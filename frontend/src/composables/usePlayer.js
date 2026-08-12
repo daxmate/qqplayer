@@ -14,6 +14,7 @@ export const state = reactive({
   mode: "continuous", // 'continuous' 连播 | 'karaoke' 跟唱
   karaokeOn: true, // 跟唱开关：开=每句播完自动停
   karaokeLoop: false, // 单句循环：跟唱开启时生效，句末自动回到句首重播
+  abLoop: null, // AB 区间循环：null 关闭 | { a, b } 起点/终点（行索引，b 为 null 表示等选终点）
   speed: 1.0,
   zhVisible: true,
   lyric: [], // [{type:'sec',name} | {type:'line',s,e,text:[jp,roma,zh]}]
@@ -84,6 +85,7 @@ export async function selectSong(index) {
   state.duration = 0;
   state.lyric = [];
   state.lyricFormat = null;
+  state.abLoop = null; // 切歌重置 AB 循环
   // 加载歌词
   try {
     const res = await fetch("/api/lyric?path=" + encodeURIComponent(state.songs[index].path), {
@@ -161,6 +163,34 @@ export function toggleKaraokeLoop() {
   state.karaokeLoop = !state.karaokeLoop;
 }
 
+// ============ AB 区间循环（长按 🔁 进入，单击退出）============
+// 进入：当前句为起点 A，等待点击另一句作为终点 B
+// 循环：A→B 区间句子连播，播到 B 句尾自动跳回 A 句首
+
+export function enterAbLoop() {
+  if (state.abLoop) return; // 已在 AB 循环中，忽略
+  const cur = currentLineIndex.value;
+  if (cur < 0) return; // 无当前句（前奏/间隙）→ 忽略
+  state.abLoop = { a: cur, b: null }; // b=null 等待选终点
+  playLine(cur); // 从起点句开始播
+}
+
+export function setAbEnd(lineIndex) {
+  if (!state.abLoop) return;
+  const lines = lineItems.value;
+  if (lineIndex < 0 || lineIndex >= lines.length) return;
+  if (lineIndex === state.abLoop.a) return; // 点起点本身 → 忽略
+  let a = state.abLoop.a;
+  let b = lineIndex;
+  if (b < a) [a, b] = [b, a]; // 终点在起点前 → 自动交换
+  state.abLoop = { a, b };
+  playLine(a); // 从区间起点句首开始播
+}
+
+export function exitAbLoop() {
+  state.abLoop = null;
+}
+
 export function toggleZh() {
   state.zhVisible = !state.zhVisible;
 }
@@ -185,6 +215,16 @@ function locateLine(t) {
 // 仅供测试：重置跟唱锚点
 export function _resetKaraokeAnchor() {
   karaokeLine = -1;
+}
+
+// 跳到某句句首；keepPlaying=true 时若暂停中则继续播
+function jumpToLine(lineIndex, keepPlaying) {
+  const lines = lineItems.value;
+  if (lineIndex < 0 || lineIndex >= lines.length) return;
+  karaokeLine = lineIndex;
+  audio.currentTime = lines[lineIndex].s;
+  state.currentTime = lines[lineIndex].s;
+  if (keepPlaying && audio.paused) audio.play().catch(() => {});
 }
 
 export function playLine(lineIndex) {
@@ -235,13 +275,35 @@ audio.addEventListener("timeupdate", () => {
       karaokeLine = locateLine(t);
     }
     if (karaokeLine >= 0 && t >= lines[karaokeLine].e) {
-      if (state.karaokeLoop) {
-        // 单句循环：回到句首重播（不暂停）
-        audio.currentTime = lines[karaokeLine].s;
-        state.currentTime = lines[karaokeLine].s;
-        if (audio.paused) audio.play().catch(() => {});
-      } else {
-        audio.pause();
+      // 循环处理句末：一次跳变可能跨多个短句，逐句推进直到落在句内或触发跳转（guard 防死循环）
+      let guard = 0;
+      while (karaokeLine >= 0 && t >= lines[karaokeLine].e && guard++ < 20) {
+        const ab = state.abLoop;
+        if (ab && karaokeLine >= ab.a) {
+          if (ab.b !== null && karaokeLine === ab.b) {
+            // AB 终点句播完 → 跳回起点句首重播
+            jumpToLine(ab.a, true);
+            break;
+          }
+          if (ab.b === null || karaokeLine < ab.b) {
+            if (ab.b === null) {
+              // 等选终点：起点句循环
+              jumpToLine(ab.a, true);
+              break;
+            }
+            // 起点/区间中间句播完 → 锚点推进下一句，继续播放
+            karaokeLine += 1;
+            continue;
+          }
+          // seek 跳出区间到终点之后：按单句循环/暂停处理
+        }
+        if (state.karaokeLoop) {
+          // 单句循环：回到句首重播（不暂停）
+          jumpToLine(karaokeLine, true);
+        } else {
+          audio.pause();
+        }
+        break;
       }
     }
   }

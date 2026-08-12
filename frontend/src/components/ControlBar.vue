@@ -40,12 +40,15 @@
         </button>
         <button
           class="btn"
-          :class="{ on: state.karaokeLoop }"
+          :class="{ on: state.abLoop || state.karaokeLoop }"
           :disabled="!state.karaokeOn"
-          title="单句循环（需开启跟唱）"
-          @click="toggleKaraokeLoop"
+          :title="loopTitle"
+          @pointerdown="onLoopPressStart"
+          @pointerup="onLoopPressEnd"
+          @pointerleave="onLoopPressEnd"
+          @click="onLoopClick"
         >
-          🔁 单句
+          {{ state.abLoop ? "🔁 AB" : "🔁 单句" }}
         </button>
       </template>
       <template v-else>
@@ -73,6 +76,7 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import { state } from "../composables/usePlayer.js";
 import {
   togglePlay,
@@ -84,6 +88,8 @@ import {
   cycleSpeed,
   toggleKaraoke,
   toggleKaraokeLoop,
+  enterAbLoop,
+  exitAbLoop,
   toggleZh,
 } from "../composables/usePlayer.js";
 
@@ -93,6 +99,46 @@ defineProps({
 
 function onSeek(e) {
   seek(parseFloat(e.target.value));
+}
+
+// 🔁 按钮：单击切换单句循环 / 退出 AB；长按 500ms 进入 AB 循环
+let pressTimer = null;
+let longPressFired = false;
+
+const loopTitle = computed(() => {
+  const ab = state.abLoop;
+  if (ab) {
+    return ab.b === null
+      ? `AB 循环：起点第 ${ab.a + 1} 句，请点击歌词选终点（单击退出）`
+      : `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句（单击退出）`;
+  }
+  return "单击：单句循环；长按：AB 区间循环（需开启跟唱）";
+});
+
+function onLoopPressStart() {
+  if (!state.karaokeOn) return;
+  longPressFired = false;
+  pressTimer = setTimeout(() => {
+    longPressFired = true;
+    enterAbLoop();
+  }, 500);
+}
+
+function onLoopPressEnd() {
+  clearTimeout(pressTimer);
+}
+
+function onLoopClick() {
+  if (longPressFired) {
+    // 长按已触发 AB 循环，吞掉本次 click
+    longPressFired = false;
+    return;
+  }
+  if (state.abLoop) {
+    exitAbLoop(); // AB 循环中：单击退出
+  } else {
+    toggleKaraokeLoop(); // 单句循环开关
+  }
 }
 
 function fmt(t) {

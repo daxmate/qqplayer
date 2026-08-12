@@ -41,6 +41,9 @@ const {
   seek,
   nextLine,
   toggleKaraokeLoop,
+  enterAbLoop,
+  setAbEnd,
+  exitAbLoop,
   currentLineIndex,
   _resetKaraokeAnchor,
 } = await import("../composables/usePlayer.js");
@@ -55,6 +58,7 @@ const RESET = {
   mode: "continuous",
   karaokeOn: true,
   karaokeLoop: false,
+  abLoop: null,
   speed: 1.0,
   zhVisible: true,
   lyric: [],
@@ -366,5 +370,174 @@ describe("单句循环", () => {
     fireTimeupdate(20.5); // 第二句播完
     expect(audio().currentTime).toBe(10); // 回到第二句句首
     expect(audio().paused).toBe(false);
+  });
+});
+
+describe("AB 循环", () => {
+  const audio = () => FakeAudio.instances[0];
+  const LYRIC = [
+    { type: "line", s: 0, e: 10, text: ["一"] },
+    { type: "line", s: 10, e: 20, text: ["二"] },
+    { type: "line", s: 20, e: 30, text: ["三"] },
+    { type: "line", s: 30, e: 40, text: ["四"] },
+  ];
+
+  function fireTimeupdate(t) {
+    const a = audio();
+    a.currentTime = t;
+    a.paused = false;
+    a.listeners["timeupdate"]();
+    return a;
+  }
+
+  function setup() {
+    state.mode = "karaoke";
+    state.karaokeOn = true;
+    state.karaokeLoop = false;
+    state.currentSong = { path: "/a.mp3" };
+    audio().src = "/a.mp3";
+    state.lyric = LYRIC;
+  }
+
+  it("enterAbLoop：当前句为起点等待终点，并播放起点", () => {
+    setup();
+    state.currentTime = 12; // 第二句内
+    enterAbLoop();
+    expect(state.abLoop).toEqual({ a: 1, b: null });
+    expect(audio().currentTime).toBe(10);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("enterAbLoop：无当前句（前奏）忽略", () => {
+    setup();
+    state.lyric = [{ type: "line", s: 3, e: 10, text: ["第一句"] }];
+    state.currentTime = 1; // 第一句开始前
+    enterAbLoop();
+    expect(state.abLoop).toBe(null);
+  });
+
+  it("enterAbLoop：已在 AB 循环中忽略", () => {
+    setup();
+    state.abLoop = { a: 0, b: 1 };
+    enterAbLoop();
+    expect(state.abLoop).toEqual({ a: 0, b: 1 });
+  });
+
+  it("setAbEnd：点终点后从区间起点开始播放", () => {
+    setup();
+    state.abLoop = { a: 0, b: null };
+    setAbEnd(2);
+    expect(state.abLoop).toEqual({ a: 0, b: 2 });
+    expect(audio().currentTime).toBe(0);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("setAbEnd：终点在起点前自动交换", () => {
+    setup();
+    state.abLoop = { a: 3, b: null };
+    setAbEnd(1);
+    expect(state.abLoop).toEqual({ a: 1, b: 3 });
+    expect(audio().currentTime).toBe(10); // 新起点（第二句）句首
+  });
+
+  it("setAbEnd：点起点本身忽略", () => {
+    setup();
+    state.abLoop = { a: 1, b: null };
+    setAbEnd(1);
+    expect(state.abLoop).toEqual({ a: 1, b: null });
+  });
+
+  it("setAbEnd：未进入 AB 时无效", () => {
+    setup();
+    setAbEnd(2);
+    expect(state.abLoop).toBe(null);
+  });
+
+  it("等待终点：起点句播完自动回句首（起点单句循环）", () => {
+    setup();
+    state.abLoop = { a: 1, b: null };
+    playLine(1);
+    fireTimeupdate(20.5); // 越过第二句 e=20
+    expect(audio().currentTime).toBe(10);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("区间中间句播完自动推进，不暂停", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    playLine(1);
+    fireTimeupdate(20.5); // 第二句播完 → 推进第三句
+    expect(audio().paused).toBe(false);
+    expect(audio().currentTime).toBe(20.5); // 未跳回，继续播
+    fireTimeupdate(30.5); // 第三句播完 → 推进第四句
+    expect(audio().currentTime).toBe(30.5);
+  });
+
+  it("终点句播完跳回起点句首", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    playLine(1);
+    fireTimeupdate(20.5); // 二 → 三
+    fireTimeupdate(30.5); // 三 → 四
+    fireTimeupdate(40.5); // 四（终点）播完 → 跳回第二句
+    expect(audio().currentTime).toBe(10);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("反复循环：终点后回起点持续循环", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    playLine(1);
+    fireTimeupdate(20.5);
+    fireTimeupdate(30.5);
+    fireTimeupdate(40.5); // 第一轮终点 → 回第二句
+    expect(audio().currentTime).toBe(10);
+    fireTimeupdate(20.5); // 第二轮第二句播完 → 推进
+    expect(audio().currentTime).toBe(20.5);
+    fireTimeupdate(40.5); // 第二轮终点 → 再回第二句
+    expect(audio().currentTime).toBe(10);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("循环中点其他句：重新设定终点（自动交换）", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    setAbEnd(0); // 点在 A 前面 → 交换为 0~1
+    expect(state.abLoop).toEqual({ a: 0, b: 1 });
+    expect(audio().currentTime).toBe(0); // 从新起点播放
+  });
+
+  it("exitAbLoop：单击退出恢复正常跟唱", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    exitAbLoop();
+    expect(state.abLoop).toBe(null);
+    playLine(0);
+    fireTimeupdate(10.5); // 无循环 → 正常暂停
+    expect(audio().paused).toBe(true);
+  });
+
+  it("AB 循环优先于单句循环（单句循环开着也按区间推进）", () => {
+    setup();
+    state.karaokeLoop = true;
+    state.abLoop = { a: 0, b: 2 };
+    playLine(0);
+    fireTimeupdate(10.5); // 起点句播完 → 推进，而不是回第一句
+    expect(audio().currentTime).toBe(10.5);
+    expect(audio().paused).toBe(false);
+    fireTimeupdate(30.5); // 终点句播完 → 跳回起点
+    expect(audio().currentTime).toBe(0);
+  });
+
+  it("selectSong 切歌重置 AB 循环", async () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    state.songs = [{ path: "/b.mp3", name: "B" }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await selectSong(0);
+    expect(state.abLoop).toBe(null);
   });
 });

@@ -2,13 +2,13 @@
   <div class="karaoke-panel">
     <div class="kp-head">
       <span>🎤 逐句练习</span>
-      <span class="kp-hint">点击句子播放 · 播完自动停</span>
+      <span class="kp-hint">{{ abHint }}</span>
     </div>
     <div ref="scrollEl" class="kp-scroll">
       <template v-for="(item, i) in lyric" :key="i">
         <div v-if="item.type === 'sec'" class="sec">♪ {{ item.name }}</div>
-        <div v-else class="kline" :class="{ active: i === current }" @click="playLineAt(i)">
-          <span class="kline-num">{{ lineNumber(i) }}</span>
+        <div v-else class="kline" :class="klineClass(i)" @click="playLineAt(i)">
+          <span class="kline-num">{{ abBadge(i) || lineNumber(i) }}</span>
           <div class="kline-body">
             <div class="kline-jp">{{ item.text[0] || "…" }}</div>
             <div v-if="item.text[1]" class="kline-roma">{{ item.text[1] }}</div>
@@ -30,8 +30,8 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from "vue";
-import { state, playLine } from "../composables/usePlayer.js";
+import { ref, watch, computed, nextTick } from "vue";
+import { state, playLine, setAbEnd } from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -55,9 +55,48 @@ function lineNumber(lyricIdx) {
   return lineIndexMap.value.indexOf(lyricIdx) + 1;
 }
 
+// ============ AB 循环：区间高亮 + 提示 ============
+const abHint = computed(() => {
+  const ab = state.abLoop;
+  if (!ab) return "点击句子播放 · 播完自动停";
+  if (ab.b === null) return `AB 循环：起点第 ${ab.a + 1} 句，请点击终点句`;
+  return `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句 · 单击 🔁 退出`;
+});
+
+function abLineNo(lyricIdx) {
+  return lineIndexMap.value.indexOf(lyricIdx);
+}
+
+function klineClass(lyricIdx) {
+  const cls = { active: lyricIdx === props.current };
+  const ab = state.abLoop;
+  const n = abLineNo(lyricIdx);
+  if (ab && ab.b !== null && n >= ab.a && n <= ab.b) {
+    cls["ab-in"] = true;
+    if (n === ab.a) cls["ab-start"] = true;
+    if (n === ab.b) cls["ab-end"] = true;
+  }
+  return cls;
+}
+
+function abBadge(lyricIdx) {
+  const ab = state.abLoop;
+  const n = abLineNo(lyricIdx);
+  if (!ab || ab.b === null) return "";
+  if (n === ab.a) return "A";
+  if (n === ab.b) return "B";
+  return "";
+}
+
 function playLineAt(lyricIdx) {
-  const lineNo = lineIndexMap.value.indexOf(lyricIdx);
-  if (lineNo >= 0) playLine(lineNo);
+  const lineNo = abLineNo(lyricIdx);
+  if (lineNo < 0) return;
+  if (state.abLoop) {
+    // AB 循环中：点击 = 设置/更换终点
+    setAbEnd(lineNo);
+  } else {
+    playLine(lineNo);
+  }
 }
 
 watch(
@@ -147,6 +186,21 @@ function fmt(t) {
   box-shadow:
     0 0 0 1px var(--accent),
     0 4px 14px rgba(255, 126, 95, 0.2);
+}
+/* AB 循环区间：浅绿高亮（active 保持原高亮） */
+.kline.ab-in:not(.active) {
+  border-left-color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+}
+.kline.ab-in:not(.active) .kline-num {
+  background: rgba(74, 222, 128, 0.22);
+  color: #4ade80;
+}
+/* AB 端点 A/B 徽标：绿色渐变（覆盖 active 样式） */
+.kline.ab-start .kline-num,
+.kline.ab-end .kline-num {
+  background: linear-gradient(135deg, #22c55e, #4ade80);
+  color: #fff;
 }
 .kline-num {
   width: 26px;
