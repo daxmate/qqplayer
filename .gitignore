@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# 构建产物（后端运行时由 CI/本地 pnpm build 生成）
+dist/
+
+# macOS
+.DS_Store
+
+# 本地歌词缓存
+.cache/

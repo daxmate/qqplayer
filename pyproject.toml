@@ -1,0 +1,18 @@
+[project]
+name = "qqplayer"
+version = "1.0.0"
+description = "QQPlayer 小千千 — 本地音乐播放器 + 跟唱练习器"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
