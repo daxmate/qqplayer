@@ -63,7 +63,7 @@ function onCoverError() {
 .cover-box {
   width: min(46vh, 340px);
   aspect-ratio: 1;
-  border-radius: 18px;
+  border-radius: 50%;
   overflow: hidden;
   background: var(--card);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
@@ -73,7 +73,7 @@ function onCoverError() {
 }
 .cover-wrap.small .cover-box {
   width: 64px;
-  border-radius: 12px;
+  border-radius: 50%;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 .cover-img {
