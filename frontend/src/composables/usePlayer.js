@@ -23,6 +23,9 @@ export const state = reactive({
   libraryPath: "",
   loading: false,
   error: "",
+  volume: 1.0, // 音量 0~1
+  muted: false,
+  favorites: [], // 收藏歌曲 path 列表（后端持久化）
 });
 
 // ============ 歌词显示设置（localStorage 持久化）============
@@ -65,6 +68,147 @@ watch(
   },
   { deep: true },
 );
+
+// ============ 音量（localStorage 持久化）============
+export const VOLUME_KEY = "qqplayer.volume.v1";
+
+function loadVolume() {
+  try {
+    const v = parseFloat(localStorage.getItem(VOLUME_KEY));
+    if (!isNaN(v) && v >= 0 && v <= 1) {
+      state.volume = v;
+      audio.volume = v;
+    }
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadVolume();
+
+function persistVolume() {
+  try {
+    localStorage.setItem(VOLUME_KEY, String(state.volume));
+  } catch {
+    /* 忽略写入失败 */
+  }
+}
+
+export function setVolume(v) {
+  state.volume = Math.min(1, Math.max(0, v));
+  state.muted = false; // 手动调音量自动取消静音
+  audio.volume = state.volume;
+  persistVolume();
+}
+
+export function toggleMute() {
+  state.muted = !state.muted;
+  audio.volume = state.muted ? 0 : state.volume;
+}
+
+// ============ 收藏（后端持久化 ~/Library/Application Support/qqplayer）============
+export async function loadFavorites() {
+  try {
+    const res = await fetch("/api/favorites", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      state.favorites = data.paths || [];
+    }
+  } catch {
+    /* 忽略 */
+  }
+}
+
+export function isFavorite(path) {
+  return state.favorites.includes(path);
+}
+
+export async function toggleFavorite(path) {
+  // 乐观更新：先改 UI，失败回滚
+  const wasFav = state.favorites.includes(path);
+  if (wasFav) {
+    state.favorites.splice(state.favorites.indexOf(path), 1);
+  } else {
+    state.favorites.push(path);
+  }
+  try {
+    await fetch("/api/favorites/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+  } catch {
+    // 回滚
+    if (wasFav) {
+      state.favorites.push(path);
+    } else {
+      state.favorites.splice(state.favorites.indexOf(path), 1);
+    }
+  }
+}
+
+// ============ 队列操作 ============
+export function removeFromQueue(index) {
+  if (index < 0 || index >= state.songs.length) return;
+  state.songs.splice(index, 1);
+  if (index < state.currentIndex) {
+    state.currentIndex -= 1;
+  } else if (index === state.currentIndex) {
+    if (state.songs.length) {
+      // 移除当前歌：切到原位置的新歌（索引已自然顺延）
+      const next = Math.min(index, state.songs.length - 1);
+      selectSong(next);
+    } else {
+      state.currentIndex = -1;
+      state.currentSong = null;
+      state.isPlaying = false;
+      state.lyric = [];
+      state.lyricFormat = null;
+      audio.pause();
+      audio.removeAttribute("src");
+    }
+  }
+  // 歌曲列表变了：洗牌队列失效，下次自动重建
+  _resetPlayMode();
+}
+
+// ============ 键盘快捷键 ============
+// 空格播放/暂停，←/→ 快退/快进 10s，↑/↓ 音量 ±10%
+// 输入框/文本域聚焦时不拦截
+const SHORTCUT_HANDLER = (e) => {
+  const el = e.target;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+    return;
+  }
+  switch (e.code) {
+    case "Space":
+      e.preventDefault();
+      togglePlay();
+      break;
+    case "ArrowLeft":
+      e.preventDefault();
+      seek(Math.max(0, (audio.currentTime || 0) - 10));
+      break;
+    case "ArrowRight":
+      e.preventDefault();
+      seek(Math.min(audio.duration || 0, (audio.currentTime || 0) + 10));
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      setVolume(state.volume + 0.1);
+      break;
+    case "ArrowDown":
+      e.preventDefault();
+      setVolume(state.volume - 0.1);
+      break;
+  }
+};
+
+// 安装快捷键监听（App onMounted 调用）；返回卸载函数
+export function setupKeyboardShortcuts() {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("keydown", SHORTCUT_HANDLER);
+  return () => window.removeEventListener("keydown", SHORTCUT_HANDLER);
+}
 
 const SPEEDS = [0.75, 1.0, 1.25];
 

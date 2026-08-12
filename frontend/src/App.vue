@@ -80,7 +80,13 @@ import LyricPanel from "./components/LyricPanel.vue";
 import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
 import SettingsModal from "./components/SettingsModal.vue";
-import { state, loadSongs, currentLineIndex } from "./composables/usePlayer.js";
+import {
+  state,
+  loadSongs,
+  loadFavorites,
+  setupKeyboardShortcuts,
+  currentLineIndex,
+} from "./composables/usePlayer.js";
 
 const settingsOpen = ref(false);
 
@@ -90,6 +96,8 @@ function switchMode(m) {
 
 onMounted(() => {
   loadSongs();
+  loadFavorites();
+  setupKeyboardShortcuts();
 });
 </script>
 

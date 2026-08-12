@@ -188,6 +188,60 @@ def test_api_cover_from_file(tmp_path):
     assert r.content == b"\xff\xd8\xff\xe0fakejpeg"
 
 
+# ============ 收藏 ============
+def test_api_favorites_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    r = client.get("/api/favorites")
+    assert r.status_code == 200
+    assert r.json() == {"paths": []}
+
+
+def test_api_favorites_toggle(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    # 收藏
+    r = client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
+    assert r.json() == {"path": "/a.mp3", "favorited": True}
+    r = client.get("/api/favorites")
+    assert r.json() == {"paths": ["/a.mp3"]}
+    # 再点取消
+    r = client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
+    assert r.json() == {"path": "/a.mp3", "favorited": False}
+    r = client.get("/api/favorites")
+    assert r.json() == {"paths": []}
+
+
+def test_api_favorites_multi(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
+    client.post("/api/favorites/toggle", json={"path": "/b.mp3"})
+    r = client.get("/api/favorites")
+    assert r.json() == {"paths": ["/a.mp3", "/b.mp3"]}
+
+
+def test_api_favorites_missing_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    r = client.post("/api/favorites/toggle", json={})
+    assert r.status_code == 400
+
+
+def test_scan_duration(song_library):
+    """假 mp3 是完整 MPEG 帧，mutagen 能读出时长"""
+    songs = backend.scan_library()
+    for s in songs:
+        assert s["duration"] is not None and s["duration"] > 0
+
+
+def test_get_duration_bad_file(tmp_path):
+    """损坏/非音频文件返回 None 而不是抛异常"""
+    bad = tmp_path / "bad.mp3"
+    bad.write_bytes(b"not audio")
+    assert backend.get_duration(bad) is None
+
+
 # ============ 解析器单元测试 ============
 def test_parse_srt_with_sections():
     text = """# 主歌1

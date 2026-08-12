@@ -21,6 +21,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
+  removeAttribute() {}
   addEventListener(ev, fn) {
     this.listeners[ev] = fn;
   }
@@ -64,6 +65,14 @@ const {
   LYRIC_SETTINGS_KEY,
   _resetKaraokeAnchor,
   _resetPlayMode,
+  setVolume,
+  toggleMute,
+  VOLUME_KEY,
+  loadFavorites,
+  toggleFavorite,
+  isFavorite,
+  removeFromQueue,
+  setupKeyboardShortcuts,
 } = await import("../composables/usePlayer.js");
 
 const RESET = {
@@ -85,6 +94,9 @@ const RESET = {
   libraryPath: "",
   loading: false,
   error: "",
+  volume: 1.0,
+  muted: false,
+  favorites: [],
 };
 
 beforeEach(() => {
@@ -287,6 +299,234 @@ describe("开关切换", () => {
     state.zhVisible = true;
     toggleZh();
     expect(state.zhVisible).toBe(false);
+  });
+});
+
+describe("音量", () => {
+  it("setVolume 设置音量并持久化到 localStorage", () => {
+    setVolume(0.5);
+    expect(state.volume).toBe(0.5);
+    expect(parseFloat(localStorage.getItem(VOLUME_KEY))).toBe(0.5);
+  });
+
+  it("setVolume 越界值被 clamp 到 0~1", () => {
+    setVolume(1.5);
+    expect(state.volume).toBe(1);
+    setVolume(-1);
+    expect(state.volume).toBe(0);
+  });
+
+  it("setVolume 自动取消静音", () => {
+    state.muted = true;
+    setVolume(0.3);
+    expect(state.muted).toBe(false);
+  });
+
+  it("toggleMute 切换静音（音量值保留）", () => {
+    setVolume(0.6);
+    toggleMute();
+    expect(state.muted).toBe(true);
+    toggleMute();
+    expect(state.muted).toBe(false);
+    expect(state.volume).toBe(0.6);
+  });
+});
+
+describe("收藏", () => {
+  it("toggleFavorite：乐观更新 + POST 后端", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    await toggleFavorite("/a.mp3");
+    expect(state.favorites).toContain("/a.mp3");
+    expect(isFavorite("/a.mp3")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/favorites/toggle",
+      expect.objectContaining({ method: "POST" }),
+    );
+    // 再点取消
+    await toggleFavorite("/a.mp3");
+    expect(state.favorites).not.toContain("/a.mp3");
+  });
+
+  it("toggleFavorite：后端失败时回滚", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    await toggleFavorite("/a.mp3");
+    expect(state.favorites).toEqual([]);
+    // 取消收藏失败也回滚
+    state.favorites.push("/a.mp3");
+    await toggleFavorite("/a.mp3");
+    expect(state.favorites).toContain("/a.mp3");
+  });
+
+  it("loadFavorites 拉取后端收藏列表", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ paths: ["/a.mp3", "/b.mp3"] }) })),
+    );
+    await loadFavorites();
+    expect(state.favorites).toEqual(["/a.mp3", "/b.mp3"]);
+  });
+});
+
+describe("removeFromQueue", () => {
+  const SONGS = [
+    { path: "/a.mp3", name: "A" },
+    { path: "/b.mp3", name: "B" },
+    { path: "/c.mp3", name: "C" },
+  ];
+
+  function stubFetch() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+  }
+
+  it("移除当前歌：切到原位置的新歌", async () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 1;
+    stubFetch();
+    removeFromQueue(1); // 移除 B
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "C"]);
+    expect(state.currentIndex).toBe(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state.currentSong.name).toBe("C");
+  });
+
+  it("移除最后一首：切到新的最后一首", async () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 2;
+    stubFetch();
+    removeFromQueue(2); // 移除 C
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "B"]);
+    expect(state.currentIndex).toBe(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state.currentSong.name).toBe("B");
+  });
+
+  it("移除当前歌之前的歌：索引前移", async () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 2;
+    state.currentSong = state.songs[2];
+    stubFetch();
+    removeFromQueue(0); // 移除 A（当前 C 之前）
+    expect(state.currentIndex).toBe(1);
+    expect(state.currentSong.name).toBe("C");
+  });
+
+  it("移除当前歌之后的歌：当前不变", async () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 1;
+    state.currentSong = state.songs[1];
+    removeFromQueue(2); // 移除 C（当前 B 之后）
+    expect(state.currentIndex).toBe(1);
+    expect(state.currentSong.name).toBe("B");
+  });
+
+  it("移除最后一首歌：清空播放器状态", () => {
+    state.songs = [{ path: "/a.mp3", name: "A" }];
+    state.currentIndex = 0;
+    state.currentSong = state.songs[0];
+    removeFromQueue(0);
+    expect(state.songs).toEqual([]);
+    expect(state.currentIndex).toBe(-1);
+    expect(state.currentSong).toBeNull();
+    expect(state.isPlaying).toBe(false);
+  });
+
+  it("越界索引不动作", () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 1;
+    removeFromQueue(5);
+    expect(state.songs).toHaveLength(3);
+  });
+});
+
+describe("键盘快捷键", () => {
+  const audio = () => FakeAudio.instances[0];
+
+  // 捕获 window keydown 监听器
+  function captureHandler() {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    setupKeyboardShortcuts();
+    const call = addSpy.mock.calls.find((c) => c[0] === "keydown");
+    return call ? call[1] : null;
+  }
+
+  function fire(handler, code, target = {}) {
+    const ev = { code, target, preventDefault: vi.fn() };
+    handler(ev);
+    return ev;
+  }
+
+  it("空格切换播放/暂停", () => {
+    const h = captureHandler();
+    expect(h).toBeTruthy();
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.paused = true;
+    fire(h, "Space");
+    expect(a.paused).toBe(false);
+    fire(h, "Space");
+    expect(a.paused).toBe(true);
+  });
+
+  it("←/→ 快退/快进 10 秒", () => {
+    const h = captureHandler();
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.src = "/a.mp3";
+    a.currentTime = 30;
+    a.duration = 100;
+    fire(h, "ArrowLeft");
+    expect(a.currentTime).toBe(20);
+    fire(h, "ArrowRight");
+    expect(a.currentTime).toBe(30);
+  });
+
+  it("← 在开头不越过 0", () => {
+    const h = captureHandler();
+    const a = audio();
+    a.src = "/a.mp3";
+    a.currentTime = 3;
+    a.duration = 100;
+    fire(h, "ArrowLeft");
+    expect(a.currentTime).toBe(0);
+  });
+
+  it("↑/↓ 音量 ±10%", () => {
+    const h = captureHandler();
+    state.volume = 0.5;
+    fire(h, "ArrowUp");
+    expect(state.volume).toBe(0.6);
+    fire(h, "ArrowDown");
+    expect(state.volume).toBe(0.5);
+  });
+
+  it("输入框聚焦时不拦截按键", () => {
+    const h = captureHandler();
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.paused = true;
+    const ev = fire(h, "Space", { tagName: "INPUT" });
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+    expect(a.paused).toBe(true); // 没有触发播放
+  });
+
+  it("node 环境（无 window）安装安全返回", () => {
+    const orig = globalThis.window;
+    globalThis.window = undefined;
+    try {
+      const un = setupKeyboardShortcuts();
+      expect(typeof un).toBe("function");
+    } finally {
+      globalThis.window = orig;
+    }
   });
 });
 

@@ -23,38 +23,38 @@
         <button
           class="btn"
           :class="{ on: state.playMode !== 'order' }"
-          @click="cyclePlayMode"
           :title="playModeTitle"
+          @click="cyclePlayMode"
         >
           <Shuffle v-if="state.playMode === 'shuffle'" :size="15" />
           <Repeat1 v-else-if="state.playMode === 'repeatOne'" :size="15" />
           <Repeat v-else :size="15" />
         </button>
       </template>
-      <button class="btn" @click="prevSong" title="上一首">
+      <button class="btn" title="上一首" @click="prevSong">
         <SkipBack :size="17" />
       </button>
 
       <template v-if="karaoke">
-        <button class="btn" @click="prevLine" title="上一句">
+        <button class="btn" title="上一句" @click="prevLine">
           <StepBack :size="17" />
         </button>
-        <button class="btn play" @click="togglePlay" title="播放/暂停">
+        <button class="btn play" title="播放/暂停" @click="togglePlay">
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
-        <button class="btn" @click="nextLine" title="下一句">
+        <button class="btn" title="下一句" @click="nextLine">
           <StepForward :size="17" />
         </button>
-        <button class="btn" :class="{ on: state.speed !== 1.0 }" @click="cycleSpeed" title="变速">
+        <button class="btn" :class="{ on: state.speed !== 1.0 }" title="变速" @click="cycleSpeed">
           <Gauge :size="15" />
           {{ state.speed }}x
         </button>
         <button
           class="btn"
           :class="{ on: state.karaokeOn }"
-          @click="toggleKaraoke"
           title="跟唱开关"
+          @click="toggleKaraoke"
         >
           <Mic :size="15" />
           跟唱
@@ -75,19 +75,42 @@
         </button>
       </template>
       <template v-else>
-        <button class="btn play" @click="togglePlay" title="播放/暂停">
+        <button class="btn play" title="播放/暂停" @click="togglePlay">
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
-        <button class="btn" @click="nextSong" title="下一首">
+        <button class="btn" title="下一首" @click="nextSong">
           <SkipForward :size="17" />
         </button>
       </template>
 
-      <button class="btn" :class="{ on: state.zhVisible }" @click="toggleZh" title="显示/隐藏中文">
+      <button class="btn" :class="{ on: state.zhVisible }" title="显示/隐藏中文" @click="toggleZh">
         <Languages :size="15" />
         译
       </button>
+
+      <!-- 音量 -->
+      <div class="vol-group">
+        <button
+          class="btn vol-btn"
+          :title="state.muted || state.volume === 0 ? '取消静音' : '静音'"
+          @click="toggleMute"
+        >
+          <VolumeX v-if="state.muted || state.volume === 0" :size="15" />
+          <Volume1 v-else-if="state.volume < 0.5" :size="15" />
+          <Volume2 v-else :size="15" />
+        </button>
+        <input
+          class="vol-slider"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          :value="state.muted ? 0 : state.volume"
+          title="音量"
+          @input="onVolume"
+        />
+      </div>
     </div>
 
     <!-- 当前歌曲信息 -->
@@ -119,7 +142,7 @@ import {
   Shuffle,
   Languages,
 } from "@lucide/vue";
-import { state } from "../composables/usePlayer.js";
+import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
 import {
   togglePlay,
   nextSong,
@@ -135,6 +158,7 @@ import {
   toggleZh,
   cyclePlayMode,
 } from "../composables/usePlayer.js";
+import { Volume1, Volume2, VolumeX } from "@lucide/vue";
 
 defineProps({
   karaoke: { type: Boolean, default: false },
@@ -142,6 +166,10 @@ defineProps({
 
 function onSeek(e) {
   seek(parseFloat(e.target.value));
+}
+
+function onVolume(e) {
+  setVolume(parseFloat(e.target.value));
 }
 
 // 循环按钮：单击切换单句循环 / 退出 AB；长按 500ms 进入 AB 循环
@@ -299,6 +327,37 @@ function fmt(t) {
   width: 56px;
   font-size: 22px;
   padding: 0;
+}
+.vol-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.vol-btn {
+  min-width: 36px !important;
+  padding: 0 10px !important;
+}
+.vol-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+}
+.vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 2px 6px rgba(255, 126, 95, 0.4);
 }
 .btn:disabled {
   opacity: 0.35;

@@ -8,6 +8,8 @@ music-player 后端 API
 用法: ./venv/bin/python backend.py [歌曲库路径]
 """
 
+import json
+import os
 import re
 import sys
 import threading
@@ -33,6 +35,10 @@ DEFAULT_LIBRARY = Path(
     "/Users/dax/Library/Mobile Documents/iCloud~dev~clq~Cosmos-Music-Player/Documents"
 )
 DEFAULT_PORT = 17627
+
+# 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）
+DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
+FAVORITES_FILE = DATA_DIR / "favorites.json"
 
 app = FastAPI(title="music-player")
 
@@ -98,9 +104,64 @@ def scan_library():
                 "lyric": lyric,
                 "cover": cover,
                 "has_lyric": lyric is not None,
+                "duration": get_duration(f),
             }
         )
     return songs
+
+
+def get_duration(f: Path):
+    """读取音频时长（秒）；无法读取返回 None（mutagen 不可用/文件损坏）"""
+    if MutagenFile is None:
+        return None
+    try:
+        audio = MutagenFile(str(f))
+        if audio is None or audio.info is None:
+            return None
+        d = getattr(audio.info, "length", None)
+        return round(float(d), 1) if d else None
+    except Exception:
+        return None
+
+
+def _load_favorites() -> list[str]:
+    """加载收藏歌曲路径列表（文件不存在/损坏返回空）"""
+    try:
+        data = json.loads(FAVORITES_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_favorites(paths: list[str]):
+    """保存收藏列表（写失败不影响播放功能）"""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        FAVORITES_FILE.write_text(json.dumps(paths, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+@app.get("/api/favorites")
+def api_favorites():
+    return {"paths": _load_favorites()}
+
+
+@app.post("/api/favorites/toggle")
+async def api_favorites_toggle(body: dict):
+    """切换收藏：path 在列表中则移除，否则添加"""
+    path = str(body.get("path", ""))
+    if not path:
+        raise HTTPException(400, "缺少 path")
+    paths = _load_favorites()
+    if path in paths:
+        paths.remove(path)
+        favorited = False
+    else:
+        paths.append(path)
+        favorited = True
+    _save_favorites(paths)
+    return {"path": path, "favorited": favorited}
 
 
 @app.get("/api/songs")
