@@ -633,6 +633,26 @@ function fmtDur(d) {
   border-color: var(--border);
   transform: translateY(-1px);
 }
+/* 专辑卡：1 列横排（封面在左，信息在右） */
+.gr-card.album {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+}
+.gr-card.album:hover {
+  transform: none;
+}
+.gr-card.album .gr-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.gr-card.album .gr-meta {
+  flex: 1;
+}
 .gr-avatar {
   width: 44px;
   height: 44px;
