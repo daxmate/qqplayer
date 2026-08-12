@@ -39,8 +39,10 @@ watch(
     if (!el) return;
     const active = el.querySelector(".lyr.active");
     if (active) {
-      const top = active.offsetTop - el.clientHeight / 2 + active.clientHeight / 2;
-      // auto：直接定位到中间（smooth 在多句快速切换时动画叠加会停不准）
+      // 用 getBoundingClientRect 计算（offsetTop 相对 body 会偏，容器上方有封面等元素）
+      const rect = active.getBoundingClientRect();
+      const crect = el.getBoundingClientRect();
+      const top = el.scrollTop + (rect.top - crect.top) - el.clientHeight / 2 + rect.height / 2;
       el.scrollTo({ top, behavior: "auto" });
     }
   },
