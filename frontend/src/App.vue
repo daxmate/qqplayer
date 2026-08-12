@@ -4,7 +4,7 @@
     <header class="topbar">
       <h1 class="logo">
         <Music :size="20" class="logo-icon" />
-        Music Player
+        QQ Player
       </h1>
       <div class="mode-tabs">
         <button
