@@ -21,6 +21,7 @@ align_lyric.py — 用 whisper 词级时间戳对齐 QQPlayer 缓存歌词
     /tmp/lyric_align_<hash>.lrc   → 纯 LRC 文本（方便预览/拷到别处）
 """
 import argparse
+import difflib
 import hashlib
 import json
 import re
