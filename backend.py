@@ -679,36 +679,62 @@ def merge_translation(lines: list, tlyric_text: str | None):
 
 
 @app.get("/api/lyric")
-def api_lyric(path: str):
-    """加载歌曲歌词：本地 srt/lrc 优先，无则在线获取（网易云→lrclib，缓存 ~/.cache）"""
+def api_lyric(path: str, prefer: str = "local"):
+    """加载歌曲歌词：默认本地 srt/lrc 优先，无则在线获取（网易云→lrclib，缓存 ~/.cache）。
+
+    prefer=online 时在线优先（在线获取失败自动回退本地）。
+    """
     f = Path(path)
     if not f.exists():
         raise HTTPException(404, "文件不存在")
-    # 1) 本地歌词文件
-    cand = None
-    for lext in ("srt", "lrc"):
-        c = f.with_suffix("." + lext)
-        if c.exists():
-            cand = c
-            break
-    if cand is None:
-        # 文件夹内唯一歌词
-        siblings = [x for x in f.parent.iterdir() if x.suffix.lower() in LYRIC_EXTS]
-        if len(siblings) == 1:
-            cand = siblings[0]
-    if cand is not None:
+
+    def local_lyric():
+        """返回 (format, lines) 或 None"""
+        cand = None
+        for lext in ("srt", "lrc"):
+            c = f.with_suffix("." + lext)
+            if c.exists():
+                cand = c
+                break
+        if cand is None:
+            # 文件夹内唯一歌词
+            siblings = [x for x in f.parent.iterdir() if x.suffix.lower() in LYRIC_EXTS]
+            if len(siblings) == 1:
+                cand = siblings[0]
+        if cand is None:
+            return None
         text = cand.read_text(encoding="utf-8", errors="ignore")
         lext = cand.suffix.lower().lstrip(".")
         data = parse_srt(text) if lext == "srt" else parse_lrc(text)
-        return {"format": lext, "lines": data, "source": "local"}
-    # 2) 在线获取（本地无歌词时兜底）
-    artist, title, _album = extract_tags(f)
-    title = title or f.stem
-    lrc_text, tlyric_text, source = fetch_online_lyric(title, artist or "")
-    if lrc_text is None:
+        return (lext, data)
+
+    def online_lyric():
+        """返回 (format, lines, source) 或 None"""
+        artist, title, _album = extract_tags(f)
+        title = title or f.stem
+        lrc_text, tlyric_text, source = fetch_online_lyric(title, artist or "")
+        if lrc_text is None:
+            return None
+        lines = merge_translation(parse_lrc(lrc_text), tlyric_text)
+        return ("lrc", lines, source)
+
+    prefer = prefer if prefer in ("local", "online") else "local"
+    if prefer == "online":
+        res = online_lyric()
+        if res is not None:
+            return {"format": res[0], "lines": res[1], "source": res[2]}
+        res = local_lyric()
+        if res is not None:
+            return {"format": res[0], "lines": res[1], "source": "local"}
         raise HTTPException(404, "无歌词文件")
-    lines = merge_translation(parse_lrc(lrc_text), tlyric_text)
-    return {"format": "lrc", "lines": lines, "source": source}
+    # 默认：本地优先
+    res = local_lyric()
+    if res is not None:
+        return {"format": res[0], "lines": res[1], "source": "local"}
+    res = online_lyric()
+    if res is not None:
+        return {"format": res[0], "lines": res[1], "source": res[2]}
+    raise HTTPException(404, "无歌词文件")
 
 
 # ============ 音频流（支持 Range） ============

@@ -253,6 +253,61 @@
                   </div>
                 </div>
               </div>
+
+              <!-- 时间校准 -->
+              <div class="group">
+                <div class="group-title">
+                  <Timer :size="13" />
+                  时间校准
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">
+                    歌词延迟
+                    <span class="val-badge">{{ fmtOffset }}</span>
+                    <button
+                      v-if="lyricSettings.offset !== 0"
+                      class="mini-btn"
+                      @click="lyricSettings.offset = 0"
+                    >
+                      重置
+                    </button>
+                  </div>
+                  <div class="setting-desc">
+                    歌词与声音不同步时微调：正值为歌词延后显示，负值为提前
+                  </div>
+                  <input
+                    v-model.number="lyricSettings.offset"
+                    class="slider"
+                    type="range"
+                    min="-2"
+                    max="2"
+                    step="0.1"
+                  />
+                </div>
+              </div>
+
+              <!-- 歌词来源 -->
+              <div class="group">
+                <div class="group-title">
+                  <Database :size="13" />
+                  歌词来源
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">来源优先级</div>
+                  <div class="seg">
+                    <button
+                      v-for="s in sourceOptions"
+                      :key="s.value"
+                      class="seg-btn"
+                      :class="{ on: lyricSettings.source === s.value }"
+                      @click="lyricSettings.source = s.value"
+                    >
+                      {{ s.label }}
+                    </button>
+                  </div>
+                  <div class="setting-desc">在线优先：使用在线歌词，本地歌词文件作兜底</div>
+                </div>
+              </div>
             </section>
 
             <!-- ============ 界面 ============ -->
@@ -384,7 +439,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import {
   Settings,
   X,
@@ -399,6 +454,8 @@ import {
   Info,
   RotateCcw,
   MonitorPlay,
+  Timer,
+  Database,
 } from "@lucide/vue";
 import {
   state,
@@ -456,6 +513,15 @@ const focusOptions = [
   { value: 0.33, label: "偏上 1/3" },
   { value: 0.5, label: "正中" },
 ];
+const sourceOptions = [
+  { value: "local", label: "本地优先" },
+  { value: "online", label: "在线优先" },
+];
+// 歌词延迟徽标：+0.5s / -1.2s / 0.0s（正 = 歌词延后显示）
+const fmtOffset = computed(() => {
+  const v = lyricSettings.offset;
+  return (v > 0 ? "+" : "") + v.toFixed(1) + "s";
+});
 const shortcuts = [
   { keys: ["Space"], desc: "播放 / 暂停" },
   { keys: ["←"], desc: "快退 10 秒" },
@@ -724,6 +790,23 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .setting-error {
   font-size: 12px;
   color: #ff6b6b;
+}
+
+/* 行内小按钮（重置等） */
+.mini-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+  vertical-align: 1px;
+}
+.mini-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 /* 分段选择器 */

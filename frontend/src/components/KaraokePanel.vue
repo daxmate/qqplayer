@@ -35,9 +35,12 @@
           :class="klineClass(i)"
           @click="playLineAt(i)"
         >
-          <span v-if="uiSettings.karaokeShowNum" class="kline-num" :class="{ 'ab-badge': abBadge(i) }">{{
-            abBadge(i) || lineNumber(i)
-          }}</span>
+          <span
+            v-if="uiSettings.karaokeShowNum"
+            class="kline-num"
+            :class="{ 'ab-badge': abBadge(i) }"
+            >{{ abBadge(i) || lineNumber(i) }}</span
+          >
           <div class="kline-body" :style="{ textAlign: lyricSettings.align }">
             <div class="kline-jp">{{ item.text[0] || "…" }}</div>
             <div v-if="item.text[1] && lyricSettings.showRoma" class="kline-roma">

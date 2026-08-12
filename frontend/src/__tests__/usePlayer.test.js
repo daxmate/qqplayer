@@ -107,6 +107,7 @@ const {
 } = await import("../composables/usePlayer.js");
 const { toggleMusicLib, togglePlaylist, PANEL_KEY } = await import("../composables/usePlayer.js");
 const { toggleControls, CONTROLS_KEY } = await import("../composables/usePlayer.js");
+const { loadLyric } = await import("../composables/usePlayer.js");
 
 const RESET = {
   songs: [],
@@ -124,6 +125,7 @@ const RESET = {
   zhVisible: true,
   lyric: [],
   lyricFormat: null,
+  lyricSource: null,
   libraryPath: "",
   loading: false,
   error: "",
@@ -2110,5 +2112,128 @@ describe("切歌淡入淡出 fadeSec", () => {
     await p1;
     await p2;
     expect(decodeURIComponent(a.src)).toContain("/c.mp3"); // 最终停在最后一次选择
+  });
+});
+
+describe("歌词延迟校准（lyricSettings.offset）", () => {
+  const LRC = [
+    { type: "line", s: 0, e: 10, text: ["第一句"] },
+    { type: "line", s: 10, e: 20, text: ["第二句"] },
+  ];
+
+  const audio = () => FakeAudio.instances[0];
+
+  function setup(on = true) {
+    state.mode = "karaoke";
+    state.karaokeOn = on;
+    state.currentSong = { path: "/a.mp3" };
+    audio().src = "/a.mp3";
+  }
+  function fireTimeupdate(t) {
+    const a = audio();
+    a.currentTime = t;
+    a.paused = false;
+    a.listeners["timeupdate"]();
+    return a;
+  }
+
+  beforeEach(() => {
+    lyricSettings.offset = 0;
+  });
+
+  it("offset>0：playLine 跳到句首 + 偏移（歌词延后，音频先行）", () => {
+    setup();
+    state.lyric = LRC;
+    lyricSettings.offset = 0.5;
+    playLine(1); // 第二句 s=10
+    expect(audio().currentTime).toBe(10.5);
+  });
+
+  it("offset<0：playLine 跳到句首 - 偏移，且不小于 0", () => {
+    setup();
+    state.lyric = LRC;
+    lyricSettings.offset = -0.5;
+    playLine(0); // 第一句 s=0 → clamp 到 0
+    expect(audio().currentTime).toBe(0);
+    playLine(1); // 第二句 s=10 → 9.5
+    expect(audio().currentTime).toBe(9.5);
+  });
+
+  it("句末自动停时刻随 offset 平移（延后 0.5s）", () => {
+    setup();
+    state.lyric = LRC;
+    lyricSettings.offset = 0.5;
+    playLine(0);
+    fireTimeupdate(10.2); // 歌词轴 9.7，仍在第一句内
+    expect(audio().paused).toBe(false);
+    fireTimeupdate(10.5); // 歌词轴 10.0，越过 e=10 → 停
+    expect(audio().paused).toBe(true);
+  });
+
+  it("句末自动停时刻随 offset 平移（提前 0.5s）", () => {
+    setup();
+    state.lyric = LRC;
+    lyricSettings.offset = -0.5;
+    playLine(0);
+    fireTimeupdate(9.2); // 歌词轴 9.7，仍在第一句内
+    expect(audio().paused).toBe(false);
+    fireTimeupdate(9.5); // 歌词轴 10.0，越过 e=10 → 停
+    expect(audio().paused).toBe(true);
+  });
+
+  it("currentLineIndex 高亮随 offset 平移", () => {
+    state.lyric = LRC;
+    state.currentTime = 10.2;
+    lyricSettings.offset = 0.5;
+    expect(currentLineIndex.value).toBe(0); // 歌词轴 9.7 仍在第一句
+    lyricSettings.offset = -0.5;
+    expect(currentLineIndex.value).toBe(1); // 歌词轴 10.7 已进第二句
+  });
+});
+
+describe("歌词来源优先级（lyricSettings.source）", () => {
+  const lyricRes = (source) => ({
+    ok: true,
+    json: async () => ({
+      format: "lrc",
+      lines: [{ type: "line", s: 0, e: 1, text: ["x"] }],
+      source,
+    }),
+  });
+
+  beforeEach(() => {
+    lyricSettings.source = "local";
+  });
+
+  it("默认 local：加载歌词请求带 prefer=local，记录实际来源", async () => {
+    const fetchMock = vi.fn(async () => lyricRes("local"));
+    vi.stubGlobal("fetch", fetchMock);
+    state.songs = [{ path: "/a.mp3" }];
+    await selectSong(0);
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).toContain("/api/lyric?path=");
+    expect(url).toContain("prefer=local");
+    expect(state.lyricSource).toBe("local");
+  });
+
+  it("切换到在线优先：watch 触发重载，请求带 prefer=online", async () => {
+    const fetchMock = vi.fn(async () => lyricRes("netease"));
+    vi.stubGlobal("fetch", fetchMock);
+    state.songs = [{ path: "/a.mp3" }];
+    await selectSong(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    lyricSettings.source = "online";
+    await new Promise((r) => setTimeout(r, 0)); // watch 异步触发重载
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("prefer=online");
+    expect(state.lyricSource).toBe("netease");
+  });
+
+  it("loadLyric 越界 index 时清空歌词", async () => {
+    state.songs = [{ path: "/a.mp3" }];
+    state.lyric = [{ type: "line", s: 0, e: 1, text: ["x"] }];
+    await loadLyric(3);
+    expect(state.lyric).toEqual([]);
+    expect(state.lyricSource).toBeNull();
   });
 });

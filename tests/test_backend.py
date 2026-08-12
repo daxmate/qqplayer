@@ -172,6 +172,49 @@ def test_api_lyric_online_fallback(song_library, monkeypatch):
     assert first["text"] == ["沈むように溶けてゆくように", "", "像是沉溺溶化一般"]
 
 
+def test_api_lyric_prefer_online_uses_online(song_library, monkeypatch):
+    """prefer=online 且本地有歌词 → 用在线歌词（在线优先）"""
+    lrc = "[00:01.00]オンライン優先の歌詞\n[00:02.00]二行目"
+    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (lrc, None, "lrclib"))
+    song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")  # 本地有 srt
+    r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["source"] == "lrclib"
+    assert data["format"] == "lrc"
+    first = next(ln for ln in data["lines"] if ln["type"] == "line")
+    assert first["text"] == ["オンライン優先の歌詞"]
+
+
+def test_api_lyric_prefer_online_fallback_local(song_library, monkeypatch):
+    """prefer=online 且在线失败 → 回退本地歌词"""
+    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")
+    r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["source"] == "local"
+    assert data["format"] == "srt"
+
+
+def test_api_lyric_prefer_online_missing(song_library, monkeypatch):
+    """prefer=online、本地无歌词且在线失败 → 404"""
+    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    song = next(s for s in backend.scan_library() if s["name"] == "知足")
+    r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
+    assert r.status_code == 404
+
+
+def test_api_lyric_prefer_invalid_defaults_local(song_library, monkeypatch):
+    """prefer 非法值 → 按 local 处理（本地优先）"""
+    lrc = "[00:01.00]不应使用"
+    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (lrc, None, "netease"))
+    song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")
+    r = client.get("/api/lyric", params={"path": song["path"], "prefer": "bogus"})
+    assert r.status_code == 200
+    assert r.json()["source"] == "local"
+
+
 # ============ 封面 ============
 def test_api_cover_embedded(song_library):
     """提取 mp3 内嵌封面（ID3 APIC）"""

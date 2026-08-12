@@ -20,6 +20,7 @@ export const state = reactive({
   zhVisible: true,
   lyric: [], // [{type:'sec',name} | {type:'line',s,e,text:[jp,roma,zh]}]
   lyricFormat: null, // 'srt' | 'lrc' | null
+  lyricSource: null, // 当前歌词实际来源：'local' | 在线来源名（netease/lrclib）| null
   libraryPath: "",
   loading: false,
   error: "",
@@ -48,6 +49,8 @@ export const LYRIC_SETTINGS_DEFAULTS = {
   focusPos: 0.33, // 焦点句停靠位置（可视区高度比例）：0.33 | 0.5
   fadeMask: true, // 上下渐隐遮罩
   autoScroll: true, // 切句自动跟随滚动
+  offset: 0, // 歌词延迟校准（秒，-2~2）：正值 = 歌词比声音延后显示，负值 = 提前
+  source: "local", // 歌词来源优先级：'local' 本地优先 | 'online' 在线优先（失败回退本地）
 };
 
 export const lyricSettings = reactive({ ...LYRIC_SETTINGS_DEFAULTS });
@@ -948,6 +951,7 @@ export async function selectSong(index, opts = {}) {
   state.duration = 0;
   state.lyric = [];
   state.lyricFormat = null;
+  state.lyricSource = null;
   state.abLoop = null; // 切歌重置 AB 循环
   // 自动播放（播完自动切歌场景）：上一首结束切到新歌后继续播放
   if (opts.autoPlay) {
@@ -955,19 +959,7 @@ export async function selectSong(index, opts = {}) {
     if (fade > 0) fadeIn(fade);
   }
   // 加载歌词
-  try {
-    const res = await fetch("/api/lyric?path=" + encodeURIComponent(state.songs[index].path), {
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const data = await res.json();
-      state.lyric = data.lines || [];
-      state.lyricFormat = data.format || null;
-    }
-  } catch {
-    state.lyric = [];
-    state.lyricFormat = null;
-  }
+  await loadLyric(index);
   // 预取时长；恢复上次播放时在这里 seek 到断点
   audio.addEventListener(
     "loadedmetadata",
@@ -982,6 +974,46 @@ export async function selectSong(index, opts = {}) {
     { once: true },
   );
 }
+
+// 加载歌词（默认当前歌）；来源优先级按 lyricSettings.source：
+// 'local' 本地优先 | 'online' 在线优先（在线失败后端自动回退本地）
+export async function loadLyric(index = state.currentIndex) {
+  if (index < 0 || index >= state.songs.length) {
+    state.lyric = [];
+    state.lyricFormat = null;
+    state.lyricSource = null;
+    return;
+  }
+  try {
+    const res = await fetch(
+      "/api/lyric?path=" +
+        encodeURIComponent(state.songs[index].path) +
+        "&prefer=" +
+        lyricSettings.source,
+      { cache: "no-store" },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      state.lyric = data.lines || [];
+      state.lyricFormat = data.format || null;
+      state.lyricSource = data.source || null;
+      return;
+    }
+  } catch {
+    /* 网络错误走空歌词 */
+  }
+  state.lyric = [];
+  state.lyricFormat = null;
+  state.lyricSource = null;
+}
+
+// 歌词来源优先级切换：实时重载当前歌曲歌词
+watch(
+  () => lyricSettings.source,
+  () => {
+    loadLyric();
+  },
+);
 
 // ============ 播放控制 ============
 export function togglePlay() {
@@ -1117,6 +1149,12 @@ export function toggleZh() {
 // ============ 跟唱模式：点句跳转 ============
 const lineItems = computed(() => state.lyric.filter((x) => x.type === "line"));
 
+// 歌词延迟校准：offset > 0 = 歌词比声音延后显示。
+// 音频时间 t 在歌词时间轴上对应 t - offset；歌词时间 s 在音频轴上对应 s + offset。
+// 定位/锚点比较统一用 lyricTime()，跳句 seek 统一用 audioTime()。
+const lyricTime = (t) => t - lyricSettings.offset;
+const audioTime = (t) => t + lyricSettings.offset;
+
 // 跟唱模式锚点：正在唱的句子索引（-1 = 未锚定，如前奏/间隙）
 // 不靠每次 timeupdate 反推当前句——句末 e 一过 currentLineIndex 就指向下一句，
 // "反推"永远判断不出该停，导致一句唱完不停
@@ -1125,8 +1163,9 @@ let karaokeLine = -1;
 // 严格区间匹配：t 落在哪一句内（不含间隙/前奏/尾声）
 function locateLine(t) {
   const lines = lineItems.value;
+  const tt = lyricTime(t);
   for (let i = 0; i < lines.length; i++) {
-    if (t >= lines[i].s && t < lines[i].e) return i;
+    if (tt >= lines[i].s && tt < lines[i].e) return i;
   }
   return -1;
 }
@@ -1141,8 +1180,8 @@ function jumpToLine(lineIndex, keepPlaying) {
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   karaokeLine = lineIndex;
-  audio.currentTime = lines[lineIndex].s;
-  state.currentTime = lines[lineIndex].s;
+  audio.currentTime = Math.max(0, audioTime(lines[lineIndex].s));
+  state.currentTime = audio.currentTime;
   if (keepPlaying && audio.paused) audio.play().catch(() => {});
 }
 
@@ -1151,7 +1190,7 @@ export function playLine(lineIndex) {
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   const ln = lines[lineIndex];
   karaokeLine = lineIndex;
-  audio.currentTime = ln.s;
+  audio.currentTime = Math.max(0, audioTime(ln.s));
   audio.play().catch(() => {});
 }
 
@@ -1178,7 +1217,7 @@ export const currentLineIndex = computed(() => {
   if (state.mode === "karaoke" && karaokeLine >= 0 && !state.isPlaying) {
     return karaokeLine;
   }
-  const t = state.currentTime;
+  const t = lyricTime(state.currentTime);
   let idx = -1;
   for (let i = 0; i < lines.length; i++) {
     if (t >= lines[i].s) idx = i;
@@ -1237,14 +1276,15 @@ audio.addEventListener("timeupdate", () => {
     const lines = lineItems.value;
     if (!lines.length) return;
     const t = audio.currentTime;
+    const lt = lyricTime(t);
     // 锚点失效（前奏/间隙未锚定，或 seek/回退到锚点句之前）→ 重新定位
-    if (karaokeLine < 0 || t < lines[karaokeLine].s) {
+    if (karaokeLine < 0 || lt < lines[karaokeLine].s) {
       karaokeLine = locateLine(t);
     }
-    if (karaokeLine >= 0 && t >= lines[karaokeLine].e) {
+    if (karaokeLine >= 0 && lt >= lines[karaokeLine].e) {
       // 循环处理句末：一次跳变可能跨多个短句，逐句推进直到落在句内或触发跳转（guard 防死循环）
       let guard = 0;
-      while (karaokeLine >= 0 && t >= lines[karaokeLine].e && guard++ < 20) {
+      while (karaokeLine >= 0 && lt >= lines[karaokeLine].e && guard++ < 20) {
         const ab = state.abLoop;
         if (ab && karaokeLine >= ab.a) {
           if (ab.b !== null && karaokeLine === ab.b) {
