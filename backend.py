@@ -62,20 +62,92 @@ app = FastAPI(title="music-player")
 # 运行时歌曲库路径（可通过命令行参数修改）
 LIBRARY = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_LIBRARY
 
-AUDIO_EXTS = {".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"}
+# 支持的音频格式（默认全选，可在设置里多选过滤）
+DEFAULT_AUDIO_EXTS = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"]
+AUDIO_EXTS = set(DEFAULT_AUDIO_EXTS)
 LYRIC_EXTS = {".srt", ".lrc"}
+
+# 音乐库设置（持久化到用户数据目录 settings.json）
+LIBRARY_SETTINGS_DEFAULTS = {
+    "audioExts": DEFAULT_AUDIO_EXTS,
+    "ignoreHidden": True,  # 忽略隐藏文件/文件夹
+    "autoRefresh": True,  # watchdog 自动刷新（库变动自动重扫）
+    "autoScanOnStart": True,  # 启动时自动扫描歌曲库
+}
+SETTINGS_FILE = DATA_DIR / "settings.json"
+_settings: dict | None = None
+
+
+# ============ 音乐库设置 ============
+def load_settings() -> dict:
+    """读取音乐库设置（内存缓存；文件缺失/损坏时回落默认值）"""
+    global _settings
+    if _settings is not None:
+        return _settings
+    data = {}
+    try:
+        if SETTINGS_FILE.exists():
+            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    _settings = dict(LIBRARY_SETTINGS_DEFAULTS)
+    for k in LIBRARY_SETTINGS_DEFAULTS:
+        if k in data:
+            _settings[k] = _normalize_setting(k, data[k])
+    return _settings
+
+
+def _normalize_setting(key: str, value):
+    """按字段类型规范化设置值，非法值回落默认"""
+    default = LIBRARY_SETTINGS_DEFAULTS[key]
+    if key == "audioExts":
+        if isinstance(value, list) and value:
+            exts = [str(e).lower() for e in value if isinstance(e, str) and e.startswith(".")]
+            if exts:
+                return exts
+        return default
+    if isinstance(value, bool):
+        return value
+    return default
+
+
+def save_settings(patch: dict) -> dict:
+    """合并保存设置到磁盘并更新内存缓存（返回规范化后的完整设置）"""
+    global _settings
+    merged = dict(load_settings())
+    for k in LIBRARY_SETTINGS_DEFAULTS:
+        if k in patch:
+            merged[k] = _normalize_setting(k, patch[k])
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    _settings = merged
+    return merged
 
 
 # ============ 歌曲库扫描 ============
 def _full_scan():
     """全量扫描歌曲库（无缓存），返回歌曲列表（含封面/歌词路径）"""
+    settings = load_settings()
+    exts = set(settings["audioExts"])
+    ignore_hidden = settings["ignoreHidden"]
     songs = []
     if not LIBRARY.is_dir():
         return songs
     for f in sorted(LIBRARY.rglob("*")):
         if not f.is_file():
             continue
-        if f.suffix.lower() not in AUDIO_EXTS:
+        try:
+            rel = f.relative_to(LIBRARY)
+        except ValueError:
+            rel = Path(f.name)
+        if f.suffix.lower() not in exts:
+            continue
+        if ignore_hidden and any(part.startswith(".") for part in rel.parts):
             continue
         # 找歌词（优先同名 srt/lrc，其次文件夹内唯一歌词文件）
         lyric = None
@@ -104,10 +176,6 @@ def _full_scan():
             if len(imgs) == 1:
                 cover = imgs[0].name
         # id 用相对歌曲库的路径（歌曲库可能在 backend 目录之外，不能 relative_to(ROOT)）
-        try:
-            rel = f.relative_to(LIBRARY)
-        except ValueError:
-            rel = Path(f.name)
         # 提取 ID3 元数据（歌手/标题/专辑），没有就用文件名
         artist, title, album = extract_tags(f)
         songs.append(
@@ -169,9 +237,11 @@ def _schedule_rescan():
 
 
 def start_watcher():
-    """启动歌曲库 watchdog（幂等；库目录不存在时跳过）"""
+    """启动歌曲库 watchdog（幂等；设置关闭自动刷新或库目录不存在时跳过）"""
     global _watch_observer
     if _watch_observer is not None or not LIBRARY.is_dir():
+        return
+    if not load_settings()["autoRefresh"]:
         return
     _watch_observer = Observer()
     _watch_observer.daemon = True
@@ -190,6 +260,15 @@ def stop_watcher():
         _watch_observer.stop()
         _watch_observer.join(timeout=3)
         _watch_observer = None
+
+
+def init_library():
+    """启动时按设置初始化：预热扫描（autoScanOnStart）+ 按需启动 watchdog（autoRefresh）"""
+    settings = load_settings()
+    if settings["autoScanOnStart"]:
+        scan_library()
+    if settings["autoRefresh"]:
+        start_watcher()
 
 
 def get_duration(f: Path):
@@ -247,6 +326,7 @@ async def api_favorites_toggle(body: dict):
 
 
 # ============ 歌单（持久化 ~/Library/Application Support/qqplayer/playlists.json）============
+
 
 def _load_playlists() -> list[dict]:
     """加载歌单列表（文件不存在/损坏返回空）"""
@@ -402,7 +482,9 @@ def _save_playback(records: list[dict]):
     """保存播放记录（写失败不影响播放功能）"""
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        PLAYBACK_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        PLAYBACK_FILE.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except OSError:
         pass
 
@@ -508,6 +590,30 @@ def api_library():
 def api_library_version():
     """返回歌曲库变动版本号（前端轮询此值判断是否需要刷新列表）"""
     return {"version": _scan_version}
+
+
+@app.get("/api/library/settings")
+def api_library_settings():
+    """返回音乐库设置（文件类型多选 / 忽略隐藏 / 自动刷新 / 启动自动扫描）"""
+    return {"settings": load_settings()}
+
+
+@app.put("/api/library/settings")
+def api_update_library_settings(body: dict):
+    """保存音乐库设置；扫描相关项变化时清缓存重扫，自动刷新开关变化时启停 watchdog"""
+    global _scan_cache, _scan_version
+    old = load_settings()
+    new = save_settings(body)
+    if new["audioExts"] != old["audioExts"] or new["ignoreHidden"] != old["ignoreHidden"]:
+        with _scan_lock:
+            _scan_cache = None
+            _scan_version += 1
+    if new["autoRefresh"] != old["autoRefresh"]:
+        if new["autoRefresh"]:
+            start_watcher()
+        else:
+            stop_watcher()
+    return {"settings": new, "count": len(scan_library())}
 
 
 @app.post("/api/library")
@@ -755,10 +861,13 @@ if (ROOT / "dist").is_dir():
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         LIBRARY = Path(sys.argv[1])
-    start_watcher()
+    init_library()
     url = f"http://localhost:{DEFAULT_PORT}"
     print(f"🎵 music-player 已启动: {url}")
     print(f"   歌曲库: {LIBRARY}")
-    print(f"   📁 监听歌曲库变动（去抖 {WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
+    if load_settings()["autoRefresh"]:
+        print(f"   📁 监听歌曲库变动（去抖 {WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
+    else:
+        print("   📁 自动刷新已关闭（设置里可开启）")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host="127.0.0.1", port=DEFAULT_PORT, log_level="warning")

@@ -105,7 +105,7 @@
                 </div>
                 <div class="setting-item">
                   <div class="setting-label">歌曲库文件夹</div>
-                  <div class="setting-desc">本地文件夹路径（扫描 mp3/flac/m4a/wav 等）</div>
+                  <div class="setting-desc">本地文件夹路径（扫描勾选的音频格式）</div>
                   <div class="setting-control">
                     <input
                       v-model="libInput"
@@ -118,6 +118,54 @@
                     </button>
                   </div>
                   <div v-if="error" class="setting-error">{{ error }}</div>
+                </div>
+              </div>
+
+              <div class="group">
+                <div class="group-title">
+                  <FileAudio :size="13" />
+                  文件类型
+                </div>
+                <div class="setting-item">
+                  <div class="setting-desc">只扫描勾选的音频格式（至少保留一种）</div>
+                  <div v-if="librarySettings" class="ext-grid">
+                    <button
+                      v-for="ext in audioExtOptions"
+                      :key="ext"
+                      class="ext-chip"
+                      :class="{ on: librarySettings.audioExts.includes(ext) }"
+                      @click="toggleExt(ext)"
+                    >
+                      {{ ext.slice(1).toUpperCase() }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="toggleSetting('ignoreHidden')">
+                    <div>
+                      <div class="setting-label">忽略隐藏文件 / 文件夹</div>
+                      <div class="setting-desc">跳过以 . 开头的目录与文件（如 .DS_Store）</div>
+                    </div>
+                    <span class="switch" :class="{ on: libBool('ignoreHidden') }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="toggleSetting('autoRefresh')">
+                    <div>
+                      <div class="setting-label">自动刷新歌曲库</div>
+                      <div class="setting-desc">监听文件夹变动，新增 / 删除歌曲自动更新列表</div>
+                    </div>
+                    <span class="switch" :class="{ on: libBool('autoRefresh') }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="toggleSetting('autoScanOnStart')">
+                    <div>
+                      <div class="setting-label">启动时自动扫描</div>
+                      <div class="setting-desc">应用启动时立即扫描歌曲库，首屏秒开</div>
+                    </div>
+                    <span class="switch" :class="{ on: libBool('autoScanOnStart') }"><i /></span>
+                  </div>
                 </div>
               </div>
             </section>
@@ -456,11 +504,14 @@ import {
   MonitorPlay,
   Timer,
   Database,
+  FileAudio,
 } from "@lucide/vue";
 import {
   state,
   setLibrary,
   loadLibrary,
+  loadLibrarySettings,
+  saveLibrarySettings,
   lyricSettings,
   uiSettings,
   playbackSettings,
@@ -484,6 +535,45 @@ const tab = ref("playback");
 const libInput = ref("");
 const saving = ref(false);
 const error = ref("");
+
+// 音乐库设置（后端持久化）：模板里用 computed 解包，null=还没加载
+const librarySettings = computed(() => state.librarySettings);
+const audioExtOptions = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"];
+// 保存防抖：连续点开关/格式时合并成一次请求（patch 累积不丢）
+let libSaveTimer = null;
+let libPatch = {};
+
+function libBool(key) {
+  return librarySettings.value ? librarySettings.value[key] : false;
+}
+
+function saveLib(patch) {
+  error.value = "";
+  Object.assign(libPatch, patch);
+  if (libSaveTimer) clearTimeout(libSaveTimer);
+  libSaveTimer = setTimeout(async () => {
+    const p = libPatch;
+    libPatch = {};
+    try {
+      await saveLibrarySettings(p);
+    } catch (e) {
+      error.value = e.message;
+    }
+  }, 300);
+}
+
+function toggleExt(ext) {
+  if (!librarySettings.value) return;
+  const cur = librarySettings.value.audioExts;
+  const next = cur.includes(ext) ? cur.filter((e) => e !== ext) : [...cur, ext];
+  if (!next.length) return; // 至少保留一种格式，防止扫不出任何歌
+  saveLib({ audioExts: next });
+}
+
+function toggleSetting(key) {
+  if (!librarySettings.value) return;
+  saveLib({ [key]: !librarySettings.value[key] });
+}
 
 const categories = [
   { key: "playback", label: "播放", icon: ListMusic },
@@ -534,14 +624,20 @@ function toggleFade() {
   playbackSettings.fadeSec = playbackSettings.fadeSec > 0 ? 0 : 1.5;
 }
 
-// 恢复默认：重置全部设置为出厂值（watch 自动持久化）
+// 恢复默认：重置全部设置为出厂值（watch 自动持久化；音乐库设置走后端）
 function resetAll() {
   Object.assign(playbackSettings, PLAYBACK_SETTINGS_DEFAULTS);
   Object.assign(lyricSettings, LYRIC_SETTINGS_DEFAULTS);
   Object.assign(uiSettings, UI_SETTINGS_DEFAULTS);
+  saveLib({
+    audioExts: audioExtOptions,
+    ignoreHidden: true,
+    autoRefresh: true,
+    autoScanOnStart: true,
+  });
 }
 
-// 每次打开时同步当前歌曲库路径
+// 每次打开时同步当前歌曲库路径 + 音乐库设置
 watch(
   () => props.open,
   (o) => {
@@ -551,6 +647,7 @@ watch(
       loadLibrary().then(() => {
         libInput.value = state.libraryPath;
       });
+      loadLibrarySettings();
     }
   },
 );
@@ -807,6 +904,35 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .mini-btn:hover {
   color: var(--text);
   border-color: var(--accent);
+}
+
+/* 文件类型多选（chip 网格） */
+.ext-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.ext-chip {
+  min-width: 58px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text2);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+.ext-chip:hover {
+  color: var(--text);
+  border-color: var(--text3);
+}
+.ext-chip.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(255, 126, 95, 0.35);
 }
 
 /* 分段选择器 */

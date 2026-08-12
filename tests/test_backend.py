@@ -72,6 +72,15 @@ def song_library(tmp_path):
         backend.LIBRARY = old
 
 
+@pytest.fixture(autouse=True)
+def _isolate_settings(tmp_path, monkeypatch):
+    """音乐库设置隔离：写临时文件不碰真实用户目录；每个测试后重置内存缓存"""
+    monkeypatch.setattr(backend, "SETTINGS_FILE", tmp_path / "settings.json")
+    backend._settings = None
+    yield
+    backend._settings = None
+
+
 # ============ 歌曲库扫描 ============
 def test_scan_library_counts(song_library):
     songs = backend.scan_library()
@@ -340,7 +349,9 @@ def test_api_playback_rollover_limit(tmp_path, monkeypatch):
     p = _playback(tmp_path, monkeypatch)
     monkeypatch.setattr(backend, "PLAYBACK_LIMIT", 5)
     for i in range(7):
-        client.post("/api/playback", json=_rec(path=f"/songs/{i}.mp3", ts=f"2026-08-12T12:0{i}:00+00:00"))
+        client.post(
+            "/api/playback", json=_rec(path=f"/songs/{i}.mp3", ts=f"2026-08-12T12:0{i}:00+00:00")
+        )
     data = json.loads(p.read_text(encoding="utf-8"))
     assert len(data) == 5  # 只留最近 5 条
     assert data[0]["path"] == "/songs/2.mp3"
@@ -532,6 +543,7 @@ def test_api_playlists_persist(tmp_path, monkeypatch):
 
 # ============ 库监听（watchdog）与扫描缓存 ============
 
+
 @pytest.fixture(autouse=True)
 def _reset_watch_state():
     """每个测试前重置扫描缓存/版本号/去抖 timer，避免全局状态串扰"""
@@ -649,3 +661,126 @@ def test_api_set_library_clears_cache_and_bumps_version(song_library, monkeypatc
     # 新库扫描结果（缓存已换新）
     songs = client.get("/api/songs").json()
     assert len(songs) == 1 and songs[0]["name"] == "B"
+
+
+# ============ 音乐库设置（第三批） ============
+
+
+def test_settings_defaults():
+    """无设置文件时回落默认值（全格式 / 忽略隐藏 / 自动刷新 / 启动扫描）"""
+    s = backend.load_settings()
+    assert s["audioExts"] == backend.DEFAULT_AUDIO_EXTS
+    assert s["ignoreHidden"] is True
+    assert s["autoRefresh"] is True
+    assert s["autoScanOnStart"] is True
+
+
+def test_settings_persist_roundtrip(tmp_path, monkeypatch):
+    """保存后写盘，重置内存缓存再读仍生效"""
+    new = backend.save_settings({"audioExts": [".mp3", ".flac"], "autoRefresh": False})
+    assert new["audioExts"] == [".mp3", ".flac"]
+    assert new["autoRefresh"] is False
+    assert backend.SETTINGS_FILE.exists()
+    backend._settings = None  # 模拟重启
+    s = backend.load_settings()
+    assert s["audioExts"] == [".mp3", ".flac"]
+    assert s["autoRefresh"] is False
+    assert s["ignoreHidden"] is True  # 未提及的字段保持默认
+
+
+def test_settings_normalize_invalid():
+    """非法值回落默认：空格式列表、非列表、非 bool"""
+    s = backend.save_settings({"audioExts": [], "ignoreHidden": "yes", "autoRefresh": 1})
+    assert s["audioExts"] == backend.DEFAULT_AUDIO_EXTS
+    assert s["ignoreHidden"] is True
+    assert s["autoRefresh"] is True
+    s = backend.save_settings({"audioExts": ["mp3", ".flac", 42]})
+    assert s["audioExts"] == [".flac"]  # 只留合法扩展名，非空即采纳
+
+
+def test_full_scan_filters_by_audio_exts(song_library):
+    """文件类型多选：只扫 mp3 时其他格式不进列表"""
+    make_mp3(song_library / "only.flac", title="Flac 歌")
+    backend.save_settings({"audioExts": [".mp3"]})
+    songs = backend._full_scan()
+    assert all(s["ext"] == "mp3" for s in songs)
+
+
+def test_full_scan_ignores_hidden_by_default(song_library):
+    """忽略隐藏：隐藏目录/文件里的歌默认不进列表；关闭开关后进入"""
+    (song_library / ".hidden").mkdir()
+    make_mp3(song_library / ".hidden" / "a.mp3", title="隐藏目录歌")
+    make_mp3(song_library / ".spotlight.mp3", title="隐藏文件歌")
+    assert {s["name"] for s in backend._full_scan()} == {"ヤキモチ", "知足"}
+    backend.save_settings({"ignoreHidden": False})
+    names = {s["name"] for s in backend._full_scan()}
+    assert {"隐藏目录歌", "隐藏文件歌"} <= names
+
+
+def test_api_library_settings_get(song_library):
+    """GET 设置接口返回完整设置"""
+    r = client.get("/api/library/settings")
+    assert r.status_code == 200
+    s = r.json()["settings"]
+    assert s["audioExts"] == backend.DEFAULT_AUDIO_EXTS
+    assert s["ignoreHidden"] is True
+
+
+def test_api_update_settings_ext_bumps_version(song_library):
+    """PUT 改文件类型：缓存清空、版本号 +1、count 反映新过滤"""
+    make_mp3(song_library / "only.flac", title="Flac 歌")
+    v0 = client.get("/api/library/version").json()["version"]
+    r = client.put(
+        "/api/library/settings",
+        json={"audioExts": [".mp3", ".flac"], "autoRefresh": False},
+    )
+    assert r.status_code == 200
+    assert r.json()["count"] == 3  # 2 mp3 + 1 flac
+    assert client.get("/api/library/version").json()["version"] == v0 + 1
+    assert client.get("/api/library/settings").json()["settings"]["audioExts"] == [
+        ".mp3",
+        ".flac",
+    ]
+
+
+def test_api_update_settings_auto_refresh_toggle(song_library, monkeypatch):
+    """autoRefresh 开关变化：关→stop_watcher，开→start_watcher（幂等安全）"""
+    calls = []
+    monkeypatch.setattr(backend, "start_watcher", lambda: calls.append("start"))
+    monkeypatch.setattr(backend, "stop_watcher", lambda: calls.append("stop"))
+    backend.save_settings({"autoRefresh": True})
+    calls.clear()
+    # 关闭自动刷新 → stop
+    client.put("/api/library/settings", json={"autoRefresh": False})
+    assert calls == ["stop"]
+    # 再开 → start
+    client.put("/api/library/settings", json={"autoRefresh": True})
+    assert calls == ["stop", "start"]
+    # 值没变 → 不重复启停
+    calls.clear()
+    client.put("/api/library/settings", json={"autoRefresh": True})
+    assert calls == []
+
+
+def test_start_watcher_respects_auto_refresh_off(song_library):
+    """autoRefresh=false 时 start_watcher 不启动 observer"""
+    backend.save_settings({"autoRefresh": False})
+    backend.start_watcher()
+    assert backend._watch_observer is None
+
+
+def test_init_library_respects_settings(song_library, monkeypatch):
+    """启动初始化：autoScanOnStart 控制预热扫描，autoRefresh 控制 watcher"""
+    calls = {"scan": 0, "watch": 0}
+    monkeypatch.setattr(
+        backend, "scan_library", lambda: calls.__setitem__("scan", calls["scan"] + 1)
+    )
+    monkeypatch.setattr(
+        backend, "start_watcher", lambda: calls.__setitem__("watch", calls["watch"] + 1)
+    )
+    backend.save_settings({"autoScanOnStart": True, "autoRefresh": True})
+    backend.init_library()
+    assert calls == {"scan": 1, "watch": 1}
+    backend.save_settings({"autoScanOnStart": False, "autoRefresh": False})
+    backend.init_library()
+    assert calls == {"scan": 1, "watch": 1}  # 不再额外调用

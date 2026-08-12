@@ -92,6 +92,8 @@ const {
   setupPlaybackFlush,
   setupAutoRefresh,
   stopAutoRefresh,
+  loadLibrarySettings,
+  saveLibrarySettings,
   _resetPlaybackSession,
 } = await import("../composables/usePlayer.js");
 
@@ -127,6 +129,7 @@ const RESET = {
   lyricFormat: null,
   lyricSource: null,
   libraryPath: "",
+  librarySettings: null,
   loading: false,
   error: "",
   volume: 1.0,
@@ -2235,5 +2238,71 @@ describe("歌词来源优先级（lyricSettings.source）", () => {
     await loadLyric(3);
     expect(state.lyric).toEqual([]);
     expect(state.lyricSource).toBeNull();
+  });
+});
+
+// ============ 第三批：音乐库设置（librarySettings）============
+describe("音乐库设置 librarySettings", () => {
+  it("loadLibrarySettings 拉取后端设置并写入 state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        expect(url).toBe("/api/library/settings");
+        return {
+          ok: true,
+          json: async () => ({
+            settings: { audioExts: [".mp3", ".flac"], ignoreHidden: true },
+          }),
+        };
+      }),
+    );
+    await loadLibrarySettings();
+    expect(state.librarySettings).toEqual({
+      audioExts: [".mp3", ".flac"],
+      ignoreHidden: true,
+    });
+  });
+
+  it("loadLibrarySettings 后端不可用时静默（不抛异常）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("down");
+      }),
+    );
+    await expect(loadLibrarySettings()).resolves.toBeUndefined();
+    expect(state.librarySettings).toBeNull();
+  });
+
+  it("saveLibrarySettings PUT 成功：写入 state 并返回响应", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, opts) => {
+        expect(url).toBe("/api/library/settings");
+        expect(opts.method).toBe("PUT");
+        expect(JSON.parse(opts.body)).toEqual({ autoRefresh: false });
+        return {
+          ok: true,
+          json: async () => ({
+            settings: { audioExts: [".mp3"], autoRefresh: false },
+            count: 10,
+          }),
+        };
+      }),
+    );
+    const data = await saveLibrarySettings({ autoRefresh: false });
+    expect(state.librarySettings.autoRefresh).toBe(false);
+    expect(data.count).toBe(10);
+  });
+
+  it("saveLibrarySettings 后端失败：抛出错误信息", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        json: async () => ({ detail: "保存失败" }),
+      })),
+    );
+    await expect(saveLibrarySettings({ autoRefresh: true })).rejects.toThrow("保存失败");
   });
 });

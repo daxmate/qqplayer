@@ -22,6 +22,7 @@ export const state = reactive({
   lyricFormat: null, // 'srt' | 'lrc' | null
   lyricSource: null, // 当前歌词实际来源：'local' | 在线来源名（netease/lrclib）| null
   libraryPath: "",
+  librarySettings: null, // 音乐库设置（后端 settings.json 持久化）
   loading: false,
   error: "",
   volume: 1.0, // 音量 0~1
@@ -794,6 +795,32 @@ export async function loadLibrary() {
   } catch {
     /* 忽略 */
   }
+}
+
+// 音乐库设置：文件类型多选 / 忽略隐藏 / 自动刷新 / 启动自动扫描（后端持久化）
+export async function loadLibrarySettings() {
+  try {
+    const res = await fetch("/api/library/settings", { cache: "no-store" });
+    const data = await res.json();
+    state.librarySettings = data.settings;
+  } catch {
+    /* 忽略 */
+  }
+}
+
+export async function saveLibrarySettings(patch) {
+  const res = await fetch("/api/library/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "保存音乐库设置失败");
+  }
+  const data = await res.json();
+  state.librarySettings = data.settings;
+  return data;
 }
 
 export async function setLibrary(path) {
