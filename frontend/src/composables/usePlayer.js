@@ -210,6 +210,120 @@ export function setupKeyboardShortcuts() {
   return () => window.removeEventListener("keydown", SHORTCUT_HANDLER);
 }
 
+// ============ 系统媒体键（MediaSession）============
+// Mac 键盘媒体键 / 控制中心 / 锁屏：播放暂停、上下曲、进度 seek、歌名/歌手/封面
+// 全部 feature-detect：环境无 MediaSession 时零副作用（测试/旧浏览器）
+
+let mediaSessionPosSync = 0; // setPositionState 节流时间戳
+
+// 相对路径 → 绝对 URL（artwork 要求绝对地址；无 window 环境原样返回）
+function absoluteUrl(path) {
+  if (typeof window === "undefined") return path;
+  try {
+    return new URL(path, window.location.href).href;
+  } catch {
+    return path;
+  }
+}
+
+function updateMediaMetadata() {
+  const ms = navigator.mediaSession;
+  if (!ms) return;
+  const song = state.currentSong;
+  if (!song) {
+    ms.metadata = null;
+    return;
+  }
+  const artwork = song.path
+    ? [
+        {
+          src: absoluteUrl("/api/cover?path=" + encodeURIComponent(song.path)),
+          sizes: "512x512",
+        },
+      ]
+    : [];
+  ms.metadata = new MediaMetadata({
+    title: song.name || "未知歌曲",
+    artist: song.artist || "",
+    album: song.album || "",
+    artwork,
+  });
+}
+
+function syncMediaPlaybackState() {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+  const ms = navigator.mediaSession;
+  if (!ms) return;
+  ms.playbackState = state.isPlaying ? "playing" : "paused";
+}
+
+function syncMediaPosition() {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+  const ms = navigator.mediaSession;
+  if (!ms || !audio.src) return;
+  const now = Date.now();
+  if (now - mediaSessionPosSync < 1000) return; // 节流 1s
+  mediaSessionPosSync = now;
+  try {
+    ms.setPositionState({
+      duration: audio.duration || 0,
+      playbackRate: audio.playbackRate,
+      position: audio.currentTime || 0,
+    });
+  } catch {
+    /* 部分浏览器 duration 未就绪时抛错，忽略 */
+  }
+}
+
+// 安装媒体键监听（App onMounted 调用）；返回卸载函数
+// 每次调用注册独立 watch，卸载时一并停止
+let mediaSessionStop = null;
+
+export function setupMediaSession() {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
+    return () => {};
+  }
+  const ms = navigator.mediaSession;
+  const handlers = {
+    play: () => togglePlay(),
+    pause: () => togglePlay(),
+    previoustrack: () => prevSong(),
+    nexttrack: () => nextSong(),
+    seekto: (details) => {
+      if (details && typeof details.seekTime === "number") seek(details.seekTime);
+    },
+    seekbackward: (details) => {
+      const offset = details?.seekOffset || 10;
+      seek(Math.max(0, (audio.currentTime || 0) - offset));
+    },
+    seekforward: (details) => {
+      const offset = details?.seekOffset || 10;
+      seek(Math.min(audio.duration || 0, (audio.currentTime || 0) + offset));
+    },
+  };
+  for (const [action, fn] of Object.entries(handlers)) {
+    try {
+      ms.setActionHandler(action, fn);
+    } catch {
+      /* 不支持的 action 忽略 */
+    }
+  }
+  // 切歌 → 更新控制中心/锁屏信息（卸载时停止监听）
+  mediaSessionStop?.();
+  mediaSessionStop = watch(() => state.currentSong, updateMediaMetadata, { immediate: true });
+  return () => {
+    mediaSessionStop?.();
+    mediaSessionStop = null;
+    for (const action of Object.keys(handlers)) {
+      try {
+        ms.setActionHandler(action, null);
+      } catch {
+        /* 忽略 */
+      }
+    }
+  };
+}
+
 const SPEEDS = [0.75, 1.0, 1.25];
 
 // ============ 连播播放模式（列表循环/随机/单曲循环）============
@@ -571,6 +685,7 @@ export const currentLineIndex = computed(() => {
 // ============ 音频事件 ============
 audio.addEventListener("timeupdate", () => {
   state.currentTime = audio.currentTime;
+  syncMediaPosition();
   // 跟唱模式：每句播完自动停（锚点方案）
   if (state.mode === "karaoke" && state.karaokeOn) {
     const lines = lineItems.value;
@@ -617,12 +732,15 @@ audio.addEventListener("timeupdate", () => {
 
 audio.addEventListener("play", () => {
   state.isPlaying = true;
+  syncMediaPlaybackState();
 });
 audio.addEventListener("pause", () => {
   state.isPlaying = false;
+  syncMediaPlaybackState();
 });
 audio.addEventListener("ended", () => {
   state.isPlaying = false;
+  syncMediaPlaybackState();
   if (state.mode !== "continuous") return;
   if (state.playMode === "repeatOne") {
     // 单曲循环：重播本首

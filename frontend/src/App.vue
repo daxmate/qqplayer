@@ -85,6 +85,7 @@ import {
   loadSongs,
   loadFavorites,
   setupKeyboardShortcuts,
+  setupMediaSession,
   currentLineIndex,
 } from "./composables/usePlayer.js";
 
@@ -98,6 +99,7 @@ onMounted(() => {
   loadSongs();
   loadFavorites();
   setupKeyboardShortcuts();
+  setupMediaSession();
 });
 </script>
 

@@ -81,6 +81,7 @@ const {
   isFavorite,
   removeFromQueue,
   setupKeyboardShortcuts,
+  setupMediaSession,
 } = await import("../composables/usePlayer.js");
 
 const RESET = {
@@ -1076,5 +1077,169 @@ describe("歌词显示设置（lyricSettings）", () => {
     expect(m.lyricSettings.focusPos).toBe(0.5);
     expect(m.lyricSettings.align).toBe("left"); // 未保存的保持默认
     expect(m.lyricSettings.fadeMask).toBe(true);
+  });
+});
+
+// ============ MediaSession 系统媒体键 ============
+// navigator.mediaSession stub：记录 setActionHandler 绑定的处理器与 metadata/playbackState
+function createMediaSessionStub() {
+  const handlers = {};
+  const ms = {
+    metadata: null,
+    playbackState: "none",
+    setActionHandler: vi.fn((action, fn) => {
+      handlers[action] = fn;
+    }),
+    setPositionState: vi.fn(),
+  };
+  vi.stubGlobal("navigator", { ...navigator, mediaSession: ms });
+  vi.stubGlobal(
+    "MediaMetadata",
+    class {
+      constructor(opts) {
+        Object.assign(this, opts);
+      }
+    },
+  );
+  return { ms, handlers };
+}
+
+// 触发全局 audio 的某个事件（如 play/pause/timeupdate）
+function fireAudioEvent(name) {
+  const a = FakeAudio.instances[0];
+  if (a.listeners[name]) a.listeners[name]();
+  return a;
+}
+
+describe("MediaSession 系统媒体键", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("安装时绑定全部媒体键处理器", () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    for (const action of [
+      "play",
+      "pause",
+      "previoustrack",
+      "nexttrack",
+      "seekto",
+      "seekbackward",
+      "seekforward",
+    ]) {
+      expect(handlers[action]).toBeTypeOf("function");
+    }
+  });
+
+  it("无 MediaSession 环境安全返回卸载函数", () => {
+    const orig = globalThis.navigator;
+    globalThis.navigator = undefined;
+    try {
+      const un = setupMediaSession();
+      expect(typeof un).toBe("function");
+    } finally {
+      globalThis.navigator = orig;
+    }
+  });
+
+  it("play/pause 媒体键切换播放状态", () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    state.currentSong = { path: "/a.mp3", name: "A" };
+    const a = FakeAudio.instances[0];
+    a.paused = true;
+    handlers.play();
+    expect(a.paused).toBe(false);
+    handlers.pause();
+    expect(a.paused).toBe(true);
+  });
+
+  it("previoustrack/nexttrack 切歌", async () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    await handlers.nexttrack();
+    expect(state.currentIndex).toBe(1);
+    await handlers.previoustrack();
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("seekto 跳到指定时间", () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    const a = FakeAudio.instances[0];
+    a.src = "/a.mp3";
+    a.currentTime = 30;
+    a.duration = 100;
+    handlers.seekto({ seekTime: 42 });
+    expect(a.currentTime).toBe(42);
+  });
+
+  it("seekbackward/seekforward 默认 ±10s，可指定偏移", () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    const a = FakeAudio.instances[0];
+    a.src = "/a.mp3";
+    a.currentTime = 50;
+    a.duration = 100;
+    handlers.seekbackward({});
+    expect(a.currentTime).toBe(40);
+    handlers.seekforward({});
+    expect(a.currentTime).toBe(50);
+    handlers.seekforward({ seekOffset: 30 });
+    expect(a.currentTime).toBe(80);
+  });
+
+  it("播放/暂停同步 playbackState", () => {
+    const { ms } = createMediaSessionStub();
+    setupMediaSession();
+    const a = fireAudioEvent("play");
+    expect(ms.playbackState).toBe("playing");
+    expect(state.isPlaying).toBe(true);
+    a.listeners["pause"]();
+    expect(ms.playbackState).toBe("paused");
+    expect(state.isPlaying).toBe(false);
+  });
+
+  it("timeupdate 同步 setPositionState（节流）", () => {
+    const { ms } = createMediaSessionStub();
+    setupMediaSession();
+    const a = FakeAudio.instances[0];
+    a.src = "/a.mp3";
+    a.currentTime = 30;
+    a.duration = 100;
+    a.listeners["timeupdate"]();
+    expect(ms.setPositionState).toHaveBeenCalledWith(
+      expect.objectContaining({ duration: 100, position: 30 }),
+    );
+  });
+
+  it("切歌时更新 metadata（歌名/歌手/封面）", async () => {
+    const { ms } = createMediaSessionStub();
+    setupMediaSession();
+    state.songs = [
+      {
+        path: "/a.mp3",
+        name: "A",
+        artist: "ArtistX",
+        album: "AlbumY",
+      },
+    ];
+    // selectSong 会请求歌词：stub fetch 返回空
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await selectSong(0);
+    expect(ms.metadata).toBeTruthy();
+    expect(ms.metadata.title).toBe("A");
+    expect(ms.metadata.artist).toBe("ArtistX");
+    expect(ms.metadata.album).toBe("AlbumY");
+    expect(ms.metadata.artwork[0].src).toContain("/api/cover?path=" + encodeURIComponent("/a.mp3"));
   });
 });
