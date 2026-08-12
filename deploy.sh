@@ -19,7 +19,51 @@ echo "── 安装后端依赖"
 echo "── 构建前端"
 (cd frontend && pnpm install && pnpm build)
 
-# 4. 重启服务：kill 掉进程，launchd KeepAlive 会自动拉起新进程（加载新代码）
+# 4. 确保 launchd 托管（plist 缺失时自动创建并加载）
+# 之前出现过 plist 丢失导致 pkill 后服务无人拉起的故障，这里做自愈：
+# 检测 ~/Library/LaunchAgents/com.daxmate.qqplayer.plist，不存在则创建，再确保已加载
+PLIST="$HOME/Library/LaunchAgents/com.daxmate.qqplayer.plist"
+LOG_DIR="$HOME/Library/Logs/qqplayer"
+if [ ! -f "$PLIST" ]; then
+  echo "── 检测到 launchd plist 缺失，自动创建: $PLIST"
+  mkdir -p "$LOG_DIR"
+  cat > "$PLIST" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.daxmate.qqplayer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dax/codes/qqplayer/venv/bin/python</string>
+        <string>/Users/dax/codes/qqplayer/backend.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/dax/codes/qqplayer</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/dax/Library/Logs/qqplayer/out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dax/Library/Logs/qqplayer/err.log</string>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>
+EOF
+  chmod 644 "$PLIST"
+fi
+
+# 已创建/已有 plist：确认已加载（launchctl list 无该服务时加载）
+if ! launchctl list 2>/dev/null | grep -q "com.daxmate.qqplayer"; then
+  echo "── 加载 launchd 服务: $PLIST"
+  launchctl load -w "$PLIST" 2>&1 || true
+fi
+
+# 5. 重启服务：kill 掉进程，launchd KeepAlive 会自动拉起新进程（加载新代码）
 # 不要 bootout/bootstrap：pkill 后 KeepAlive 已重启，再卸载/加载会和 launchd 域状态打架（I/O error）
 echo "── 重启服务（KeepAlive 自动拉起）"
 pkill -f "backend.py" 2>/dev/null || true
