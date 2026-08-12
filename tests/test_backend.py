@@ -412,3 +412,68 @@ def test_merge_translation_none():
     lines = [{"type": "line", "s": 1.0, "e": 2.0, "text": ["原文"]}]
     assert backend.merge_translation(lines, None) == lines
     assert backend.merge_translation(lines, "") == lines
+
+
+# ============ 歌单 ============
+def _pl_client(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(backend, "PLAYLISTS_FILE", tmp_path / "playlists.json")
+    return client
+
+
+def test_api_playlists_create_and_list(tmp_path, monkeypatch):
+    _pl_client(tmp_path, monkeypatch)
+    assert client.get("/api/playlists").json() == {"playlists": []}
+    r = client.post("/api/playlists", json={"name": "日语歌"})
+    assert r.status_code == 200
+    p = r.json()
+    assert p["name"] == "日语歌" and p["songPaths"] == [] and p["id"]
+    # 空名拒绝
+    assert client.post("/api/playlists", json={"name": "  "}).status_code == 400
+    r = client.get("/api/playlists")
+    assert len(r.json()["playlists"]) == 1
+
+
+def test_api_playlists_rename_delete(tmp_path, monkeypatch):
+    _pl_client(tmp_path, monkeypatch)
+    pid = client.post("/api/playlists", json={"name": "旧名"}).json()["id"]
+    r = client.patch(f"/api/playlists/{pid}", json={"name": "新名"})
+    assert r.json()["name"] == "新名"
+    assert client.patch(f"/api/playlists/{pid}", json={"name": ""}).status_code == 400
+    assert client.delete("/api/playlists/not-exist").status_code == 404
+    assert client.delete(f"/api/playlists/{pid}").json() == {"ok": True}
+    assert client.get("/api/playlists").json() == {"playlists": []}
+
+
+def test_api_playlists_songs_add_remove_order(tmp_path, monkeypatch):
+    from urllib.parse import quote
+
+    _pl_client(tmp_path, monkeypatch)
+    pid = client.post("/api/playlists", json={"name": "测试"}).json()["id"]
+    # 加歌（去重）
+    r = client.post(f"/api/playlists/{pid}/songs", json={"path": "/a.mp3"})
+    assert r.json()["songPaths"] == ["/a.mp3"]
+    client.post(f"/api/playlists/{pid}/songs", json={"path": "/a.mp3"})
+    client.post(f"/api/playlists/{pid}/songs", json={"path": "/b.mp3"})
+    # 排序：整体重排
+    r = client.put(f"/api/playlists/{pid}/order", json={"paths": ["/b.mp3", "/a.mp3"]})
+    assert r.json()["songPaths"] == ["/b.mp3", "/a.mp3"]
+    # 排序提交不存在的 path 会过滤掉，但原歌不丢
+    r = client.put(f"/api/playlists/{pid}/order", json={"paths": ["/ghost.mp3"]})
+    assert set(r.json()["songPaths"]) == {"/b.mp3", "/a.mp3"}
+    # 移除（path 带斜杠需 URL 编码）
+    r = client.delete(f"/api/playlists/{pid}/songs/{quote('/a.mp3')}")
+    assert r.json()["songPaths"] == ["/b.mp3"]
+    # 不存在的歌单
+    assert client.post("/api/playlists/xxx/songs", json={"path": "/a.mp3"}).status_code == 404
+    assert client.put("/api/playlists/xxx/order", json={"paths": []}).status_code == 404
+
+
+def test_api_playlists_persist(tmp_path, monkeypatch):
+    """歌单写入文件后重新加载仍在（持久化）"""
+    _pl_client(tmp_path, monkeypatch)
+    pid = client.post("/api/playlists", json={"name": "持久"}).json()["id"]
+    client.post(f"/api/playlists/{pid}/songs", json={"path": "/x.mp3"})
+    # 模拟重启：重新加载
+    data = json.loads((tmp_path / "playlists.json").read_text(encoding="utf-8"))
+    assert data[0]["name"] == "持久" and data[0]["songPaths"] == ["/x.mp3"]

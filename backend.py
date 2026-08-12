@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import threading
+import uuid
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,7 @@ DEFAULT_PORT = 17627
 # 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）
 DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
 FAVORITES_FILE = DATA_DIR / "favorites.json"
+PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
 # 播放记录滚动保留上限（超了删最旧）
 PLAYBACK_LIMIT = 5000
@@ -168,6 +170,143 @@ async def api_favorites_toggle(body: dict):
         favorited = True
     _save_favorites(paths)
     return {"path": path, "favorited": favorited}
+
+
+# ============ 歌单（持久化 ~/Library/Application Support/qqplayer/playlists.json）============
+
+def _load_playlists() -> list[dict]:
+    """加载歌单列表（文件不存在/损坏返回空）"""
+    try:
+        data = json.loads(PLAYLISTS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_playlists(playlists: list[dict]):
+    """保存歌单列表（写失败不影响播放功能）"""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        PLAYLISTS_FILE.write_text(
+            json.dumps(playlists, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _find_playlist(playlists: list[dict], pid: str) -> dict | None:
+    for p in playlists:
+        if p.get("id") == pid:
+            return p
+    return None
+
+
+@app.get("/api/playlists")
+def api_playlists():
+    """全部歌单（按创建顺序）"""
+    return {"playlists": _load_playlists()}
+
+
+@app.post("/api/playlists")
+def api_playlists_create(body: dict):
+    """新建歌单"""
+    name = str(body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "歌单名称不能为空")
+    now = datetime.now(timezone.utc).isoformat()
+    playlist = {
+        "id": uuid.uuid4().hex[:12],
+        "name": name,
+        "songPaths": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    playlists = _load_playlists()
+    playlists.append(playlist)
+    _save_playlists(playlists)
+    return playlist
+
+
+@app.patch("/api/playlists/{pid}")
+def api_playlists_rename(pid: str, body: dict):
+    """歌单改名"""
+    name = str(body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "歌单名称不能为空")
+    playlists = _load_playlists()
+    p = _find_playlist(playlists, pid)
+    if p is None:
+        raise HTTPException(404, "歌单不存在")
+    p["name"] = name
+    p["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _save_playlists(playlists)
+    return p
+
+
+@app.delete("/api/playlists/{pid}")
+def api_playlists_delete(pid: str):
+    """删除歌单"""
+    playlists = _load_playlists()
+    before = len(playlists)
+    playlists = [p for p in playlists if p.get("id") != pid]
+    if len(playlists) == before:
+        raise HTTPException(404, "歌单不存在")
+    _save_playlists(playlists)
+    return {"ok": True}
+
+
+@app.post("/api/playlists/{pid}/songs")
+def api_playlists_add_song(pid: str, body: dict):
+    """往歌单加一首歌（自动去重）"""
+    path = str(body.get("path", "")).strip()
+    if not path:
+        raise HTTPException(400, "缺少 path")
+    playlists = _load_playlists()
+    p = _find_playlist(playlists, pid)
+    if p is None:
+        raise HTTPException(404, "歌单不存在")
+    paths = p.setdefault("songPaths", [])
+    if path not in paths:
+        paths.append(path)
+        p["updatedAt"] = datetime.now(timezone.utc).isoformat()
+        _save_playlists(playlists)
+    return p
+
+
+@app.delete("/api/playlists/{pid}/songs/{path:path}")
+def api_playlists_remove_song(pid: str, path: str):
+    """从歌单移除一首歌"""
+    playlists = _load_playlists()
+    p = _find_playlist(playlists, pid)
+    if p is None:
+        raise HTTPException(404, "歌单不存在")
+    paths = p.setdefault("songPaths", [])
+    if path in paths:
+        paths.remove(path)
+        p["updatedAt"] = datetime.now(timezone.utc).isoformat()
+        _save_playlists(playlists)
+    return p
+
+
+@app.put("/api/playlists/{pid}/order")
+def api_playlists_order(pid: str, body: dict):
+    """拖拽排序：按 paths 数组重排歌单内歌曲（只重排已存在的，防止丢歌）"""
+    paths = body.get("paths")
+    if not isinstance(paths, list):
+        raise HTTPException(400, "缺少 paths 数组")
+    playlists = _load_playlists()
+    p = _find_playlist(playlists, pid)
+    if p is None:
+        raise HTTPException(404, "歌单不存在")
+    existing = p.get("songPaths", [])
+    ordered = [x for x in paths if x in existing]
+    for x in existing:  # 不在新顺序里的原歌曲补在末尾，不丢失
+        if x not in ordered:
+            ordered.append(x)
+    p["songPaths"] = ordered
+    p["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _save_playlists(playlists)
+    return p
 
 
 # ============ 播放记录（完整历史，append-only + 滚动截断）============

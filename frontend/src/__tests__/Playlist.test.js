@@ -40,6 +40,8 @@ beforeEach(() => {
     loading: false,
     error: "",
     favorites: [],
+    playlists: [],
+    activePlaylistId: null,
   });
 });
 
@@ -199,5 +201,61 @@ describe("Playlist", () => {
     state.songs = [{ id: "a", name: "A", artist: "", duration: 214.5 }];
     const wrapper = mount(Playlist);
     expect(wrapper.text()).toContain("3:34");
+  });
+
+  it("歌单视图：只显示歌单内歌曲，且按歌单顺序（独立视图）", () => {
+    state.playlists = [{ id: "p1", name: "日语歌", songPaths: ["/b.mp3", "/a.mp3"] }];
+    state.activePlaylistId = "p1";
+    state.songs = [
+      { id: "a", name: "A歌", artist: "", path: "/a.mp3" },
+      { id: "b", name: "B歌", artist: "", path: "/b.mp3" },
+      { id: "c", name: "C歌", artist: "", path: "/c.mp3" },
+    ];
+    const wrapper = mount(Playlist);
+    expect(wrapper.find(".pl-head").text()).toContain("日语歌");
+    const items = wrapper.findAll(".pl-item");
+    expect(items).toHaveLength(2); // C 歌不在歌单里
+    expect(items[0].text()).toContain("B歌"); // 按歌单顺序而非曲库顺序
+    expect(items[1].text()).toContain("A歌");
+    expect(wrapper.text()).not.toContain("C歌");
+  });
+
+  it("歌单视图：空歌单显示引导提示", () => {
+    state.playlists = [{ id: "p1", name: "空歌单", songPaths: [] }];
+    state.activePlaylistId = "p1";
+    state.songs = [{ id: "a", name: "A歌", artist: "", path: "/a.mp3" }];
+    const wrapper = mount(Playlist);
+    expect(wrapper.text()).toContain("歌单是空的");
+  });
+
+  it("歌单视图：✕ 按钮从歌单移除（不删曲库歌曲）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    state.playlists = [{ id: "p1", name: "歌单", songPaths: ["/a.mp3", "/b.mp3"] }];
+    state.activePlaylistId = "p1";
+    state.songs = [
+      { id: "a", name: "A歌", artist: "", path: "/a.mp3" },
+      { id: "b", name: "B歌", artist: "", path: "/b.mp3" },
+    ];
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pl-action.remove")[0].trigger("click");
+    expect(state.playlists[0].songPaths).toEqual(["/b.mp3"]);
+    expect(state.songs).toHaveLength(2); // 曲库不变
+  });
+
+  it("歌单视图：拖拽手柄仅在默认排序且无过滤时显示", async () => {
+    state.playlists = [{ id: "p1", name: "歌单", songPaths: ["/a.mp3"] }];
+    state.activePlaylistId = "p1";
+    state.songs = [{ id: "a", name: "A歌", artist: "", path: "/a.mp3" }];
+    const wrapper = mount(Playlist);
+    expect(wrapper.find(".pl-drag").exists()).toBe(true);
+    // 激活排序 → 手柄隐藏
+    await wrapper.find(".pl-sort").setValue("name");
+    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    // 全部歌曲视图 → 无手柄
+    state.activePlaylistId = null;
+    expect(wrapper.find(".pl-drag").exists()).toBe(false);
   });
 });

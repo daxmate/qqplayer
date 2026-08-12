@@ -34,6 +34,7 @@
 
     <!-- 主体：连播模式 -->
     <main v-if="state.mode === 'continuous'" class="main continuous">
+      <Sidebar class="panel sidebar" />
       <Playlist class="panel playlist" />
       <section class="center">
         <Cover :song="state.currentSong" />
@@ -75,6 +76,7 @@
 import { ref, onMounted } from "vue";
 import { Music2, Mic, Play, Settings } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
+import Sidebar from "./components/Sidebar.vue";
 import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
 import KaraokePanel from "./components/KaraokePanel.vue";
@@ -84,6 +86,7 @@ import {
   state,
   loadSongs,
   loadFavorites,
+  loadPlaylists,
   setupKeyboardShortcuts,
   setupMediaSession,
   setupPlaybackFlush,
@@ -99,6 +102,7 @@ function switchMode(m) {
 onMounted(() => {
   loadSongs();
   loadFavorites();
+  loadPlaylists();
   setupKeyboardShortcuts();
   setupMediaSession();
   setupPlaybackFlush();
@@ -223,11 +227,14 @@ onMounted(() => {
 }
 .main.continuous {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 200px 280px 1fr;
   grid-template-rows: 1fr auto;
   grid-template-areas:
-    "playlist center"
-    "controls controls";
+    "sidebar playlist center"
+    "controls controls controls";
+}
+.sidebar {
+  grid-area: sidebar;
 }
 .playlist {
   grid-area: playlist;

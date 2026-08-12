@@ -86,6 +86,8 @@ const {
   _resetPlaybackSession,
 } = await import("../composables/usePlayer.js");
 
+const { loadPlaylists, createPlaylist, renamePlaylist, deletePlaylist, addToPlaylist, removeFromPlaylist, setPlaylistOrder, isInPlaylist } = await import("../composables/usePlayer.js");
+
 const RESET = {
   songs: [],
   currentIndex: -1,
@@ -108,6 +110,8 @@ const RESET = {
   volume: 1.0,
   muted: false,
   favorites: [],
+  playlists: [],
+  activePlaylistId: null,
   lastSource: "manual",
 };
 
@@ -1499,5 +1503,153 @@ describe("播放统计", () => {
 
     expect(calls.length).toBe(1);
     expect(calls[0].played).toBe(15); // 5+10s 累计（从 karaoke play 到切模式）
+  });
+});
+
+describe("歌单", () => {
+  it("loadPlaylists 拉取歌单列表；激活的歌单被删则退回全部歌曲", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          playlists: [{ id: "p1", name: "日语", songPaths: ["/a.mp3"] }],
+        }),
+      })),
+    );
+    state.activePlaylistId = "p1";
+    await loadPlaylists();
+    expect(state.playlists).toHaveLength(1);
+    expect(state.playlists[0].name).toBe("日语");
+    expect(state.activePlaylistId).toBe("p1");
+    // 歌单没了 → 退回全部歌曲
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ playlists: [] }) })),
+    );
+    await loadPlaylists();
+    expect(state.activePlaylistId).toBeNull();
+  });
+
+  it("createPlaylist 创建并加入列表；空名报错", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ id: "p9", name: "新歌单", songPaths: [] }),
+      })),
+    );
+    const p = await createPlaylist("新歌单");
+    expect(state.playlists).toContainEqual(p);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists",
+      expect.objectContaining({ method: "POST" }),
+    );
+    // 后端拒绝
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        json: async () => ({ detail: "歌单名称不能为空" }),
+      })),
+    );
+    await expect(createPlaylist("")).rejects.toThrow("歌单名称不能为空");
+  });
+
+  it("renamePlaylist 乐观改名；失败回滚", async () => {
+    state.playlists = [{ id: "p1", name: "旧名", songPaths: [] }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    await renamePlaylist("p1", "新名");
+    expect(state.playlists[0].name).toBe("新名");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists/p1",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    // 失败回滚
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
+    await expect(renamePlaylist("p1", "再改")).rejects.toThrow("改名失败");
+    expect(state.playlists[0].name).toBe("新名");
+  });
+
+  it("deletePlaylist 删除并退回全部歌曲；失败回滚", async () => {
+    state.playlists = [
+      { id: "p1", name: "A", songPaths: [] },
+      { id: "p2", name: "B", songPaths: [] },
+    ];
+    state.activePlaylistId = "p1";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    await deletePlaylist("p1");
+    expect(state.playlists.map((p) => p.id)).toEqual(["p2"]);
+    expect(state.activePlaylistId).toBeNull();
+    expect(fetch).toHaveBeenCalledWith("/api/playlists/p1", { method: "DELETE" });
+    // 失败回滚
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
+    await expect(deletePlaylist("p2")).rejects.toThrow("删除失败");
+    expect(state.playlists.map((p) => p.id)).toEqual(["p2"]);
+  });
+
+  it("addToPlaylist 加歌（去重）并 POST 后端", async () => {
+    state.playlists = [{ id: "p1", name: "A", songPaths: [] }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    await addToPlaylist("p1", "/a.mp3");
+    expect(isInPlaylist("p1", "/a.mp3")).toBe(true);
+    // 已在歌单 → 不发请求（去重）
+    const before = fetch.mock.calls.length;
+    await addToPlaylist("p1", "/a.mp3");
+    expect(fetch.mock.calls.length).toBe(before);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists/p1/songs",
+      expect.objectContaining({ method: "POST" }),
+    );
+    // 失败回滚
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
+    await expect(addToPlaylist("p1", "/b.mp3")).rejects.toThrow("加入歌单失败");
+    expect(isInPlaylist("p1", "/b.mp3")).toBe(false);
+  });
+
+  it("removeFromPlaylist 移出并 DELETE（path 编码）；失败回滚", async () => {
+    state.playlists = [{ id: "p1", name: "A", songPaths: ["/a.mp3"] }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    await removeFromPlaylist("p1", "/a.mp3");
+    expect(isInPlaylist("p1", "/a.mp3")).toBe(false);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists/p1/songs/" + encodeURIComponent("/a.mp3"),
+      { method: "DELETE" },
+    );
+    // 失败回滚
+    state.playlists[0].songPaths = ["/b.mp3"];
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
+    await expect(removeFromPlaylist("p1", "/b.mp3")).rejects.toThrow("移出歌单失败");
+    expect(isInPlaylist("p1", "/b.mp3")).toBe(true);
+  });
+
+  it("setPlaylistOrder 提交新顺序；失败回滚", async () => {
+    state.playlists = [{ id: "p1", name: "A", songPaths: ["/a.mp3", "/b.mp3"] }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    await setPlaylistOrder("p1", ["/b.mp3", "/a.mp3"]);
+    expect(state.playlists[0].songPaths).toEqual(["/b.mp3", "/a.mp3"]);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists/p1/order",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    // 失败回滚
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
+    await expect(setPlaylistOrder("p1", ["/a.mp3"])).rejects.toThrow("排序保存失败");
+    expect(state.playlists[0].songPaths).toEqual(["/b.mp3", "/a.mp3"]);
   });
 });

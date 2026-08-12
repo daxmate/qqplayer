@@ -2,7 +2,7 @@
   <div class="playlist" :class="{ compact }">
     <div class="pl-head">
       <Music :size="13" />
-      播放列表 ({{ visible.length }}/{{ state.songs.length }})
+      {{ viewTitle }}
       <button
         class="pl-refresh"
         :class="{ spinning: state.loading }"
@@ -35,14 +35,18 @@
       </button>
     </div>
 
-    <div class="pl-list">
+    <div ref="listEl" class="pl-list">
       <div
         v-for="({ song, i }, vi) in visible"
         :key="song.id"
         class="pl-item"
         :class="{ active: i === state.currentIndex }"
+        :data-path="song.path"
         @click="pick(i)"
       >
+        <span v-if="canDrag" class="pl-drag" title="拖拽排序">
+          <GripVertical :size="14" />
+        </span>
         <span class="pl-idx">{{ vi + 1 }}</span>
         <div class="pl-info">
           <div class="pl-name">
@@ -72,7 +76,18 @@
         >
           <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
         </button>
-        <button class="pl-action remove" title="从队列移除" @click.stop="removeFromQueue(i)">
+        <button
+          class="pl-action"
+          title="加入歌单"
+          @click.stop="openAddMenu(song.path)"
+        >
+          <ListPlus :size="14" />
+        </button>
+        <button
+          class="pl-action remove"
+          :title="inPlaylistView ? '从歌单移除' : '从队列移除'"
+          @click.stop="removeItem(i)"
+        >
           <X :size="14" />
         </button>
       </div>
@@ -80,32 +95,99 @@
         {{
           state.loading
             ? "扫描中…"
-            : state.songs.length
+            : viewSongs.length
               ? favOnly
                 ? "没有收藏的歌曲"
                 : "没有匹配的歌曲"
-              : "没有歌曲，请设置歌曲库"
+              : inPlaylistView
+                ? "歌单是空的，点击行上的 ＋ 加歌"
+                : "没有歌曲，请设置歌曲库"
         }}
       </div>
     </div>
+
+    <!-- 加歌浮层 -->
+    <Teleport to="body">
+      <div v-if="addMenuOpen" class="am-backdrop" @click="addMenuOpen = false"></div>
+      <div v-if="addMenuOpen" class="add-menu">
+        <div class="am-title">
+          <ListPlus :size="13" />
+          加入歌单
+        </div>
+        <div
+          v-for="p in state.playlists"
+          :key="p.id"
+          class="am-item"
+          :class="{ in: isInPlaylist(p.id, addMenuPath) }"
+          @click="toggleAdd(p.id)"
+        >
+          <ListMusic :size="13" />
+          <span class="am-name">{{ p.name }}</span>
+          <span class="am-state">
+            <Check v-if="isInPlaylist(p.id, addMenuPath)" :size="13" />
+            <Plus v-else :size="13" />
+          </span>
+        </div>
+        <div v-if="!state.playlists.length" class="am-empty">
+          还没有歌单，点左侧「新建歌单」
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
-import { Music, Mic, RefreshCw, Search, Heart, X } from "@lucide/vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import Sortable from "sortablejs";
+import {
+  Music,
+  Mic,
+  RefreshCw,
+  Search,
+  Heart,
+  X,
+  GripVertical,
+  ListPlus,
+  ListMusic,
+  Check,
+  Plus,
+} from "@lucide/vue";
 import {
   state,
+  activePlaylist,
   selectSong,
   loadSongs,
   play,
   isFavorite,
   toggleFavorite,
   removeFromQueue,
+  isInPlaylist,
+  addToPlaylist,
+  removeFromPlaylist,
+  setPlaylistOrder,
 } from "../composables/usePlayer.js";
 
 defineProps({
   compact: { type: Boolean, default: false },
+});
+
+// ============ 视图：全部歌曲 / 歌单（独立视图） ============
+const inPlaylistView = computed(() => !!state.activePlaylistId);
+const viewTitle = computed(() =>
+  inPlaylistView.value ? activePlaylist.value?.name || "歌单" : "播放列表",
+);
+
+// 当前视图的歌曲列表：歌单视图按歌单顺序（songPaths）展开，i 为曲库索引
+const viewSongs = computed(() => {
+  if (!inPlaylistView.value) {
+    return state.songs.map((song, i) => ({ song, i }));
+  }
+  const pl = activePlaylist.value;
+  if (!pl) return [];
+  const byPath = new Map(state.songs.map((s, i) => [s.path, { song: s, i }]));
+  return (pl.songPaths || [])
+    .map((path) => byPath.get(path))
+    .filter(Boolean);
 });
 
 // ============ 搜索 / 排序 / 收藏过滤 ============
@@ -113,9 +195,9 @@ const query = ref("");
 const sortKey = ref("default");
 const favOnly = ref(false);
 
-// 过滤 + 排序后的可见列表：{ song, i }，i 为在 state.songs 中的原始索引
+// 过滤 + 排序后的可见列表
 const visible = computed(() => {
-  let list = state.songs.map((song, i) => ({ song, i }));
+  let list = viewSongs.value;
   if (favOnly.value) {
     list = list.filter(({ song }) => isFavorite(song.path));
   }
@@ -129,19 +211,86 @@ const visible = computed(() => {
   }
   const key = sortKey.value;
   if (key === "name") {
-    list.sort((a, b) => (a.song.name || "").localeCompare(b.song.name || ""));
+    list = [...list].sort((a, b) => (a.song.name || "").localeCompare(b.song.name || ""));
   } else if (key === "artist") {
-    list.sort((a, b) => (a.song.artist || "").localeCompare(b.song.artist || ""));
+    list = [...list].sort((a, b) => (a.song.artist || "").localeCompare(b.song.artist || ""));
   } else if (key === "duration") {
-    list.sort((a, b) => (a.song.duration ?? 0) - (b.song.duration ?? 0));
+    list = [...list].sort((a, b) => (a.song.duration ?? 0) - (b.song.duration ?? 0));
   }
   return list;
 });
+
+// 拖拽启用条件：歌单视图 + 无搜索/排序/收藏过滤（保证可见集 = 歌单全量，排序不丢歌）
+const canDrag = computed(
+  () =>
+    inPlaylistView.value &&
+    sortKey.value === "default" &&
+    !query.value.trim() &&
+    !favOnly.value,
+);
 
 function pick(i) {
   selectSong(i);
   play(); // 点击列表直接开始播放
 }
+
+// ============ 行操作：移除（跟随视图语义） / 加歌 ============
+function removeItem(i) {
+  if (inPlaylistView.value) {
+    const path = viewSongs.value[i]?.song.path;
+    if (path) removeFromPlaylist(state.activePlaylistId, path);
+  } else {
+    removeFromQueue(i);
+  }
+}
+
+// 加歌浮层
+const addMenuOpen = ref(false);
+const addMenuPath = ref("");
+
+function openAddMenu(path) {
+  addMenuPath.value = path;
+  addMenuOpen.value = true;
+}
+
+async function toggleAdd(pid) {
+  const path = addMenuPath.value;
+  try {
+    if (isInPlaylist(pid, path)) {
+      await removeFromPlaylist(pid, path);
+    } else {
+      await addToPlaylist(pid, path);
+    }
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+// ============ 歌单拖拽排序（sortablejs） ============
+const listEl = ref(null);
+let sortable = null;
+
+function setupSortable() {
+  sortable?.destroy();
+  sortable = null;
+  if (!canDrag.value || !listEl.value) return;
+  sortable = Sortable.create(listEl.value, {
+    handle: ".pl-drag",
+    animation: 150,
+    ghostClass: "pl-ghost",
+    onEnd: ({ oldIndex, newIndex }) => {
+      if (oldIndex === newIndex || !state.activePlaylistId) return;
+      const paths = [...listEl.value.querySelectorAll(".pl-item")].map(
+        (el) => el.dataset.path,
+      );
+      setPlaylistOrder(state.activePlaylistId, paths).catch((e) => alert(e.message));
+    },
+  });
+}
+
+watch([activePlaylist, canDrag], () => nextTick(setupSortable));
+onMounted(() => nextTick(setupSortable));
+onBeforeUnmount(() => sortable?.destroy());
 
 function fmtDur(d) {
   const m = Math.floor(d / 60);
@@ -156,6 +305,7 @@ function fmtDur(d) {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 .pl-head {
   padding: 12px 14px;
@@ -270,6 +420,25 @@ function fmtDur(d) {
   flex: 1;
   overflow-y: auto;
   padding: 6px;
+}
+.pl-drag {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text3);
+  cursor: grab;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+.pl-drag:hover {
+  opacity: 1;
+  color: var(--text2);
+}
+.pl-drag:active {
+  cursor: grabbing;
+}
+.pl-ghost {
+  opacity: 0.4;
+  background: var(--card2);
 }
 .pl-item {
   display: flex;
@@ -391,5 +560,69 @@ function fmtDur(d) {
   color: var(--text3);
   font-size: 13px;
   padding: 30px 0;
+}
+/* 加歌浮层 */
+.am-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+.add-menu {
+  position: fixed;
+  top: 120px;
+  right: 340px;
+  z-index: 91;
+  width: 220px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  padding: 6px;
+}
+.am-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text2);
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.am-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.am-item:hover {
+  background: var(--card2);
+  color: var(--text);
+}
+.am-item.in {
+  color: var(--accent);
+}
+.am-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-state {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.am-empty {
+  text-align: center;
+  color: var(--text3);
+  font-size: 12px;
+  padding: 16px 0;
 }
 </style>
