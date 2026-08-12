@@ -1,5 +1,6 @@
 // usePlayer composable 单元测试
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册）
 class FakeAudio {
@@ -26,6 +27,18 @@ class FakeAudio {
 }
 vi.stubGlobal("Audio", FakeAudio);
 
+// localStorage stub（vitest 默认 node 环境无 localStorage；usePlayer 模块加载时 try/catch 保护，测试体里需要显式提供）
+const lsStore = {};
+const localStorageStub = {
+  getItem: (k) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k, v) => {
+    lsStore[k] = String(v);
+  },
+  removeItem: (k) => {
+    delete lsStore[k];
+  },
+};
+
 const {
   state,
   cycleSpeed,
@@ -47,6 +60,8 @@ const {
   exitAbLoop,
   clickLine,
   currentLineIndex,
+  lyricSettings,
+  LYRIC_SETTINGS_KEY,
   _resetKaraokeAnchor,
   _resetPlayMode,
 } = await import("../composables/usePlayer.js");
@@ -77,6 +92,8 @@ beforeEach(() => {
   _resetKaraokeAnchor();
   _resetPlayMode();
   vi.restoreAllMocks();
+  vi.stubGlobal("localStorage", localStorageStub);
+  for (const k of Object.keys(lsStore)) delete lsStore[k];
 });
 
 afterEach(() => {
@@ -734,5 +751,39 @@ describe("AB 循环", () => {
     );
     await selectSong(0);
     expect(state.abLoop).toBe(null);
+  });
+});
+
+describe("歌词显示设置（lyricSettings）", () => {
+  it("默认值：20px / 左对齐 / 系统字体 / 全开 / 1/3 停靠", () => {
+    expect(lyricSettings.fontSize).toBe(20);
+    expect(lyricSettings.align).toBe("left");
+    expect(lyricSettings.fontFamily).toBe("system");
+    expect(lyricSettings.showRoma).toBe(true);
+    expect(lyricSettings.showZh).toBe(true);
+    expect(lyricSettings.showSec).toBe(true);
+    expect(lyricSettings.focusPos).toBe(0.33);
+    expect(lyricSettings.fadeMask).toBe(true);
+    expect(lyricSettings.autoScroll).toBe(true);
+  });
+
+  it("修改后自动持久化到 localStorage", async () => {
+    localStorage.removeItem(LYRIC_SETTINGS_KEY);
+    lyricSettings.fontSize = 26;
+    lyricSettings.align = "center";
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem(LYRIC_SETTINGS_KEY));
+    expect(saved.fontSize).toBe(26);
+    expect(saved.align).toBe("center");
+  });
+
+  it("localStorage 已有配置时加载覆盖默认值，未保存项保持默认", async () => {
+    localStorage.setItem(LYRIC_SETTINGS_KEY, JSON.stringify({ fontSize: 24, focusPos: 0.5 }));
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    expect(m.lyricSettings.fontSize).toBe(24);
+    expect(m.lyricSettings.focusPos).toBe(0.5);
+    expect(m.lyricSettings.align).toBe("left"); // 未保存的保持默认
+    expect(m.lyricSettings.fadeMask).toBe(true);
   });
 });

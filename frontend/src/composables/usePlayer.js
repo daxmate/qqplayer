@@ -25,6 +25,47 @@ export const state = reactive({
   error: "",
 });
 
+// ============ 歌词显示设置（localStorage 持久化）============
+export const LYRIC_SETTINGS_KEY = "qqplayer.lyricSettings.v1";
+
+export const lyricSettings = reactive({
+  fontFamily: "system", // 'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
+  fontSize: 20, // 当前句基准字号（px），其他层级按比例缩放
+  align: "left", // 'left' | 'center' | 'right'
+  showRoma: true, // 显示罗马音
+  showZh: true, // 显示中文翻译
+  showSec: true, // 显示段落标题
+  focusPos: 0.33, // 焦点句停靠位置（可视区高度比例）：0.33 | 0.5
+  fadeMask: true, // 上下渐隐遮罩
+  autoScroll: true, // 切句自动跟随滚动
+});
+
+function loadLyricSettings() {
+  try {
+    const raw = localStorage.getItem(LYRIC_SETTINGS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    for (const k of Object.keys(lyricSettings)) {
+      if (k in saved) lyricSettings[k] = saved[k];
+    }
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadLyricSettings();
+
+watch(
+  lyricSettings,
+  () => {
+    try {
+      localStorage.setItem(LYRIC_SETTINGS_KEY, JSON.stringify(lyricSettings));
+    } catch {
+      /* 忽略写入失败 */
+    }
+  },
+  { deep: true },
+);
+
 const SPEEDS = [0.75, 1.0, 1.25];
 
 // ============ 连播播放模式（列表循环/随机/单曲循环）============
@@ -94,7 +135,7 @@ export async function loadLibrary() {
     const res = await fetch("/api/library", { cache: "no-store" });
     const data = await res.json();
     state.libraryPath = data.path;
-  } catch (e) {
+  } catch {
     /* 忽略 */
   }
 }
@@ -170,7 +211,7 @@ export async function selectSong(index, opts = {}) {
       state.lyric = data.lines || [];
       state.lyricFormat = data.format || null;
     }
-  } catch (e) {
+  } catch {
     state.lyric = [];
     state.lyricFormat = null;
   }

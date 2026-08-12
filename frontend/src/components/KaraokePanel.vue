@@ -7,20 +7,32 @@
       </span>
       <span class="kp-hint">{{ abHint }}</span>
     </div>
-    <div ref="scrollEl" class="kp-scroll">
+    <div
+      ref="scrollEl"
+      class="kp-scroll"
+      :class="{ 'no-mask': !lyricSettings.fadeMask }"
+      :style="scrollStyle"
+    >
       <template v-for="(item, i) in lyric" :key="i">
-        <div v-if="item.type === 'sec'" class="sec">
+        <div v-if="item.type === 'sec' && lyricSettings.showSec" class="sec">
           <Music2 :size="12" />
           {{ item.name }}
         </div>
-        <div v-else class="kline" :class="klineClass(i)" @click="playLineAt(i)">
+        <div
+          v-else-if="item.type === 'line'"
+          class="kline"
+          :class="klineClass(i)"
+          @click="playLineAt(i)"
+        >
           <span class="kline-num" :class="{ 'ab-badge': abBadge(i) }">{{
             abBadge(i) || lineNumber(i)
           }}</span>
-          <div class="kline-body">
+          <div class="kline-body" :style="{ textAlign: lyricSettings.align }">
             <div class="kline-jp">{{ item.text[0] || "…" }}</div>
-            <div v-if="item.text[1]" class="kline-roma">{{ item.text[1] }}</div>
-            <div v-if="item.text[2]" class="kline-zh" :class="{ hidden: !state.zhVisible }">
+            <div v-if="item.text[1] && lyricSettings.showRoma" class="kline-roma">
+              {{ item.text[1] }}
+            </div>
+            <div v-if="item.text[2] && lyricSettings.showZh && state.zhVisible" class="kline-zh">
               {{ item.text[2] }}
             </div>
           </div>
@@ -42,7 +54,7 @@
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
 import { Mic, Music2 } from "@lucide/vue";
-import { state, clickLine } from "../composables/usePlayer.js";
+import { state, clickLine, lyricSettings } from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -52,6 +64,18 @@ const props = defineProps({
 const scrollEl = ref(null);
 const lineIndexMap = ref([]); // lyric 数组索引 -> 行号（只计 line）
 let lastCurrent = -1;
+
+const FONTS = {
+  system: "",
+  serif: '"Songti SC", "SimSun", "Noto Serif SC", serif',
+  rounded: '"Yuanti SC", "PingFang SC", "Noto Sans SC", sans-serif',
+};
+
+// 字号/字体/渐隐 → CSS 变量与内联样式（与连播 LyricPanel 一致）
+const scrollStyle = computed(() => ({
+  fontFamily: FONTS[lyricSettings.fontFamily] || "",
+  "--fs-active": lyricSettings.fontSize + "px",
+}));
 
 watch(
   () => props.lyric,
@@ -114,15 +138,20 @@ watch(
   async (v) => {
     if (v < 0 || v === lastCurrent) return;
     lastCurrent = v;
+    if (!lyricSettings.autoScroll) return; // 关闭自动跟随：只高亮不滚动
     await nextTick();
     const el = scrollEl.value;
     if (!el) return;
     const active = el.querySelector(".kline.active");
     if (active) {
-      // 与连播歌词一致：停靠可视区 1/3 高度 + 平滑滚动
+      // 与连播歌词一致：停靠焦点位置（默认 1/3 高度）+ 平滑滚动
       const rect = active.getBoundingClientRect();
       const crect = el.getBoundingClientRect();
-      const top = el.scrollTop + (rect.top - crect.top) - el.clientHeight / 3 + rect.height / 2;
+      const top =
+        el.scrollTop +
+        (rect.top - crect.top) -
+        el.clientHeight * lyricSettings.focusPos +
+        rect.height / 2;
       el.scrollTo({ top, behavior: "smooth" });
     }
   },
@@ -173,6 +202,10 @@ function fmt(t) {
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
   mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
 }
+.kp-scroll.no-mask {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
 .sec {
   font-size: 12px;
   font-weight: 700;
@@ -200,7 +233,7 @@ function fmt(t) {
   background: none;
 }
 .kline-jp {
-  font-size: 13.5px;
+  font-size: calc(var(--fs-active, 20px) * 0.675);
   font-weight: 400;
   color: var(--text3);
   line-height: 1.6;
@@ -210,7 +243,7 @@ function fmt(t) {
     font-weight 0.3s;
 }
 .kline-roma {
-  font-size: 11px;
+  font-size: calc(var(--fs-active, 20px) * 0.55);
   color: var(--text3);
   margin-top: 2px;
   font-style: italic;
@@ -222,7 +255,7 @@ function fmt(t) {
     opacity 0.3s;
 }
 .kline-zh {
-  font-size: 11.5px;
+  font-size: calc(var(--fs-active, 20px) * 0.575);
   color: var(--text3);
   margin-top: 3px;
   line-height: 1.4;
@@ -248,17 +281,17 @@ function fmt(t) {
   opacity: 1;
 }
 .kline.near .kline-jp {
-  font-size: 15px;
+  font-size: calc(var(--fs-active, 20px) * 0.75);
   font-weight: 500;
   color: rgba(238, 240, 247, 0.72);
 }
 .kline.near .kline-roma {
-  font-size: 11.5px;
+  font-size: calc(var(--fs-active, 20px) * 0.575);
   color: rgba(238, 240, 247, 0.6);
   opacity: 0.85;
 }
 .kline.near .kline-zh {
-  font-size: 12px;
+  font-size: calc(var(--fs-active, 20px) * 0.6);
   color: rgba(238, 240, 247, 0.6);
   opacity: 0.8;
 }
@@ -271,17 +304,17 @@ function fmt(t) {
   border-left-color: var(--accent);
 }
 .kline.active .kline-jp {
-  font-size: 20px;
+  font-size: var(--fs-active, 20px);
   font-weight: 700;
   color: #ffd9c9;
 }
 .kline.active .kline-roma {
-  font-size: 12.5px;
+  font-size: calc(var(--fs-active, 20px) * 0.625);
   color: var(--text2);
   opacity: 1;
 }
 .kline.active .kline-zh {
-  font-size: 13px;
+  font-size: calc(var(--fs-active, 20px) * 0.65);
   color: var(--text2);
   opacity: 1;
 }
