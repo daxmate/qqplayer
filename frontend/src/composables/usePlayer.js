@@ -111,7 +111,7 @@ export async function selectSong(index) {
 export function togglePlay() {
   if (!state.currentSong) return;
   if (audio.paused) {
-    audio.play().catch(() => {});
+    play(); // 带跟唱锚点重定位（句末暂停后再播 → 锚定下一句）
   } else {
     audio.pause();
   }
@@ -119,6 +119,8 @@ export function togglePlay() {
 
 export function play() {
   if (!state.currentSong) return;
+  // 重新锚定当前时间所在句（-1 = 前奏/间隙，播到下一句时自动锚定）
+  karaokeLine = locateLine(audio.currentTime);
   audio.play().catch(() => {});
 }
 
@@ -140,6 +142,8 @@ export function seek(t) {
   if (!audio.src) return;
   audio.currentTime = t;
   state.currentTime = t;
+  // 跳转后重定位跟唱锚点，避免旧锚点立刻触发暂停/漏停
+  karaokeLine = locateLine(t);
 }
 
 export function cycleSpeed() {
@@ -159,12 +163,32 @@ export function toggleZh() {
 // ============ 跟唱模式：点句跳转 ============
 const lineItems = computed(() => state.lyric.filter((x) => x.type === "line"));
 
+// 跟唱模式锚点：正在唱的句子索引（-1 = 未锚定，如前奏/间隙）
+// 不靠每次 timeupdate 反推当前句——句末 e 一过 currentLineIndex 就指向下一句，
+// "反推"永远判断不出该停，导致一句唱完不停
+let karaokeLine = -1;
+
+// 严格区间匹配：t 落在哪一句内（不含间隙/前奏/尾声）
+function locateLine(t) {
+  const lines = lineItems.value;
+  for (let i = 0; i < lines.length; i++) {
+    if (t >= lines[i].s && t < lines[i].e) return i;
+  }
+  return -1;
+}
+
+// 仅供测试：重置跟唱锚点
+export function _resetKaraokeAnchor() {
+  karaokeLine = -1;
+}
+
 export function playLine(lineIndex) {
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   const ln = lines[lineIndex];
+  karaokeLine = lineIndex;
   audio.currentTime = ln.s;
-  play();
+  audio.play().catch(() => {});
 }
 
 export function prevLine() {
@@ -179,26 +203,33 @@ export function nextLine() {
 }
 
 // 当前高亮句（按时间戳定位）
+// 取「最后一条已开始的句子」：句间间隙（上一句 e ~ 下一句 s）中保持上一句，
+// 播放结束后保持最后一句；这样跟唱模式 timeupdate 才能识别「该停了」
 export const currentLineIndex = computed(() => {
   const lines = lineItems.value;
   if (!lines.length) return -1;
   const t = state.currentTime;
+  let idx = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (t >= lines[i].s && t < lines[i].e) return i;
+    if (t >= lines[i].s) idx = i;
+    else break;
   }
-  // 播放结束后保持最后一句
-  if (t >= lines[lines.length - 1].e) return lines.length - 1;
-  return -1;
+  return idx;
 });
 
 // ============ 音频事件 ============
 audio.addEventListener("timeupdate", () => {
   state.currentTime = audio.currentTime;
-  // 跟唱模式：每句播完自动停
+  // 跟唱模式：每句播完自动停（锚点方案）
   if (state.mode === "karaoke" && state.karaokeOn) {
     const lines = lineItems.value;
-    const idx = currentLineIndex.value;
-    if (idx >= 0 && lines[idx] && audio.currentTime >= lines[idx].e) {
+    if (!lines.length) return;
+    const t = audio.currentTime;
+    // 锚点失效（前奏/间隙未锚定，或 seek/回退到锚点句之前）→ 重新定位
+    if (karaokeLine < 0 || t < lines[karaokeLine].s) {
+      karaokeLine = locateLine(t);
+    }
+    if (karaokeLine >= 0 && t >= lines[karaokeLine].e) {
       audio.pause();
     }
   }
