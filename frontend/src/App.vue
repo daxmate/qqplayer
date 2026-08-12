@@ -3,8 +3,11 @@
     <!-- 顶栏 -->
     <header class="topbar">
       <h1 class="logo">
-        <Music :size="20" class="logo-icon" />
-        QQ Player
+        <span class="logo-bubbles" aria-hidden="true">
+          <span class="qq q1">Q</span>
+          <span class="qq q2"><span class="qq-face">Q</span></span>
+        </span>
+        <span class="logo-text">Player</span>
       </h1>
       <div class="mode-tabs">
         <button
@@ -74,7 +77,7 @@
 
 <script setup>
 import { ref, onMounted } from "vue";
-import { Music, Music2, Mic, Play, Settings } from "@lucide/vue";
+import { Music2, Mic, Play, Settings } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
@@ -120,10 +123,46 @@ onMounted(() => {
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-.logo-icon {
-  color: var(--accent);
+.logo-bubbles {
+  display: inline-flex;
+  align-items: center;
+}
+.qq {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Didot", "Baskerville", Georgia, serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+.q1 {
+  background: linear-gradient(135deg, #ff9ab5, #ff7e6b);
+  transform: rotate(-10deg);
+  z-index: 1;
+}
+.q2 {
+  background: linear-gradient(135deg, #ffc06b, #ff9a5c);
+  transform: rotate(10deg);
+  margin-left: -6px;
+}
+.qq-face {
+  display: block;
+  transform: scaleX(-1);
+}
+.logo-text {
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  color: var(--text);
 }
 .mode-tabs {
   display: flex;
