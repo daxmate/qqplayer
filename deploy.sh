@@ -23,10 +23,26 @@ echo "── 构建前端"
 (cd frontend && pnpm install && pnpm build)
 
 # 4. 重启服务：停掉旧进程 → 卸载旧服务 → 加载 launchd 服务
+# 注意：pkill 后立即 bootout/bootstrap 易报 "Bootstrap failed: 5: Input/output error"（launchd 域状态瞬时），
+# 先等旧状态清理，bootstrap 失败自动重试
+LABEL_CMD="gui/$(id -u)/$LABEL"
 echo "── 重启服务"
 pkill -f "backend.py" 2>/dev/null || true
-launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+launchctl bootout "$LABEL_CMD" 2>/dev/null || true
+sleep 1
+BOOTSTRAPPED=0
+for attempt in 1 2 3 4 5; do
+  if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then
+    BOOTSTRAPPED=1
+    break
+  fi
+  echo "  bootstrap 第 $attempt 次失败（I/O error 为瞬时状态），1s 后重试…"
+  sleep 1
+done
+if [ "$BOOTSTRAPPED" -ne 1 ]; then
+  echo "❌ launchctl bootstrap 连续 5 次失败，服务未加载"
+  exit 1
+fi
 
 # 5. 健康检查
 echo "── 健康检查"
