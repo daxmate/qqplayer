@@ -348,3 +348,11 @@ audio.addEventListener("ended", () => {
     nextSong();
   }
 });
+
+// ============ 页面标题 ============
+watch(
+  () => state.currentSong?.name,
+  (name) => {
+    document.title = name ? `QQ Player - ${name}` : "🎵 QQ Player";
+  },
+);
