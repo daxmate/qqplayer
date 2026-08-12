@@ -66,6 +66,16 @@ html[data-theme="light"] .lyr.far,
 html[data-theme="light"] .kline.far {
   opacity: 0.85;
 }
+/* 浅色下 active 行橙色文字对比弱，补浅橙背景条 + 圆角（深色下仍靠文字亮度区分） */
+html[data-theme="light"] .lyr.active,
+html[data-theme="light"] .kline.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 8px;
+  padding-left: 10px;
+  padding-right: 10px;
+  margin-left: -10px;
+  margin-right: -10px;
+}
 html[data-theme="light"] .lyr.near .lyr-roma,
 html[data-theme="light"] .lyr.near .lyr-zh,
 html[data-theme="light"] .kline.near .kline-roma,
