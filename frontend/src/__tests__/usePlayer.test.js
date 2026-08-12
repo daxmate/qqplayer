@@ -749,6 +749,37 @@ describe("跟唱模式自动停（锚点方案，bug 回归）", () => {
     expect(currentLineIndex.value).toBe(0);
   });
 
+  it("句末自动停后 currentLineIndex 保持刚唱完的句（不跳下一句，回归）", () => {
+    setup();
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5); // 句末自动停，t=10.5 已越过下一句起点 s=10
+    expect(audio().paused).toBe(true);
+    expect(state.isPlaying).toBe(false);
+    expect(currentLineIndex.value).toBe(0); // 高亮停在第一句，而不是跳到第二句
+  });
+
+  it("句末自动停后再次播放同句，高亮回到该句", () => {
+    setup();
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5);
+    playLine(0); // 重唱第一句
+    fireTimeupdate(5); // 第一句句内
+    expect(currentLineIndex.value).toBe(0);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("跟唱连续播放（不暂停）时按时间定位推进", () => {
+    setup(false); // karaokeOn=false → 播完不停，连续播放
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    audio().listeners["play"](); // 模拟真实播放事件（FakeAudio.play 不触发）
+    fireTimeupdate(15); // 已进入第二句
+    expect(audio().paused).toBe(false);
+    expect(currentLineIndex.value).toBe(1); // 高亮跟随第二句
+  });
+
   it("跟唱开关关闭时不自动停", () => {
     setup(false);
     state.lyric = LRC_LYRIC;

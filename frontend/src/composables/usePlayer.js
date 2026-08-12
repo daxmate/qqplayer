@@ -1011,6 +1011,12 @@ export function nextLine() {
 export const currentLineIndex = computed(() => {
   const lines = lineItems.value;
   if (!lines.length) return -1;
+  // 跟唱模式暂停（含句末自动停）时保持锚点句：句尾边界 e == 下一句 s 时，
+  // 时间反推（t >= s）会把停在句尾的音频判进下一句 → 视觉上"播完自动跳下一句"；
+  // 跟唱要反复练同一句，暂停时应该始终停留在刚唱完的那句
+  if (state.mode === "karaoke" && karaokeLine >= 0 && !state.isPlaying) {
+    return karaokeLine;
+  }
   const t = state.currentTime;
   let idx = -1;
   for (let i = 0; i < lines.length; i++) {
