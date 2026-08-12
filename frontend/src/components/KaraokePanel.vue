@@ -1,6 +1,14 @@
 <template>
   <div class="karaoke-panel">
     <div class="kp-head">
+      <button
+        v-if="expandBtn"
+        class="kp-expand"
+        title="展开音乐库 / 播放列表"
+        @click="expandPanels()"
+      >
+        <PanelLeftOpen :size="14" />
+      </button>
       <span class="kp-title">
         <Mic :size="13" />
         逐句练习
@@ -8,17 +16,7 @@
       <span v-if="uiSettings.showSongInfo && state.currentSong" class="kp-song" :title="songTitle">
         {{ songTitle }}
       </span>
-      <span class="kp-head-right">
-        <span class="kp-hint">{{ abHint }}</span>
-        <button
-          v-if="expandBtn"
-          class="kp-expand"
-          title="展开音乐库 / 播放列表"
-          @click="expandPanels()"
-        >
-          <PanelLeftOpen :size="14" />
-        </button>
-      </span>
+      <span class="kp-hint">{{ abHint }}</span>
     </div>
     <div
       ref="scrollEl"
@@ -227,13 +225,7 @@ watch(
   font-size: 12px;
   font-weight: 400;
   color: var(--text3);
-}
-.kp-head-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
   margin-left: auto;
-  min-width: 0;
 }
 .kp-expand {
   width: 28px;
@@ -247,6 +239,7 @@ watch(
   opacity: 0.6;
   transition: all 0.15s;
   flex-shrink: 0;
+  margin-right: 6px;
 }
 .kp-expand:hover {
   opacity: 1;
