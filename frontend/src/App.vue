@@ -2,14 +2,6 @@
   <div class="app">
     <!-- 顶栏 -->
     <header class="topbar">
-      <button
-        v-if="!panelsActive"
-        class="panel-btn"
-        title="展开面板"
-        @click="toggleMusicLib()"
-      >
-        <PanelLeftOpen :size="16" />
-      </button>
       <h1 class="logo">
         <span class="logo-bubbles" aria-hidden="true">
           <span class="qq q1">Q</span>
@@ -47,6 +39,14 @@
       :class="panelClass"
     >
       <ActivityBar v-if="panelsActive" class="activity-bar" />
+      <button
+        v-if="!panelsActive"
+        class="floating-panel-btn"
+        title="展开面板"
+        @click="toggleMusicLib()"
+      >
+        <PanelLeftOpen :size="16" />
+      </button>
       <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
       <Playlist v-if="state.playlistOpen" class="panel playlist" />
       <section class="center">
@@ -257,6 +257,7 @@ onMounted(() => {
   grid-template-areas:
     "center"
     "controls";
+  position: relative;
 }
 .main.continuous.has-tabbar {
   grid-template-columns: 44px 1fr;
@@ -292,21 +293,27 @@ onMounted(() => {
 .playlist {
   grid-area: playlist;
 }
-.panel-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+/* 都关时：内容区左上角悬浮展开按钮（不占布局，logo 不移位） */
+.floating-panel-btn {
+  position: absolute;
+  top: 14px;
+  left: 20px;
+  z-index: 10;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--card2);
   color: var(--text2);
+  opacity: 0.6;
   transition: all 0.15s;
-  flex-shrink: 0;
 }
-.panel-btn:hover {
-  background: var(--border);
+.floating-panel-btn:hover {
+  opacity: 1;
   color: var(--text);
+  background: var(--border);
 }
 .center {
   grid-area: center;
