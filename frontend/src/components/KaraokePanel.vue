@@ -80,6 +80,10 @@ function abLineNo(lyricIdx) {
 
 function klineClass(lyricIdx) {
   const cls = { active: lyricIdx === props.current };
+  // 距离分级（与连播歌词一致的字体层级）
+  const d = props.current < 0 ? 99 : Math.abs(lyricIdx - props.current);
+  if (d === 1) cls.near = true;
+  if (d >= 2) cls.far = true;
   const ab = state.abLoop;
   const n = abLineNo(lyricIdx);
   if (ab && ab.b !== null && n >= ab.a && n <= ab.b) {
@@ -115,11 +119,11 @@ watch(
     if (!el) return;
     const active = el.querySelector(".kline.active");
     if (active) {
-      // 用 getBoundingClientRect 计算（offsetTop 相对 body 会偏，容器上方有封面等元素）
+      // 与连播歌词一致：停靠可视区 1/3 高度 + 平滑滚动
       const rect = active.getBoundingClientRect();
       const crect = el.getBoundingClientRect();
-      const top = el.scrollTop + (rect.top - crect.top) - el.clientHeight / 2 + rect.height / 2;
-      el.scrollTo({ top, behavior: "auto" });
+      const top = el.scrollTop + (rect.top - crect.top) - el.clientHeight / 3 + rect.height / 2;
+      el.scrollTo({ top, behavior: "smooth" });
     }
   },
 );
@@ -164,14 +168,17 @@ function fmt(t) {
 .kp-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 18px 30px;
+  padding: 16px 22px 48px;
+  /* 上下渐隐遮罩（与连播歌词一致） */
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
 }
 .sec {
   font-size: 12px;
   font-weight: 700;
   color: var(--accent2);
   letter-spacing: 2px;
-  margin: 20px 0 8px;
+  margin: 22px 0 10px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -179,32 +186,132 @@ function fmt(t) {
 .sec:first-child {
   margin-top: 0;
 }
+/* 纯文字流：字体层级跟随连播歌词，功能元素（行号/时间/AB）保留 */
 .kline {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 11px 14px;
-  border-radius: 12px;
+  padding: 9px 14px;
   cursor: pointer;
-  transition: all 0.15s;
-  border-left: 4px solid transparent;
-  margin-bottom: 8px;
-  background: var(--bg2);
+  transition: all 0.3s;
+  border-left: 3px solid transparent;
 }
 .kline:hover {
-  background: var(--card2);
+  background: none;
 }
+.kline-jp {
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--text3);
+  line-height: 1.6;
+  transition:
+    font-size 0.3s,
+    color 0.3s,
+    font-weight 0.3s;
+}
+.kline-roma {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+  font-style: italic;
+  line-height: 1.4;
+  opacity: 0.75;
+  transition:
+    font-size 0.3s,
+    color 0.3s,
+    opacity 0.3s;
+}
+.kline-zh {
+  font-size: 11.5px;
+  color: var(--text3);
+  margin-top: 3px;
+  line-height: 1.4;
+  opacity: 0.7;
+  transition:
+    font-size 0.3s,
+    color 0.3s,
+    opacity 0.3s;
+}
+.kline-zh.hidden {
+  display: none;
+}
+.kline-time {
+  font-size: 11px;
+  color: var(--text3);
+  flex-shrink: 0;
+  margin-top: 7px;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s;
+}
+/* 相邻句：略放大、提亮（中间层） */
+.kline.near {
+  opacity: 1;
+}
+.kline.near .kline-jp {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(238, 240, 247, 0.72);
+}
+.kline.near .kline-roma {
+  font-size: 11.5px;
+  color: rgba(238, 240, 247, 0.6);
+  opacity: 0.85;
+}
+.kline.near .kline-zh {
+  font-size: 12px;
+  color: rgba(238, 240, 247, 0.6);
+  opacity: 0.8;
+}
+/* 更远句：整体更淡（最底层） */
+.kline.far {
+  opacity: 0.68;
+}
+/* 当前句：放大加粗、亮白（与连播歌词一致的焦点效果） */
 .kline.active {
-  background: linear-gradient(135deg, rgba(255, 126, 95, 0.22), rgba(254, 180, 123, 0.1));
   border-left-color: var(--accent);
-  box-shadow:
-    0 0 0 1px var(--accent),
-    0 4px 14px rgba(255, 126, 95, 0.2);
 }
-/* AB 循环区间：浅绿高亮（active 保持原高亮） */
+.kline.active .kline-jp {
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffd9c9;
+}
+.kline.active .kline-roma {
+  font-size: 12.5px;
+  color: var(--text2);
+  opacity: 1;
+}
+.kline.active .kline-zh {
+  font-size: 13px;
+  color: var(--text2);
+  opacity: 1;
+}
+.kline.active .kline-time {
+  color: #ffd9c9;
+}
+/* 行号圆点 */
+.kline-num {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--card2);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+  transition: all 0.3s;
+}
+.kline.active .kline-num {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  margin-top: 9px; /* 跟随焦点句字号放大，圆点下移对齐 */
+}
+/* AB 循环区间：细绿竖条 + 行号绿色（active 保持焦点高亮） */
 .kline.ab-in:not(.active) {
-  border-left-color: #4ade80;
-  background: rgba(74, 222, 128, 0.08);
+  border-left-color: rgba(74, 222, 128, 0.55);
 }
 .kline.ab-in:not(.active) .kline-num {
   background: rgba(74, 222, 128, 0.22);
@@ -214,60 +321,6 @@ function fmt(t) {
 .kline.ab-in .kline-num.ab-badge {
   background: linear-gradient(135deg, #22c55e, #4ade80);
   color: #fff;
-}
-.kline-num {
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--card2);
-  color: var(--text2);
-  font-size: 12px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 2px;
-}
-.kline.active .kline-num {
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff;
-}
-.kline-body {
-  flex: 1;
-  min-width: 0;
-}
-.kline-jp {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--text);
-  line-height: 1.5;
-}
-.kline.active .kline-jp {
-  color: #ffd9c9;
-}
-.kline-roma {
-  font-size: 12.5px;
-  color: var(--text2);
-  margin-top: 2px;
-  font-style: italic;
-  line-height: 1.4;
-}
-.kline-zh {
-  font-size: 13px;
-  color: var(--text3);
-  margin-top: 4px;
-  line-height: 1.4;
-}
-.kline-zh.hidden {
-  display: none;
-}
-.kline-time {
-  font-size: 11px;
-  color: var(--text3);
-  flex-shrink: 0;
-  margin-top: 6px;
-  font-variant-numeric: tabular-nums;
 }
 .kp-empty {
   text-align: center;
