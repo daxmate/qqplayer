@@ -36,7 +36,6 @@
               {{ item.text[2] }}
             </div>
           </div>
-          <span class="kline-time">{{ fmt(item.s) }} – {{ fmt(item.e) }}</span>
         </div>
       </template>
       <div v-if="!lyric.length" class="kp-empty">
@@ -156,12 +155,6 @@ watch(
     }
   },
 );
-
-function fmt(t) {
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return m + ":" + String(s).padStart(2, "0");
-}
 </script>
 
 <style scoped>
@@ -268,14 +261,6 @@ function fmt(t) {
 .kline-zh.hidden {
   display: none;
 }
-.kline-time {
-  font-size: 11px;
-  color: var(--text3);
-  flex-shrink: 0;
-  margin-top: 7px;
-  font-variant-numeric: tabular-nums;
-  transition: color 0.3s;
-}
 /* 相邻句：略放大、提亮（中间层） */
 .kline.near {
   opacity: 1;
@@ -317,9 +302,6 @@ function fmt(t) {
   font-size: calc(var(--fs-active, 20px) * 0.65);
   color: var(--text2);
   opacity: 1;
-}
-.kline.active .kline-time {
-  color: #ffd9c9;
 }
 /* 行号圆点 */
 .kline-num {
