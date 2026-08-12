@@ -24,20 +24,13 @@
           跟唱
         </button>
       </div>
-      <div class="lib">
-        <span class="lib-label">
-          <FolderOpen :size="13" />
-          歌曲库
-        </span>
-        <input
-          v-model="libInput"
-          class="lib-input"
-          placeholder="文件夹路径"
-          @keyup.enter="applyLibrary"
-        />
-        <button class="btn small" @click="applyLibrary">设置</button>
-        <button class="btn small" @click="refreshSongs" title="重新扫描">⟳</button>
-      </div>
+      <button
+        class="gear-btn"
+        title="设置"
+        @click="settingsOpen = true"
+      >
+        <Settings :size="18" />
+      </button>
     </header>
 
     <!-- 主体：连播模式 -->
@@ -74,51 +67,34 @@
     </main>
 
     <div v-if="state.error" class="error-bar">{{ state.error }}</div>
+
+    <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from "vue";
-import { Music, Music2, Mic, Play, FolderOpen } from "@lucide/vue";
+import { Music, Music2, Mic, Play, Settings } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
 import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
+import SettingsModal from "./components/SettingsModal.vue";
 import {
   state,
   loadSongs,
-  loadLibrary,
-  setLibrary,
   currentLineIndex,
 } from "./composables/usePlayer.js";
 
-const libInput = ref("");
+const settingsOpen = ref(false);
 
 function switchMode(m) {
   state.mode = m;
 }
 
-async function applyLibrary() {
-  const p = libInput.value.trim();
-  if (!p) return;
-  try {
-    await setLibrary(p);
-    libInput.value = "";
-  } catch (e) {
-    state.error = e.message;
-    setTimeout(() => (state.error = ""), 3000);
-  }
-}
-
-async function refreshSongs() {
-  await loadSongs();
-}
-
-onMounted(async () => {
-  await loadLibrary();
-  libInput.value = state.libraryPath;
-  await loadSongs();
+onMounted(() => {
+  loadSongs();
 });
 </script>
 
@@ -171,50 +147,27 @@ onMounted(async () => {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
 }
-.lib {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-}
-.lib-label {
-  font-size: 13px;
-  color: var(--text2);
-  white-space: nowrap;
+.gear-btn {
+  margin-left: auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  color: var(--text2);
+  transition: all 0.15s;
+  flex-shrink: 0;
 }
-.lib-input {
-  flex: 1;
-  min-width: 120px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 12px;
-  color: var(--text);
-  font-size: 13px;
-  outline: none;
-}
-.lib-input:focus {
-  border-color: var(--accent);
-}
-.btn {
-  border-radius: 10px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
+.gear-btn:hover {
   background: var(--card2);
   color: var(--text);
-  transition: all 0.15s;
 }
-.btn:hover {
-  background: var(--border);
+.gear-btn svg {
+  transition: transform 0.4s;
 }
-.btn.small {
-  padding: 7px 12px;
-  font-size: 12px;
+.gear-btn:hover svg {
+  transform: rotate(60deg);
 }
 
 /* 主体 */

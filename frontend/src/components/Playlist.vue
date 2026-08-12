@@ -3,6 +3,14 @@
     <div class="pl-head">
       <Music :size="13" />
       播放列表 ({{ state.songs.length }})
+      <button
+        class="pl-refresh"
+        :class="{ spinning: state.loading }"
+        title="重新扫描"
+        @click="loadSongs()"
+      >
+        <RefreshCw :size="17" />
+      </button>
     </div>
     <div class="pl-list">
       <div
@@ -36,8 +44,8 @@
 </template>
 
 <script setup>
-import { Music, Mic } from "@lucide/vue";
-import { state, selectSong } from "../composables/usePlayer.js";
+import { Music, Mic, RefreshCw } from "@lucide/vue";
+import { state, selectSong, loadSongs } from "../composables/usePlayer.js";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -65,6 +73,37 @@ function pick(i) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.pl-refresh {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  color: var(--text2);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.pl-refresh:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.pl-refresh:active {
+  transform: scale(0.92);
+}
+.pl-refresh.spinning svg {
+  animation: refresh-spin 0.9s linear infinite;
+}
+@keyframes refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .pl-list {
   flex: 1;
