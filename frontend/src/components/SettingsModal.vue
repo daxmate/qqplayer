@@ -212,6 +212,18 @@
                   <span class="switch" :class="{ on: uiSettings.karaokeShowTime }"><i /></span>
                 </div>
               </div>
+              <div class="setting-item">
+                <div
+                  class="toggle-row"
+                  @click="uiSettings.karaokeShowNum = !uiSettings.karaokeShowNum"
+                >
+                  <div>
+                    <div class="setting-label">跟唱显示行号</div>
+                    <div class="setting-desc">跟唱模式每句歌词左侧显示句子序号</div>
+                  </div>
+                  <span class="switch" :class="{ on: uiSettings.karaokeShowNum }"><i /></span>
+                </div>
+              </div>
             </div>
           </template>
         </div>

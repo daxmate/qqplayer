@@ -35,7 +35,7 @@
           :class="klineClass(i)"
           @click="playLineAt(i)"
         >
-          <span class="kline-num" :class="{ 'ab-badge': abBadge(i) }">{{
+          <span v-if="uiSettings.karaokeShowNum" class="kline-num" :class="{ 'ab-badge': abBadge(i) }">{{
             abBadge(i) || lineNumber(i)
           }}</span>
           <div class="kline-body" :style="{ textAlign: lyricSettings.align }">
@@ -293,6 +293,11 @@ watch(
 }
 .kline:hover {
   background: none;
+}
+/* 歌词正文占满行内剩余宽度：text-align 才有居中/右对齐空间（行号固定最左） */
+.kline-body {
+  flex: 1;
+  min-width: 0;
 }
 .kline-jp {
   font-size: calc(var(--fs-active, 20px) * 0.675);

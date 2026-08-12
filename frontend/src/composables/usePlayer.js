@@ -56,6 +56,7 @@ export const UI_SETTINGS_KEY = "qqplayer.uiSettings.v1";
 export const uiSettings = reactive({
   showSongInfo: false, // 跟唱模式歌词面板顶部显示当前歌曲信息（歌名/歌手）
   karaokeShowTime: false, // 跟唱模式每句显示起止时间戳
+  karaokeShowNum: true, // 跟唱模式每句左侧显示行号（默认显示，用户可关）
 });
 
 function loadUiSettings() {

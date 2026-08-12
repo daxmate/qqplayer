@@ -1138,19 +1138,22 @@ describe("歌词显示设置（lyricSettings）", () => {
 });
 
 describe("界面偏好（uiSettings）", () => {
-  it("默认值：歌曲信息关闭 / 跟唱时间戳关闭（默认不要，用户可选）", () => {
+  it("默认值：歌曲信息关闭 / 跟唱时间戳关闭 / 跟唱行号显示（默认显示，用户可关）", () => {
     expect(uiSettings.showSongInfo).toBe(false);
     expect(uiSettings.karaokeShowTime).toBe(false);
+    expect(uiSettings.karaokeShowNum).toBe(true);
   });
 
   it("修改后自动持久化到 localStorage", async () => {
     localStorage.removeItem(UI_SETTINGS_KEY);
     uiSettings.showSongInfo = true;
     uiSettings.karaokeShowTime = true;
+    uiSettings.karaokeShowNum = false;
     await nextTick();
     const saved = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY));
     expect(saved.showSongInfo).toBe(true);
     expect(saved.karaokeShowTime).toBe(true);
+    expect(saved.karaokeShowNum).toBe(false);
   });
 
   it("localStorage 已有配置时加载覆盖默认值，未保存项保持默认", async () => {
@@ -1159,6 +1162,7 @@ describe("界面偏好（uiSettings）", () => {
     const m = await import("../composables/usePlayer.js");
     expect(m.uiSettings.showSongInfo).toBe(true);
     expect(m.uiSettings.karaokeShowTime).toBe(false); // 未保存的保持默认
+    expect(m.uiSettings.karaokeShowNum).toBe(true); // 未保存的保持默认
   });
 });
 
