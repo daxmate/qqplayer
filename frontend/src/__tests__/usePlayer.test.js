@@ -39,6 +39,8 @@ const {
   play,
   playLine,
   seek,
+  nextLine,
+  toggleKaraokeLoop,
   currentLineIndex,
   _resetKaraokeAnchor,
 } = await import("../composables/usePlayer.js");
@@ -52,6 +54,7 @@ const RESET = {
   duration: 0,
   mode: "continuous",
   karaokeOn: true,
+  karaokeLoop: false,
   speed: 1.0,
   zhVisible: true,
   lyric: [],
@@ -276,6 +279,92 @@ describe("跟唱模式自动停（锚点方案，bug 回归）", () => {
     audio().src = "/a.mp3";
     playLine(0);
     fireTimeupdate(10.5);
+    expect(audio().paused).toBe(false);
+  });
+});
+
+describe("单句循环", () => {
+  const audio = () => FakeAudio.instances[0];
+  const LRC_LYRIC = [
+    { type: "line", s: 0, e: 10, text: ["第一句"] },
+    { type: "line", s: 10, e: 20, text: ["第二句"] },
+  ];
+
+  function fireTimeupdate(t) {
+    const a = audio();
+    a.currentTime = t;
+    a.paused = false;
+    a.listeners["timeupdate"]();
+    return a;
+  }
+
+  function setup() {
+    state.mode = "karaoke";
+    state.karaokeOn = true;
+    state.karaokeLoop = true;
+    state.currentSong = { path: "/a.mp3" };
+    audio().src = "/a.mp3";
+  }
+
+  it("toggleKaraokeLoop 开关", () => {
+    state.karaokeLoop = false;
+    toggleKaraokeLoop();
+    expect(state.karaokeLoop).toBe(true);
+    toggleKaraokeLoop();
+    expect(state.karaokeLoop).toBe(false);
+  });
+
+  it("循环开启：句末不暂停，回到句首重播", () => {
+    setup();
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5); // 越过 e=10
+    expect(audio().paused).toBe(false); // 不停
+    expect(audio().currentTime).toBe(0); // 回到句首
+    expect(state.currentTime).toBe(0);
+  });
+
+  it("循环开启：反复越过句末都回到句首（持续循环）", () => {
+    setup();
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5);
+    expect(audio().currentTime).toBe(0);
+    fireTimeupdate(10.5); // 模拟再次播到句末
+    expect(audio().currentTime).toBe(0);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("循环关闭：句末照旧暂停", () => {
+    setup();
+    state.karaokeLoop = false;
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5);
+    expect(audio().paused).toBe(true);
+  });
+
+  it("跟唱开关关闭：循环不生效（不重播也不暂停）", () => {
+    setup();
+    state.karaokeOn = false;
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5);
+    expect(audio().paused).toBe(false);
+    expect(audio().currentTime).toBe(10.5); // 没跳回句首
+  });
+
+  it("循环中切下一句：循环跟随新句子", () => {
+    setup();
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5); // 第一句循环中
+    expect(audio().currentTime).toBe(0);
+    nextLine(); // 切到第二句
+    fireTimeupdate(10.5); // 越过第二句 e=20 之前（第二句内）
+    expect(audio().paused).toBe(false);
+    fireTimeupdate(20.5); // 第二句播完
+    expect(audio().currentTime).toBe(10); // 回到第二句句首
     expect(audio().paused).toBe(false);
   });
 });

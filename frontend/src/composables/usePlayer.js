@@ -13,6 +13,7 @@ export const state = reactive({
   duration: 0,
   mode: "continuous", // 'continuous' 连播 | 'karaoke' 跟唱
   karaokeOn: true, // 跟唱开关：开=每句播完自动停
+  karaokeLoop: false, // 单句循环：跟唱开启时生效，句末自动回到句首重播
   speed: 1.0,
   zhVisible: true,
   lyric: [], // [{type:'sec',name} | {type:'line',s,e,text:[jp,roma,zh]}]
@@ -156,6 +157,10 @@ export function toggleKaraoke() {
   state.karaokeOn = !state.karaokeOn;
 }
 
+export function toggleKaraokeLoop() {
+  state.karaokeLoop = !state.karaokeLoop;
+}
+
 export function toggleZh() {
   state.zhVisible = !state.zhVisible;
 }
@@ -230,7 +235,14 @@ audio.addEventListener("timeupdate", () => {
       karaokeLine = locateLine(t);
     }
     if (karaokeLine >= 0 && t >= lines[karaokeLine].e) {
-      audio.pause();
+      if (state.karaokeLoop) {
+        // 单句循环：回到句首重播（不暂停）
+        audio.currentTime = lines[karaokeLine].s;
+        state.currentTime = lines[karaokeLine].s;
+        if (audio.paused) audio.play().catch(() => {});
+      } else {
+        audio.pause();
+      }
     }
   }
 });

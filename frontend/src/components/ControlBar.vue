@@ -38,6 +38,15 @@
         >
           🎤 跟唱
         </button>
+        <button
+          class="btn"
+          :class="{ on: state.karaokeLoop }"
+          :disabled="!state.karaokeOn"
+          title="单句循环（需开启跟唱）"
+          @click="toggleKaraokeLoop"
+        >
+          🔁 单句
+        </button>
       </template>
       <template v-else>
         <button class="btn play" @click="togglePlay" title="播放/暂停">
@@ -74,6 +83,7 @@ import {
   nextLine,
   cycleSpeed,
   toggleKaraoke,
+  toggleKaraokeLoop,
   toggleZh,
 } from "../composables/usePlayer.js";
 
@@ -193,9 +203,15 @@ function fmt(t) {
 }
 .btn-row .btn:has(🐢),
 .btn-row .btn:has(🎤),
+.btn-row .btn:has(🔁),
 .btn-row .btn:has(译) {
   padding: 0 14px;
   font-size: 13.5px;
+}
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .song-line {
   text-align: center;
