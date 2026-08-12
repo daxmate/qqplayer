@@ -50,6 +50,40 @@ export const lyricSettings = reactive({
   autoScroll: true, // 切句自动跟随滚动
 });
 
+// ============ 界面偏好（localStorage 持久化）============
+export const UI_SETTINGS_KEY = "qqplayer.uiSettings.v1";
+
+export const uiSettings = reactive({
+  showSongInfo: false, // 跟唱模式歌词面板顶部显示当前歌曲信息（歌名/歌手）
+  karaokeShowTime: false, // 跟唱模式每句显示起止时间戳
+});
+
+function loadUiSettings() {
+  try {
+    const raw = localStorage.getItem(UI_SETTINGS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    for (const k of Object.keys(uiSettings)) {
+      if (k in saved) uiSettings[k] = saved[k];
+    }
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadUiSettings();
+
+watch(
+  uiSettings,
+  () => {
+    try {
+      localStorage.setItem(UI_SETTINGS_KEY, JSON.stringify(uiSettings));
+    } catch {
+      /* 忽略写入失败 */
+    }
+  },
+  { deep: true },
+);
+
 function loadLyricSettings() {
   try {
     const raw = localStorage.getItem(LYRIC_SETTINGS_KEY);

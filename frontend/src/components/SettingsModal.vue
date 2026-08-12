@@ -20,6 +20,10 @@
             <Music2 :size="13" />
             歌词
           </button>
+          <button class="tab" :class="{ on: tab === 'ui' }" @click="tab = 'ui'">
+            <LayoutGrid :size="13" />
+            界面
+          </button>
         </div>
 
         <div class="modal-body">
@@ -47,7 +51,7 @@
           </template>
 
           <!-- 歌词 tab -->
-          <template v-else>
+          <template v-else-if="tab === 'lyric'">
             <div class="lyric-settings">
               <!-- 外观排版 -->
               <div class="group">
@@ -180,6 +184,36 @@
               </div>
             </div>
           </template>
+          <!-- 界面 tab -->
+          <template v-else>
+            <div class="group">
+              <div class="group-title">
+                <LayoutGrid :size="13" />
+                界面偏好
+              </div>
+              <div class="setting-item">
+                <div class="toggle-row" @click="uiSettings.showSongInfo = !uiSettings.showSongInfo">
+                  <div>
+                    <div class="setting-label">显示当前歌曲信息</div>
+                    <div class="setting-desc">跟唱模式歌词面板顶部显示歌名 / 歌手</div>
+                  </div>
+                  <span class="switch" :class="{ on: uiSettings.showSongInfo }"><i /></span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div
+                  class="toggle-row"
+                  @click="uiSettings.karaokeShowTime = !uiSettings.karaokeShowTime"
+                >
+                  <div>
+                    <div class="setting-label">跟唱显示每句时间戳</div>
+                    <div class="setting-desc">跟唱模式每句歌词右侧显示起止时间</div>
+                  </div>
+                  <span class="switch" :class="{ on: uiSettings.karaokeShowTime }"><i /></span>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -188,8 +222,14 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from "vue";
-import { Settings, X, FolderOpen, Music2, Type, Eye, Sparkles } from "@lucide/vue";
-import { state, setLibrary, loadLibrary, lyricSettings } from "../composables/usePlayer.js";
+import { Settings, X, FolderOpen, Music2, Type, Eye, Sparkles, LayoutGrid } from "@lucide/vue";
+import {
+  state,
+  setLibrary,
+  loadLibrary,
+  lyricSettings,
+  uiSettings,
+} from "../composables/usePlayer.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },

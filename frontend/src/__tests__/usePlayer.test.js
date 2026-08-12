@@ -71,6 +71,8 @@ const {
   currentLineIndex,
   lyricSettings,
   LYRIC_SETTINGS_KEY,
+  uiSettings,
+  UI_SETTINGS_KEY,
   _resetKaraokeAnchor,
   _resetPlayMode,
   setVolume,
@@ -1132,6 +1134,31 @@ describe("歌词显示设置（lyricSettings）", () => {
     expect(m.lyricSettings.focusPos).toBe(0.5);
     expect(m.lyricSettings.align).toBe("left"); // 未保存的保持默认
     expect(m.lyricSettings.fadeMask).toBe(true);
+  });
+});
+
+describe("界面偏好（uiSettings）", () => {
+  it("默认值：歌曲信息关闭 / 跟唱时间戳关闭（默认不要，用户可选）", () => {
+    expect(uiSettings.showSongInfo).toBe(false);
+    expect(uiSettings.karaokeShowTime).toBe(false);
+  });
+
+  it("修改后自动持久化到 localStorage", async () => {
+    localStorage.removeItem(UI_SETTINGS_KEY);
+    uiSettings.showSongInfo = true;
+    uiSettings.karaokeShowTime = true;
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY));
+    expect(saved.showSongInfo).toBe(true);
+    expect(saved.karaokeShowTime).toBe(true);
+  });
+
+  it("localStorage 已有配置时加载覆盖默认值，未保存项保持默认", async () => {
+    localStorage.setItem(UI_SETTINGS_KEY, JSON.stringify({ showSongInfo: true }));
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    expect(m.uiSettings.showSongInfo).toBe(true);
+    expect(m.uiSettings.karaokeShowTime).toBe(false); // 未保存的保持默认
   });
 });
 

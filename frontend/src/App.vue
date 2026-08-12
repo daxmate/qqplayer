@@ -65,25 +65,20 @@
     </main>
 
     <!-- 主体：跟唱模式 -->
-    <main v-else class="main karaoke">
-      <aside class="side">
-        <Playlist class="panel playlist" compact />
-        <div class="panel song-info">
-          <Cover :song="state.currentSong" small />
-          <div class="song-meta">
-            <div class="song-name">{{ state.currentSong?.name || "未选择" }}</div>
-            <div class="song-artist">{{ state.currentSong?.artist || "" }}</div>
-            <div v-if="!state.lyric.length" class="no-lyric small">
-              无歌词文件，跟唱需同名 .srt/.lrc
-            </div>
-          </div>
-        </div>
-      </aside>
-      <KaraokePanel class="panel karaoke-panel" :lyric="state.lyric" :current="currentLineIndex" />
+    <main v-else class="main karaoke" :class="panelClass">
+      <ActivityBar v-if="panelsActive" class="activity-bar" />
+      <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
+      <Playlist v-if="state.playlistOpen" class="panel playlist" />
+      <KaraokePanel
+        class="panel karaoke-panel"
+        :lyric="state.lyric"
+        :current="currentLineIndex"
+        :expand-btn="!panelsActive"
+      />
       <ControlBar v-show="!state.controlsHidden" class="panel controls" karaoke />
       <button
         v-if="state.controlsHidden"
-        class="expand-controls-btn karaoke"
+        class="expand-controls-btn"
         title="展开控制区"
         @click="toggleControls()"
       >
@@ -266,7 +261,8 @@ onMounted(() => {
   padding: 14px 20px;
   min-height: 0;
 }
-.main.continuous {
+.main.continuous,
+.main.karaoke {
   display: grid;
   grid-template-columns: 1fr;
   grid-template-rows: 1fr auto;
@@ -275,45 +271,54 @@ onMounted(() => {
     "controls";
   position: relative;
 }
-.main.continuous.has-tabbar {
+.main.continuous.has-tabbar,
+.main.karaoke.has-tabbar {
   grid-template-columns: 44px 1fr;
   grid-template-areas:
     "activity center"
     "activity controls";
 }
-.main.continuous.has-tabbar.has-music {
+.main.continuous.has-tabbar.has-music,
+.main.karaoke.has-tabbar.has-music {
   grid-template-columns: 44px 200px 1fr;
   grid-template-areas:
     "activity sidebar center"
     "activity controls controls";
 }
-.main.continuous.has-tabbar.has-playlist {
+.main.continuous.has-tabbar.has-playlist,
+.main.karaoke.has-tabbar.has-playlist {
   grid-template-columns: 44px 280px 1fr;
   grid-template-areas:
     "activity playlist center"
     "activity controls controls";
 }
-.main.continuous.has-tabbar.has-music.has-playlist {
+.main.continuous.has-tabbar.has-music.has-playlist,
+.main.karaoke.has-tabbar.has-music.has-playlist {
   grid-template-columns: 44px 200px 280px 1fr;
   grid-template-areas:
     "activity sidebar playlist center"
     "activity controls controls controls";
 }
 /* 控制区收起：去掉 controls 行，内容区占满 */
-.main.continuous.no-controls {
+.main.continuous.no-controls,
+.main.karaoke.no-controls {
   grid-template-rows: 1fr;
   grid-template-areas: "center";
 }
-.main.continuous.has-tabbar.no-controls {
+.main.continuous.has-tabbar.no-controls,
+.main.karaoke.has-tabbar.no-controls {
   grid-template-areas: "activity center";
 }
-.main.continuous.has-tabbar.has-music.no-controls {
+.main.continuous.has-tabbar.has-music.no-controls,
+.main.karaoke.has-tabbar.has-music.no-controls {
   grid-template-areas: "activity sidebar center";
 }
-.main.continuous.has-tabbar.has-playlist.no-controls {
+.main.continuous.has-tabbar.has-playlist.no-controls,
+.main.karaoke.has-tabbar.has-playlist.no-controls {
   grid-template-areas: "activity playlist center";
 }
-.main.continuous.has-tabbar.has-music.has-playlist.no-controls {
+.main.continuous.has-tabbar.has-music.has-playlist.no-controls,
+.main.karaoke.has-tabbar.has-music.has-playlist.no-controls {
   grid-template-areas: "activity sidebar playlist center";
 }
 .activity-bar {
@@ -396,62 +401,9 @@ onMounted(() => {
 .no-lyric-icon {
   opacity: 0.6;
 }
-.no-lyric.small {
-  flex: none;
-  font-size: 12px;
-  justify-content: flex-start;
-  margin-top: 6px;
-}
-
-/* 跟唱模式布局 */
-.main.karaoke {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  grid-template-rows: 1fr auto;
-  grid-template-areas:
-    "side karaoke-panel"
-    "controls controls";
-  position: relative;
-}
-.main.karaoke.no-controls {
-  grid-template-rows: 1fr;
-  grid-template-areas: "side karaoke-panel";
-}
-.side {
-  grid-area: side;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
-.side .playlist {
-  flex: 1;
-  min-height: 0;
-}
-.song-info {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-shrink: 0;
-}
-.song-meta {
-  min-width: 0;
-}
-.song-name {
-  font-size: 15px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.song-artist {
-  font-size: 12px;
-  color: var(--text2);
-  margin-top: 3px;
-}
+/* 跟唱模式：复用连播的面板 grid（选择器在上方成对共用），karaoke-panel 占中央区域 */
 .karaoke-panel {
-  grid-area: karaoke-panel;
+  grid-area: center;
 }
 .error-bar {
   position: fixed;

@@ -5,7 +5,20 @@
         <Mic :size="13" />
         逐句练习
       </span>
-      <span class="kp-hint">{{ abHint }}</span>
+      <span v-if="uiSettings.showSongInfo && state.currentSong" class="kp-song" :title="songTitle">
+        {{ songTitle }}
+      </span>
+      <span class="kp-head-right">
+        <span class="kp-hint">{{ abHint }}</span>
+        <button
+          v-if="expandBtn"
+          class="kp-expand"
+          title="展开音乐库 / 播放列表"
+          @click="expandPanels()"
+        >
+          <PanelLeftOpen :size="14" />
+        </button>
+      </span>
     </div>
     <div
       ref="scrollEl"
@@ -36,6 +49,9 @@
               {{ item.text[2] }}
             </div>
           </div>
+          <span v-if="uiSettings.karaokeShowTime" class="kline-time"
+            >{{ fmt(item.s) }} – {{ fmt(item.e) }}</span
+          >
         </div>
       </template>
       <div v-if="!lyric.length" class="kp-empty">
@@ -52,13 +68,24 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
-import { Mic, Music2 } from "@lucide/vue";
-import { state, clickLine, lyricSettings } from "../composables/usePlayer.js";
+import { Mic, Music2, PanelLeftOpen } from "@lucide/vue";
+import {
+  state,
+  clickLine,
+  lyricSettings,
+  uiSettings,
+  toggleMusicLib,
+} from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
   current: { type: Number, default: -1 },
+  expandBtn: { type: Boolean, default: false }, // 面板全关时显示展开按钮（跟唱模式无悬浮按钮区）
 });
+
+function expandPanels() {
+  toggleMusicLib();
+}
 
 const scrollEl = ref(null);
 const lineIndexMap = ref([]); // lyric 数组索引 -> 行号（只计 line）
@@ -87,6 +114,20 @@ watch(
 
 function lineNumber(lyricIdx) {
   return lineIndexMap.value.indexOf(lyricIdx) + 1;
+}
+
+// 当前歌曲信息（设置开关控制）
+const songTitle = computed(() => {
+  const s = state.currentSong;
+  if (!s) return "未选择歌曲";
+  return s.artist ? `${s.name} · ${s.artist}` : s.name;
+});
+
+function fmt(t) {
+  if (t == null || Number.isNaN(t)) return "--:--";
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return m + ":" + String(s).padStart(2, "0");
 }
 
 // ============ AB 循环：区间高亮 + 提示 ============
@@ -186,6 +227,41 @@ watch(
   font-size: 12px;
   font-weight: 400;
   color: var(--text3);
+}
+.kp-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  min-width: 0;
+}
+.kp-expand {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  color: var(--text2);
+  opacity: 0.6;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.kp-expand:hover {
+  opacity: 1;
+  color: var(--text);
+  background: var(--border);
+}
+.kp-song {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  padding: 0 8px;
 }
 .kp-scroll {
   flex: 1;
@@ -302,6 +378,18 @@ watch(
   font-size: calc(var(--fs-active, 20px) * 0.65);
   color: var(--text2);
   opacity: 1;
+}
+/* 每句时间戳（设置开关控制） */
+.kline-time {
+  font-size: 11px;
+  color: var(--text3);
+  flex-shrink: 0;
+  margin-top: 7px;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s;
+}
+.kline.active .kline-time {
+  color: #ffd9c9;
 }
 /* 行号圆点 */
 .kline-num {
