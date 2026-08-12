@@ -8,8 +8,14 @@
 - **跟唱模式** = 逐句练习：点击句子跳转播放、每句显示原文/罗马音/中文、变速（0.75/1.0/1.25）、跟唱开关（每句播完自动停）
 - 歌曲库可切换任意本地文件夹（默认 iCloud 音乐库）
 - 封面：内嵌封面（ID3 APIC / MP4 covr）优先，其次文件夹 cover.jpg
-- 歌词：本地同名 `.srt` / `.lrc` 优先，其次文件夹内唯一歌词文件，最后在线获取（网易云原文+中文翻译，lrclib 兜底；缓存 `~/.cache/qqplayer/`）
+- 歌词：本地同名 `.srt` / `.lrc` 优先，其次文件夹内唯一歌词文件，最后在线获取（网易云原文+中文翻译，lrclib 兜底；缓存 `~/.cache/qqplayer/lyric/`）
 - 音频流支持 Range（可 seek）
+
+## 数据位置
+
+- **歌曲库**（默认，`backend.py` 内置）：`/Users/dax/Library/Mobile Documents/iCloud~dev~clq~Cosmos-Music-Player/Documents`（iCloud 同步的音乐文件夹，约 84 首）。运行时可用命令行参数覆盖：`./venv/bin/python backend.py [歌曲库路径]`
+- **歌词缓存**：`~/.cache/qqplayer/lyric/`（在线获取的歌词自动缓存，30 天有效，不影响功能）
+- **测试数据**：不入仓库（歌曲文件太大，约 22MB）。`tests/` 用 `tmp_path` 现场生成假 mp3/srt 跑测试，不依赖真实音频；等以后有外部贡献者再考虑如何提供样例数据
 
 ## 启动
 

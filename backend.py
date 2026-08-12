@@ -28,7 +28,10 @@ except ImportError:
     MutagenFile = None
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_LIBRARY = ROOT / "songs"
+# 默认歌曲库：用户本地 iCloud 音乐文件夹（不在仓库内，仓库不存音频文件）
+DEFAULT_LIBRARY = Path(
+    "/Users/dax/Library/Mobile Documents/iCloud~dev~clq~Cosmos-Music-Player/Documents"
+)
 DEFAULT_PORT = 17627
 
 app = FastAPI(title="music-player")
