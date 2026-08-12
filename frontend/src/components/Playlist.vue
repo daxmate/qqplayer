@@ -253,6 +253,13 @@ function openAddMenu(path) {
   addMenuOpen.value = true;
 }
 
+// 浮层支持 Esc 关闭
+function onKeydown(e) {
+  if (e.key === "Escape") addMenuOpen.value = false;
+}
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+
 async function toggleAdd(pid) {
   const path = addMenuPath.value;
   try {
