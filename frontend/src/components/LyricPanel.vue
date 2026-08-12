@@ -23,7 +23,9 @@
           <div v-if="item.text[1] && lyricSettings.showRoma" class="lyr-roma">
             {{ item.text[1] }}
           </div>
-          <div v-if="item.text[2] && lyricSettings.showZh" class="lyr-zh">{{ item.text[2] }}</div>
+          <div v-if="item.text[2] && lyricSettings.showZh && state.zhVisible" class="lyr-zh">
+            {{ item.text[2] }}
+          </div>
         </div>
       </template>
       <div v-if="!lyric.length" class="lyr-empty">暂无歌词</div>
@@ -34,7 +36,7 @@
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
 import { Music2 } from "@lucide/vue";
-import { seek, lyricSettings } from "../composables/usePlayer.js";
+import { seek, lyricSettings, state } from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },

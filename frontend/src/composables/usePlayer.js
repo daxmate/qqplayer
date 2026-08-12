@@ -246,16 +246,24 @@ function ensureShuffleQueue() {
 }
 
 // 随机模式下一首：队列顺序推进，一轮播完以当前歌为队首重新洗牌
-function nextShuffle() {
+// opts.autoPlay=true 时（播完自动切歌）切到新歌后继续播放
+function nextShuffle(opts = {}) {
   ensureShuffleQueue();
   if (shufflePos >= shuffleQueue.length - 1) {
     buildShuffleQueue(state.currentIndex);
     if (shuffleQueue.length > 1) {
-      selectSong(shuffleQueue[1]);
+      selectSong(shuffleQueue[1], opts);
+      return;
+    }
+    // 只有一首歌：无法推进 → 重播本首
+    if (state.currentIndex >= 0 && audio.src) {
+      audio.currentTime = 0;
+      state.currentTime = 0;
+      if (opts.autoPlay) audio.play().catch(() => {});
     }
     return;
   }
-  selectSong(shuffleQueue[shufflePos + 1]);
+  selectSong(shuffleQueue[shufflePos + 1], opts);
 }
 
 // 三态循环：列表循环 → 随机 → 单曲循环 → 列表循环
@@ -345,6 +353,10 @@ export async function selectSong(index, opts = {}) {
   state.lyric = [];
   state.lyricFormat = null;
   state.abLoop = null; // 切歌重置 AB 循环
+  // 自动播放（播完自动切歌场景）：上一首结束切到新歌后继续播放
+  if (opts.autoPlay) {
+    audio.play().catch(() => {});
+  }
   // 加载歌词
   try {
     const res = await fetch("/api/lyric?path=" + encodeURIComponent(state.songs[index].path), {
@@ -390,13 +402,13 @@ export function pause() {
   audio.pause();
 }
 
-export function nextSong() {
+export function nextSong(opts = {}) {
   if (state.songs.length === 0) return;
   if (state.playMode === "shuffle") {
-    nextShuffle();
+    nextShuffle(opts);
     return;
   }
-  selectSong((state.currentIndex + 1) % state.songs.length);
+  selectSong((state.currentIndex + 1) % state.songs.length, opts);
 }
 
 export function prevSong() {
@@ -620,11 +632,11 @@ audio.addEventListener("ended", () => {
     return;
   }
   if (state.playMode === "shuffle") {
-    nextShuffle();
+    nextShuffle({ autoPlay: true });
     return;
   }
-  // 列表循环：顺序下一首
-  nextSong();
+  // 列表循环：顺序下一首并自动播放（连播 bug：只切歌不播放）
+  nextSong({ autoPlay: true });
 });
 
 // ============ 页面标题 ============

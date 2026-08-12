@@ -6,13 +6,21 @@ import { nextTick } from "vue";
 class FakeAudio {
   static instances = [];
   constructor() {
-    this.src = "";
+    this._src = "";
     this.currentTime = 0;
     this.playbackRate = 1;
     this.paused = true;
     this.duration = 0;
     this.listeners = {};
     FakeAudio.instances.push(this);
+  }
+  // 浏览器行为：换源自动归零播放位置
+  set src(v) {
+    this._src = v;
+    if (v) this.currentTime = 0;
+  }
+  get src() {
+    return this._src;
   }
   play() {
     this.paused = false;
@@ -235,6 +243,49 @@ describe("连播播放模式：随机 / 单曲循环", () => {
     a.currentTime = 100;
     fireEnded();
     expect(state.currentIndex).toBe(2);
+  });
+
+  it("列表循环：播完自动切下一首并继续播放（连播 bug 回归）", async () => {
+    state.songs = SONGS5;
+    stubFetch();
+    await selectSong(0);
+    const a = audio();
+    a.currentTime = 100;
+    fireEnded();
+    expect(state.currentIndex).toBe(1);
+    expect(a.paused).toBe(false); // 自动播放
+  });
+
+  it("随机模式：播完自动切下一首并继续播放（连播 bug 回归）", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    const a = audio();
+    a.currentTime = 100;
+    fireEnded();
+    expect(state.currentIndex).toBe(2);
+    expect(a.paused).toBe(false); // 自动播放
+  });
+
+  it("列表循环：只有一首歌时播完重播本首（自动播放）", async () => {
+    state.songs = [SONGS5[0]];
+    stubFetch();
+    await selectSong(0);
+    const a = audio();
+    a.currentTime = 100;
+    fireEnded();
+    expect(state.currentIndex).toBe(0);
+    expect(a.currentTime).toBe(0);
+    expect(a.paused).toBe(false);
+  });
+
+  it("selectSong 默认不自动播放（手动选歌由调用方决定是否播放）", async () => {
+    state.songs = SONGS5;
+    stubFetch();
+    await selectSong(0);
+    expect(audio().paused).toBe(true);
   });
 
   it("随机模式：一轮播完自动重新洗牌", async () => {
