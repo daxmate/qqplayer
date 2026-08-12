@@ -33,8 +33,15 @@
     </header>
 
     <!-- 主体：连播模式 -->
-    <main v-if="state.mode === 'continuous'" class="main continuous">
-      <Sidebar class="panel sidebar" />
+    <main
+      v-if="state.mode === 'continuous'"
+      class="main continuous"
+      :class="{ 'sb-collapsed': state.sidebarCollapsed }"
+    >
+      <Sidebar v-if="!state.sidebarCollapsed" class="panel sidebar" />
+      <button v-else class="sb-expand" title="展开音乐库" @click="toggleSidebar()">
+        <PanelLeftOpen :size="18" />
+      </button>
       <Playlist class="panel playlist" />
       <section class="center">
         <Cover :song="state.currentSong" />
@@ -74,7 +81,7 @@
 
 <script setup>
 import { ref, onMounted } from "vue";
-import { Music2, Mic, Play, Settings } from "@lucide/vue";
+import { Music2, Mic, Play, Settings, PanelLeftOpen } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
 import Cover from "./components/Cover.vue";
@@ -90,6 +97,7 @@ import {
   setupKeyboardShortcuts,
   setupMediaSession,
   setupPlaybackFlush,
+  toggleSidebar,
   currentLineIndex,
 } from "./composables/usePlayer.js";
 
@@ -233,8 +241,30 @@ onMounted(() => {
     "sidebar playlist center"
     "controls controls controls";
 }
+.main.continuous.sb-collapsed {
+  grid-template-columns: 44px 280px 1fr;
+}
 .sidebar {
   grid-area: sidebar;
+}
+.sb-expand {
+  grid-area: sidebar;
+  justify-self: center;
+  align-self: start;
+  margin-top: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  color: var(--text2);
+  transition: all 0.15s;
+}
+.sb-expand:hover {
+  background: var(--border);
+  color: var(--text);
 }
 .playlist {
   grid-area: playlist;

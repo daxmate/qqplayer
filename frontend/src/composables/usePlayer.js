@@ -28,6 +28,7 @@ export const state = reactive({
   favorites: [], // 收藏歌曲 path 列表（后端持久化）
   playlists: [], // 歌单列表（后端持久化）
   activePlaylistId: null, // 当前浏览的歌单 id；null = 全部歌曲
+  sidebarCollapsed: false, // 侧边栏收起状态（localStorage 持久化）
   lastSource: "manual", // 最近一次选歌来源：manual | auto | media（播放统计用）
 });
 
@@ -631,6 +632,27 @@ export function _resetPlayMode() {
   shuffleQueue = [];
   shufflePos = -1;
   playHistory = [];
+}
+
+// ============ 侧边栏收起状态（localStorage 持久化）============
+export const SIDEBAR_KEY = "qqplay…b.v1";
+
+function loadSidebarCollapsed() {
+  try {
+    state.sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === "1";
+  } catch {
+    /* 忽略 */
+  }
+}
+loadSidebarCollapsed();
+
+export function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  try {
+    localStorage.setItem(SIDEBAR_KEY, state.sidebarCollapsed ? "1" : "0");
+  } catch {
+    /* 忽略 */
+  }
 }
 
 // ============ 歌曲列表 ============

@@ -87,6 +87,7 @@ const {
 } = await import("../composables/usePlayer.js");
 
 const { loadPlaylists, createPlaylist, renamePlaylist, deletePlaylist, addToPlaylist, removeFromPlaylist, setPlaylistOrder, isInPlaylist } = await import("../composables/usePlayer.js");
+const { toggleSidebar, SIDEBAR_KEY } = await import("../composables/usePlayer.js");
 
 const RESET = {
   songs: [],
@@ -112,6 +113,7 @@ const RESET = {
   favorites: [],
   playlists: [],
   activePlaylistId: null,
+  sidebarCollapsed: false,
   lastSource: "manual",
 };
 
@@ -1651,5 +1653,24 @@ describe("歌单", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
     await expect(setPlaylistOrder("p1", ["/a.mp3"])).rejects.toThrow("排序保存失败");
     expect(state.playlists[0].songPaths).toEqual(["/b.mp3", "/a.mp3"]);
+  });
+});
+
+describe("侧边栏收起", () => {
+  it("toggleSidebar 切换状态并持久化 localStorage", () => {
+    expect(state.sidebarCollapsed).toBe(false);
+    toggleSidebar();
+    expect(state.sidebarCollapsed).toBe(true);
+    expect(lsStore[SIDEBAR_KEY]).toBe("1");
+    toggleSidebar();
+    expect(state.sidebarCollapsed).toBe(false);
+    expect(lsStore[SIDEBAR_KEY]).toBe("0");
+  });
+
+  it("加载时从 localStorage 恢复收起状态", async () => {
+    lsStore[SIDEBAR_KEY] = "1";
+    vi.resetModules();
+    const mod = await import("../composables/usePlayer.js");
+    expect(mod.state.sidebarCollapsed).toBe(true);
   });
 });
