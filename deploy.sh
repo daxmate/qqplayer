@@ -5,9 +5,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-LABEL="com.daxmate.qqplayer"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-
 echo "🎵 QQPlayer 部署开始..."
 
 # 1. 拉最新代码
@@ -22,27 +19,11 @@ echo "── 安装后端依赖"
 echo "── 构建前端"
 (cd frontend && pnpm install && pnpm build)
 
-# 4. 重启服务：停掉旧进程 → 卸载旧服务 → 加载 launchd 服务
-# 注意：pkill 后立即 bootout/bootstrap 易报 "Bootstrap failed: 5: Input/output error"（launchd 域状态瞬时），
-# 先等旧状态清理，bootstrap 失败自动重试
-LABEL_CMD="gui/$(id -u)/$LABEL"
-echo "── 重启服务"
+# 4. 重启服务：kill 掉进程，launchd KeepAlive 会自动拉起新进程（加载新代码）
+# 不要 bootout/bootstrap：pkill 后 KeepAlive 已重启，再卸载/加载会和 launchd 域状态打架（I/O error）
+echo "── 重启服务（KeepAlive 自动拉起）"
 pkill -f "backend.py" 2>/dev/null || true
-launchctl bootout "$LABEL_CMD" 2>/dev/null || true
-sleep 1
-BOOTSTRAPPED=0
-for attempt in 1 2 3 4 5; do
-  if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then
-    BOOTSTRAPPED=1
-    break
-  fi
-  echo "  bootstrap 第 $attempt 次失败（I/O error 为瞬时状态），1s 后重试…"
-  sleep 1
-done
-if [ "$BOOTSTRAPPED" -ne 1 ]; then
-  echo "❌ launchctl bootstrap 连续 5 次失败，服务未加载"
-  exit 1
-fi
+sleep 2 # 等 KeepAlive 拉起新进程
 
 # 5. 健康检查
 echo "── 健康检查"
