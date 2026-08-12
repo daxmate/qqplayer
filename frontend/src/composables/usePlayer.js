@@ -28,6 +28,7 @@ export const state = reactive({
   favorites: [], // 收藏歌曲 path 列表（后端持久化）
   playlists: [], // 歌单列表（后端持久化）
   activePlaylistId: null, // 当前浏览的歌单 id；null = 全部歌曲
+  libraryVersion: null, // 歌曲库变动版本号（轮询对比，变化则自动刷新列表）
   musicLibOpen: true, // 音乐库面板开关（左侧 tab 栏控制，localStorage 持久化）
   playlistOpen: true, // 播放列表面板开关（左侧 tab 栏控制，localStorage 持久化）
   lastSource: "manual", // 最近一次选歌来源：manual | auto | media（播放统计用）
@@ -712,6 +713,35 @@ export async function loadSongs() {
     state.error = "加载歌曲列表失败：" + e.message;
   } finally {
     state.loading = false;
+  }
+}
+
+// ============ 歌曲库自动刷新（iCloud 文件夹变动） ============
+let refreshTimer = null;
+
+export function setupAutoRefresh(intervalMs = 3000) {
+  // 幂等：重复调用不叠加 timer
+  if (refreshTimer) return;
+  refreshTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/api/library/version", { cache: "no-store" });
+      const { version } = await res.json();
+      if (state.libraryVersion == null) {
+        state.libraryVersion = version;
+      } else if (version !== state.libraryVersion) {
+        state.libraryVersion = version;
+        await loadSongs(); // 刷新后保持当前选中/播放（loadSongs 已处理）
+      }
+    } catch {
+      // 后端暂不可用：静默，下轮重试
+    }
+  }, intervalMs);
+}
+
+export function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 }
 

@@ -4,3 +4,4 @@ mutagen
 httpx
 pytest
 ruff
+watchdog

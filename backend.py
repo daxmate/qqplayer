@@ -22,6 +22,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 from lyric_fetch import fetch_online_lyric
 
@@ -47,6 +49,13 @@ PLAYBACK_FILE = DATA_DIR / "playback.json"
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
 PLAYBACK_MIN_SECONDS = 3
+# 库变动监听：事件去抖窗口（秒）与扫描缓存
+WATCH_DEBOUNCE_SECONDS = 2.0
+_scan_cache: dict | None = None  # {"library": str, "songs": [...]}
+_scan_version = 0
+_scan_lock = threading.Lock()
+_watch_timer: threading.Timer | None = None
+_watch_observer: Observer | None = None
 
 app = FastAPI(title="music-player")
 
@@ -58,8 +67,8 @@ LYRIC_EXTS = {".srt", ".lrc"}
 
 
 # ============ 歌曲库扫描 ============
-def scan_library():
-    """扫描歌曲库，返回歌曲列表（含封面/歌词路径）"""
+def _full_scan():
+    """全量扫描歌曲库（无缓存），返回歌曲列表（含封面/歌词路径）"""
     songs = []
     if not LIBRARY.is_dir():
         return songs
@@ -117,6 +126,70 @@ def scan_library():
             }
         )
     return songs
+
+
+def scan_library():
+    """扫描歌曲库，带缓存（库路径变化自动失效）；变动由 watchdog 重扫后刷新"""
+    global _scan_cache
+    with _scan_lock:
+        if _scan_cache is not None and _scan_cache.get("library") == str(LIBRARY):
+            return _scan_cache["songs"]
+        songs = _full_scan()
+        _scan_cache = {"library": str(LIBRARY), "songs": songs}
+        return songs
+
+
+def _rescan():
+    """库变动后全量重扫 + 版本号递增（watchdog 去抖触发，带锁防并发）"""
+    global _scan_cache, _scan_version
+    with _scan_lock:
+        songs = _full_scan()
+        _scan_cache = {"library": str(LIBRARY), "songs": songs}
+        _scan_version += 1
+
+
+class _LibraryHandler(FileSystemEventHandler):
+    """监听歌曲库变动：目录自身的 modified 事件太多（iCloud 同步），跳过；其余去抖后重扫"""
+
+    def on_any_event(self, event):
+        if event.is_directory and event.event_type == "modified":
+            return
+        _schedule_rescan()
+
+
+def _schedule_rescan():
+    """合并去抖：窗口内多次事件只触发一次重扫"""
+    global _watch_timer
+    with _scan_lock:
+        if _watch_timer is not None:
+            _watch_timer.cancel()
+        _watch_timer = threading.Timer(WATCH_DEBOUNCE_SECONDS, _rescan)
+        _watch_timer.daemon = True
+        _watch_timer.start()
+
+
+def start_watcher():
+    """启动歌曲库 watchdog（幂等；库目录不存在时跳过）"""
+    global _watch_observer
+    if _watch_observer is not None or not LIBRARY.is_dir():
+        return
+    _watch_observer = Observer()
+    _watch_observer.daemon = True
+    _watch_observer.schedule(_LibraryHandler(), str(LIBRARY), recursive=True)
+    _watch_observer.start()
+
+
+def stop_watcher():
+    """停止 watchdog（切换歌曲库时调用）"""
+    global _watch_observer, _watch_timer
+    with _scan_lock:
+        if _watch_timer is not None:
+            _watch_timer.cancel()
+            _watch_timer = None
+    if _watch_observer is not None:
+        _watch_observer.stop()
+        _watch_observer.join(timeout=3)
+        _watch_observer = None
 
 
 def get_duration(f: Path):
@@ -431,14 +504,25 @@ def api_library():
     return {"path": str(LIBRARY)}
 
 
+@app.get("/api/library/version")
+def api_library_version():
+    """返回歌曲库变动版本号（前端轮询此值判断是否需要刷新列表）"""
+    return {"version": _scan_version}
+
+
 @app.post("/api/library")
 async def api_set_library(body: dict):
-    """设置歌曲库文件夹"""
-    global LIBRARY
+    """设置歌曲库文件夹（切换后清缓存并重启监听）"""
+    global LIBRARY, _scan_cache, _scan_version
     p = Path(body.get("path", ""))
     if not p.is_dir():
         raise HTTPException(400, f"目录不存在: {p}")
+    stop_watcher()
     LIBRARY = p
+    with _scan_lock:
+        _scan_cache = None
+        _scan_version += 1
+    start_watcher()
     return {"path": str(LIBRARY), "count": len(scan_library())}
 
 
@@ -645,8 +729,10 @@ if (ROOT / "dist").is_dir():
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         LIBRARY = Path(sys.argv[1])
+    start_watcher()
     url = f"http://localhost:{DEFAULT_PORT}"
     print(f"🎵 music-player 已启动: {url}")
     print(f"   歌曲库: {LIBRARY}")
+    print(f"   📁 监听歌曲库变动（去抖 {WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host="127.0.0.1", port=DEFAULT_PORT, log_level="warning")

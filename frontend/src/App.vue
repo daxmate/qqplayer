@@ -100,6 +100,7 @@ import {
   setupKeyboardShortcuts,
   setupMediaSession,
   setupPlaybackFlush,
+  setupAutoRefresh,
   toggleMusicLib,
   currentLineIndex,
 } from "./composables/usePlayer.js";
@@ -127,6 +128,7 @@ onMounted(() => {
   setupKeyboardShortcuts();
   setupMediaSession();
   setupPlaybackFlush();
+  setupAutoRefresh();
 });
 </script>
 

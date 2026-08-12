@@ -485,3 +485,124 @@ def test_api_playlists_persist(tmp_path, monkeypatch):
     # 模拟重启：重新加载
     data = json.loads((tmp_path / "playlists.json").read_text(encoding="utf-8"))
     assert data[0]["name"] == "持久" and data[0]["songPaths"] == ["/x.mp3"]
+
+
+# ============ 库监听（watchdog）与扫描缓存 ============
+
+@pytest.fixture(autouse=True)
+def _reset_watch_state():
+    """每个测试前重置扫描缓存/版本号/去抖 timer，避免全局状态串扰"""
+    with backend._scan_lock:
+        backend._scan_cache = None
+        backend._scan_version = 0
+        if backend._watch_timer is not None:
+            backend._watch_timer.cancel()
+            backend._watch_timer = None
+    yield
+    with backend._scan_lock:
+        backend._scan_cache = None
+        backend._scan_version = 0
+        if backend._watch_timer is not None:
+            backend._watch_timer.cancel()
+            backend._watch_timer = None
+
+
+def test_scan_library_cache_hit(song_library, monkeypatch):
+    """同库二次扫描命中缓存，不再全量扫（_full_scan 只调一次）"""
+    real = backend._full_scan
+    calls = []
+
+    def counting():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(backend, "_full_scan", counting)
+    backend.scan_library()
+    backend.scan_library()
+    assert len(calls) == 1
+
+
+def test_scan_cache_invalid_when_library_changes(song_library, monkeypatch):
+    """切换歌曲库路径后缓存自动失效（按 library 路径做 key）"""
+    backend.scan_library()
+    backend.LIBRARY = song_library / "sub"
+    backend.LIBRARY.mkdir()
+    make_mp3(backend.LIBRARY / "新歌.mp3", title="新歌")
+    songs = backend.scan_library()
+    assert len(songs) == 1 and songs[0]["name"] == "新歌"
+
+
+def test_rescan_bumps_version_and_updates_cache(song_library):
+    """库变动重扫：版本号 +1，缓存同步更新（新增文件能扫到）"""
+    backend.scan_library()
+    make_mp3(song_library / "新增.mp3", title="新增")
+    backend._rescan()
+    assert backend._scan_version == 1
+    assert backend.scan_library() == backend._scan_cache["songs"]
+    names = {s["name"] for s in backend.scan_library()}
+    assert "新增" in names
+
+
+def test_schedule_rescan_debounce(song_library, monkeypatch):
+    """去抖：窗口内多次事件只触发一次重扫"""
+    backend.WATCH_DEBOUNCE_SECONDS = 0.05
+    calls = []
+    monkeypatch.setattr(backend, "_rescan", lambda: calls.append(1))
+    for _ in range(5):
+        backend._schedule_rescan()
+    assert len(calls) == 0  # 去抖窗口内还没执行
+    import time
+
+    time.sleep(0.2)
+    assert len(calls) == 1  # 合并成一次
+
+
+def test_handler_skips_dir_modified(song_library, monkeypatch):
+    """目录自身 modified 事件（iCloud 同步频繁）不触发重扫；文件事件触发"""
+    calls = []
+    monkeypatch.setattr(backend, "_schedule_rescan", lambda: calls.append(1))
+    h = backend._LibraryHandler()
+
+    class Ev:
+        def __init__(self, is_dir, event_type):
+            self.is_directory = is_dir
+            self.event_type = event_type
+
+    h.on_any_event(Ev(True, "modified"))  # 跳过
+    assert calls == []
+    h.on_any_event(Ev(False, "created"))  # 文件创建 → 触发
+    h.on_any_event(Ev(False, "modified"))  # 文件修改 → 触发
+    assert len(calls) == 2
+
+
+def test_start_watcher_skips_missing_dir(song_library):
+    """歌曲库目录不存在时不启动 observer"""
+    backend.LIBRARY = song_library / "ghost"
+    backend.start_watcher()
+    assert backend._watch_observer is None
+
+
+def test_api_library_version(song_library):
+    """version 接口：初始 0，重扫后递增"""
+    r = client.get("/api/library/version")
+    assert r.json() == {"version": 0}
+    backend._rescan()
+    assert client.get("/api/library/version").json() == {"version": 1}
+
+
+def test_api_set_library_clears_cache_and_bumps_version(song_library, monkeypatch):
+    """切换歌曲库：缓存清空、版本号 +1、新库可扫（watcher 用桩避免真起线程）"""
+    monkeypatch.setattr(backend, "start_watcher", lambda: None)
+    monkeypatch.setattr(backend, "stop_watcher", lambda: None)
+    backend.scan_library()
+    v0 = client.get("/api/library/version").json()["version"]
+    new_dir = song_library / "newlib"
+    new_dir.mkdir()
+    make_mp3(new_dir / "b.mp3", title="B")
+    r = client.post("/api/library", json={"path": str(new_dir)})
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+    assert client.get("/api/library/version").json()["version"] == v0 + 1
+    # 新库扫描结果（缓存已换新）
+    songs = client.get("/api/songs").json()
+    assert len(songs) == 1 and songs[0]["name"] == "B"
