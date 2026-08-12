@@ -42,14 +42,14 @@
 
 /* 浅色主题 */
 html[data-theme="light"] {
-  --accent-text: color-mix(in srgb, var(--accent) 42%, #1c2030); /* 高亮句文字用深色混合保证可读 */
+  --accent-text: color-mix(in srgb, var(--accent) 34%, #1c2030); /* 高亮句文字用深色混合保证可读 */
   --bg: #f4f5fa;
   --bg2: #e9ebf3;
   --card: #ffffff;
   --card2: #eef0f7;
   --text: #1c2030;
-  --text-soft: rgba(28, 32, 48, 0.78);
-  --text-faint: rgba(28, 32, 48, 0.7);
+  --text-soft: rgba(28, 32, 48, 0.85);
+  --text-faint: rgba(28, 32, 48, 0.78);
   --text2: #4c5470;
   --text3: #7d85a0;
   --border: #d8dce8;
