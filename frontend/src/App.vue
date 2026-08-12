@@ -263,29 +263,31 @@ onMounted(() => {
   grid-template-columns: 44px 1fr;
   grid-template-areas:
     "activity center"
-    "controls controls";
+    "activity controls";
 }
 .main.continuous.has-tabbar.has-music {
   grid-template-columns: 44px 200px 1fr;
   grid-template-areas:
     "activity sidebar center"
-    "controls controls controls";
+    "activity controls controls";
 }
 .main.continuous.has-tabbar.has-playlist {
   grid-template-columns: 44px 280px 1fr;
   grid-template-areas:
     "activity playlist center"
-    "controls controls controls";
+    "activity controls controls";
 }
 .main.continuous.has-tabbar.has-music.has-playlist {
   grid-template-columns: 44px 200px 280px 1fr;
   grid-template-areas:
     "activity sidebar playlist center"
-    "controls controls controls controls";
+    "activity controls controls controls";
 }
 .activity-bar {
   grid-area: activity;
   border-right: 1px solid var(--border);
+  background: var(--bg2);
+  border-radius: 16px 0 0 16px;
 }
 .sidebar {
   grid-area: sidebar;
