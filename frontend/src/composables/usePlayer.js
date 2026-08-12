@@ -12,6 +12,7 @@ export const state = reactive({
   currentTime: 0,
   duration: 0,
   mode: "continuous", // 'continuous' 连播 | 'karaoke' 跟唱
+  playMode: "order", // 连播播放模式：'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
   karaokeOn: true, // 跟唱开关：开=每句播完自动停
   karaokeLoop: false, // 单句循环：跟唱开启时生效，句末自动回到句首重播
   abLoop: null, // AB 区间循环：null 关闭 | { a, b } 起点/终点（行索引，b 为 null 表示等选终点）
@@ -25,6 +26,67 @@ export const state = reactive({
 });
 
 const SPEEDS = [0.75, 1.0, 1.25];
+
+// ============ 连播播放模式（列表循环/随机/单曲循环）============
+let shuffleQueue = []; // 洗牌队列：歌曲索引排列（随机模式用）
+let shufflePos = -1; // 当前歌曲在队列中的位置
+let playHistory = []; // 播放历史栈（歌曲索引），随机模式"上一首"回退用
+
+// 生成洗牌队列：leader（通常为当前歌）固定队首，其余 Fisher-Yates 随机
+function buildShuffleQueue(leader) {
+  const n = state.songs.length;
+  if (!n) {
+    shuffleQueue = [];
+    shufflePos = -1;
+    return;
+  }
+  const rest = [];
+  for (let i = 0; i < n; i++) if (i !== leader) rest.push(i);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  shuffleQueue = leader >= 0 ? [leader, ...rest] : rest;
+  shufflePos = leader >= 0 ? 0 : -1;
+}
+
+// 队列失效（歌曲列表变化 / 当前歌不在队列）时重建
+function ensureShuffleQueue() {
+  if (
+    shuffleQueue.length !== state.songs.length ||
+    (state.currentIndex >= 0 && !shuffleQueue.includes(state.currentIndex))
+  ) {
+    buildShuffleQueue(state.currentIndex);
+  }
+}
+
+// 随机模式下一首：队列顺序推进，一轮播完以当前歌为队首重新洗牌
+function nextShuffle() {
+  ensureShuffleQueue();
+  if (shufflePos >= shuffleQueue.length - 1) {
+    buildShuffleQueue(state.currentIndex);
+    if (shuffleQueue.length > 1) {
+      selectSong(shuffleQueue[1]);
+    }
+    return;
+  }
+  selectSong(shuffleQueue[shufflePos + 1]);
+}
+
+// 三态循环：列表循环 → 随机 → 单曲循环 → 列表循环
+// 注意与跟唱模式的"单句循环/AB 循环"（歌词行级）区分：这是歌曲级播放模式
+export function cyclePlayMode() {
+  const order = ["order", "shuffle", "repeatOne"];
+  state.playMode = order[(order.indexOf(state.playMode) + 1) % order.length];
+  if (state.playMode === "shuffle") ensureShuffleQueue();
+}
+
+// 仅供测试：重置播放模式内部状态（洗牌队列/播放历史）
+export function _resetPlayMode() {
+  shuffleQueue = [];
+  shufflePos = -1;
+  playHistory = [];
+}
 
 // ============ 歌曲列表 ============
 export async function loadLibrary() {
@@ -73,8 +135,20 @@ export async function loadSongs() {
 }
 
 // ============ 选歌 ============
-export async function selectSong(index) {
+export async function selectSong(index, opts = {}) {
   if (index < 0 || index >= state.songs.length) return;
+  // 播放历史：记录旧歌（随机模式"上一首"回退）；回退本身不记录
+  if (opts.record !== false && state.currentIndex >= 0 && state.currentIndex !== index) {
+    playHistory.push(state.currentIndex);
+    if (playHistory.length > 100) playHistory.shift();
+  }
+  // 洗牌队列定位：手动选了队列外的歌 → 以它为队首重建队列
+  const qIdx = shuffleQueue.indexOf(index);
+  if (qIdx >= 0) {
+    shufflePos = qIdx;
+  } else {
+    buildShuffleQueue(index);
+  }
   state.currentIndex = index;
   state.currentSong = state.songs[index];
   state.isPlaying = false;
@@ -133,11 +207,20 @@ export function pause() {
 
 export function nextSong() {
   if (state.songs.length === 0) return;
+  if (state.playMode === "shuffle") {
+    nextShuffle();
+    return;
+  }
   selectSong((state.currentIndex + 1) % state.songs.length);
 }
 
 export function prevSong() {
   if (state.songs.length === 0) return;
+  if (state.playMode === "shuffle" && playHistory.length) {
+    // 随机模式：按播放历史回退到上一首（不重复记录）
+    selectSong(playHistory.pop(), { record: false });
+    return;
+  }
   selectSong((state.currentIndex - 1 + state.songs.length) % state.songs.length);
 }
 
@@ -343,10 +426,20 @@ audio.addEventListener("pause", () => {
 });
 audio.addEventListener("ended", () => {
   state.isPlaying = false;
-  if (state.mode === "continuous") {
-    // 连播模式：自动下一首
-    nextSong();
+  if (state.mode !== "continuous") return;
+  if (state.playMode === "repeatOne") {
+    // 单曲循环：重播本首
+    audio.currentTime = 0;
+    state.currentTime = 0;
+    audio.play().catch(() => {});
+    return;
   }
+  if (state.playMode === "shuffle") {
+    nextShuffle();
+    return;
+  }
+  // 列表循环：顺序下一首
+  nextSong();
 });
 
 // ============ 页面标题 ============

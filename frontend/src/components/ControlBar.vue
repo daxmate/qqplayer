@@ -19,6 +19,18 @@
 
     <!-- 按钮 -->
     <div class="btn-row">
+      <template v-if="!karaoke">
+        <button
+          class="btn"
+          :class="{ on: state.playMode !== 'order' }"
+          @click="cyclePlayMode"
+          :title="playModeTitle"
+        >
+          <Shuffle v-if="state.playMode === 'shuffle'" :size="15" />
+          <Repeat1 v-else-if="state.playMode === 'repeatOne'" :size="15" />
+          <Repeat v-else :size="15" />
+        </button>
+      </template>
       <button class="btn" @click="prevSong" title="上一首">
         <SkipBack :size="17" />
       </button>
@@ -103,6 +115,8 @@ import {
   Gauge,
   Repeat1,
   Repeat2,
+  Repeat,
+  Shuffle,
   Languages,
 } from "@lucide/vue";
 import { state } from "../composables/usePlayer.js";
@@ -119,6 +133,7 @@ import {
   enterAbLoop,
   exitAbLoop,
   toggleZh,
+  cyclePlayMode,
 } from "../composables/usePlayer.js";
 
 defineProps({
@@ -141,6 +156,13 @@ const loopTitle = computed(() => {
       : `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句（单击退出）`;
   }
   return "单击：单句循环；长按：AB 区间循环（需开启跟唱）";
+});
+
+// 连播播放模式：三态循环切换（列表循环 → 随机 → 单曲循环）
+const playModeTitle = computed(() => {
+  if (state.playMode === "shuffle") return "随机播放（点击切换）";
+  if (state.playMode === "repeatOne") return "单曲循环（点击切换）";
+  return "列表循环（点击切换）";
 });
 
 function onLoopPressStart() {

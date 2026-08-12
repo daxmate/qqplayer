@@ -29,6 +29,7 @@ vi.stubGlobal("Audio", FakeAudio);
 const {
   state,
   cycleSpeed,
+  cyclePlayMode,
   nextSong,
   prevSong,
   togglePlay,
@@ -47,6 +48,7 @@ const {
   clickLine,
   currentLineIndex,
   _resetKaraokeAnchor,
+  _resetPlayMode,
 } = await import("../composables/usePlayer.js");
 
 const RESET = {
@@ -57,6 +59,7 @@ const RESET = {
   currentTime: 0,
   duration: 0,
   mode: "continuous",
+  playMode: "order",
   karaokeOn: true,
   karaokeLoop: false,
   abLoop: null,
@@ -72,6 +75,7 @@ const RESET = {
 beforeEach(() => {
   Object.assign(state, RESET);
   _resetKaraokeAnchor();
+  _resetPlayMode();
   vi.restoreAllMocks();
 });
 
@@ -110,6 +114,150 @@ describe("nextSong / prevSong", () => {
     state.currentIndex = 0;
     await prevSong();
     expect(state.currentIndex).toBe(1);
+  });
+});
+
+describe("连播播放模式：随机 / 单曲循环", () => {
+  const SONGS5 = [
+    { path: "/a.mp3", name: "A" },
+    { path: "/b.mp3", name: "B" },
+    { path: "/c.mp3", name: "C" },
+    { path: "/d.mp3", name: "D" },
+    { path: "/e.mp3", name: "E" },
+  ];
+  const audio = () => FakeAudio.instances[0];
+
+  function stubFetch() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+  }
+
+  function fireEnded() {
+    const a = audio();
+    a.paused = false;
+    a.listeners["ended"]();
+    return a;
+  }
+
+  // Math.random 固定 0：leader=0 时 rest=[1,2,3,4] 洗牌后为 [2,3,4,1]
+  // → 队列 [0,2,3,4,1]
+  function stubRandom() {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+  }
+
+  it("cyclePlayMode：列表循环 → 随机 → 单曲循环 → 列表循环", () => {
+    state.playMode = "order";
+    cyclePlayMode();
+    expect(state.playMode).toBe("shuffle");
+    cyclePlayMode();
+    expect(state.playMode).toBe("repeatOne");
+    cyclePlayMode();
+    expect(state.playMode).toBe("order");
+  });
+
+  it("单曲循环：播完重播本首（索引不变、从头播、继续播放）", async () => {
+    state.songs = SONGS5;
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "repeatOne";
+    const a = audio();
+    a.currentTime = 120;
+    fireEnded();
+    expect(state.currentIndex).toBe(0);
+    expect(a.currentTime).toBe(0);
+    expect(a.paused).toBe(false);
+  });
+
+  it("单曲循环：手动下一首正常切歌（模式保持）", async () => {
+    state.songs = SONGS5;
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "repeatOne";
+    await nextSong();
+    expect(state.currentIndex).toBe(1);
+    expect(state.playMode).toBe("repeatOne");
+  });
+
+  it("随机模式：手动下一首按洗牌队列推进", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    await nextSong();
+    expect(state.currentIndex).toBe(2);
+    await nextSong();
+    expect(state.currentIndex).toBe(3);
+    await nextSong();
+    expect(state.currentIndex).toBe(4);
+    await nextSong();
+    expect(state.currentIndex).toBe(1);
+  });
+
+  it("随机模式：播完自动随机下一首（不重复相邻）", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    const a = audio();
+    a.currentTime = 100;
+    fireEnded();
+    expect(state.currentIndex).toBe(2);
+  });
+
+  it("随机模式：一轮播完自动重新洗牌", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    // 队列 [0,2,3,4,1]：推进到队列末尾
+    await nextSong(); // 2
+    await nextSong(); // 3
+    await nextSong(); // 4
+    await nextSong(); // 1（队列末）
+    // 再下一首 → 以 1 为队首重新洗牌：rest=[0,2,3,4] → 队列 [1,2,3,4,0] → 下一首 2
+    await nextSong();
+    expect(state.currentIndex).toBe(2);
+  });
+
+  it("随机模式：上一首按播放历史回退", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    await nextSong(); // → 2，历史 [0]
+    await nextSong(); // → 3，历史 [0,2]
+    await prevSong();
+    expect(state.currentIndex).toBe(2);
+    await prevSong();
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("随机模式：无历史时上一首按顺序回退", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    await prevSong();
+    expect(state.currentIndex).toBe(4);
+  });
+
+  it("随机模式：手动选歌同步队列位置，继续随机不乱序", async () => {
+    state.songs = SONGS5;
+    stubRandom();
+    stubFetch();
+    await selectSong(0);
+    state.playMode = "shuffle";
+    await nextSong(); // 2（pos 1）
+    await selectSong(4); // 手动点 E：队列 [0,2,3,4,1] 中 pos 3
+    await nextSong();
+    expect(state.currentIndex).toBe(1); // 队列 pos 4
   });
 });
 
