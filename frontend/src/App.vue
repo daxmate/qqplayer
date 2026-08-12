@@ -169,9 +169,9 @@ onMounted(() => {
   z-index: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(64px) saturate(1.5);
-  transform: scale(1.2); /* 模糊后边缘不留黑 */
-  opacity: 0.55;
+  filter: blur(72px) saturate(1.6);
+  transform: scale(1.25); /* 模糊后边缘不留黑 */
+  opacity: 0.72;
   pointer-events: none;
   transition: opacity 0.5s;
 }
