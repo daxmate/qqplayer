@@ -27,7 +27,7 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_LIBRARY = ROOT / "songs"
-DEFAULT_PORT = 8765
+DEFAULT_PORT = 17627
 
 app = FastAPI(title="music-player")
 

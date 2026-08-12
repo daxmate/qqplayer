@@ -17,7 +17,7 @@
 ./启动.command            # 一键启动（iCloud 歌曲库，自动开浏览器）
 # 或
 ./venv/bin/python backend.py [歌曲库路径]
-# 默认端口 8765，访问 http://localhost:8765
+# 默认端口 17627，访问 http://localhost:17627
 ```
 
 ## 开发
@@ -31,7 +31,7 @@ python3 -m venv venv
 # 前端
 cd frontend
 pnpm install
-pnpm dev        # 开发服务器（代理 /api 到 8765）
+pnpm dev        # 开发服务器（代理 /api 到 17627）
 pnpm build      # 构建到 ../dist（后端直接托管）
 ```
 
