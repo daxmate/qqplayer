@@ -99,6 +99,7 @@ const {
   isInPlaylist,
 } = await import("../composables/usePlayer.js");
 const { toggleMusicLib, togglePlaylist, PANEL_KEY } = await import("../composables/usePlayer.js");
+const { toggleControls, CONTROLS_KEY } = await import("../composables/usePlayer.js");
 
 const RESET = {
   songs: [],
@@ -1712,6 +1713,23 @@ describe("侧栏面板开关", () => {
     const mod = await import("../composables/usePlayer.js");
     expect(mod.state.musicLibOpen).toBe(false);
     expect(mod.state.playlistOpen).toBe(true);
+  });
+
+  it("toggleControls 收起/展开控制区并持久化 localStorage", () => {
+    expect(state.controlsHidden).toBe(false);
+    toggleControls();
+    expect(state.controlsHidden).toBe(true);
+    expect(lsStore[CONTROLS_KEY]).toBe("1");
+    toggleControls();
+    expect(state.controlsHidden).toBe(false);
+    expect(lsStore[CONTROLS_KEY]).toBe("0");
+  });
+
+  it("加载时从 localStorage 恢复控制区收起状态", async () => {
+    lsStore[CONTROLS_KEY] = "1";
+    vi.resetModules();
+    const mod = await import("../composables/usePlayer.js");
+    expect(mod.state.controlsHidden).toBe(true);
   });
 });
 

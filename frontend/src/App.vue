@@ -53,7 +53,15 @@
           <span>暂无歌词（可放置同名 .srt / .lrc）</span>
         </div>
       </section>
-      <ControlBar class="panel controls" />
+      <ControlBar v-show="!state.controlsHidden" class="panel controls" />
+      <button
+        v-if="state.controlsHidden"
+        class="expand-controls-btn"
+        title="展开控制区"
+        @click="toggleControls()"
+      >
+        <ChevronUp :size="18" />
+      </button>
     </main>
 
     <!-- 主体：跟唱模式 -->
@@ -72,7 +80,15 @@
         </div>
       </aside>
       <KaraokePanel class="panel karaoke-panel" :lyric="state.lyric" :current="currentLineIndex" />
-      <ControlBar class="panel controls" karaoke />
+      <ControlBar v-show="!state.controlsHidden" class="panel controls" karaoke />
+      <button
+        v-if="state.controlsHidden"
+        class="expand-controls-btn karaoke"
+        title="展开控制区"
+        @click="toggleControls()"
+      >
+        <ChevronUp :size="18" />
+      </button>
     </main>
 
     <div v-if="state.error" class="error-bar">{{ state.error }}</div>
@@ -83,7 +99,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
-import { Music2, Mic, Play, Settings, PanelLeftOpen } from "@lucide/vue";
+import { Music2, Mic, Play, Settings, PanelLeftOpen, ChevronUp } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
 import ActivityBar from "./components/ActivityBar.vue";
@@ -101,6 +117,7 @@ import {
   setupMediaSession,
   setupPlaybackFlush,
   setupAutoRefresh,
+  toggleControls,
   toggleMusicLib,
   currentLineIndex,
 } from "./composables/usePlayer.js";
@@ -114,6 +131,7 @@ const panelClass = computed(() => {
   if (panelsActive.value) c.push("has-tabbar");
   if (state.musicLibOpen) c.push("has-music");
   if (state.playlistOpen) c.push("has-playlist");
+  if (state.controlsHidden) c.push("no-controls");
   return c;
 });
 
@@ -281,6 +299,23 @@ onMounted(() => {
     "activity sidebar playlist center"
     "activity controls controls controls";
 }
+/* 控制区收起：去掉 controls 行，内容区占满 */
+.main.continuous.no-controls {
+  grid-template-rows: 1fr;
+  grid-template-areas: "center";
+}
+.main.continuous.has-tabbar.no-controls {
+  grid-template-areas: "activity center";
+}
+.main.continuous.has-tabbar.has-music.no-controls {
+  grid-template-areas: "activity sidebar center";
+}
+.main.continuous.has-tabbar.has-playlist.no-controls {
+  grid-template-areas: "activity playlist center";
+}
+.main.continuous.has-tabbar.has-music.has-playlist.no-controls {
+  grid-template-areas: "activity sidebar playlist center";
+}
 .activity-bar {
   grid-area: activity;
   border-right: 1px solid var(--border);
@@ -311,6 +346,28 @@ onMounted(() => {
   transition: all 0.15s;
 }
 .floating-panel-btn:hover {
+  opacity: 1;
+  color: var(--text);
+  background: var(--border);
+}
+.expand-controls-btn {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  color: var(--text2);
+  opacity: 0.6;
+  transition: all 0.15s;
+}
+.expand-controls-btn:hover {
   opacity: 1;
   color: var(--text);
   background: var(--border);
@@ -354,6 +411,11 @@ onMounted(() => {
   grid-template-areas:
     "side karaoke-panel"
     "controls controls";
+  position: relative;
+}
+.main.karaoke.no-controls {
+  grid-template-rows: 1fr;
+  grid-template-areas: "side karaoke-panel";
 }
 .side {
   grid-area: side;

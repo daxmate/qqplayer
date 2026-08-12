@@ -1,5 +1,8 @@
 <template>
   <div class="controls" :class="{ karaoke }">
+    <button class="collapse-btn" title="收起控制区" @click="toggleControls()">
+      <ChevronDown :size="16" />
+    </button>
     <!-- 进度条 -->
     <div class="progress-row">
       <span class="time">{{ fmt(state.currentTime) }}</span>
@@ -157,8 +160,9 @@ import {
   exitAbLoop,
   toggleZh,
   cyclePlayMode,
+  toggleControls,
 } from "../composables/usePlayer.js";
-import { Volume1, Volume2, VolumeX } from "@lucide/vue";
+import { ChevronDown, Volume1, Volume2, VolumeX } from "@lucide/vue";
 
 defineProps({
   karaoke: { type: Boolean, default: false },
@@ -229,6 +233,7 @@ function fmt(t) {
 
 <style scoped>
 .controls {
+  position: relative;
   background: var(--card);
   border-radius: 16px;
   border: 1px solid var(--border);
@@ -236,6 +241,25 @@ function fmt(t) {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.collapse-btn {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  opacity: 0.55;
+  transition: all 0.15s;
+}
+.collapse-btn:hover {
+  opacity: 1;
+  color: var(--text);
+  background: var(--border);
 }
 .progress-row {
   display: flex;
