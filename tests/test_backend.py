@@ -92,10 +92,27 @@ def test_api_lyric_yakimochi():
     assert len(line["text"]) >= 1
 
 
-def test_api_lyric_missing():
+def test_api_lyric_missing(monkeypatch):
+    """本地无歌词且在线也获取失败 → 404"""
+    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (None, None, None))
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"]})
     assert r.status_code == 404
+
+
+def test_api_lyric_online_fallback(monkeypatch):
+    """本地无歌词时在线获取成功 → 200，带 source 和翻译合并"""
+    lrc = "[00:10.00]沈むように溶けてゆくように\n[00:20.00]二人だけの空"
+    tlyric = "[00:10.00]像是沉溺溶化一般\n[00:20.00]只有两人的天空"
+    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (lrc, tlyric, "netease"))
+    song = next(s for s in backend.scan_library() if s["name"] == "知足")
+    r = client.get("/api/lyric", params={"path": song["path"]})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["source"] == "netease"
+    assert data["format"] == "lrc"
+    first = next(ln for ln in data["lines"] if ln["type"] == "line")
+    assert first["text"] == ["沈むように溶けてゆくように", "", "像是沉溺溶化一般"]
 
 
 # ============ 封面 ============
@@ -167,3 +184,29 @@ def test_parse_lrc():
     assert lines[0]["s"] == pytest.approx(10.0)
     assert lines[1]["s"] == pytest.approx(20.5)
     assert lines[2]["e"] == pytest.approx(35.25)
+
+
+# ============ 翻译合并 ============
+def test_merge_translation():
+    lines = [
+        {"type": "line", "s": 10.0, "e": 15.0, "text": ["原文一"]},
+        {"type": "line", "s": 20.0, "e": 25.0, "text": ["原文二"]},
+    ]
+    tlyric = "[00:10.00]翻译一\n[00:20.00]翻译二"
+    merged = backend.merge_translation(lines, tlyric)
+    # 约定 text = [原文, 罗马音(空), 中文翻译]
+    assert merged[0]["text"] == ["原文一", "", "翻译一"]
+    assert merged[1]["text"] == ["原文二", "", "翻译二"]
+
+
+def test_merge_translation_mismatch():
+    """翻译行与主行时间差超过容差 → 不合并"""
+    lines = [{"type": "line", "s": 10.0, "e": 15.0, "text": ["原文"]}]
+    merged = backend.merge_translation(lines, "[00:30.00]翻译")
+    assert merged[0]["text"] == ["原文"]
+
+
+def test_merge_translation_none():
+    lines = [{"type": "line", "s": 1.0, "e": 2.0, "text": ["原文"]}]
+    assert backend.merge_translation(lines, None) == lines
+    assert backend.merge_translation(lines, "") == lines

@@ -19,6 +19,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from lyric_fetch import fetch_online_lyric
+
 try:
     from mutagen import File as MutagenFile
     from mutagen.mp4 import MP4, MP4Cover
@@ -250,12 +252,33 @@ def parse_lrc(text: str):
     return result
 
 
+def merge_translation(lines: list, tlyric_text: str | None):
+    """把网易云中文翻译（tlyric LRC）按时间戳合并进主歌词行
+    约定 text = [原文, 罗马音(空), 中文翻译]（与前端 KaraokePanel/LyricPanel 渲染位一致）
+    """
+    if not tlyric_text:
+        return lines
+    tlines = [t for t in parse_lrc(tlyric_text) if t.get("text")]
+    if not tlines:
+        return lines
+    result = []
+    for ln in lines:
+        if ln["type"] == "line":
+            for t in tlines:
+                if abs(t["s"] - ln["s"]) <= 0.6:
+                    ln = {**ln, "text": [ln["text"][0], "", t["text"][0]]}
+                    break
+        result.append(ln)
+    return result
+
+
 @app.get("/api/lyric")
 def api_lyric(path: str):
-    """加载歌曲歌词文件（同名 srt/lrc，或文件夹内唯一歌词），返回解析后的逐句数据"""
+    """加载歌曲歌词：本地 srt/lrc 优先，无则在线获取（网易云→lrclib，缓存 ~/.cache）"""
     f = Path(path)
     if not f.exists():
         raise HTTPException(404, "文件不存在")
+    # 1) 本地歌词文件
     cand = None
     for lext in ("srt", "lrc"):
         c = f.with_suffix("." + lext)
@@ -267,12 +290,19 @@ def api_lyric(path: str):
         siblings = [x for x in f.parent.iterdir() if x.suffix.lower() in LYRIC_EXTS]
         if len(siblings) == 1:
             cand = siblings[0]
-    if cand is None:
+    if cand is not None:
+        text = cand.read_text(encoding="utf-8", errors="ignore")
+        lext = cand.suffix.lower().lstrip(".")
+        data = parse_srt(text) if lext == "srt" else parse_lrc(text)
+        return {"format": lext, "lines": data, "source": "local"}
+    # 2) 在线获取（本地无歌词时兜底）
+    artist, title = extract_tags(f)
+    title = title or f.stem
+    lrc_text, tlyric_text, source = fetch_online_lyric(title, artist or "")
+    if lrc_text is None:
         raise HTTPException(404, "无歌词文件")
-    text = cand.read_text(encoding="utf-8", errors="ignore")
-    lext = cand.suffix.lower().lstrip(".")
-    data = parse_srt(text) if lext == "srt" else parse_lrc(text)
-    return {"format": lext, "lines": data}
+    lines = merge_translation(parse_lrc(lrc_text), tlyric_text)
+    return {"format": "lrc", "lines": lines, "source": source}
 
 
 # ============ 音频流（支持 Range） ============
