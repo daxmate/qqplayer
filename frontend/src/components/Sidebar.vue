@@ -3,9 +3,6 @@
     <div class="sb-head">
       <Library :size="14" />
       音乐库
-      <button class="sb-collapse" title="收起侧边栏" @click="toggleSidebar()">
-        <PanelLeftClose :size="15" />
-      </button>
     </div>
 
     <div class="sb-list">
@@ -87,13 +84,12 @@
 
 <script setup>
 import { ref, nextTick } from "vue";
-import { Library, Music2, ListMusic, Plus, Pencil, Trash2, PanelLeftClose } from "@lucide/vue";
+import { Library, Music2, ListMusic, Plus, Pencil, Trash2 } from "@lucide/vue";
 import {
   state,
   createPlaylist,
   renamePlaylist,
   deletePlaylist,
-  toggleSidebar,
 } from "../composables/usePlayer.js";
 
 function activate(pid) {
@@ -181,23 +177,6 @@ function askDelete(p) {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.sb-collapse {
-  margin-left: auto;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--text3);
-  transition: all 0.12s;
-  flex-shrink: 0;
-}
-.sb-collapse:hover {
-  background: var(--border);
-  color: var(--text);
 }
 .sb-list {
   flex: 1;

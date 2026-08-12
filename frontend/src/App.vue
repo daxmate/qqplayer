@@ -2,6 +2,14 @@
   <div class="app">
     <!-- 顶栏 -->
     <header class="topbar">
+      <button
+        v-if="!panelsActive"
+        class="panel-btn"
+        title="展开面板"
+        @click="toggleMusicLib()"
+      >
+        <PanelLeftOpen :size="16" />
+      </button>
       <h1 class="logo">
         <span class="logo-bubbles" aria-hidden="true">
           <span class="qq q1">Q</span>
@@ -36,13 +44,11 @@
     <main
       v-if="state.mode === 'continuous'"
       class="main continuous"
-      :class="{ 'sb-collapsed': state.sidebarCollapsed }"
+      :class="panelClass"
     >
-      <Sidebar v-if="!state.sidebarCollapsed" class="panel sidebar" />
-      <button v-else class="sb-expand" title="展开音乐库" @click="toggleSidebar()">
-        <PanelLeftOpen :size="18" />
-      </button>
-      <Playlist class="panel playlist" />
+      <ActivityBar v-if="panelsActive" class="activity-bar" />
+      <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
+      <Playlist v-if="state.playlistOpen" class="panel playlist" />
       <section class="center">
         <Cover :song="state.currentSong" />
         <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
@@ -80,10 +86,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { Music2, Mic, Play, Settings, PanelLeftOpen } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
+import ActivityBar from "./components/ActivityBar.vue";
 import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
 import KaraokePanel from "./components/KaraokePanel.vue";
@@ -97,11 +104,21 @@ import {
   setupKeyboardShortcuts,
   setupMediaSession,
   setupPlaybackFlush,
-  toggleSidebar,
+  toggleMusicLib,
   currentLineIndex,
 } from "./composables/usePlayer.js";
 
 const settingsOpen = ref(false);
+
+// 面板组合 class：控制 grid 列数/区域（4 种状态）
+const panelsActive = computed(() => state.musicLibOpen || state.playlistOpen);
+const panelClass = computed(() => {
+  const c = [];
+  if (panelsActive.value) c.push("has-tabbar");
+  if (state.musicLibOpen) c.push("has-music");
+  if (state.playlistOpen) c.push("has-playlist");
+  return c;
+});
 
 function switchMode(m) {
   state.mode = m;
@@ -235,39 +252,61 @@ onMounted(() => {
 }
 .main.continuous {
   display: grid;
-  grid-template-columns: 200px 280px 1fr;
+  grid-template-columns: 1fr;
   grid-template-rows: 1fr auto;
   grid-template-areas:
-    "sidebar playlist center"
+    "center"
+    "controls";
+}
+.main.continuous.has-tabbar {
+  grid-template-columns: 44px 1fr;
+  grid-template-areas:
+    "activity center"
+    "controls controls";
+}
+.main.continuous.has-tabbar.has-music {
+  grid-template-columns: 44px 200px 1fr;
+  grid-template-areas:
+    "activity sidebar center"
     "controls controls controls";
 }
-.main.continuous.sb-collapsed {
+.main.continuous.has-tabbar.has-playlist {
   grid-template-columns: 44px 280px 1fr;
+  grid-template-areas:
+    "activity playlist center"
+    "controls controls controls";
+}
+.main.continuous.has-tabbar.has-music.has-playlist {
+  grid-template-columns: 44px 200px 280px 1fr;
+  grid-template-areas:
+    "activity sidebar playlist center"
+    "controls controls controls controls";
+}
+.activity-bar {
+  grid-area: activity;
+  border-right: 1px solid var(--border);
 }
 .sidebar {
   grid-area: sidebar;
 }
-.sb-expand {
-  grid-area: sidebar;
-  justify-self: center;
-  align-self: start;
-  margin-top: 12px;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+.playlist {
+  grid-area: playlist;
+}
+.panel-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--card2);
   color: var(--text2);
   transition: all 0.15s;
+  flex-shrink: 0;
 }
-.sb-expand:hover {
+.panel-btn:hover {
   background: var(--border);
   color: var(--text);
-}
-.playlist {
-  grid-area: playlist;
 }
 .center {
   grid-area: center;

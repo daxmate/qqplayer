@@ -28,7 +28,8 @@ export const state = reactive({
   favorites: [], // 收藏歌曲 path 列表（后端持久化）
   playlists: [], // 歌单列表（后端持久化）
   activePlaylistId: null, // 当前浏览的歌单 id；null = 全部歌曲
-  sidebarCollapsed: false, // 侧边栏收起状态（localStorage 持久化）
+  musicLibOpen: true, // 音乐库面板开关（左侧 tab 栏控制，localStorage 持久化）
+  playlistOpen: true, // 播放列表面板开关（左侧 tab 栏控制，localStorage 持久化）
   lastSource: "manual", // 最近一次选歌来源：manual | auto | media（播放统计用）
 });
 
@@ -634,25 +635,41 @@ export function _resetPlayMode() {
   playHistory = [];
 }
 
-// ============ 侧边栏收起状态（localStorage 持久化）============
-export const SIDEBAR_KEY = "qqplay…b.v1";
+// ============ 侧栏面板开关（左侧 tab 栏，localStorage 持久化）============
+export const PANEL_KEY = "qqplay…p.v1";
 
-function loadSidebarCollapsed() {
+function loadPanels() {
   try {
-    state.sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === "1";
+    const raw = localStorage.getItem(PANEL_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (typeof saved.musicLib === "boolean") state.musicLibOpen = saved.musicLib;
+    if (typeof saved.playlist === "boolean") state.playlistOpen = saved.playlist;
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadPanels();
+
+function persistPanels() {
+  try {
+    localStorage.setItem(
+      PANEL_KEY,
+      JSON.stringify({ musicLib: state.musicLibOpen, playlist: state.playlistOpen }),
+    );
   } catch {
     /* 忽略 */
   }
 }
-loadSidebarCollapsed();
 
-export function toggleSidebar() {
-  state.sidebarCollapsed = !state.sidebarCollapsed;
-  try {
-    localStorage.setItem(SIDEBAR_KEY, state.sidebarCollapsed ? "1" : "0");
-  } catch {
-    /* 忽略 */
-  }
+export function toggleMusicLib() {
+  state.musicLibOpen = !state.musicLibOpen;
+  persistPanels();
+}
+
+export function togglePlaylist() {
+  state.playlistOpen = !state.playlistOpen;
+  persistPanels();
 }
 
 // ============ 歌曲列表 ============

@@ -87,7 +87,7 @@ const {
 } = await import("../composables/usePlayer.js");
 
 const { loadPlaylists, createPlaylist, renamePlaylist, deletePlaylist, addToPlaylist, removeFromPlaylist, setPlaylistOrder, isInPlaylist } = await import("../composables/usePlayer.js");
-const { toggleSidebar, SIDEBAR_KEY } = await import("../composables/usePlayer.js");
+const { toggleMusicLib, togglePlaylist, PANEL_KEY } = await import("../composables/usePlayer.js");
 
 const RESET = {
   songs: [],
@@ -113,7 +113,8 @@ const RESET = {
   favorites: [],
   playlists: [],
   activePlaylistId: null,
-  sidebarCollapsed: false,
+  musicLibOpen: true,
+  playlistOpen: true,
   lastSource: "manual",
 };
 
@@ -1656,21 +1657,36 @@ describe("歌单", () => {
   });
 });
 
-describe("侧边栏收起", () => {
-  it("toggleSidebar 切换状态并持久化 localStorage", () => {
-    expect(state.sidebarCollapsed).toBe(false);
-    toggleSidebar();
-    expect(state.sidebarCollapsed).toBe(true);
-    expect(lsStore[SIDEBAR_KEY]).toBe("1");
-    toggleSidebar();
-    expect(state.sidebarCollapsed).toBe(false);
-    expect(lsStore[SIDEBAR_KEY]).toBe("0");
+describe("侧栏面板开关", () => {
+  it("toggleMusicLib / togglePlaylist 切换并持久化 localStorage", () => {
+    expect(state.musicLibOpen).toBe(true);
+    expect(state.playlistOpen).toBe(true);
+    toggleMusicLib();
+    togglePlaylist();
+    expect(state.musicLibOpen).toBe(false);
+    expect(state.playlistOpen).toBe(false);
+    expect(lsStore[PANEL_KEY]).toBe(
+      JSON.stringify({ musicLib: false, playlist: false }),
+    );
+    toggleMusicLib();
+    expect(state.musicLibOpen).toBe(true);
+    expect(state.playlistOpen).toBe(false);
   });
 
-  it("加载时从 localStorage 恢复收起状态", async () => {
-    lsStore[SIDEBAR_KEY] = "1";
+  it("两个面板独立开关，互不影响", () => {
+    toggleMusicLib();
+    expect(state.musicLibOpen).toBe(false);
+    expect(state.playlistOpen).toBe(true);
+    togglePlaylist();
+    expect(state.musicLibOpen).toBe(false);
+    expect(state.playlistOpen).toBe(false);
+  });
+
+  it("加载时从 localStorage 恢复面板状态", async () => {
+    lsStore[PANEL_KEY] = JSON.stringify({ musicLib: false, playlist: true });
     vi.resetModules();
     const mod = await import("../composables/usePlayer.js");
-    expect(mod.state.sidebarCollapsed).toBe(true);
+    expect(mod.state.musicLibOpen).toBe(false);
+    expect(mod.state.playlistOpen).toBe(true);
   });
 });
