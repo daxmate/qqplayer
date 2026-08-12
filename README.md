@@ -13,12 +13,22 @@
 
 ## 启动
 
+服务由 **launchd** 托管（`com.daxmate.qqplayer`）：登录后自动启动，进程崩溃自动拉起。
+
 ```bash
-./启动.command            # 一键启动（iCloud 歌曲库，自动开浏览器）
-# 或
-./venv/bin/python backend.py [歌曲库路径]
-# 默认端口 17627，访问 http://localhost:17627
+./deploy.sh              # 部署/更新：拉代码 → 装依赖 → 构建前端 → 重启服务
 ```
+
+手动控制：
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.daxmate.qqplayer   # 重启服务
+launchctl bootout gui/$(id -u)/com.daxmate.qqplayer        # 停止服务
+./venv/bin/python backend.py [歌曲库路径]                    # 前台调试
+```
+
+- 默认端口 **17627**，访问 http://localhost:17627
+- 日志：`~/Library/Logs/qqplayer/out.log` / `err.log`
 
 ## 开发
 
