@@ -86,6 +86,7 @@ import {
   loadFavorites,
   setupKeyboardShortcuts,
   setupMediaSession,
+  setupPlaybackFlush,
   currentLineIndex,
 } from "./composables/usePlayer.js";
 
@@ -100,6 +101,7 @@ onMounted(() => {
   loadFavorites();
   setupKeyboardShortcuts();
   setupMediaSession();
+  setupPlaybackFlush();
 });
 </script>
 

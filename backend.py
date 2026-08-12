@@ -14,6 +14,7 @@ import re
 import sys
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
@@ -39,6 +40,11 @@ DEFAULT_PORT = 17627
 # 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）
 DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
 FAVORITES_FILE = DATA_DIR / "favorites.json"
+PLAYBACK_FILE = DATA_DIR / "playback.json"
+# 播放记录滚动保留上限（超了删最旧）
+PLAYBACK_LIMIT = 5000
+# 播放时长少于该秒数视为误触，不记录
+PLAYBACK_MIN_SECONDS = 3
 
 app = FastAPI(title="music-player")
 
@@ -162,6 +168,116 @@ async def api_favorites_toggle(body: dict):
         favorited = True
     _save_favorites(paths)
     return {"path": path, "favorited": favorited}
+
+
+# ============ 播放记录（完整历史，append-only + 滚动截断）============
+
+# 写锁：避免并发上报时读改写竞争丢数据
+_playback_lock = threading.Lock()
+
+
+def _load_playback() -> list[dict]:
+    """加载全部播放记录（文件不存在/损坏返回空）"""
+    try:
+        data = json.loads(PLAYBACK_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_playback(records: list[dict]):
+    """保存播放记录（写失败不影响播放功能）"""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        PLAYBACK_FILE.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _append_playback(record: dict):
+    """追加一条播放记录；超过 PLAYBACK_LIMIT 时删最旧"""
+    with _playback_lock:
+        records = _load_playback()
+        records.append(record)
+        if len(records) > PLAYBACK_LIMIT:
+            records = records[-PLAYBACK_LIMIT:]
+        _save_playback(records)
+
+
+def _playback_record(body: dict) -> dict | None:
+    """校验并规整一条播放记录；非法/误触（< PLAYBACK_MIN_SECONDS）返回 None"""
+    path = str(body.get("path", "")).strip()
+    played = float(body.get("played", 0) or 0)
+    if not path or played < PLAYBACK_MIN_SECONDS:
+        return None
+    try:
+        duration = float(body.get("duration", 0) or 0)
+        ratio = float(body.get("ratio", 0) or 0)
+    except (TypeError, ValueError):
+        duration, ratio = 0.0, 0.0
+    record = {
+        "ts": body.get("ts") or datetime.now(timezone.utc).isoformat(),
+        "path": path,
+        "name": str(body.get("name", "") or ""),
+        "artist": str(body.get("artist", "") or ""),
+        "album": str(body.get("album", "") or ""),
+        "played": round(played, 1),
+        "duration": round(duration, 1),
+        "ratio": round(ratio, 4),
+        "completed": bool(body.get("completed", False)),
+        "source": str(body.get("source", "manual") or "manual"),
+        "mode": str(body.get("mode", "continuous") or "continuous"),
+        "device": str(body.get("device", "") or ""),
+    }
+    return record
+
+
+@app.post("/api/playback")
+async def api_playback(body: dict):
+    """上报一条播放记录（切歌/暂停/播完时前端调用）"""
+    record = _playback_record(body)
+    if record is None:
+        return {"ok": False, "reason": "invalid"}
+    _append_playback(record)
+    return {"ok": True}
+
+
+@app.get("/api/playback")
+def api_playback_list():
+    """返回全部播放记录（按时间倒序，最新在前）"""
+    records = _load_playback()
+    records.sort(key=lambda r: r.get("ts", ""), reverse=True)
+    return {"records": records, "count": len(records), "limit": PLAYBACK_LIMIT}
+
+
+@app.get("/api/playback/stats")
+def api_playback_stats():
+    """播放统计聚合：每首歌的播放次数/最近播放/总时长/完成度（喂每日三首推荐）"""
+    stats: dict[str, dict] = {}
+    for r in _load_playback():
+        path = r.get("path", "")
+        s = stats.setdefault(
+            path,
+            {
+                "path": path,
+                "name": r.get("name", ""),
+                "artist": r.get("artist", ""),
+                "album": r.get("album", ""),
+                "plays": 0,
+                "totalPlayed": 0.0,
+                "lastPlayed": "",
+                "completed": 0,
+            },
+        )
+        s["plays"] += 1
+        s["totalPlayed"] = round(s["totalPlayed"] + r.get("played", 0), 1)
+        if r.get("completed"):
+            s["completed"] += 1
+        ts = r.get("ts", "")
+        if ts > s["lastPlayed"]:
+            s["lastPlayed"] = ts
+    songs = sorted(stats.values(), key=lambda s: s["lastPlayed"], reverse=True)
+    return {"count": len(songs), "songs": songs}
 
 
 @app.get("/api/songs")

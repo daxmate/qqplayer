@@ -82,6 +82,8 @@ const {
   removeFromQueue,
   setupKeyboardShortcuts,
   setupMediaSession,
+  setupPlaybackFlush,
+  _resetPlaybackSession,
 } = await import("../composables/usePlayer.js");
 
 const RESET = {
@@ -106,12 +108,14 @@ const RESET = {
   volume: 1.0,
   muted: false,
   favorites: [],
+  lastSource: "manual",
 };
 
 beforeEach(() => {
   Object.assign(state, RESET);
   _resetKaraokeAnchor();
   _resetPlayMode();
+  _resetPlaybackSession();
   vi.restoreAllMocks();
   vi.stubGlobal("localStorage", localStorageStub);
   for (const k of Object.keys(lsStore)) delete lsStore[k];
@@ -1080,8 +1084,7 @@ describe("歌词显示设置（lyricSettings）", () => {
   });
 });
 
-// ============ MediaSession 系统媒体键 ============
-// navigator.mediaSession stub：记录 setActionHandler 绑定的处理器与 metadata/playbackState
+// ============ MediaSession 系统媒体键 ============// navigator.mediaSession stub：记录 setActionHandler 绑定的处理器与 metadata/playbackState
 function createMediaSessionStub() {
   const handlers = {};
   const ms = {
@@ -1302,5 +1305,199 @@ describe("MediaSession 系统媒体键", () => {
     handlers.play();
     expect(a.currentTime).toBe(0);
     expect(a.paused).toBe(false);
+  });
+});
+
+// ============ 播放统计（会话跟踪 + 上报）============
+describe("播放统计", () => {
+  const audio = () => FakeAudio.instances[0];
+
+  // 捕获 fetch POST /api/playback 的调用
+  function stubPlaybackFetch() {
+    const calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, opts) => {
+        if (url === "/api/playback" && opts?.method === "POST") {
+          calls.push(JSON.parse(opts.body));
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    return calls;
+  }
+
+  // 模拟开始播放一首歌：先 selectSong 再触发 play 事件（Date.now 受控）
+  async function startPlaying(path = "/a.mp3", name = "A") {
+    state.songs = [{ path, name, artist: "X", album: "Y" }];
+    await selectSong(0);
+    const a = audio();
+    a.duration = 200;
+    state.duration = 200;
+    a.listeners["play"](); // 触发 play 事件 → 建会话
+    return a;
+  }
+
+  it("播放后暂停 → 上报一条记录（含细节字段）", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying();
+    vi.setSystemTime(new Date("2026-08-12T12:00:30Z")); // 播了 30s
+    const a = audio();
+    a.listeners["pause"]();
+    vi.useRealTimers();
+
+    expect(calls.length).toBe(1);
+    const rec = calls[0];
+    expect(rec.path).toBe("/a.mp3");
+    expect(rec.name).toBe("A");
+    expect(rec.artist).toBe("X");
+    expect(rec.album).toBe("Y");
+    expect(rec.played).toBe(30);
+    expect(rec.duration).toBe(200);
+    expect(rec.ratio).toBe(0.15);
+    expect(rec.completed).toBe(false);
+    expect(rec.source).toBe("manual");
+    expect(rec.mode).toBe("continuous");
+    expect(rec.device).toBe("mac");
+    expect(rec.ts).toBeTruthy();
+  });
+
+  it("播放不足 3 秒 → 不上报（误触）", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying();
+    vi.setSystemTime(new Date("2026-08-12T12:00:02Z")); // 2s
+    const a = audio();
+    a.listeners["pause"]();
+    vi.useRealTimers();
+    expect(calls.length).toBe(0);
+  });
+
+  it("自然播完（ended）→ completed=true 上报", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying();
+    vi.setSystemTime(new Date("2026-08-12T12:03:20Z")); // 200s = 完整播完
+    const a = audio();
+    a.ended = true;
+    a.listeners["ended"]();
+    vi.useRealTimers();
+
+    expect(calls.length).toBe(1);
+    expect(calls[0].completed).toBe(true);
+    expect(calls[0].ratio).toBe(1);
+  });
+
+  it("切歌 → 上报旧歌会话；新歌播放再建新会话", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying("/a.mp3", "A");
+    vi.setSystemTime(new Date("2026-08-12T12:00:20Z"));
+    // 切到 B（手动选歌 source=manual）
+    state.songs = [
+      { path: "/a.mp3", name: "A", artist: "X", album: "Y" },
+      { path: "/b.mp3", name: "B", artist: "X", album: "Y" },
+    ];
+    await selectSong(1); // selectSong 内部 flush 旧会话
+    expect(calls.length).toBe(1);
+    expect(calls[0].path).toBe("/a.mp3");
+    expect(calls[0].played).toBe(20);
+
+    // 播放 B → 建新会话
+    const a = audio();
+    a.duration = 100;
+    state.duration = 100;
+    a.listeners["play"]();
+    vi.setSystemTime(new Date("2026-08-12T12:00:50Z")); // 播了 30s
+    a.listeners["pause"]();
+    vi.useRealTimers();
+    expect(calls.length).toBe(2);
+    expect(calls[1].path).toBe("/b.mp3");
+    expect(calls[1].played).toBe(30);
+  });
+
+  it("媒体键切歌 → source=media；自动切歌 → source=auto", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying("/a.mp3", "A");
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    vi.setSystemTime(new Date("2026-08-12T12:00:10Z"));
+    await nextSong({ autoPlay: true, source: "media" }); // 媒体键切歌
+    // 切歌上报的是旧歌 A 的会话（手动选的 → manual）
+    expect(calls.length).toBe(1);
+    expect(calls[0].path).toBe("/a.mp3");
+    expect(calls[0].source).toBe("manual");
+
+    // 播 B，模拟播完自动切歌
+    const a = audio();
+    a.duration = 100;
+    state.duration = 100;
+    a.listeners["play"]();
+    vi.setSystemTime(new Date("2026-08-12T12:01:50Z")); // 播 100s
+    a.ended = true;
+    a.listeners["ended"]();
+    expect(calls.length).toBe(2);
+    expect(calls[1].path).toBe("/b.mp3");
+    expect(calls[1].completed).toBe(true);
+    expect(calls[1].source).toBe("media"); // B 由媒体键选中 → source=media
+    vi.useRealTimers();
+  });
+
+  it("页面关闭（pagehide）→ sendBeacon 兜底上报", async () => {
+    const beacon = vi.fn();
+    vi.stubGlobal("navigator", { ...navigator, sendBeacon: beacon });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying();
+    vi.setSystemTime(new Date("2026-08-12T12:00:15Z"));
+
+    // 捕获 pagehide 监听
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const un = setupPlaybackFlush();
+    const call = addSpy.mock.calls.find((c) => c[0] === "pagehide");
+    call[1](); // 触发
+    vi.useRealTimers();
+
+    expect(beacon).toHaveBeenCalledTimes(1);
+    const [url, blob] = beacon.mock.calls[0];
+    expect(url).toBe("/api/playback");
+    const text = await blob.text();
+    const rec = JSON.parse(text);
+    expect(rec.path).toBe("/a.mp3");
+    expect(rec.played).toBe(15);
+    un();
+  });
+
+  it("跟唱模式句间暂停不上报，播完/切模式才上报", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying();
+    state.mode = "karaoke"; // 切到跟唱模式
+    await nextTick(); // 让 mode watch 生效（flush 旧会话，played=0 不上报）
+    const a = audio();
+    a.duration = 300;
+    state.duration = 300;
+    a.listeners["play"](); // 重新建会话（karaoke 模式）
+    vi.setSystemTime(new Date("2026-08-12T12:00:05Z"));
+    a.listeners["pause"](); // 句间暂停 → 不上报
+    vi.setSystemTime(new Date("2026-08-12T12:00:10Z"));
+    a.listeners["play"](); // 下一句
+    vi.setSystemTime(new Date("2026-08-12T12:00:15Z"));
+    state.mode = "continuous"; // 切回连播 → 上报整段
+    await nextTick();
+    vi.useRealTimers();
+
+    expect(calls.length).toBe(1);
+    expect(calls[0].played).toBe(15); // 5+10s 累计（从 karaoke play 到切模式）
   });
 });

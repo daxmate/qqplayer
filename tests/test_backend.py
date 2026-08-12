@@ -1,5 +1,6 @@
 """backend.py API 测试（测试数据用 tmp_path 现场生成假 mp3/srt，不依赖仓库内真实音频）"""
 
+import json
 import sys
 from pathlib import Path
 
@@ -226,6 +227,105 @@ def test_api_favorites_missing_path(tmp_path, monkeypatch):
     monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
     r = client.post("/api/favorites/toggle", json={})
     assert r.status_code == 400
+
+
+# ============ 播放记录 ============
+
+
+def _playback(tmp_path, monkeypatch):
+    """把 PLAYBACK_FILE 指到临时目录并返回该路径"""
+    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    p = tmp_path / "playback.json"
+    monkeypatch.setattr(backend, "PLAYBACK_FILE", p)
+    return p
+
+
+def _rec(**overrides):
+    r = {
+        "ts": "2026-08-12T12:00:00+00:00",
+        "path": "/songs/a.mp3",
+        "name": "A",
+        "artist": "X",
+        "album": "Y",
+        "played": 180.5,
+        "duration": 200.0,
+        "ratio": 0.9,
+        "completed": False,
+        "source": "manual",
+        "mode": "continuous",
+        "device": "mac",
+    }
+    r.update(overrides)
+    return r
+
+
+def test_api_playback_append(tmp_path, monkeypatch):
+    p = _playback(tmp_path, monkeypatch)
+    r = client.post("/api/playback", json=_rec())
+    assert r.json() == {"ok": True}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert len(data) == 1
+    assert data[0]["path"] == "/songs/a.mp3"
+    assert data[0]["played"] == 180.5
+    assert data[0]["ratio"] == 0.9
+
+
+def test_api_playback_too_short_skipped(tmp_path, monkeypatch):
+    _playback(tmp_path, monkeypatch)
+    r = client.post("/api/playback", json=_rec(played=1.5))
+    assert r.json() == {"ok": False, "reason": "invalid"}
+    # 2.9s 也不记（阈值 3s）
+    client.post("/api/playback", json=_rec(played=2.9))
+    assert not (tmp_path / "playback.json").exists()
+
+
+def test_api_playback_missing_path(tmp_path, monkeypatch):
+    _playback(tmp_path, monkeypatch)
+    r = client.post("/api/playback", json=_rec(path=""))
+    assert r.json() == {"ok": False, "reason": "invalid"}
+
+
+def test_api_playback_rollover_limit(tmp_path, monkeypatch):
+    p = _playback(tmp_path, monkeypatch)
+    monkeypatch.setattr(backend, "PLAYBACK_LIMIT", 5)
+    for i in range(7):
+        client.post("/api/playback", json=_rec(path=f"/songs/{i}.mp3", ts=f"2026-08-12T12:0{i}:00+00:00"))
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert len(data) == 5  # 只留最近 5 条
+    assert data[0]["path"] == "/songs/2.mp3"
+    assert data[-1]["path"] == "/songs/6.mp3"
+
+
+def test_api_playback_list_sorted(tmp_path, monkeypatch):
+    _playback(tmp_path, monkeypatch)
+    client.post("/api/playback", json=_rec(ts="2026-08-12T10:00:00+00:00"))
+    client.post("/api/playback", json=_rec(ts="2026-08-12T11:00:00+00:00", path="/songs/b.mp3"))
+    r = client.get("/api/playback")
+    body = r.json()
+    assert body["count"] == 2
+    assert body["records"][0]["path"] == "/songs/b.mp3"  # 最新在前
+    assert body["limit"] == 5000
+
+
+def test_api_playback_stats(tmp_path, monkeypatch):
+    _playback(tmp_path, monkeypatch)
+    client.post("/api/playback", json=_rec(played=100, completed=True))
+    client.post("/api/playback", json=_rec(played=50, completed=False))
+    client.post("/api/playback", json=_rec(path="/songs/b.mp3", name="B", played=30))
+    r = client.get("/api/playback/stats")
+    songs = r.json()["songs"]
+    assert r.json()["count"] == 2
+    a = next(s for s in songs if s["path"] == "/songs/a.mp3")
+    assert a["plays"] == 2
+    assert a["totalPlayed"] == 150.0
+    assert a["completed"] == 1
+    assert a["lastPlayed"] == "2026-08-12T12:00:00+00:00"
+
+
+def test_api_playback_stats_empty(tmp_path, monkeypatch):
+    _playback(tmp_path, monkeypatch)
+    r = client.get("/api/playback/stats")
+    assert r.json() == {"count": 0, "songs": []}
 
 
 def test_scan_duration(song_library):

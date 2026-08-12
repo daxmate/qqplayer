@@ -26,6 +26,7 @@ export const state = reactive({
   volume: 1.0, // 音量 0~1
   muted: false,
   favorites: [], // 收藏歌曲 path 列表（后端持久化）
+  lastSource: "manual", // 最近一次选歌来源：manual | auto | media（播放统计用）
 });
 
 // ============ 歌词显示设置（localStorage 持久化）============
@@ -171,6 +172,80 @@ export function removeFromQueue(index) {
   _resetPlayMode();
 }
 
+// ============ 播放会话跟踪（上报播放统计）============
+// 每次完整播放会话（选歌→播放→切走/暂停/播完）结束后上报一条记录到 /api/playback
+// 细节：记录实际播放秒数/总时长/完成度/来源/模式；少于 3 秒的误触不记
+
+let playbackSession = null; // { path,name,artist,album,startedAt,lastTickAt }
+
+function currentPlaybackSource() {
+  // 播放来源：媒体键/自动切歌/手动选歌（后续可扩展）
+  return state.lastSource || "manual";
+}
+
+// 上报一条播放记录（POST /api/playback；失败静默，不影响播放）
+async function reportPlayback(rec) {
+  try {
+    await fetch("/api/playback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rec),
+    });
+  } catch {
+    /* 忽略 */
+  }
+}
+
+// 结束当前播放会话并上报（播放不足 3 秒视为误触不记）
+// 返回生成的记录（未达阈值返回 null）；由调用方决定发送方式（fetch/sendBeacon）
+export function flushPlaybackSession() {
+  const s = playbackSession;
+  if (!s) return null;
+  playbackSession = null;
+  const played = (Date.now() - s.startedAt) / 1000;
+  if (played < 3) return null; // 误触/短切
+  const rec = {
+    ts: new Date().toISOString(),
+    path: s.path,
+    name: s.name,
+    artist: s.artist,
+    album: s.album,
+    played: Math.round(played * 10) / 10,
+    duration: s.duration || 0,
+    ratio: s.duration ? Math.min(1, Math.round((played / s.duration) * 100) / 100) : 0,
+    completed: s.completed || false,
+    source: s.source || "manual",
+    mode: s.mode || "continuous",
+    device: s.device || "mac",
+  };
+  reportPlayback(rec);
+  return rec;
+}
+
+// 开始跟踪当前歌曲的播放会话（歌曲变化时由 selectSong 调用；audio play 事件里建）
+function startPlaybackSession() {
+  const song = state.currentSong;
+  if (!song) return;
+  playbackSession = {
+    path: song.path,
+    name: song.name || "",
+    artist: song.artist || "",
+    album: song.album || "",
+    duration: state.duration || audio.duration || 0,
+    startedAt: Date.now(),
+    completed: false,
+    source: currentPlaybackSource(),
+    mode: state.mode,
+    device: "mac",
+  };
+}
+
+// 仅供测试：重置播放会话跟踪状态
+// 注意：模块级 playbackSession 会跨测试残留，beforeEach 必须调用
+export function _resetPlaybackSession() {
+  playbackSession = null;
+}
+
 // ============ 键盘快捷键 ============
 // 空格播放/暂停，←/→ 快退/快进 10s，↑/↓ 音量 ±10%
 // 媒体键（MediaPlayPause 等）仅在无 MediaSession 的环境兜底处理（键盘事件），
@@ -200,11 +275,11 @@ const SHORTCUT_HANDLER = (e) => {
       break;
     case "MediaTrackNext":
       e.preventDefault();
-      nextSong({ autoPlay: true });
+      nextSong({ autoPlay: true, source: "media" });
       break;
     case "MediaTrackPrevious":
       e.preventDefault();
-      prevSong({ autoPlay: true });
+      prevSong({ autoPlay: true, source: "media" });
       break;
     case "MediaStop":
       e.preventDefault();
@@ -317,8 +392,8 @@ export function setupMediaSession() {
   const handlers = {
     play: () => play(),
     pause: () => pause(),
-    previoustrack: () => prevSong({ autoPlay: true }),
-    nexttrack: () => nextSong({ autoPlay: true }),
+    previoustrack: () => prevSong({ autoPlay: true, source: "media" }),
+    nexttrack: () => nextSong({ autoPlay: true, source: "media" }),
     seekto: (details) => {
       if (details && typeof details.seekTime === "number") seek(details.seekTime);
     },
@@ -474,6 +549,12 @@ export async function loadSongs() {
 // ============ 选歌 ============
 export async function selectSong(index, opts = {}) {
   if (index < 0 || index >= state.songs.length) return;
+  // 切歌：先上报旧歌的播放会话（若正在播放）
+  // 自然播完（ended 触发自动切歌）时 audio.ended=true → 标记 completed
+  if (playbackSession) playbackSession.completed = audio.ended;
+  flushPlaybackSession();
+  // 记录本次选歌来源（播放事件建会话时使用）
+  state.lastSource = opts.source || "manual";
   // 播放历史：记录旧歌（随机模式"上一首"回退）；回退本身不记录
   if (opts.record !== false && state.currentIndex >= 0 && state.currentIndex !== index) {
     playHistory.push(state.currentIndex);
@@ -539,7 +620,7 @@ export function play() {
   // 没选歌时：自动选第一首播放（媒体键/播放键直接开播）
   if (!state.currentSong) {
     if (state.songs.length) {
-      selectSong(0, { autoPlay: true });
+      selectSong(0, { autoPlay: true, source: "auto" });
     }
     return;
   }
@@ -774,14 +855,34 @@ audio.addEventListener("timeupdate", () => {
 audio.addEventListener("play", () => {
   state.isPlaying = true;
   syncMediaPlaybackState();
+  // 真正开始出声才建播放会话：选歌但未播放不记；
+  // 若已跟踪的歌不同（换歌后立即播放）→ 先上报旧会话
+  const song = state.currentSong;
+  if (song && (!playbackSession || playbackSession.path !== song.path)) {
+    flushPlaybackSession();
+    startPlaybackSession();
+  }
 });
 audio.addEventListener("pause", () => {
   state.isPlaying = false;
   syncMediaPlaybackState();
+  // 暂停：结束当前播放会话并上报（跟唱模式句间自动暂停也会触发——
+  // 但因每句间隔很短，连续跟唱会被下一句 play 合并？不会——pause 即 flush，
+  // 跟唱模式每句暂停都会产生一条短记录。处理：跟唱模式下不因句间暂停 flush，
+  // 而是等切歌/播完/退出模式时再报。
+  // 这里仅对连播模式的主动暂停 flush；跟唱模式交还给时间锚点逻辑。
+  if (state.mode === "continuous" && playbackSession) {
+    flushPlaybackSession();
+  }
 });
 audio.addEventListener("ended", () => {
   state.isPlaying = false;
   syncMediaPlaybackState();
+  // 自然播完：标记 completed 后上报（repeatOne 除外，同一首歌继续听）
+  if (playbackSession && state.playMode !== "repeatOne") {
+    playbackSession.completed = true;
+    flushPlaybackSession();
+  }
   if (state.mode !== "continuous") return;
   if (state.playMode === "repeatOne") {
     // 单曲循环：重播本首
@@ -791,11 +892,11 @@ audio.addEventListener("ended", () => {
     return;
   }
   if (state.playMode === "shuffle") {
-    nextShuffle({ autoPlay: true });
+    nextShuffle({ autoPlay: true, source: "auto" });
     return;
   }
   // 列表循环：顺序下一首并自动播放（连播 bug：只切歌不播放）
-  nextSong({ autoPlay: true });
+  nextSong({ autoPlay: true, source: "auto" });
 });
 
 // ============ 页面标题 ============
@@ -805,3 +906,53 @@ watch(
     document.title = name ? `QQ Player - ${name}` : "🎵 QQ Player";
   },
 );
+
+// ============ 播放统计：模式切换/页面关闭兜底 ============
+// 切到跟唱/连播：当前会话结束上报（跟唱模式句间暂停不逐条上报，切歌/切模式/播完才记）
+watch(
+  () => state.mode,
+  () => {
+    flushPlaybackSession();
+  },
+);
+
+// 页面关闭/刷新：sendBeacon 兜底上报未结束的会话（fetch 在卸载时不可靠）
+export function setupPlaybackFlush() {
+  if (typeof window === "undefined") return () => {};
+  const handler = () => {
+    // 直接构造并 beacon：不能用 flushPlaybackSession（它走 fetch，卸载时会被取消）
+    const s = playbackSession;
+    if (!s) return;
+    playbackSession = null;
+    const played = (Date.now() - s.startedAt) / 1000;
+    if (played < 3) return;
+    const rec = {
+      ts: new Date().toISOString(),
+      path: s.path,
+      name: s.name,
+      artist: s.artist,
+      album: s.album,
+      played: Math.round(played * 10) / 10,
+      duration: s.duration || 0,
+      ratio: s.duration ? Math.min(1, Math.round((played / s.duration) * 100) / 100) : 0,
+      completed: s.completed || false,
+      source: s.source || "manual",
+      mode: s.mode || "continuous",
+      device: s.device || "mac",
+    };
+    try {
+      navigator.sendBeacon(
+        "/api/playback",
+        new Blob([JSON.stringify(rec)], { type: "application/json" }),
+      );
+    } catch {
+      /* 忽略 */
+    }
+  };
+  window.addEventListener("pagehide", handler);
+  window.addEventListener("beforeunload", handler);
+  return () => {
+    window.removeEventListener("pagehide", handler);
+    window.removeEventListener("beforeunload", handler);
+  };
+}
