@@ -59,13 +59,77 @@ export const lyricSettings = reactive({ ...LYRIC_SETTINGS_DEFAULTS });
 // ============ 界面偏好（localStorage 持久化）============
 export const UI_SETTINGS_KEY = "qqplayer.uiSettings.v1";
 
+export const THEME_OPTIONS = ["dark", "light", "auto"]; // 'auto' = 跟随系统
+
+export const ACCENT_OPTIONS = [
+  { key: "orange", color: "#ff7e5f", color2: "#feb47b" },
+  { key: "blue", color: "#5b9dff", color2: "#8ab4ff" },
+  { key: "green", color: "#34d399", color2: "#6ee7b7" },
+  { key: "purple", color: "#a78bfa", color2: "#c4b5fd" },
+  { key: "pink", color: "#f472b6", color2: "#f9a8d4" },
+  { key: "teal", color: "#2dd4bf", color2: "#5eead4" },
+];
+
 export const UI_SETTINGS_DEFAULTS = {
   showSongInfo: false, // 跟唱模式歌词面板顶部显示当前歌曲信息（歌名/歌手）
   karaokeShowTime: false, // 跟唱模式每句显示起止时间戳
   karaokeShowNum: true, // 跟唱模式每句左侧显示行号（默认显示，用户可关）
+  theme: "dark", // 主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
+  accent: "orange", // 强调色预设 key（见 ACCENT_OPTIONS）
+  coverBlur: false, // 封面模糊背景（播放器背景铺当前歌曲封面模糊图）
+  compact: false, // 紧凑模式（减小间距与尺寸，提高信息密度）
 };
 
 export const uiSettings = reactive({ ...UI_SETTINGS_DEFAULTS });
+
+// ============ 主题 / 强调色 / 封面模糊 / 紧凑模式应用（html data-* 属性驱动 CSS）============
+let themeMedia = null;
+
+function onPrefersColorChange() {
+  if (uiSettings.theme === "auto") applyTheme();
+}
+
+function applyTheme() {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  const mq =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: light)")
+      : null;
+  if (mq && mq !== themeMedia) {
+    themeMedia?.removeEventListener?.("change", onPrefersColorChange);
+    themeMedia = mq;
+    mq.addEventListener?.("change", onPrefersColorChange);
+  }
+  const resolved =
+    uiSettings.theme === "auto" ? (mq?.matches ? "light" : "dark") : uiSettings.theme;
+  root.dataset.theme = resolved;
+}
+
+function applyAccent() {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.accent = uiSettings.accent;
+}
+
+function applyCompact() {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (uiSettings.compact) root.dataset.compact = "true";
+  else delete root.dataset.compact;
+}
+
+function applyCoverBlur() {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (uiSettings.coverBlur) root.dataset.blur = "true";
+  else delete root.dataset.blur;
+}
+
+// 设置变化即时应用
+watch(() => uiSettings.theme, applyTheme);
+watch(() => uiSettings.accent, applyAccent);
+watch(() => uiSettings.compact, applyCompact);
+watch(() => uiSettings.coverBlur, applyCoverBlur);
 
 function loadUiSettings() {
   try {
@@ -80,6 +144,12 @@ function loadUiSettings() {
   }
 }
 loadUiSettings();
+
+// 启动时按持久化值应用一次（必须在 loadUiSettings 之后）
+applyTheme();
+applyAccent();
+applyCompact();
+applyCoverBlur();
 
 watch(
   uiSettings,

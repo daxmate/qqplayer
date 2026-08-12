@@ -345,16 +345,16 @@ watch(
 .kline.near .kline-jp {
   font-size: calc(var(--fs-active, 20px) * 0.75);
   font-weight: 500;
-  color: rgba(238, 240, 247, 0.72);
+  color: var(--text-soft);
 }
 .kline.near .kline-roma {
   font-size: calc(var(--fs-active, 20px) * 0.575);
-  color: rgba(238, 240, 247, 0.6);
+  color: var(--text-faint);
   opacity: 0.85;
 }
 .kline.near .kline-zh {
   font-size: calc(var(--fs-active, 20px) * 0.6);
-  color: rgba(238, 240, 247, 0.6);
+  color: var(--text-faint);
   opacity: 0.8;
 }
 /* 更远句：整体更淡（最底层） */
@@ -368,7 +368,7 @@ watch(
 .kline.active .kline-jp {
   font-size: var(--fs-active, 20px);
   font-weight: 700;
-  color: #ffd9c9;
+  color: var(--accent-text);
 }
 .kline.active .kline-roma {
   font-size: calc(var(--fs-active, 20px) * 0.625);
@@ -390,7 +390,7 @@ watch(
   transition: color 0.3s;
 }
 .kline.active .kline-time {
-  color: #ffd9c9;
+  color: var(--accent-text);
 }
 /* 行号圆点 */
 .kline-num {
@@ -415,15 +415,15 @@ watch(
 }
 /* AB 循环区间：细绿竖条 + 行号绿色（active 保持焦点高亮） */
 .kline.ab-in:not(.active) {
-  border-left-color: rgba(74, 222, 128, 0.55);
+  border-left-color: var(--green-border);
 }
 .kline.ab-in:not(.active) .kline-num {
-  background: rgba(74, 222, 128, 0.22);
-  color: #4ade80;
+  background: var(--green-soft);
+  color: var(--green);
 }
 /* AB 端点 A/B 徽标：绿色渐变（末尾定义，特异性覆盖 active 与区间底色） */
 .kline.ab-in .kline-num.ab-badge {
-  background: linear-gradient(135deg, #22c55e, #4ade80);
+  background: linear-gradient(135deg, var(--green-grad1), var(--green));
   color: #fff;
 }
 .kp-empty {

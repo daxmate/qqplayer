@@ -291,7 +291,7 @@ function fmt(t) {
   height: 14px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent2));
-  box-shadow: 0 2px 6px rgba(255, 126, 95, 0.4);
+  box-shadow: 0 2px 6px var(--accent-glow);
 }
 .progress-empty {
   cursor: default;
@@ -330,11 +330,11 @@ function fmt(t) {
   font-size: 22px;
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
-  box-shadow: 0 4px 14px rgba(255, 126, 95, 0.35);
+  box-shadow: 0 4px 14px var(--accent-glow2);
 }
 .btn.on {
-  background: rgba(255, 126, 95, 0.3);
-  color: #ffb59d;
+  background: var(--accent-on);
+  color: var(--accent-ink);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 /* 带文字的按钮（变速/跟唱/译） */
@@ -382,7 +382,7 @@ function fmt(t) {
   height: 12px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent2));
-  box-shadow: 0 2px 6px rgba(255, 126, 95, 0.4);
+  box-shadow: 0 2px 6px var(--accent-glow);
 }
 .btn:disabled {
   opacity: 0.35;

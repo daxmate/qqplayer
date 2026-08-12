@@ -1,5 +1,6 @@
 <template>
   <div class="app">
+    <div v-if="blurCoverUrl" class="bg-blur" :style="{ backgroundImage: `url(${blurCoverUrl})` }" />
     <!-- 顶栏 -->
     <header class="topbar">
       <h1 class="logo">
@@ -116,9 +117,16 @@ import {
   toggleControls,
   toggleMusicLib,
   currentLineIndex,
+  uiSettings,
 } from "./composables/usePlayer.js";
 
 const settingsOpen = ref(false);
+
+// 封面模糊背景：当前歌曲封面 URL（开关 + 有歌时显示）
+const blurCoverUrl = computed(() => {
+  if (!uiSettings.coverBlur || !state.currentSong) return "";
+  return "/api/cover?path=" + encodeURIComponent(state.currentSong.path);
+});
 
 // 面板组合 class：控制 grid 列数/区域（4 种状态）
 const panelsActive = computed(() => state.musicLibOpen || state.playlistOpen);
@@ -148,10 +156,34 @@ onMounted(() => {
 
 <style scoped>
 .app {
+  position: relative;
   height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+/* 封面模糊背景层（fixed 全屏垫底，面板半透明后透出） */
+.bg-blur {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(64px) saturate(1.5);
+  transform: scale(1.2); /* 模糊后边缘不留黑 */
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.5s;
+}
+.bg-blur::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--blur-mask);
+}
+.app > *:not(.bg-blur) {
+  position: relative;
+  z-index: 1;
 }
 /* 顶栏 */
 .topbar {
@@ -159,7 +191,7 @@ onMounted(() => {
   align-items: center;
   gap: 18px;
   padding: 12px 20px;
-  background: rgba(20, 22, 31, 0.9);
+  background: var(--topbar-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -185,7 +217,7 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 700;
   color: #fff;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 3px 8px var(--shadow-sm);
   flex-shrink: 0;
 }
 .q1 {

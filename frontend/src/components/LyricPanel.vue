@@ -193,16 +193,16 @@ function seekLine(item) {
 .lyr.near .lyr-jp {
   font-size: calc(var(--fs-active, 20px) * 0.75);
   font-weight: 500;
-  color: rgba(238, 240, 247, 0.72);
+  color: var(--text-soft);
 }
 .lyr.near .lyr-roma {
   font-size: calc(var(--fs-active, 20px) * 0.575);
-  color: rgba(238, 240, 247, 0.6);
+  color: var(--text-faint);
   opacity: 0.85;
 }
 .lyr.near .lyr-zh {
   font-size: calc(var(--fs-active, 20px) * 0.6);
-  color: rgba(238, 240, 247, 0.6);
+  color: var(--text-faint);
   opacity: 0.8;
 }
 /* 更远句：整体更淡（最底层） */
@@ -216,7 +216,7 @@ function seekLine(item) {
 .lyr.active .lyr-jp {
   font-size: var(--fs-active, 20px);
   font-weight: 700;
-  color: #ffd9c9;
+  color: var(--accent-text);
 }
 .lyr.active .lyr-roma {
   font-size: calc(var(--fs-active, 20px) * 0.625);

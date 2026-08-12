@@ -52,5 +52,61 @@ await page.locator(".nav-item:has-text('播放')").click();
 await page.waitForTimeout(400);
 await page.screenshot({ path: "/tmp/qqp-settings-playback.png" });
 
+// ============ 第四批：界面分类 ============
+await page.locator(".nav-item:has-text('界面')").click();
+await page.waitForTimeout(400);
+
+// 主题 seg 三选项
+const segBtns = await page.locator(".settings-scroll .seg .seg-btn").allTextContents();
+console.log("主题选项:", segBtns.join("/"));
+// 强调色 swatch 数量
+const swatches = await page.locator(".accent-swatch").count();
+console.log("强调色 swatch:", swatches);
+// 封面模糊/紧凑开关
+const blurToggle = await page.locator(".toggle-row:has-text('封面模糊')").count();
+const compactToggle = await page.locator(".toggle-row:has-text('紧凑')").count();
+console.log("封面模糊开关:", blurToggle, "紧凑开关:", compactToggle);
+await page.screenshot({ path: "/tmp/qqp-settings-ui.png" });
+
+// 切浅色主题 → html data-theme
+await page.locator(".seg-btn:has-text('浅色')").click();
+await page.waitForTimeout(300);
+let theme = await page.evaluate(() => document.documentElement.dataset.theme);
+console.log("浅色主题 → data-theme =", theme);
+await page.screenshot({ path: "/tmp/qqp-settings-light.png" });
+
+// 换强调色 → data-accent
+await page.locator(".accent-swatch[title='blue']").click();
+await page.waitForTimeout(300);
+const accent = await page.evaluate(() => document.documentElement.dataset.accent);
+console.log("强调色 blue → data-accent =", accent);
+
+// 开封面模糊 + 紧凑 → data-blur / data-compact
+await page.locator(".toggle-row:has-text('封面模糊')").click();
+await page.locator(".toggle-row:has-text('紧凑')").click();
+await page.waitForTimeout(400);
+const blur = await page.evaluate(() => document.documentElement.dataset.blur);
+const compact = await page.evaluate(() => document.documentElement.dataset.compact);
+console.log("封面模糊 → data-blur =", blur, "紧凑 → data-compact =", compact);
+await page.screenshot({ path: "/tmp/qqp-settings-blur-compact.png" });
+
+// 恢复默认 → 主题回深色 / 强调色回 orange / 开关关闭
+await page.locator(".reset-btn").click();
+await page.waitForTimeout(500);
+theme = await page.evaluate(() => document.documentElement.dataset.theme);
+const accentBack = await page.evaluate(() => document.documentElement.dataset.accent);
+const blurBack = await page.evaluate(() => document.documentElement.dataset.blur);
+const compactBack = await page.evaluate(() => document.documentElement.dataset.compact);
+console.log(
+  "恢复默认 → theme =",
+  theme,
+  "accent =",
+  accentBack,
+  "blur =",
+  blurBack,
+  "compact =",
+  compactBack,
+);
+
 console.log("JS 错误:", errors.length ? errors : "无");
 await browser.close();

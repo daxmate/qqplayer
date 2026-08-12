@@ -401,6 +401,60 @@
                     <span class="switch" :class="{ on: uiSettings.karaokeShowNum }"><i /></span>
                   </div>
                 </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="uiSettings.coverBlur = !uiSettings.coverBlur">
+                    <div>
+                      <div class="setting-label">封面模糊背景</div>
+                      <div class="setting-desc">背景铺当前歌曲封面模糊图，面板呈毛玻璃效果</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.coverBlur }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
+                    <div>
+                      <div class="setting-label">紧凑模式</div>
+                      <div class="setting-desc">减小间距与封面尺寸，提高信息密度</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.compact }"><i /></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 主题与强调色 -->
+              <div class="group">
+                <div class="group-title">
+                  <Palette :size="13" />
+                  主题与强调色
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">外观</div>
+                  <div class="seg" style="margin-top: 8px">
+                    <button
+                      v-for="t in themeOptions"
+                      :key="t.value"
+                      class="seg-btn"
+                      :class="{ on: uiSettings.theme === t.value }"
+                      @click="uiSettings.theme = t.value"
+                    >
+                      {{ t.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">强调色</div>
+                  <div class="accent-grid">
+                    <button
+                      v-for="a in ACCENT_OPTIONS"
+                      :key="a.key"
+                      class="accent-swatch"
+                      :class="{ on: uiSettings.accent === a.key }"
+                      :style="{ '--swatch': a.color, '--swatch2': a.color2 }"
+                      :title="a.key"
+                      @click="uiSettings.accent = a.key"
+                    />
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -505,6 +559,7 @@ import {
   Timer,
   Database,
   FileAudio,
+  Palette,
 } from "@lucide/vue";
 import {
   state,
@@ -518,6 +573,7 @@ import {
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
   PLAYBACK_SETTINGS_DEFAULTS,
+  ACCENT_OPTIONS,
 } from "../composables/usePlayer.js";
 import pkg from "../../package.json";
 
@@ -535,6 +591,12 @@ const tab = ref("playback");
 const libInput = ref("");
 const saving = ref(false);
 const error = ref("");
+
+const themeOptions = [
+  { value: "dark", label: "深色" },
+  { value: "light", label: "浅色" },
+  { value: "auto", label: "跟随系统" },
+];
 
 // 音乐库设置（后端持久化）：模板里用 computed 解包，null=还没加载
 const librarySettings = computed(() => state.librarySettings);
@@ -682,7 +744,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--mask);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -695,8 +757,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   border: 1px solid var(--border);
   border-radius: 16px;
   box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.6),
-    0 4px 16px rgba(0, 0, 0, 0.35);
+    0 24px 80px var(--shadow-strong),
+    0 4px 16px var(--shadow-sm);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -794,7 +856,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   height: 20px;
   border-radius: 2px;
   background: linear-gradient(180deg, var(--accent), var(--accent2));
-  box-shadow: 0 0 8px rgba(255, 126, 95, 0.7);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 .content {
@@ -932,7 +994,43 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
   border-color: transparent;
-  box-shadow: 0 2px 8px rgba(255, 126, 95, 0.35);
+  box-shadow: 0 2px 8px var(--accent-glow2);
+}
+
+/* 强调色预设（色板） */
+.accent-grid {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.accent-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--swatch), var(--swatch2));
+  border: 2px solid transparent;
+  transition: all 0.15s;
+  position: relative;
+}
+.accent-swatch:hover {
+  transform: scale(1.12);
+}
+.accent-swatch.on {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--bg);
+  transform: scale(1.1);
+}
+.accent-swatch.on::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
 /* 分段选择器 */
@@ -959,13 +1057,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .seg-btn.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
-  box-shadow: 0 2px 8px rgba(255, 126, 95, 0.35);
+  box-shadow: 0 2px 8px var(--accent-glow2);
 }
 .val-badge {
   font-size: 11px;
   font-weight: 600;
   color: var(--accent);
-  background: rgba(255, 126, 95, 0.14);
+  background: var(--accent-soft);
   padding: 2px 8px;
   border-radius: 8px;
   margin-left: 4px;
@@ -1045,7 +1143,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   border-radius: 50%;
   background: #fff;
   transition: transform 0.2s;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px var(--shadow-sm);
 }
 .switch.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));

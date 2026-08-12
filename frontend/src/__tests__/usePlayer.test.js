@@ -1154,6 +1154,75 @@ describe("界面偏好（uiSettings）", () => {
     expect(uiSettings.karaokeShowNum).toBe(true);
   });
 
+  it("第四批默认值：深色主题 / 橙色强调色 / 封面模糊关 / 紧凑模式关", () => {
+    expect(uiSettings.theme).toBe("dark");
+    expect(uiSettings.accent).toBe("orange");
+    expect(uiSettings.coverBlur).toBe(false);
+    expect(uiSettings.compact).toBe(false);
+  });
+
+  it("修改主题/强调色/紧凑/封面模糊后写入 html dataset（驱动 CSS）", async () => {
+    const html = document.documentElement;
+    uiSettings.theme = "light";
+    uiSettings.accent = "blue";
+    uiSettings.compact = true;
+    uiSettings.coverBlur = true;
+    await nextTick();
+    expect(html.dataset.theme).toBe("light");
+    expect(html.dataset.accent).toBe("blue");
+    expect(html.dataset.compact).toBe("true");
+    expect(html.dataset.blur).toBe("true");
+    // 关闭后移除属性
+    uiSettings.compact = false;
+    uiSettings.coverBlur = false;
+    await nextTick();
+    expect(html.dataset.compact).toBeUndefined();
+    expect(html.dataset.blur).toBeUndefined();
+  });
+
+  it("auto 主题跟随系统 prefers-color-scheme（浅色系统→light，深色系统→dark）", async () => {
+    const listeners = {};
+    const mq = {
+      matches: true,
+      media: "(prefers-color-scheme: light)",
+      addEventListener: (ev, fn) => {
+        listeners[ev] = fn;
+      },
+      removeEventListener: () => {},
+    };
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => mq),
+    );
+    uiSettings.theme = "auto";
+    await nextTick();
+    expect(document.documentElement.dataset.theme).toBe("light");
+    // 系统切到深色 → 自动更新
+    mq.matches = false;
+    listeners.change();
+    await nextTick();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    // 手动指定主题后不再跟随系统
+    uiSettings.theme = "light";
+    await nextTick();
+    expect(document.documentElement.dataset.theme).toBe("light");
+    vi.unstubAllGlobals();
+  });
+
+  it("localStorage 持久化的主题/强调色在启动时应用（data-theme 恢复）", async () => {
+    localStorage.setItem(
+      UI_SETTINGS_KEY,
+      JSON.stringify({ theme: "light", accent: "purple", compact: true }),
+    );
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    expect(m.uiSettings.theme).toBe("light");
+    expect(m.uiSettings.accent).toBe("purple");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.dataset.accent).toBe("purple");
+    expect(document.documentElement.dataset.compact).toBe("true");
+  });
+
   it("修改后自动持久化到 localStorage", async () => {
     localStorage.removeItem(UI_SETTINGS_KEY);
     uiSettings.showSongInfo = true;

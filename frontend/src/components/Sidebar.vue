@@ -198,7 +198,11 @@ function askDelete(p) {
   color: var(--text);
 }
 .sb-item.on {
-  background: linear-gradient(135deg, rgba(255, 126, 95, 0.2), rgba(254, 180, 123, 0.1));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 20%, transparent),
+    color-mix(in srgb, var(--accent2) 10%, transparent)
+  );
   color: var(--text);
   font-weight: 600;
 }
@@ -240,7 +244,7 @@ function askDelete(p) {
   color: var(--text);
 }
 .sb-act.danger:hover {
-  color: #ff6b81;
+  color: var(--red);
 }
 .sb-empty {
   text-align: center;
