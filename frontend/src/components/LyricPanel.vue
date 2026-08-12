@@ -40,7 +40,8 @@ watch(
     const active = el.querySelector(".lyr.active");
     if (active) {
       const top = active.offsetTop - el.clientHeight / 2 + active.clientHeight / 2;
-      el.scrollTo({ top, behavior: "smooth" });
+      // auto：直接定位到中间（smooth 在多句快速切换时动画叠加会停不准）
+      el.scrollTo({ top, behavior: "auto" });
     }
   },
 );
@@ -64,7 +65,6 @@ function seekLine(item) {
   height: 100%;
   overflow-y: auto;
   padding: 18px 24px;
-  scroll-behavior: smooth;
 }
 .sec {
   font-size: 12px;
