@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+mutagen
+httpx
+pytest
+ruff

@@ -27,12 +27,7 @@
           {{ state.isPlaying ? "⏸" : "▶" }}
         </button>
         <button class="btn" @click="nextLine" title="下一句">⏩</button>
-        <button
-          class="btn"
-          :class="{ on: state.speed !== 1.0 }"
-          @click="cycleSpeed"
-          title="变速"
-        >
+        <button class="btn" :class="{ on: state.speed !== 1.0 }" @click="cycleSpeed" title="变速">
           🐢 {{ state.speed }}x
         </button>
         <button
@@ -51,12 +46,7 @@
         <button class="btn" @click="nextSong" title="下一首">⏭</button>
       </template>
 
-      <button
-        class="btn"
-        :class="{ on: state.zhVisible }"
-        @click="toggleZh"
-        title="显示/隐藏中文"
-      >
+      <button class="btn" :class="{ on: state.zhVisible }" @click="toggleZh" title="显示/隐藏中文">
         译
       </button>
     </div>

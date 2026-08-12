@@ -5,12 +5,7 @@
         <!-- 段落标题 -->
         <div v-if="item.type === 'sec'" class="sec">♪ {{ item.name }}</div>
         <!-- 句子 -->
-        <div
-          v-else
-          class="lyr"
-          :class="{ active: i === current }"
-          @click="seekLine(item)"
-        >
+        <div v-else class="lyr" :class="{ active: i === current }" @click="seekLine(item)">
           <div class="lyr-jp">{{ item.text[0] || "…" }}</div>
           <div v-if="item.text[1]" class="lyr-roma">{{ item.text[1] }}</div>
           <div v-if="item.text[2]" class="lyr-zh">{{ item.text[2] }}</div>
@@ -47,7 +42,7 @@ watch(
       const top = active.offsetTop - el.clientHeight / 2 + active.clientHeight / 2;
       el.scrollTo({ top, behavior: "smooth" });
     }
-  }
+  },
 );
 
 function seekLine(item) {

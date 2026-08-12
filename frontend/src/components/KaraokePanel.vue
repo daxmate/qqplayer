@@ -7,12 +7,7 @@
     <div ref="scrollEl" class="kp-scroll">
       <template v-for="(item, i) in lyric" :key="i">
         <div v-if="item.type === 'sec'" class="sec">♪ {{ item.name }}</div>
-        <div
-          v-else
-          class="kline"
-          :class="{ active: i === current }"
-          @click="playLineAt(i)"
-        >
+        <div v-else class="kline" :class="{ active: i === current }" @click="playLineAt(i)">
           <span class="kline-num">{{ lineNumber(i) }}</span>
           <div class="kline-body">
             <div class="kline-jp">{{ item.text[0] || "…" }}</div>
@@ -50,12 +45,10 @@ let lastCurrent = -1;
 watch(
   () => props.lyric,
   (v) => {
-    lineIndexMap.value = v
-      .map((x, i) => (x.type === "line" ? i : -1))
-      .filter((i) => i >= 0);
+    lineIndexMap.value = v.map((x, i) => (x.type === "line" ? i : -1)).filter((i) => i >= 0);
     lastCurrent = -1;
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 function lineNumber(lyricIdx) {
@@ -80,7 +73,7 @@ watch(
       const top = active.offsetTop - el.clientHeight / 2 + active.clientHeight / 2;
       el.scrollTo({ top, behavior: "smooth" });
     }
-  }
+  },
 );
 
 function fmt(t) {
@@ -149,7 +142,9 @@ function fmt(t) {
 .kline.active {
   background: linear-gradient(135deg, rgba(255, 126, 95, 0.22), rgba(254, 180, 123, 0.1));
   border-left-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(255, 126, 95, 0.2);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 4px 14px rgba(255, 126, 95, 0.2);
 }
 .kline-num {
   width: 26px;

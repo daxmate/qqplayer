@@ -85,10 +85,9 @@ export async function selectSong(index) {
   state.lyricFormat = null;
   // 加载歌词
   try {
-    const res = await fetch(
-      "/api/lyric?path=" + encodeURIComponent(state.songs[index].path),
-      { cache: "no-store" }
-    );
+    const res = await fetch("/api/lyric?path=" + encodeURIComponent(state.songs[index].path), {
+      cache: "no-store",
+    });
     if (res.ok) {
       const data = await res.json();
       state.lyric = data.lines || [];
@@ -104,7 +103,7 @@ export async function selectSong(index) {
     () => {
       state.duration = audio.duration || 0;
     },
-    { once: true }
+    { once: true },
   );
 }
 
@@ -134,9 +133,7 @@ export function nextSong() {
 
 export function prevSong() {
   if (state.songs.length === 0) return;
-  selectSong(
-    (state.currentIndex - 1 + state.songs.length) % state.songs.length
-  );
+  selectSong((state.currentIndex - 1 + state.songs.length) % state.songs.length);
 }
 
 export function seek(t) {
@@ -160,9 +157,7 @@ export function toggleZh() {
 }
 
 // ============ 跟唱模式：点句跳转 ============
-const lineItems = computed(() =>
-  state.lyric.filter((x) => x.type === "line")
-);
+const lineItems = computed(() => state.lyric.filter((x) => x.type === "line"));
 
 export function playLine(lineIndex) {
   const lines = lineItems.value;
@@ -173,7 +168,6 @@ export function playLine(lineIndex) {
 }
 
 export function prevLine() {
-  const lines = lineItems.value;
   const cur = currentLineIndex.value;
   if (cur > 0) playLine(cur - 1);
 }

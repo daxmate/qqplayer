@@ -12,8 +12,17 @@
     "vue": "^3.5.39"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.11",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.9.0",
+    "jsdom": "^30.0.1",
     "playwright": "^1.62.1",
-    "vite": "^8.1.1"
+    "prettier": "^3.9.6",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
   }
 }

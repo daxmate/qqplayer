@@ -28,9 +28,7 @@
           @keyup.enter="applyLibrary"
         />
         <button class="btn small" @click="applyLibrary">设置</button>
-        <button class="btn small" @click="refreshSongs" title="重新扫描">
-          ⟳
-        </button>
+        <button class="btn small" @click="refreshSongs" title="重新扫描">⟳</button>
       </div>
     </header>
 
@@ -39,11 +37,7 @@
       <Playlist class="panel playlist" />
       <section class="center">
         <Cover :song="state.currentSong" />
-        <LyricPanel
-          v-if="state.lyric.length"
-          :lyric="state.lyric"
-          :current="currentLineIndex"
-        />
+        <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
         <div v-else class="no-lyric">🎶 暂无歌词（可放置同名 .srt / .lrc）</div>
       </section>
       <ControlBar class="panel controls" />
@@ -64,11 +58,7 @@
           </div>
         </div>
       </aside>
-      <KaraokePanel
-        class="panel karaoke-panel"
-        :lyric="state.lyric"
-        :current="currentLineIndex"
-      />
+      <KaraokePanel class="panel karaoke-panel" :lyric="state.lyric" :current="currentLineIndex" />
       <ControlBar class="panel controls" karaoke />
     </main>
 
@@ -77,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted } from "vue";
 import Playlist from "./components/Playlist.vue";
 import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
@@ -88,7 +78,6 @@ import {
   loadSongs,
   loadLibrary,
   setLibrary,
-  selectSong,
   currentLineIndex,
 } from "./composables/usePlayer.js";
 

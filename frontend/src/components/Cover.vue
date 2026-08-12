@@ -39,7 +39,7 @@ watch(
     }
     coverUrl.value = "/api/cover?path=" + encodeURIComponent(p);
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 function onCoverError() {

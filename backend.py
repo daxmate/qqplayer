@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 music-player 后端 API
 - 扫描本地歌曲库文件夹（mp3/flac/m4a/wav/ogg）
@@ -8,23 +7,20 @@ music-player 后端 API
 - 加载同名 .srt/.lrc 歌词
 用法: ./venv/bin/python backend.py [歌曲库路径]
 """
-import os
+
 import re
 import sys
-import json
 import threading
 import webbrowser
 from pathlib import Path
-from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 try:
     from mutagen import File as MutagenFile
-    from mutagen.id3 import APIC
     from mutagen.mp4 import MP4, MP4Cover
 except ImportError:
     MutagenFile = None
@@ -72,7 +68,11 @@ def scan_library():
                 cover = cand.name
                 break
         if cover is None:
-            imgs = [x for x in f.parent.iterdir() if x.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
+            imgs = [
+                x
+                for x in f.parent.iterdir()
+                if x.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+            ]
             if len(imgs) == 1:
                 cover = imgs[0].name
         # id 用相对歌曲库的路径（歌曲库可能在 backend 目录之外，不能 relative_to(ROOT)）
@@ -82,17 +82,19 @@ def scan_library():
             rel = Path(f.name)
         # 提取 ID3 元数据（歌手/标题），没有就用文件名
         artist, title = extract_tags(f)
-        songs.append({
-            "id": str(rel),
-            "path": str(f),
-            "name": title or f.stem,
-            "artist": artist or (f.parent.name if f.parent != LIBRARY else ""),
-            "folder": str(f.parent),
-            "ext": f.suffix.lower().lstrip("."),
-            "lyric": lyric,
-            "cover": cover,
-            "has_lyric": lyric is not None,
-        })
+        songs.append(
+            {
+                "id": str(rel),
+                "path": str(f),
+                "name": title or f.stem,
+                "artist": artist or (f.parent.name if f.parent != LIBRARY else ""),
+                "folder": str(f.parent),
+                "ext": f.suffix.lower().lstrip("."),
+                "lyric": lyric,
+                "cover": cover,
+                "has_lyric": lyric is not None,
+            }
+        )
     return songs
 
 
@@ -129,7 +131,7 @@ def extract_tags(f: Path):
         tags = getattr(audio, "tags", None)
         title = artist = None
         if tags is not None:
-            for key in tags.keys():
+            for key in tags:
                 k = key.lower()
                 if k in ("tpe1", "©art", "aart", "artist") and artist is None:
                     artist = str(tags[key]).split("\x00")[0].strip()
@@ -160,7 +162,7 @@ def api_cover(path: str):
                 # MP3: ID3 APIC
                 tags = getattr(audio, "tags", None)
                 if tags is not None:
-                    for key in tags.keys():
+                    for key in tags:
                         if key.startswith("APIC"):
                             apic = tags[key]
                             return Response(content=apic.data, media_type=apic.mime)
@@ -168,7 +170,11 @@ def api_cover(path: str):
                 if isinstance(audio, MP4) and "covr" in audio:
                     cov = audio["covr"][0]
                     data = bytes(cov)
-                    mime = "image/jpeg" if isinstance(cov, MP4Cover) and cov.imageformat == MP4Cover.FORMAT_JPEG else "image/png"
+                    mime = (
+                        "image/jpeg"
+                        if isinstance(cov, MP4Cover) and cov.imageformat == MP4Cover.FORMAT_JPEG
+                        else "image/png"
+                    )
                     return Response(content=data, media_type=mime)
         except Exception:
             pass
@@ -201,16 +207,24 @@ def parse_srt(text: str):
                 break
         if time_idx < 0:
             continue
-        m = re.match(r"(\d{1,2}):(\d{2}):(\d{2})[,.]?(\d{0,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.]?(\d{0,3})", content[time_idx])
+        m = re.match(
+            r"(\d{1,2}):(\d{2}):(\d{2})[,.]?(\d{0,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.]?(\d{0,3})",
+            content[time_idx],
+        )
         if not m:
             continue
-        def sec(h, mm, s, ms): return int(h) * 3600 + int(mm) * 60 + int(s) + int(ms or 0) / 1000
-        result.append({
-            "type": "line",
-            "s": sec(m[1], m[2], m[3], m[4]),
-            "e": sec(m[5], m[6], m[7], m[8]),
-            "text": content[time_idx + 1:],
-        })
+
+        def sec(h, mm, s, ms):
+            return int(h) * 3600 + int(mm) * 60 + int(s) + int(ms or 0) / 1000
+
+        result.append(
+            {
+                "type": "line",
+                "s": sec(m[1], m[2], m[3], m[4]),
+                "e": sec(m[5], m[6], m[7], m[8]),
+                "text": content[time_idx + 1 :],
+            }
+        )
     return result
 
 
@@ -223,7 +237,7 @@ def parse_lrc(text: str):
         matches = list(pattern.finditer(line))
         if not matches:
             continue
-        lyric_text = line[matches[-1].end():].strip()
+        lyric_text = line[matches[-1].end() :].strip()
         for m in matches:
             ms = m.group(3) or "0"
             ms = int(ms) * (10 ** (3 - len(ms)))

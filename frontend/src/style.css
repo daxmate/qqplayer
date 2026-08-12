@@ -22,8 +22,7 @@ body {
   height: 100%;
 }
 body {
-  font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB",
-    sans-serif;
+  font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", sans-serif;
   background: linear-gradient(160deg, var(--bg), var(--bg2));
   color: var(--text);
   min-height: 100vh;
