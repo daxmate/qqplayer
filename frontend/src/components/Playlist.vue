@@ -13,29 +13,113 @@
       </button>
     </div>
 
-    <!-- 工具条：搜索 / 排序 / 只看收藏 -->
-    <div class="pl-tools">
-      <div class="pl-search">
-        <Search :size="13" />
-        <input v-model="query" type="text" placeholder="搜索歌名 / 歌手" spellcheck="false" />
-      </div>
-      <select v-model="sortKey" class="pl-sort" title="排序方式">
-        <option value="default">默认顺序</option>
-        <option value="name">按标题</option>
-        <option value="artist">按歌手</option>
-        <option value="duration">按时长</option>
-      </select>
+    <!-- 浏览 tab：全部歌曲 / 歌手 / 专辑 -->
+    <div class="pl-browse">
       <button
-        class="pl-fav-btn"
-        :class="{ on: favOnly }"
-        :title="favOnly ? '显示全部' : '只看收藏'"
-        @click="favOnly = !favOnly"
+        class="pb-tab"
+        :class="{ on: browseMode === 'songs' && !browseFilter }"
+        @click="enterBrowse('songs')"
       >
-        <Heart :size="13" :fill="favOnly ? 'currentColor' : 'none'" />
+        全部歌曲
+      </button>
+      <button
+        class="pb-tab"
+        :class="{ on: browseMode === 'artists' && !browseFilter }"
+        @click="enterBrowse('artists')"
+      >
+        歌手
+      </button>
+      <button
+        class="pb-tab"
+        :class="{ on: browseMode === 'albums' && !browseFilter }"
+        @click="enterBrowse('albums')"
+      >
+        专辑
       </button>
     </div>
 
-    <div ref="listEl" class="pl-list">
+    <!-- 分组详情：返回 + 分组名 -->
+    <div v-if="browseFilter" class="pl-filter-bar">
+      <button class="pl-back" title="返回全部" @click="browseFilter = null">
+        <ArrowLeft :size="12" />
+        全部
+      </button>
+      <span class="pl-filter-title">{{ browseFilterTitle }}</span>
+      <span class="pl-filter-count">{{ viewSongs.length }} 首</span>
+    </div>
+
+    <!-- 工具条：搜索 / 排序 / 只看收藏（网格视图只留搜索） -->
+    <div class="pl-tools">
+      <div class="pl-search">
+        <Search :size="13" />
+        <input
+          v-model="query"
+          type="text"
+          :placeholder="
+            gridMode ? (browseMode === 'artists' ? '搜索歌手' : '搜索专辑') : '搜索歌名 / 歌手'
+          "
+          spellcheck="false"
+        />
+      </div>
+      <template v-if="!gridMode">
+        <select v-model="sortKey" class="pl-sort" title="排序方式">
+          <option value="default">默认顺序</option>
+          <option value="name">按标题</option>
+          <option value="artist">按歌手</option>
+          <option value="duration">按时长</option>
+        </select>
+        <button
+          class="pl-fav-btn"
+          :class="{ on: favOnly }"
+          :title="favOnly ? '显示全部' : '只看收藏'"
+          @click="favOnly = !favOnly"
+        >
+          <Heart :size="13" :fill="favOnly ? 'currentColor' : 'none'" />
+        </button>
+      </template>
+    </div>
+
+    <!-- 网格视图：歌手 / 专辑卡片 -->
+    <div v-if="gridMode" class="pl-grid">
+      <button
+        v-for="g in gridGroups"
+        :key="gridKey(g)"
+        class="gr-card"
+        :class="{ album: browseMode === 'albums' }"
+        @click="enterGroup(g)"
+      >
+        <template v-if="browseMode === 'artists'">
+          <span class="gr-avatar" :style="{ background: hashBg(g.name) }">{{ g.name[0] }}</span>
+          <span class="gr-meta">
+            <span class="gr-name">{{ g.name }}</span>
+            <span class="gr-count">{{ g.count }} 首</span>
+          </span>
+        </template>
+        <template v-else>
+          <span class="gr-cover">
+            <img
+              v-if="g.coverUrl"
+              :src="g.coverUrl"
+              alt=""
+              loading="lazy"
+              @error="g.coverUrl = ''"
+            />
+            <Music v-else :size="20" />
+          </span>
+          <span class="gr-meta">
+            <span class="gr-name">{{ g.album }}</span>
+            <span class="gr-count">{{ g.artist }} · {{ g.count }} 首</span>
+          </span>
+        </template>
+      </button>
+      <div v-if="!gridGroups.length" class="pl-empty">
+        {{
+          state.loading ? "扫描中…" : "没有匹配的" + (browseMode === "artists" ? "歌手" : "专辑")
+        }}
+      </div>
+    </div>
+
+    <div v-else ref="listEl" class="pl-list">
       <div
         v-for="({ song, i }, vi) in visible"
         :key="song.id"
@@ -76,11 +160,7 @@
         >
           <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
         </button>
-        <button
-          class="pl-action"
-          title="加入歌单"
-          @click.stop="openAddMenu(song.path)"
-        >
+        <button class="pl-action" title="加入歌单" @click.stop="openAddMenu(song.path)">
           <ListPlus :size="14" />
         </button>
         <button
@@ -99,9 +179,11 @@
               ? favOnly
                 ? "没有收藏的歌曲"
                 : "没有匹配的歌曲"
-              : inPlaylistView
-                ? "歌单是空的，点击行上的 ＋ 加歌"
-                : "没有歌曲，请设置歌曲库"
+              : browseFilter
+                ? "该分组没有歌曲"
+                : inPlaylistView
+                  ? "歌单是空的，点击行上的 ＋ 加歌"
+                  : "没有歌曲，请设置歌曲库"
         }}
       </div>
     </div>
@@ -128,9 +210,7 @@
             <Plus v-else :size="13" />
           </span>
         </div>
-        <div v-if="!state.playlists.length" class="am-empty">
-          还没有歌单，点左侧「新建歌单」
-        </div>
+        <div v-if="!state.playlists.length" class="am-empty">还没有歌单，点左侧「新建歌单」</div>
       </div>
     </Teleport>
   </div>
@@ -151,6 +231,7 @@ import {
   ListMusic,
   Check,
   Plus,
+  ArrowLeft,
 } from "@lucide/vue";
 import {
   state,
@@ -171,24 +252,132 @@ defineProps({
   compact: { type: Boolean, default: false },
 });
 
-// ============ 视图：全部歌曲 / 歌单（独立视图） ============
+// ============ 视图：全部歌曲 / 歌单（独立视图）/ 分组浏览 ============
 const inPlaylistView = computed(() => !!state.activePlaylistId);
 const viewTitle = computed(() =>
   inPlaylistView.value ? activePlaylist.value?.name || "歌单" : "播放列表",
 );
 
-// 当前视图的歌曲列表：歌单视图按歌单顺序（songPaths）展开，i 为曲库索引
+// 浏览模式：songs（列表）/ artists（歌手网格）/ albums（专辑网格）
+const browseMode = ref("songs");
+// 分组过滤：进入某歌手/专辑后的歌曲列表
+const browseFilter = ref(null); // { type: 'artist'|'album', value }
+
+const UNKNOWN_ARTIST = "未知歌手";
+const UNKNOWN_ALBUM = "未知专辑";
+const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
+
+// 当前视图的歌曲列表：歌单视图按歌单顺序（songPaths）展开，i 为曲库索引；分组过滤后只留该组
 const viewSongs = computed(() => {
+  let list;
   if (!inPlaylistView.value) {
-    return state.songs.map((song, i) => ({ song, i }));
+    list = state.songs.map((song, i) => ({ song, i }));
+  } else {
+    const pl = activePlaylist.value;
+    if (!pl) return [];
+    const byPath = new Map(state.songs.map((s, i) => [s.path, { song: s, i }]));
+    list = (pl.songPaths || []).map((path) => byPath.get(path)).filter(Boolean);
   }
-  const pl = activePlaylist.value;
-  if (!pl) return [];
-  const byPath = new Map(state.songs.map((s, i) => [s.path, { song: s, i }]));
-  return (pl.songPaths || [])
-    .map((path) => byPath.get(path))
-    .filter(Boolean);
+  const f = browseFilter.value;
+  if (f) {
+    list = list.filter(({ song }) => {
+      const v =
+        f.type === "artist" ? norm(song.artist, UNKNOWN_ARTIST) : norm(song.album, UNKNOWN_ALBUM);
+      return v === f.value;
+    });
+  }
+  return list;
 });
+
+// 网格视图：浏览 tab 非列表且未进入分组
+const gridMode = computed(() => browseMode.value !== "songs" && !browseFilter.value);
+
+// 歌手分组聚合（名称 → 歌曲数）
+const artistGroups = computed(() => {
+  const m = new Map();
+  for (const s of state.songs) {
+    const name = norm(s.artist, UNKNOWN_ARTIST);
+    m.set(name, (m.get(name) || 0) + 1);
+  }
+  return [...m.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => a.name.localeCompare(b.name, "zh"));
+});
+
+// 专辑分组聚合（按专辑名，歌手去重显示，取代表歌封面）
+const albumGroups = computed(() => {
+  const m = new Map();
+  for (const s of state.songs) {
+    const album = norm(s.album, UNKNOWN_ALBUM);
+    const artist = norm(s.artist, UNKNOWN_ARTIST);
+    const cur = m.get(album);
+    if (cur) {
+      cur.count++;
+      if (!cur.artists.has(artist)) cur.artists.add(artist);
+    } else {
+      m.set(album, {
+        album,
+        artists: new Set([artist]),
+        count: 1,
+        coverUrl: `/api/cover?path=${encodeURIComponent(s.path)}`,
+      });
+    }
+  }
+  return [...m.values()]
+    .map((g) => {
+      const list = [...g.artists];
+      return {
+        ...g,
+        artist: list.length > 2 ? list.slice(0, 2).join(" / ") + " 等" : list.join(" / "),
+      };
+    })
+    .sort((a, b) => a.album.localeCompare(b.album, "zh"));
+});
+
+// 网格视图当前分组列表（支持搜索过滤卡片）
+const gridGroups = computed(() => {
+  const groups = browseMode.value === "artists" ? artistGroups.value : albumGroups.value;
+  const q = query.value.trim().toLowerCase();
+  if (!q) return groups;
+  return groups.filter((g) => {
+    const text = browseMode.value === "artists" ? g.name : g.album + " " + g.artist;
+    return text.toLowerCase().includes(q);
+  });
+});
+
+const gridKey = (g) =>
+  browseMode.value === "artists" ? "a:" + g.name : "l:" + g.album + ":" + g.artist;
+
+// 分组详情标题（未知歌手/专辑保留原名）
+const browseFilterTitle = computed(() => {
+  const f = browseFilter.value;
+  if (!f) return "";
+  return f.type === "artist" ? f.value : `${f.value} · ${f.artist}`;
+});
+
+// 切换浏览 tab（清空分组过滤）
+function enterBrowse(mode) {
+  browseMode.value = mode;
+  browseFilter.value = null;
+  query.value = "";
+}
+
+// 点击卡片进入分组
+function enterGroup(g) {
+  browseFilter.value =
+    browseMode.value === "artists"
+      ? { type: "artist", value: g.name }
+      : { type: "album", value: g.album, artist: g.artist };
+  query.value = "";
+}
+
+// 歌手首字母色块：名字哈希 → 渐变背景
+function hashBg(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  return `linear-gradient(135deg, hsl(${hue} 48% 52%), hsl(${(hue + 42) % 360} 45% 40%))`;
+}
 
 // ============ 搜索 / 排序 / 收藏过滤 ============
 const query = ref("");
@@ -220,13 +409,14 @@ const visible = computed(() => {
   return list;
 });
 
-// 拖拽启用条件：歌单视图 + 无搜索/排序/收藏过滤（保证可见集 = 歌单全量，排序不丢歌）
+// 拖拽启用条件：歌单视图 + 无搜索/排序/收藏/分组过滤（保证可见集 = 歌单全量，排序不丢歌）
 const canDrag = computed(
   () =>
     inPlaylistView.value &&
     sortKey.value === "default" &&
     !query.value.trim() &&
-    !favOnly.value,
+    !favOnly.value &&
+    !browseFilter.value,
 );
 
 function pick(i) {
@@ -287,9 +477,7 @@ function setupSortable() {
     ghostClass: "pl-ghost",
     onEnd: ({ oldIndex, newIndex }) => {
       if (oldIndex === newIndex || !state.activePlaylistId) return;
-      const paths = [...listEl.value.querySelectorAll(".pl-item")].map(
-        (el) => el.dataset.path,
-      );
+      const paths = [...listEl.value.querySelectorAll(".pl-item")].map((el) => el.dataset.path);
       setPlaylistOrder(state.activePlaylistId, paths).catch((e) => alert(e.message));
     },
   });
@@ -355,6 +543,147 @@ function fmtDur(d) {
   to {
     transform: rotate(360deg);
   }
+}
+/* 浏览 tab */
+.pl-browse {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+.pb-tab {
+  flex: 1;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text3);
+  transition: all 0.12s;
+}
+.pb-tab:hover {
+  color: var(--text);
+  background: var(--card2);
+}
+.pb-tab.on {
+  color: var(--accent);
+  background: rgba(255, 126, 95, 0.14);
+}
+/* 分组详情返回条 */
+.pl-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+.pl-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--card2);
+  color: var(--text2);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+.pl-back:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.pl-filter-title {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-filter-count {
+  font-size: 11px;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+/* 歌手/专辑网格 */
+.pl-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-content: start;
+}
+.gr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 6px 10px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid transparent;
+  transition: all 0.12s;
+  text-align: center;
+}
+.gr-card:hover {
+  background: var(--card2);
+  border-color: var(--border);
+  transform: translateY(-1px);
+}
+.gr-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 19px;
+  font-weight: 700;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+.gr-cover {
+  width: 58px;
+  height: 58px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+.gr-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gr-meta {
+  min-width: 0;
+  width: 100%;
+}
+.gr-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gr-count {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text3);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* 工具条 */
 .pl-tools {

@@ -159,10 +159,7 @@ export async function loadPlaylists() {
       const data = await res.json();
       state.playlists = data.playlists || [];
       // 当前激活的歌单被删了 → 退回全部歌曲
-      if (
-        state.activePlaylistId &&
-        !state.playlists.some((p) => p.id === state.activePlaylistId)
-      ) {
+      if (state.activePlaylistId && !state.playlists.some((p) => p.id === state.activePlaylistId)) {
         state.activePlaylistId = null;
       }
     }

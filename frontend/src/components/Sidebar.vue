@@ -85,12 +85,7 @@
 <script setup>
 import { ref, nextTick } from "vue";
 import { Library, Music2, ListMusic, Plus, Pencil, Trash2 } from "@lucide/vue";
-import {
-  state,
-  createPlaylist,
-  renamePlaylist,
-  deletePlaylist,
-} from "../composables/usePlayer.js";
+import { state, createPlaylist, renamePlaylist, deletePlaylist } from "../composables/usePlayer.js";
 
 function activate(pid) {
   state.activePlaylistId = pid;

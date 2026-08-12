@@ -258,4 +258,121 @@ describe("Playlist", () => {
     state.activePlaylistId = null;
     expect(wrapper.find(".pl-drag").exists()).toBe(false);
   });
+
+  // ============ 分组浏览（歌手/专辑） ============
+  const SAMPLE = [
+    { id: "a", name: "ヤキモチ", artist: "高橋優", album: "開往明天的旅行" },
+    { id: "b", name: "知足", artist: "五月天", album: "知足" },
+    { id: "c", name: "溫柔", artist: "五月天", album: "知足" },
+    { id: "d", name: "无歌手歌", artist: "", album: "知足" },
+  ];
+
+  it("歌手 tab：聚合歌手卡片（计数 + 排序）", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[1].trigger("click"); // 歌手
+    const cards = wrapper.findAll(".gr-card");
+    expect(cards).toHaveLength(3);
+    // zh collation 按拼音排序：高橋優(gao) < 未知歌手(wei) < 五月天(wu)
+    const names = cards.map((c) => c.find(".gr-name").text());
+    expect(names).toEqual(["高橋優", "未知歌手", "五月天"]);
+    const wy = cards.find((c) => c.find(".gr-name").text() === "五月天");
+    expect(wy.find(".gr-count").text()).toContain("2");
+  });
+
+  it("歌手卡：首字母色块显示首字符", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[1].trigger("click");
+    const wy = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天");
+    expect(wy.find(".gr-avatar").text()).toBe("五");
+  });
+
+  it("专辑 tab：聚合专辑卡片（专辑名 + 歌手 + 封面）", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[2].trigger("click"); // 专辑
+    const cards = wrapper.findAll(".gr-card");
+    expect(cards).toHaveLength(2);
+    // 同名专辑聚合，歌手去重显示
+    const names = cards.map((c) => c.find(".gr-name").text());
+    expect(names).toEqual(["開往明天的旅行", "知足"]);
+    const zz = cards.find((c) => c.find(".gr-name").text() === "知足");
+    expect(zz.find(".gr-count").text()).toContain("五月天");
+    expect(zz.find(".gr-count").text()).toContain("3");
+    // 封面 img 指向 /api/cover
+    expect(zz.find(".gr-cover img").attributes("src")).toContain("/api/cover?path=");
+  });
+
+  it("点击歌手卡 → 列表只显示该歌手 + 返回条标题", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[1].trigger("click");
+    await wrapper.findAll(".gr-card")[1].trigger("click"); // 未知歌手
+    // 返回条：全部 + 分组名 + 首数
+    expect(wrapper.find(".pl-filter-title").text()).toBe("未知歌手");
+    expect(wrapper.text()).toContain("1 首");
+    const items = wrapper.findAll(".pl-item");
+    expect(items).toHaveLength(1);
+    expect(items[0].text()).toContain("无歌手歌");
+  });
+
+  it("点击返回 → 回到歌手网格", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[1].trigger("click");
+    await wrapper.findAll(".gr-card")[0].trigger("click"); // 五月天
+    expect(wrapper.find(".pl-item").exists()).toBe(true);
+    await wrapper.find(".pl-back").trigger("click");
+    expect(wrapper.find(".gr-card").exists()).toBe(true);
+    expect(wrapper.find(".pl-item").exists()).toBe(false);
+  });
+
+  it("分组内搜索只搜该分组", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[1].trigger("click");
+    // 点“五月天”卡片（拼音序第三张）
+    const wy = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天");
+    await wy.trigger("click");
+    await wrapper.find(".pl-search input").setValue("溫柔");
+    const items = wrapper.findAll(".pl-item");
+    expect(items).toHaveLength(1);
+    expect(items[0].text()).toContain("溫柔");
+  });
+
+  it("网格视图：搜索过滤卡片", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[1].trigger("click"); // 歌手
+    await wrapper.find(".pl-search input").setValue("五月");
+    const cards = wrapper.findAll(".gr-card");
+    expect(cards).toHaveLength(1);
+    expect(cards[0].find(".gr-name").text()).toBe("五月天");
+  });
+
+  it("切回全部歌曲 tab → 恢复完整列表", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[2].trigger("click"); // 专辑
+    await wrapper.findAll(".gr-card")[0].trigger("click");
+    expect(wrapper.find(".pl-item").exists()).toBe(true);
+    await wrapper.findAll(".pb-tab")[0].trigger("click"); // 全部歌曲
+    expect(wrapper.findAll(".pl-item")).toHaveLength(4);
+    expect(wrapper.find(".pl-filter-bar").exists()).toBe(false);
+  });
+
+  it("歌单视图 + 分组过滤 → 拖拽手柄隐藏", async () => {
+    state.playlists = [{ id: "p1", name: "歌单", songPaths: ["/a.mp3", "/b.mp3"] }];
+    state.activePlaylistId = "p1";
+    state.songs = [
+      { id: "a", name: "A歌", artist: "五月天", path: "/a.mp3" },
+      { id: "b", name: "B歌", artist: "高橋優", path: "/b.mp3" },
+    ];
+    const wrapper = mount(Playlist);
+    expect(wrapper.find(".pl-drag").exists()).toBe(true);
+    await wrapper.findAll(".pb-tab")[1].trigger("click");
+    await wrapper.findAll(".gr-card")[0].trigger("click"); // 进入歌手分组
+    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+  });
 });

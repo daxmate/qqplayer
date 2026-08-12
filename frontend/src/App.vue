@@ -33,11 +33,7 @@
     </header>
 
     <!-- 主体：连播模式 -->
-    <main
-      v-if="state.mode === 'continuous'"
-      class="main continuous"
-      :class="panelClass"
-    >
+    <main v-if="state.mode === 'continuous'" class="main continuous" :class="panelClass">
       <ActivityBar v-if="panelsActive" class="activity-bar" />
       <button
         v-if="!panelsActive"
