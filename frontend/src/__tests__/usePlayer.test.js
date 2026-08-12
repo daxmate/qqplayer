@@ -1242,4 +1242,65 @@ describe("MediaSession 系统媒体键", () => {
     expect(ms.metadata.album).toBe("AlbumY");
     expect(ms.metadata.artwork[0].src).toContain("/api/cover?path=" + encodeURIComponent("/a.mp3"));
   });
+
+  it("nexttrack/previoustrack 切歌后自动播放", async () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await selectSong(0);
+    const a = FakeAudio.instances[0];
+    a.paused = true; // 手动暂停
+    await handlers.nexttrack();
+    expect(state.currentIndex).toBe(1);
+    expect(a.paused).toBe(false); // 自动播放
+    a.paused = true;
+    await handlers.previoustrack();
+    expect(state.currentIndex).toBe(0);
+    expect(a.paused).toBe(false);
+  });
+
+  it("未选歌时播放键自动选第一首并播放", async () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = -1;
+    state.currentSong = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    handlers.play();
+    await new Promise((r) => setTimeout(r, 0)); // selectSong 异步
+    expect(state.currentIndex).toBe(0);
+    expect(FakeAudio.instances[0].paused).toBe(false);
+  });
+
+  it("播放键在歌曲播完（ended）后重播，不卡在末尾", async () => {
+    const { handlers } = createMediaSessionStub();
+    setupMediaSession();
+    state.songs = [{ path: "/a.mp3", name: "A" }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await selectSong(0);
+    const a = FakeAudio.instances[0];
+    a.duration = 100;
+    a.currentTime = 100;
+    a.ended = true;
+    a.paused = true;
+    handlers.play();
+    expect(a.currentTime).toBe(0);
+    expect(a.paused).toBe(false);
+  });
 });

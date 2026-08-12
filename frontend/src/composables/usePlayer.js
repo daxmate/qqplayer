@@ -173,16 +173,42 @@ export function removeFromQueue(index) {
 
 // ============ 键盘快捷键 ============
 // 空格播放/暂停，←/→ 快退/快进 10s，↑/↓ 音量 ±10%
-// 输入框/文本域聚焦时不拦截
+// 媒体键（MediaPlayPause 等）仅在无 MediaSession 的环境兜底处理（键盘事件），
+// 有 MediaSession 时交给系统（避免双重触发）
+const HAS_MEDIA_SESSION = typeof navigator !== "undefined" && "mediaSession" in navigator;
+const MEDIA_KEY_CODES = ["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious", "MediaStop"];
+
+// 输入框/文本域聚焦时不拦截（媒体键除外：即使输入框聚焦也应全局响应）
 const SHORTCUT_HANDLER = (e) => {
   const el = e.target;
-  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+  const isMediaKey = !HAS_MEDIA_SESSION && MEDIA_KEY_CODES.includes(e.code);
+  if (
+    !isMediaKey &&
+    el &&
+    (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+  ) {
     return;
   }
   switch (e.code) {
     case "Space":
       e.preventDefault();
       togglePlay();
+      break;
+    case "MediaPlayPause":
+      e.preventDefault();
+      togglePlay();
+      break;
+    case "MediaTrackNext":
+      e.preventDefault();
+      nextSong({ autoPlay: true });
+      break;
+    case "MediaTrackPrevious":
+      e.preventDefault();
+      prevSong({ autoPlay: true });
+      break;
+    case "MediaStop":
+      e.preventDefault();
+      pause();
       break;
     case "ArrowLeft":
       e.preventDefault();
@@ -227,6 +253,7 @@ function absoluteUrl(path) {
 }
 
 function updateMediaMetadata() {
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   const ms = navigator.mediaSession;
   if (!ms) return;
   const song = state.currentSong;
@@ -284,11 +311,14 @@ export function setupMediaSession() {
     return () => {};
   }
   const ms = navigator.mediaSession;
+  // 初始化为 paused（而非默认 none）：Chrome/系统媒体键只路由给 playbackState
+  // 非 none 的页面，否则未播放过时按播放键无响应
+  ms.playbackState = state.isPlaying ? "playing" : "paused";
   const handlers = {
-    play: () => togglePlay(),
-    pause: () => togglePlay(),
-    previoustrack: () => prevSong(),
-    nexttrack: () => nextSong(),
+    play: () => play(),
+    pause: () => pause(),
+    previoustrack: () => prevSong({ autoPlay: true }),
+    nexttrack: () => nextSong({ autoPlay: true }),
     seekto: (details) => {
       if (details && typeof details.seekTime === "number") seek(details.seekTime);
     },
@@ -506,7 +536,18 @@ export function togglePlay() {
 }
 
 export function play() {
-  if (!state.currentSong) return;
+  // 没选歌时：自动选第一首播放（媒体键/播放键直接开播）
+  if (!state.currentSong) {
+    if (state.songs.length) {
+      selectSong(0, { autoPlay: true });
+    }
+    return;
+  }
+  // 播完停在末尾（ended）→ 归零重播；否则 audio.play() 停在末尾不响
+  if (audio.ended || (audio.duration && audio.currentTime >= audio.duration - 0.1)) {
+    audio.currentTime = 0;
+    state.currentTime = 0;
+  }
   // 重新锚定当前时间所在句（-1 = 前奏/间隙，播到下一句时自动锚定）
   karaokeLine = locateLine(audio.currentTime);
   audio.play().catch(() => {});
@@ -525,14 +566,14 @@ export function nextSong(opts = {}) {
   selectSong((state.currentIndex + 1) % state.songs.length, opts);
 }
 
-export function prevSong() {
+export function prevSong(opts = {}) {
   if (state.songs.length === 0) return;
   if (state.playMode === "shuffle" && playHistory.length) {
     // 随机模式：按播放历史回退到上一首（不重复记录）
-    selectSong(playHistory.pop(), { record: false });
+    selectSong(playHistory.pop(), { record: false, ...opts });
     return;
   }
-  selectSong((state.currentIndex - 1 + state.songs.length) % state.songs.length);
+  selectSong((state.currentIndex - 1 + state.songs.length) % state.songs.length, opts);
 }
 
 export function seek(t) {
