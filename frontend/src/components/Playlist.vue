@@ -45,7 +45,7 @@
 
 <script setup>
 import { Music, Mic, RefreshCw } from "@lucide/vue";
-import { state, selectSong, loadSongs } from "../composables/usePlayer.js";
+import { state, selectSong, loadSongs, play } from "../composables/usePlayer.js";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -53,6 +53,7 @@ defineProps({
 
 function pick(i) {
   selectSong(i);
+  play(); // 点击列表直接开始播放
 }
 </script>
 
