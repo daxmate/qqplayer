@@ -1,14 +1,22 @@
 <template>
   <div class="karaoke-panel">
     <div class="kp-head">
-      <span>🎤 逐句练习</span>
+      <span class="kp-title">
+        <Mic :size="13" />
+        逐句练习
+      </span>
       <span class="kp-hint">{{ abHint }}</span>
     </div>
     <div ref="scrollEl" class="kp-scroll">
       <template v-for="(item, i) in lyric" :key="i">
-        <div v-if="item.type === 'sec'" class="sec">♪ {{ item.name }}</div>
+        <div v-if="item.type === 'sec'" class="sec">
+          <Music2 :size="12" />
+          {{ item.name }}
+        </div>
         <div v-else class="kline" :class="klineClass(i)" @click="playLineAt(i)">
-          <span class="kline-num">{{ abBadge(i) || lineNumber(i) }}</span>
+          <span class="kline-num" :class="{ 'ab-badge': abBadge(i) }">{{
+            abBadge(i) || lineNumber(i)
+          }}</span>
           <div class="kline-body">
             <div class="kline-jp">{{ item.text[0] || "…" }}</div>
             <div v-if="item.text[1]" class="kline-roma">{{ item.text[1] }}</div>
@@ -20,7 +28,9 @@
         </div>
       </template>
       <div v-if="!lyric.length" class="kp-empty">
-        <div class="kp-empty-icon">🎤</div>
+        <div class="kp-empty-icon">
+          <Mic :size="44" />
+        </div>
         <div>这首歌没有歌词文件</div>
         <div class="kp-empty-sub">在歌曲同目录放置同名 .srt 或 .lrc 即可跟唱</div>
         <div class="kp-empty-sub">SRT 格式：每句可 1~3 行（原文 / 罗马音 / 中文）</div>
@@ -31,7 +41,8 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
-import { state, playLine, setAbEnd } from "../composables/usePlayer.js";
+import { Mic, Music2 } from "@lucide/vue";
+import { state, clickLine } from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -60,7 +71,7 @@ const abHint = computed(() => {
   const ab = state.abLoop;
   if (!ab) return "点击句子播放 · 播完自动停";
   if (ab.b === null) return `AB 循环：起点第 ${ab.a + 1} 句，请点击终点句`;
-  return `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句 · 单击 🔁 退出`;
+  return `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句 · 单击退出`;
 });
 
 function abLineNo(lyricIdx) {
@@ -91,12 +102,7 @@ function abBadge(lyricIdx) {
 function playLineAt(lyricIdx) {
   const lineNo = abLineNo(lyricIdx);
   if (lineNo < 0) return;
-  if (state.abLoop) {
-    // AB 循环中：点击 = 设置/更换终点
-    setAbEnd(lineNo);
-  } else {
-    playLine(lineNo);
-  }
+  clickLine(lineNo); // AB 循环中：区间外退出并播放；区间内跳转播放；等选终点时设为终点
 }
 
 watch(
@@ -145,6 +151,11 @@ function fmt(t) {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.kp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .kp-hint {
   font-size: 12px;
   font-weight: 400;
@@ -161,6 +172,9 @@ function fmt(t) {
   color: var(--accent2);
   letter-spacing: 2px;
   margin: 20px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .sec:first-child {
   margin-top: 0;
@@ -196,9 +210,8 @@ function fmt(t) {
   background: rgba(74, 222, 128, 0.22);
   color: #4ade80;
 }
-/* AB 端点 A/B 徽标：绿色渐变（覆盖 active 样式） */
-.kline.ab-start .kline-num,
-.kline.ab-end .kline-num {
+/* AB 端点 A/B 徽标：绿色渐变（末尾定义，特异性覆盖 active 与区间底色） */
+.kline.ab-in .kline-num.ab-badge {
   background: linear-gradient(135deg, #22c55e, #4ade80);
   color: #fff;
 }
@@ -263,8 +276,9 @@ function fmt(t) {
   font-size: 14px;
 }
 .kp-empty-icon {
-  font-size: 44px;
   margin-bottom: 14px;
+  color: var(--text3);
+  opacity: 0.6;
 }
 .kp-empty-sub {
   font-size: 12px;

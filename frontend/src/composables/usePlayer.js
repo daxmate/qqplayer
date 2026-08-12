@@ -163,7 +163,7 @@ export function toggleKaraokeLoop() {
   state.karaokeLoop = !state.karaokeLoop;
 }
 
-// ============ AB 区间循环（长按 🔁 进入，单击退出）============
+// ============ AB 区间循环（长按循环按钮进入，单击退出）============
 // 进入：当前句为起点 A，等待点击另一句作为终点 B
 // 循环：A→B 区间句子连播，播到 B 句尾自动跳回 A 句首
 
@@ -189,6 +189,32 @@ export function setAbEnd(lineIndex) {
 
 export function exitAbLoop() {
   state.abLoop = null;
+}
+
+// 歌词点击统一入口（跟唱面板）
+// 无 AB → 直接播放该句；等选终点（b=null）→ 点击设为终点；
+// 区间内 → 跳到该句播放（区间不变）；区间外 → 退出 AB 循环并播放该句
+// （2026-08-12 用户拍板：区间外点击 = 退出 AB + 播放当前句；区间内 = 跳转播放）
+export function clickLine(lineIndex) {
+  const lines = lineItems.value;
+  if (lineIndex < 0 || lineIndex >= lines.length) return;
+  const ab = state.abLoop;
+  if (!ab) {
+    playLine(lineIndex);
+    return;
+  }
+  if (ab.b === null) {
+    setAbEnd(lineIndex); // 等选终点：点击 = 设置终点
+    return;
+  }
+  if (lineIndex < ab.a || lineIndex > ab.b) {
+    // 区间外：退出 AB 循环，恢复正常跟唱并播放该句
+    state.abLoop = null;
+    playLine(lineIndex);
+    return;
+  }
+  // 区间内：跳到该句句首播放，AB 区间保持不变
+  playLine(lineIndex);
 }
 
 export function toggleZh() {

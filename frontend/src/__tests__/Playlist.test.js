@@ -36,10 +36,10 @@ describe("Playlist", () => {
     expect(wrapper.text()).toContain("五月天");
   });
 
-  it("有歌词的歌曲显示 🎤 标记", () => {
+  it("有歌词的歌曲显示歌词标记（Mic 图标）", () => {
     state.songs = [{ id: "a", name: "ヤキモチ", artist: "高橋優", has_lyric: true }];
     const wrapper = mount(Playlist);
-    expect(wrapper.text()).toContain("🎤");
+    expect(wrapper.find(".pl-lyric svg").exists()).toBe(true);
   });
 
   it("当前播放的歌曲有 active class", () => {

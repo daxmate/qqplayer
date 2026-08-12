@@ -2,25 +2,33 @@
   <div class="app">
     <!-- 顶栏 -->
     <header class="topbar">
-      <h1 class="logo">🎵 Music Player</h1>
+      <h1 class="logo">
+        <Music :size="20" class="logo-icon" />
+        Music Player
+      </h1>
       <div class="mode-tabs">
         <button
           class="tab"
           :class="{ on: state.mode === 'continuous' }"
           @click="switchMode('continuous')"
         >
-          ▶ 连播
+          <Play :size="13" />
+          连播
         </button>
         <button
           class="tab"
           :class="{ on: state.mode === 'karaoke' }"
           @click="switchMode('karaoke')"
         >
-          🎤 跟唱
+          <Mic :size="13" />
+          跟唱
         </button>
       </div>
       <div class="lib">
-        <span class="lib-label">📂 歌曲库</span>
+        <span class="lib-label">
+          <FolderOpen :size="13" />
+          歌曲库
+        </span>
         <input
           v-model="libInput"
           class="lib-input"
@@ -38,7 +46,10 @@
       <section class="center">
         <Cover :song="state.currentSong" />
         <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
-        <div v-else class="no-lyric">🎶 暂无歌词（可放置同名 .srt / .lrc）</div>
+        <div v-else class="no-lyric">
+          <Music2 :size="40" class="no-lyric-icon" />
+          <span>暂无歌词（可放置同名 .srt / .lrc）</span>
+        </div>
       </section>
       <ControlBar class="panel controls" />
     </main>
@@ -68,6 +79,7 @@
 
 <script setup>
 import { ref, onMounted } from "vue";
+import { Music, Music2, Mic, Play, FolderOpen } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
@@ -130,6 +142,12 @@ onMounted(async () => {
 .logo {
   font-size: 18px;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.logo-icon {
+  color: var(--accent);
 }
 .mode-tabs {
   display: flex;
@@ -145,6 +163,9 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--text2);
   transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .tab.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -161,6 +182,9 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--text2);
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .lib-input {
   flex: 1;
@@ -228,9 +252,13 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   color: var(--text3);
   font-size: 14px;
   min-height: 80px;
+}
+.no-lyric-icon {
+  opacity: 0.6;
 }
 .no-lyric.small {
   flex: none;

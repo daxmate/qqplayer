@@ -19,16 +19,24 @@
 
     <!-- 按钮 -->
     <div class="btn-row">
-      <button class="btn" @click="prevSong" title="上一首">⏮</button>
+      <button class="btn" @click="prevSong" title="上一首">
+        <SkipBack :size="17" />
+      </button>
 
       <template v-if="karaoke">
-        <button class="btn" @click="prevLine" title="上一句">⏪</button>
-        <button class="btn play" @click="togglePlay" title="播放/暂停">
-          {{ state.isPlaying ? "⏸" : "▶" }}
+        <button class="btn" @click="prevLine" title="上一句">
+          <StepBack :size="17" />
         </button>
-        <button class="btn" @click="nextLine" title="下一句">⏩</button>
+        <button class="btn play" @click="togglePlay" title="播放/暂停">
+          <Pause v-if="state.isPlaying" :size="21" />
+          <Play v-else :size="21" />
+        </button>
+        <button class="btn" @click="nextLine" title="下一句">
+          <StepForward :size="17" />
+        </button>
         <button class="btn" :class="{ on: state.speed !== 1.0 }" @click="cycleSpeed" title="变速">
-          🐢 {{ state.speed }}x
+          <Gauge :size="15" />
+          {{ state.speed }}x
         </button>
         <button
           class="btn"
@@ -36,7 +44,8 @@
           @click="toggleKaraoke"
           title="跟唱开关"
         >
-          🎤 跟唱
+          <Mic :size="15" />
+          跟唱
         </button>
         <button
           class="btn"
@@ -48,17 +57,23 @@
           @pointerleave="onLoopPressEnd"
           @click="onLoopClick"
         >
-          {{ state.abLoop ? "🔁 AB" : "🔁 单句" }}
+          <Repeat2 v-if="state.abLoop" :size="15" />
+          <Repeat1 v-else :size="15" />
+          {{ state.abLoop ? "AB" : "单句" }}
         </button>
       </template>
       <template v-else>
         <button class="btn play" @click="togglePlay" title="播放/暂停">
-          {{ state.isPlaying ? "⏸" : "▶" }}
+          <Pause v-if="state.isPlaying" :size="21" />
+          <Play v-else :size="21" />
         </button>
-        <button class="btn" @click="nextSong" title="下一首">⏭</button>
+        <button class="btn" @click="nextSong" title="下一首">
+          <SkipForward :size="17" />
+        </button>
       </template>
 
       <button class="btn" :class="{ on: state.zhVisible }" @click="toggleZh" title="显示/隐藏中文">
+        <Languages :size="15" />
         译
       </button>
     </div>
@@ -77,6 +92,19 @@
 
 <script setup>
 import { computed } from "vue";
+import {
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  StepBack,
+  StepForward,
+  Mic,
+  Gauge,
+  Repeat1,
+  Repeat2,
+  Languages,
+} from "@lucide/vue";
 import { state } from "../composables/usePlayer.js";
 import {
   togglePlay,
@@ -101,7 +129,7 @@ function onSeek(e) {
   seek(parseFloat(e.target.value));
 }
 
-// 🔁 按钮：单击切换单句循环 / 退出 AB；长按 500ms 进入 AB 循环
+// 循环按钮：单击切换单句循环 / 退出 AB；长按 500ms 进入 AB 循环
 let pressTimer = null;
 let longPressFired = false;
 
@@ -206,11 +234,12 @@ function fmt(t) {
   border-radius: 12px;
   background: var(--card2);
   color: var(--text);
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   transition: all 0.15s;
   white-space: nowrap;
 }
@@ -241,18 +270,13 @@ function fmt(t) {
 .btn-row .btn {
   width: auto;
   min-width: 44px;
-  font-size: 14px;
+  padding: 0 14px;
+  font-size: 13.5px;
 }
 .btn-row .btn.play {
   width: 56px;
   font-size: 22px;
-}
-.btn-row .btn:has(🐢),
-.btn-row .btn:has(🎤),
-.btn-row .btn:has(🔁),
-.btn-row .btn:has(译) {
-  padding: 0 14px;
-  font-size: 13.5px;
+  padding: 0;
 }
 .btn:disabled {
   opacity: 0.35;

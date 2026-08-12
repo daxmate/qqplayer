@@ -9,13 +9,16 @@
         alt="封面"
         @error="onCoverError"
       />
-      <div v-else class="cover-fallback">🎵</div>
+      <div v-else class="cover-fallback">
+        <Music :size="props.small ? 26 : 64" />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, watch } from "vue";
+import { Music } from "@lucide/vue";
 import { state } from "../composables/usePlayer.js";
 
 const props = defineProps({
@@ -90,10 +93,7 @@ function onCoverError() {
   }
 }
 .cover-fallback {
-  font-size: 64px;
   color: var(--text3);
-}
-.cover-wrap.small .cover-fallback {
-  font-size: 26px;
+  opacity: 0.7;
 }
 </style>

@@ -3,7 +3,10 @@
     <div ref="scrollEl" class="lyric-scroll">
       <template v-for="(item, i) in lyric" :key="i">
         <!-- 段落标题 -->
-        <div v-if="item.type === 'sec'" class="sec">♪ {{ item.name }}</div>
+        <div v-if="item.type === 'sec'" class="sec">
+          <Music2 :size="12" />
+          {{ item.name }}
+        </div>
         <!-- 句子 -->
         <div v-else class="lyr" :class="{ active: i === current }" @click="seekLine(item)">
           <div class="lyr-jp">{{ item.text[0] || "…" }}</div>
@@ -18,6 +21,7 @@
 
 <script setup>
 import { ref, watch, nextTick } from "vue";
+import { Music2 } from "@lucide/vue";
 import { seek } from "../composables/usePlayer.js";
 
 const props = defineProps({
@@ -74,6 +78,9 @@ function seekLine(item) {
   color: var(--accent2);
   letter-spacing: 2px;
   margin: 18px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .sec:first-child {
   margin-top: 0;

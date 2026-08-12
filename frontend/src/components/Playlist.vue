@@ -1,6 +1,9 @@
 <template>
   <div class="playlist" :class="{ compact }">
-    <div class="pl-head">🎵 播放列表 ({{ state.songs.length }})</div>
+    <div class="pl-head">
+      <Music :size="13" />
+      播放列表 ({{ state.songs.length }})
+    </div>
     <div class="pl-list">
       <div
         v-for="(s, i) in state.songs"
@@ -14,10 +17,16 @@
           <div class="pl-name">{{ s.name }}</div>
           <div class="pl-artist">
             {{ s.artist }}
-            <span v-if="s.has_lyric" class="pl-lyric">🎤</span>
+            <span v-if="s.has_lyric" class="pl-lyric" title="有歌词">
+              <Mic :size="11" />
+            </span>
           </div>
         </div>
-        <span v-if="i === state.currentIndex" class="pl-eq">♪</span>
+        <span v-if="i === state.currentIndex" class="pl-eq" title="播放中">
+          <span class="eq-bar"></span>
+          <span class="eq-bar"></span>
+          <span class="eq-bar"></span>
+        </span>
       </div>
       <div v-if="!state.songs.length" class="pl-empty">
         {{ state.loading ? "扫描中…" : "没有歌曲，请设置歌曲库" }}
@@ -27,6 +36,7 @@
 </template>
 
 <script setup>
+import { Music, Mic } from "@lucide/vue";
 import { state, selectSong } from "../composables/usePlayer.js";
 
 defineProps({
@@ -52,6 +62,9 @@ function pick(i) {
   color: var(--text2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .pl-list {
   flex: 1;
@@ -101,20 +114,39 @@ function pick(i) {
   text-overflow: ellipsis;
 }
 .pl-lyric {
-  font-size: 11px;
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-left: 4px;
+  color: var(--text2);
 }
 .pl-eq {
-  color: var(--accent);
-  font-weight: 700;
-  animation: eq 1s infinite alternate;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 13px;
   flex-shrink: 0;
+  color: var(--accent);
 }
-@keyframes eq {
-  from {
-    opacity: 0.4;
+.eq-bar {
+  width: 3px;
+  border-radius: 1.5px;
+  background: currentColor;
+  height: 100%;
+  animation: eq-bounce 1s ease-in-out infinite;
+}
+.eq-bar:nth-child(2) {
+  animation-delay: -0.33s;
+}
+.eq-bar:nth-child(3) {
+  animation-delay: -0.66s;
+}
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.35);
   }
-  to {
-    opacity: 1;
+  50% {
+    transform: scaleY(1);
   }
 }
 .pl-empty {

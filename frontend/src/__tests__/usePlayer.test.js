@@ -44,6 +44,7 @@ const {
   enterAbLoop,
   setAbEnd,
   exitAbLoop,
+  clickLine,
   currentLineIndex,
   _resetKaraokeAnchor,
 } = await import("../composables/usePlayer.js");
@@ -499,12 +500,58 @@ describe("AB 循环", () => {
     expect(audio().paused).toBe(false);
   });
 
-  it("循环中点其他句：重新设定终点（自动交换）", () => {
+  it("点击区间外（A 前）：退出 AB 并播放该句", () => {
     setup();
     state.abLoop = { a: 1, b: 3 };
-    setAbEnd(0); // 点在 A 前面 → 交换为 0~1
-    expect(state.abLoop).toEqual({ a: 0, b: 1 });
-    expect(audio().currentTime).toBe(0); // 从新起点播放
+    clickLine(0);
+    expect(state.abLoop).toBe(null);
+    expect(audio().currentTime).toBe(0); // 第一句句首
+    expect(audio().paused).toBe(false);
+  });
+
+  it("点击区间外（B 后）：退出 AB 并播放该句", () => {
+    setup();
+    state.abLoop = { a: 1, b: 2 };
+    clickLine(3); // 第四句在区间外
+    expect(state.abLoop).toBe(null);
+    expect(audio().currentTime).toBe(30);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("点击区间内：跳到该句播放，区间不变", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    clickLine(2); // 第三句在区间内
+    expect(state.abLoop).toEqual({ a: 1, b: 3 });
+    expect(audio().currentTime).toBe(20);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("点击区间内终点句，播完仍跳回起点（循环继续）", () => {
+    setup();
+    state.abLoop = { a: 1, b: 3 };
+    clickLine(3); // 直接跳到终点句
+    fireTimeupdate(40.5); // 终点句播完 → 跳回起点
+    expect(state.abLoop).toEqual({ a: 1, b: 3 });
+    expect(audio().currentTime).toBe(10);
+    expect(audio().paused).toBe(false);
+  });
+
+  it("等选终点时点击：设为终点并播起点（路由）", () => {
+    setup();
+    state.abLoop = { a: 1, b: null };
+    clickLine(2);
+    expect(state.abLoop).toEqual({ a: 1, b: 2 });
+    expect(audio().currentTime).toBe(10); // 从区间起点开始播
+    expect(audio().paused).toBe(false);
+  });
+
+  it("无 AB 循环时点击：直接播放该句", () => {
+    setup();
+    clickLine(2);
+    expect(state.abLoop).toBe(null);
+    expect(audio().currentTime).toBe(20);
+    expect(audio().paused).toBe(false);
   });
 
   it("exitAbLoop：单击退出恢复正常跟唱", () => {
