@@ -73,6 +73,11 @@ const {
   LYRIC_SETTINGS_KEY,
   uiSettings,
   UI_SETTINGS_KEY,
+  playbackSettings,
+  PLAYBACK_SETTINGS_KEY,
+  restoreLastPlayed,
+  saveLastPlayed,
+  LAST_PLAYED_KEY,
   _resetKaraokeAnchor,
   _resetPlayMode,
   setVolume,
@@ -1899,5 +1904,211 @@ describe("setupAutoRefresh（iCloud 库自动刷新）", () => {
     setupAutoRefresh(100);
     await vi.advanceTimersByTimeAsync(300);
     expect(state.libraryVersion).toBeNull();
+  });
+});
+
+// ============ 第一批：播放设置（playbackSettings）============
+describe("播放设置 playbackSettings", () => {
+  // 模块级 reactive 跨测试残留：每个测试前保存、后恢复
+  let saved;
+  beforeEach(() => {
+    saved = { ...playbackSettings };
+  });
+  afterEach(() => {
+    Object.assign(playbackSettings, saved);
+    state.volume = 1.0;
+    state.muted = false;
+  });
+
+  it("cyclePlayMode 同步持久化播放模式（启动时恢复用）", async () => {
+    state.playMode = "order";
+    cyclePlayMode();
+    expect(playbackSettings.playMode).toBe("shuffle");
+    await nextTick(); // watch 持久化为异步写入
+    expect(JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)).playMode).toBe("shuffle");
+  });
+
+  it("设置弹窗里改播放模式立即生效（同步 state）", () => {
+    state.playMode = "order";
+    playbackSettings.playMode = "repeatOne";
+    expect(state.playMode).toBe("repeatOne");
+  });
+
+  it("播放模式持久化：模块加载时从 localStorage 恢复", async () => {
+    // 重新加载模块验证启动恢复（重置模块缓存）
+    localStorage.setItem(
+      PLAYBACK_SETTINGS_KEY,
+      JSON.stringify({ playMode: "shuffle", resumeLast: false, rememberVolume: false, fadeSec: 1 }),
+    );
+    const mod = await import("../composables/usePlayer.js?restore-test=" + Date.now());
+    expect(mod.state.playMode).toBe("shuffle");
+    expect(mod.playbackSettings.fadeSec).toBe(1);
+  });
+
+  it("记住音量：开启时 setVolume 持久化", () => {
+    playbackSettings.rememberVolume = true;
+    setVolume(0.5);
+    expect(parseFloat(localStorage.getItem(VOLUME_KEY))).toBe(0.5);
+  });
+
+  it("记住音量：关闭时 setVolume 不写入 localStorage", () => {
+    playbackSettings.rememberVolume = false;
+    setVolume(0.5);
+    expect(localStorage.getItem(VOLUME_KEY)).toBeNull();
+  });
+});
+
+describe("恢复上次播放 restoreLastPlayed", () => {
+  let saved;
+  beforeEach(() => {
+    saved = { ...playbackSettings };
+  });
+  afterEach(() => {
+    Object.assign(playbackSettings, saved);
+  });
+
+  it("歌曲在库中：恢复歌曲并 seek 到断点", async () => {
+    playbackSettings.resumeLast = true;
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/b.mp3", position: 42 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await restoreLastPlayed();
+    expect(state.currentSong.path).toBe("/b.mp3");
+    // 触发 loadedmetadata → seek 到断点
+    const a = FakeAudio.instances[0];
+    a.duration = 100;
+    a.listeners["loadedmetadata"]();
+    expect(a.currentTime).toBe(42);
+    expect(state.currentTime).toBe(42);
+  });
+
+  it("进度超出歌曲时长：clamp 到末尾附近", async () => {
+    playbackSettings.resumeLast = true;
+    state.songs = [{ path: "/a.mp3", name: "A" }];
+    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/a.mp3", position: 999 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await restoreLastPlayed();
+    const a = FakeAudio.instances[0];
+    a.duration = 100;
+    a.listeners["loadedmetadata"]();
+    expect(a.currentTime).toBe(99.5);
+  });
+
+  it("歌曲已不在库中：不恢复（保持当前状态）", async () => {
+    playbackSettings.resumeLast = true;
+    state.songs = [{ path: "/a.mp3", name: "A" }];
+    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/gone.mp3", position: 10 }));
+    await restoreLastPlayed();
+    expect(state.currentSong).toBeNull();
+  });
+
+  it("开关关闭时不恢复", async () => {
+    playbackSettings.resumeLast = false;
+    state.songs = [{ path: "/a.mp3", name: "A" }];
+    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/a.mp3", position: 10 }));
+    await restoreLastPlayed();
+    expect(state.currentSong).toBeNull();
+  });
+
+  it("saveLastPlayed：记录当前歌曲与进度", () => {
+    playbackSettings.resumeLast = true;
+    state.currentSong = { path: "/a.mp3", name: "A" };
+    const a = FakeAudio.instances[0];
+    a._src = "/api/audio?path=/a.mp3";
+    a.currentTime = 30;
+    saveLastPlayed();
+    const saved = JSON.parse(localStorage.getItem(LAST_PLAYED_KEY));
+    expect(saved.path).toBe("/a.mp3");
+    expect(saved.position).toBe(30);
+  });
+});
+
+describe("切歌淡入淡出 fadeSec", () => {
+  let saved;
+  beforeEach(() => {
+    vi.useRealTimers(); // 清理其他测试残留的 fake timers
+    FakeAudio.instances[0].paused = true; // 重置 audio 播放状态（跨测试残留）
+    FakeAudio.instances[0].volume = 1;
+    saved = { ...playbackSettings };
+  });
+  afterEach(() => {
+    Object.assign(playbackSettings, saved);
+    vi.useRealTimers();
+  });
+
+  function stubFetch() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+  }
+
+  it("fadeSec=0（默认）：切歌音量不变", async () => {
+    playbackSettings.fadeSec = 0;
+    state.volume = 0.8;
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    stubFetch();
+    await selectSong(0);
+    const a = FakeAudio.instances[0];
+    a.volume = 0.8;
+    await selectSong(1);
+    expect(a.volume).toBe(0.8);
+  });
+
+  it("fadeSec>0 播放中切歌：先淡出到 0 再换源，自动播放时淡入回目标音量", async () => {
+    vi.useFakeTimers();
+    playbackSettings.fadeSec = 1;
+    state.volume = 0.8;
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    stubFetch();
+    await selectSong(0);
+    const a = FakeAudio.instances[0];
+    a.volume = 0.8;
+    a.paused = false;
+    const p = selectSong(1, { autoPlay: true, source: "auto" }); // 不 await：先跑淡出
+    await vi.advanceTimersByTimeAsync(500); // 一半：音量应低于 0.8
+    expect(a.volume).toBeLessThan(0.8);
+    expect(a.volume).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(1500); // 淡出完成（剩 500ms）→ 换源 → 淡入（1000ms）
+    await p;
+    expect(decodeURIComponent(a.src)).toContain("/b.mp3");
+    expect(a.volume).toBe(0.8); // 淡入结束回到目标音量
+  });
+
+  it("淡出期间再次切歌：旧切歌放弃，新切歌接管", async () => {
+    vi.useFakeTimers();
+    playbackSettings.fadeSec = 1;
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+      { path: "/c.mp3", name: "C" },
+    ];
+    stubFetch();
+    await selectSong(0);
+    const a = FakeAudio.instances[0];
+    a.volume = 0.8;
+    a.paused = false;
+    const p1 = selectSong(1); // 开始淡出中
+    await vi.advanceTimersByTimeAsync(200);
+    const p2 = selectSong(2); // 快速连切
+    await vi.advanceTimersByTimeAsync(2000);
+    await p1;
+    await p2;
+    expect(decodeURIComponent(a.src)).toContain("/c.mp3"); // 最终停在最后一次选择
   });
 });

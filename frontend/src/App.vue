@@ -112,6 +112,7 @@ import {
   setupMediaSession,
   setupPlaybackFlush,
   setupAutoRefresh,
+  restoreLastPlayed,
   toggleControls,
   toggleMusicLib,
   currentLineIndex,
@@ -135,7 +136,7 @@ function switchMode(m) {
 }
 
 onMounted(() => {
-  loadSongs();
+  loadSongs().then(() => restoreLastPlayed());
   loadFavorites();
   loadPlaylists();
   setupKeyboardShortcuts();

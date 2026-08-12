@@ -38,7 +38,7 @@ export const state = reactive({
 // ============ 歌词显示设置（localStorage 持久化）============
 export const LYRIC_SETTINGS_KEY = "qqplayer.lyricSettings.v1";
 
-export const lyricSettings = reactive({
+export const LYRIC_SETTINGS_DEFAULTS = {
   fontFamily: "system", // 'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
   fontSize: 20, // 当前句基准字号（px），其他层级按比例缩放
   align: "left", // 'left' | 'center' | 'right'
@@ -48,16 +48,20 @@ export const lyricSettings = reactive({
   focusPos: 0.33, // 焦点句停靠位置（可视区高度比例）：0.33 | 0.5
   fadeMask: true, // 上下渐隐遮罩
   autoScroll: true, // 切句自动跟随滚动
-});
+};
+
+export const lyricSettings = reactive({ ...LYRIC_SETTINGS_DEFAULTS });
 
 // ============ 界面偏好（localStorage 持久化）============
 export const UI_SETTINGS_KEY = "qqplayer.uiSettings.v1";
 
-export const uiSettings = reactive({
+export const UI_SETTINGS_DEFAULTS = {
   showSongInfo: false, // 跟唱模式歌词面板顶部显示当前歌曲信息（歌名/歌手）
   karaokeShowTime: false, // 跟唱模式每句显示起止时间戳
   karaokeShowNum: true, // 跟唱模式每句左侧显示行号（默认显示，用户可关）
-});
+};
+
+export const uiSettings = reactive({ ...UI_SETTINGS_DEFAULTS });
 
 function loadUiSettings() {
   try {
@@ -111,10 +115,64 @@ watch(
   { deep: true },
 );
 
+// ============ 播放设置（localStorage 持久化）============
+// 覆盖：播放模式记忆 / 恢复上次播放 / 记住音量 / 切歌淡入淡出
+export const PLAYBACK_SETTINGS_KEY = "qqplayer.playbackSettings.v1";
+
+export const PLAYBACK_SETTINGS_DEFAULTS = {
+  playMode: "order", // 播放模式（启动时恢复）：'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
+  resumeLast: true, // 启动时恢复上次播放的歌曲与进度
+  rememberVolume: true, // 记住音量（关闭则每次启动回到默认音量）
+  fadeSec: 0, // 切歌淡入淡出时长（秒）；0 = 关闭
+};
+
+export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
+
+function loadPlaybackSettings() {
+  try {
+    const raw = localStorage.getItem(PLAYBACK_SETTINGS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    for (const k of Object.keys(playbackSettings)) {
+      if (k in saved) playbackSettings[k] = saved[k];
+    }
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadPlaybackSettings();
+
+watch(
+  playbackSettings,
+  () => {
+    try {
+      localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify(playbackSettings));
+    } catch {
+      /* 忽略写入失败 */
+    }
+  },
+  { deep: true },
+);
+
+// 播放模式随设置恢复（用户手动三态切换时也会同步回 playbackSettings，见 cyclePlayMode）
+if (["order", "shuffle", "repeatOne"].includes(playbackSettings.playMode)) {
+  state.playMode = playbackSettings.playMode;
+}
+// 设置弹窗里改播放模式 → 立即生效（含洗牌队列初始化）
+watch(
+  () => playbackSettings.playMode,
+  (m) => {
+    state.playMode = m;
+    if (m === "shuffle") ensureShuffleQueue();
+  },
+  { flush: "sync" },
+);
+
 // ============ 音量（localStorage 持久化）============
 export const VOLUME_KEY = "qqplayer.volume.v1";
 
 function loadVolume() {
+  if (!playbackSettings.rememberVolume) return; // 不记住音量：保持默认 100%
   try {
     const v = parseFloat(localStorage.getItem(VOLUME_KEY));
     if (!isNaN(v) && v >= 0 && v <= 1) {
@@ -128,6 +186,7 @@ function loadVolume() {
 loadVolume();
 
 function persistVolume() {
+  if (!playbackSettings.rememberVolume) return; // 关闭记住音量：不写入
   try {
     localStorage.setItem(VOLUME_KEY, String(state.volume));
   } catch {
@@ -659,6 +718,7 @@ function nextShuffle(opts = {}) {
 export function cyclePlayMode() {
   const order = ["order", "shuffle", "repeatOne"];
   state.playMode = order[(order.indexOf(state.playMode) + 1) % order.length];
+  playbackSettings.playMode = state.playMode; // 同步持久化（启动时恢复）
   if (state.playMode === "shuffle") ensureShuffleQueue();
 }
 
@@ -797,9 +857,67 @@ export function stopAutoRefresh() {
   }
 }
 
+// ============ 切歌淡入淡出 ============
+let fadeSeq = 0; // 切歌序列号：快速连切时旧淡出让位（旧切换自动放弃）
+
+// 当前音量淡出到 0（50ms 一步）。被更新的切歌取代时 resolve(false) → 放弃本次切换
+// 注意：每个淡出用独立 timer——若共用全局 timer，新切歌清掉旧 timer 会让旧 promise 永不 resolve
+function fadeOut(sec, seq) {
+  return new Promise((resolve) => {
+    const base = audio.volume;
+    if (!(sec > 0) || base <= 0) {
+      resolve(true);
+      return;
+    }
+    const steps = Math.max(1, Math.round(sec * 20));
+    const step = -base / steps;
+    let i = 0;
+    const timer = setInterval(() => {
+      if (seq !== fadeSeq) {
+        clearInterval(timer);
+        resolve(false);
+        return;
+      }
+      i += 1;
+      audio.volume = Math.max(0, base + step * i);
+      if (i >= steps) {
+        clearInterval(timer);
+        audio.volume = 0;
+        resolve(true);
+      }
+    }, 50);
+  });
+}
+
+// 从 0 淡入到目标音量（不阻塞；独立 timer，与淡出互不干扰）
+function fadeIn(sec) {
+  if (!(sec > 0)) return;
+  const target = state.muted ? 0 : state.volume;
+  if (target <= 0) return;
+  const steps = Math.max(1, Math.round(sec * 20));
+  const step = target / steps;
+  let i = 0;
+  const timer = setInterval(() => {
+    i += 1;
+    audio.volume = Math.min(target, step * i);
+    if (i >= steps) {
+      clearInterval(timer);
+      audio.volume = target;
+    }
+  }, 50);
+}
+
 // ============ 选歌 ============
 export async function selectSong(index, opts = {}) {
   if (index < 0 || index >= state.songs.length) return;
+  const seq = ++fadeSeq;
+  // 切歌淡入淡出：正在播放且开启淡出 → 先淡出旧歌再换源
+  const fade = opts.fade === false ? 0 : playbackSettings.fadeSec;
+  const wasPlaying = !audio.paused && !!audio.src;
+  if (fade > 0 && wasPlaying) {
+    const ok = await fadeOut(fade, seq);
+    if (!ok) return; // 淡出期间又被切歌：放弃本次（新切歌接管）
+  }
   // 切歌：先上报旧歌的播放会话（若正在播放）
   // 自然播完（ended 触发自动切歌）时 audio.ended=true → 标记 completed
   if (playbackSession) playbackSession.completed = audio.ended;
@@ -824,6 +942,8 @@ export async function selectSong(index, opts = {}) {
   audio.pause();
   audio.src = "/api/audio?path=" + encodeURIComponent(state.songs[index].path);
   audio.playbackRate = state.speed;
+  // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
+  audio.volume = state.muted ? 0 : state.volume;
   state.currentTime = 0;
   state.duration = 0;
   state.lyric = [];
@@ -832,6 +952,7 @@ export async function selectSong(index, opts = {}) {
   // 自动播放（播完自动切歌场景）：上一首结束切到新歌后继续播放
   if (opts.autoPlay) {
     audio.play().catch(() => {});
+    if (fade > 0) fadeIn(fade);
   }
   // 加载歌词
   try {
@@ -847,11 +968,16 @@ export async function selectSong(index, opts = {}) {
     state.lyric = [];
     state.lyricFormat = null;
   }
-  // 预取时长
+  // 预取时长；恢复上次播放时在这里 seek 到断点
   audio.addEventListener(
     "loadedmetadata",
     () => {
       state.duration = audio.duration || 0;
+      if (opts.resumeAt != null && audio.duration) {
+        const t = Math.min(opts.resumeAt, Math.max(0, audio.duration - 0.5));
+        audio.currentTime = t;
+        state.currentTime = t;
+      }
     },
     { once: true },
   );
@@ -1061,10 +1187,51 @@ export const currentLineIndex = computed(() => {
   return idx;
 });
 
+// ============ 恢复上次播放（localStorage；受 playbackSettings.resumeLast 控制）============
+export const LAST_PLAYED_KEY = "qqplayer.lastPlayed.v1";
+let lastSaveAt = 0;
+
+// 保存当前播放位置（timeupdate 节流 + 页面关闭兑底调用）
+export function saveLastPlayed() {
+  const song = state.currentSong;
+  if (!playbackSettings.resumeLast || !song || !audio.src) return;
+  const pos = audio.currentTime || 0;
+  if (!(pos > 0)) return;
+  try {
+    localStorage.setItem(
+      LAST_PLAYED_KEY,
+      JSON.stringify({ path: song.path, position: pos, ts: Date.now() }),
+    );
+  } catch {
+    /* 忽略写入失败 */
+  }
+}
+
+// 启动时恢复上次播放的歌曲与进度（需在歌曲列表加载完成后调用；不自动播放，避免浏览器拦截）
+export async function restoreLastPlayed() {
+  if (!playbackSettings.resumeLast || !state.songs.length) return;
+  let saved = null;
+  try {
+    const raw = localStorage.getItem(LAST_PLAYED_KEY);
+    if (raw) saved = JSON.parse(raw);
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+  if (!saved || !saved.path) return;
+  const idx = state.songs.findIndex((s) => s.path === saved.path);
+  if (idx < 0) return;
+  await selectSong(idx, { record: false, resumeAt: saved.position });
+}
+
 // ============ 音频事件 ============
 audio.addEventListener("timeupdate", () => {
   state.currentTime = audio.currentTime;
   syncMediaPosition();
+  // 恢复上次播放：节流保存进度（10s 一次；页面关闭由 setupPlaybackFlush 兑底）
+  if (playbackSettings.resumeLast && Date.now() - lastSaveAt > 10000) {
+    lastSaveAt = Date.now();
+    saveLastPlayed();
+  }
   // 跟唱模式：每句播完自动停（锚点方案）
   if (state.mode === "karaoke" && state.karaokeOn) {
     const lines = lineItems.value;
@@ -1177,6 +1344,7 @@ watch(
 export function setupPlaybackFlush() {
   if (typeof window === "undefined") return () => {};
   const handler = () => {
+    saveLastPlayed(); // 恢复上次播放：页面关闭/刷新前保存当前进度
     // 直接构造并 beacon：不能用 flushPlaybackSession（它走 fetch，卸载时会被取消）
     const s = playbackSession;
     if (!s) return;
