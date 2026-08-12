@@ -33,10 +33,14 @@ kimi ga mae ni
 
 
 def make_mp3(
-    path: Path, title: str | None = None, artist: str | None = None, cover: bytes | None = None
+    path: Path,
+    title: str | None = None,
+    artist: str | None = None,
+    album: str | None = None,
+    cover: bytes | None = None,
 ):
     """生成带 ID3 标签（可选内嵌封面 APIC）的假 mp3，模拟真实歌曲文件"""
-    from mutagen.id3 import APIC, ID3, TIT2, TPE1
+    from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1
 
     frame = b"\xff\xfb\x90\x00" + b"\x00" * 413  # 完整 128kbps/44100 MPEG1 L3 帧
     path.write_bytes(frame * 3)
@@ -45,6 +49,8 @@ def make_mp3(
         tags.add(TIT2(encoding=3, text=title))
     if artist:
         tags.add(TPE1(encoding=3, text=artist))
+    if album:
+        tags.add(TALB(encoding=3, text=album))
     if cover:
         tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover))
     tags.save(path)
@@ -58,7 +64,7 @@ def song_library(tmp_path):
         backend.LIBRARY = tmp_path
         d = tmp_path / "yakimochi"
         d.mkdir()
-        make_mp3(d / "song.mp3", title="ヤキモチ", artist="高橋優")
+        make_mp3(d / "song.mp3", title="ヤキモチ", artist="高橋優", album="開往明天的旅行")
         (d / "yakimochi.srt").write_text(SRT_TEXT, encoding="utf-8")
         make_mp3(tmp_path / "五月天 - 知足.mp3", title="知足", artist="五月天", cover=FAKE_JPEG)
         yield tmp_path
@@ -78,12 +84,14 @@ def test_scan_library_metadata(song_library):
     by_name = {s["name"]: s for s in backend.scan_library()}
     yakimochi = by_name["ヤキモチ"]
     assert yakimochi["artist"] == "高橋優"
+    assert yakimochi["album"] == "開往明天的旅行"
     assert yakimochi["ext"] == "mp3"
     assert yakimochi["has_lyric"] is True
     assert yakimochi["lyric"] == "yakimochi.srt"
 
     zhizu = by_name["知足"]
     assert zhizu["artist"] == "五月天"
+    assert zhizu["album"] == ""  # 无专辑标签
     assert zhizu["has_lyric"] is False
     assert zhizu["lyric"] is None
 

@@ -99,14 +99,15 @@ def scan_library():
             rel = f.relative_to(LIBRARY)
         except ValueError:
             rel = Path(f.name)
-        # 提取 ID3 元数据（歌手/标题），没有就用文件名
-        artist, title = extract_tags(f)
+        # 提取 ID3 元数据（歌手/标题/专辑），没有就用文件名
+        artist, title, album = extract_tags(f)
         songs.append(
             {
                 "id": str(rel),
                 "path": str(f),
                 "name": title or f.stem,
                 "artist": artist or (f.parent.name if f.parent != LIBRARY else ""),
+                "album": album or "",
                 "folder": str(f.parent),
                 "ext": f.suffix.lower().lstrip("."),
                 "lyric": lyric,
@@ -442,15 +443,15 @@ async def api_set_library(body: dict):
 
 
 def extract_tags(f: Path):
-    """提取音频文件的标题/歌手（ID3 / MP4 元数据）"""
+    """提取音频文件的标题/歌手/专辑（ID3 / MP4 元数据）"""
     if MutagenFile is None:
-        return None, None
+        return None, None, None
     try:
         audio = MutagenFile(str(f))
         if audio is None:
-            return None, None
+            return None, None, None
         tags = getattr(audio, "tags", None)
-        title = artist = None
+        title = artist = album = None
         if tags is not None:
             for key in tags:
                 k = key.lower()
@@ -458,9 +459,11 @@ def extract_tags(f: Path):
                     artist = str(tags[key]).split("\x00")[0].strip()
                 elif k in ("tit2", "©nam", "title") and title is None:
                     title = str(tags[key]).split("\x00")[0].strip()
-        return artist or None, title or None
+                elif k in ("talb", "©alb", "album") and album is None:
+                    album = str(tags[key]).split("\x00")[0].strip()
+        return artist or None, title or None, album or None
     except Exception:
-        return None, None
+        return None, None, None
 
 
 # ============ 封面 ============
@@ -615,7 +618,7 @@ def api_lyric(path: str):
         data = parse_srt(text) if lext == "srt" else parse_lrc(text)
         return {"format": lext, "lines": data, "source": "local"}
     # 2) 在线获取（本地无歌词时兜底）
-    artist, title = extract_tags(f)
+    artist, title, _album = extract_tags(f)
     title = title or f.stem
     lrc_text, tlyric_text, source = fetch_online_lyric(title, artist or "")
     if lrc_text is None:
