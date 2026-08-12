@@ -237,17 +237,18 @@ function fmt(t) {
   background: var(--card);
   border-radius: 16px;
   border: 1px solid var(--border);
-  padding: 14px 20px 12px;
+  padding: 30px 20px 12px; /* 顶部留白容纳居中收起按钮 */
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 .collapse-btn {
   position: absolute;
-  top: 8px;
-  right: 10px;
-  width: 24px;
-  height: 24px;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 22px;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
