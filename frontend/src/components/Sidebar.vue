@@ -9,7 +9,7 @@
       <!-- 全部歌曲 -->
       <div
         class="sb-item"
-        :class="{ on: !state.activePlaylistId }"
+        :class="{ on: !state.activePlaylistId && !smartViewState.active }"
         title="全部歌曲"
         @click="activate(null)"
       >
@@ -17,6 +17,20 @@
         <span class="sb-name">全部歌曲</span>
         <span class="sb-count">{{ state.songs.length }}</span>
       </div>
+
+      <!-- 智能视图：最近添加 / 最近播放 / 常听排行 -->
+      <div class="sb-group">智能视图</div>
+      <template v-for="v in smartViewEntries" :key="v.kind">
+        <div
+          class="sb-item"
+          :class="{ on: smartViewState.active === v.kind }"
+          :title="v.title"
+          @click="openSmartView(v.kind)"
+        >
+          <component :is="v.icon" :size="15" />
+          <span class="sb-name">{{ v.title }}</span>
+        </div>
+      </template>
 
       <!-- 歌单列表 -->
       <template v-for="p in state.playlists" :key="p.id">
@@ -79,18 +93,78 @@
       <Plus :size="14" />
       新建歌单
     </button>
+
+    <!-- 智能视图面板：覆盖播放列表列 -->
+    <SmartViewPanel
+      v-if="smartViewState.active"
+      :kind="smartViewState.active"
+      @close="closeSmartViewPanel"
+    />
   </aside>
 </template>
 
 <script setup>
-import { ref, nextTick } from "vue";
-import { Library, Music2, ListMusic, Plus, Pencil, Trash2 } from "@lucide/vue";
+import { ref, nextTick, onBeforeUnmount } from "vue";
+import {
+  Library,
+  Music2,
+  ListMusic,
+  Plus,
+  Pencil,
+  Trash2,
+  Sparkles,
+  History,
+  TrendingUp,
+} from "@lucide/vue";
 import { state, createPlaylist, renamePlaylist, deletePlaylist } from "../composables/usePlayer.js";
+import {
+  SMART_VIEWS,
+  smartViewState,
+  loadSmartView,
+  closeSmartView,
+} from "../composables/useSmartViews.js";
+import SmartViewPanel from "./SmartViewPanel.vue";
+
+// 智能视图入口定义（图标组件在模板里用 <component :is> 渲染）
+const smartViewEntries = [
+  { kind: "recentAdded", title: SMART_VIEWS.recentAdded.title, icon: Sparkles },
+  { kind: "recentPlayed", title: SMART_VIEWS.recentPlayed.title, icon: History },
+  { kind: "topPlayed", title: SMART_VIEWS.topPlayed.title, icon: TrendingUp },
+];
 
 function activate(pid) {
+  if (smartViewState.active) closeSmartViewPanel(); // 切回常规视图时关闭智能视图
   state.activePlaylistId = pid;
   state.playlistOpen = true; // 点击曲库条目时自动打开播放列表面板
 }
+
+// ============ 智能视图 ============
+function openSmartView(kind) {
+  if (smartViewState.active === kind) {
+    closeSmartViewPanel(); // 再点同一项 = 关闭
+    return;
+  }
+  smartViewState.prevPlaylistOpen = state.playlistOpen; // 记住进入前的面板开关，退出时恢复
+  state.playlistOpen = true; // 挂载 Playlist 作为智能视图定位锚点（面板覆盖其上）
+  loadSmartView(kind);
+}
+
+function closeSmartViewPanel() {
+  const prev = smartViewState.prevPlaylistOpen;
+  closeSmartView();
+  if (typeof prev === "boolean") state.playlistOpen = prev;
+  smartViewState.prevPlaylistOpen = null;
+}
+
+// 侧栏被关闭（音乐库面板收起）时同步退出智能视图，避免残留覆盖层
+onBeforeUnmount(() => {
+  if (smartViewState.active) {
+    const prev = smartViewState.prevPlaylistOpen;
+    closeSmartView();
+    if (typeof prev === "boolean") state.playlistOpen = prev;
+    smartViewState.prevPlaylistOpen = null;
+  }
+});
 
 // ============ 新建 ============
 const creating = ref(false);
@@ -252,6 +326,13 @@ function askDelete(p) {
   color: var(--text3);
   font-size: 12px;
   padding: 20px 0;
+}
+.sb-group {
+  padding: 10px 10px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: 0.5px;
 }
 .sb-editing {
   padding: 3px;
