@@ -14,7 +14,8 @@ export default [
   },
   {
     files: ["**/*.mjs"],
-    languageOptions: { globals: { ...globals.node } },
+    // playwright 验证脚本（ui-test/ui-settings-test/scripts/*）同时用 node 与 browser API
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     files: ["**/*.{js,vue}"],

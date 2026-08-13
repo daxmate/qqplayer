@@ -849,7 +849,13 @@ def test_manual_lyric_with_tlyric(song_library, tmp_path):
     tlyric = "[00:01.00]翻译第一行\n[00:05.00]翻译第二行\n"
     r = client.put(
         "/api/lyric/manual",
-        json={"path": str(song), "format": "lrc", "text": lrc, "source": "上传·x.json", "tlyric": tlyric},
+        json={
+            "path": str(song),
+            "format": "lrc",
+            "text": lrc,
+            "source": "上传·x.json",
+            "tlyric": tlyric,
+        },
     )
     assert r.status_code == 200
     assert r.json()["tlyric"] == tlyric
@@ -881,7 +887,9 @@ def test_manual_lyric_missing_fields():
         client.put("/api/lyric/manual", json={"format": "lrc", "text": "[00:01.00]x"}).status_code
         == 400
     )
-    assert client.put("/api/lyric/manual", json={"path": "/x.mp3", "text": "   "}).status_code == 400
+    assert (
+        client.put("/api/lyric/manual", json={"path": "/x.mp3", "text": "   "}).status_code == 400
+    )
 
 
 def test_lyric_search_api(song_library, monkeypatch):
@@ -900,6 +908,7 @@ def test_lyric_search_api(song_library, monkeypatch):
 
 
 # ============ 桌面歌词/迷你窗：now-playing 上报 + 播放控制指令队列 ============
+
 
 def test_api_now_playing_roundtrip():
     """now-playing 上报完整字段（含迷你窗需要的 name/artist/duration/isPlaying）→ GET 原样返回"""
@@ -960,9 +969,17 @@ def test_api_player_action_unknown_rejected():
 def test_api_player_action_seek_volume_validation():
     """seek/volume 必须带数值，且 clamp 到合法范围"""
     assert client.post("/api/player/action", json={"action": "seek"}).json()["ok"] is False
-    assert client.post("/api/player/action", json={"action": "volume", "value": "loud"}).json()["ok"] is False
-    assert client.post("/api/player/action", json={"action": "seek", "value": -5}).status_code == 200
-    assert client.post("/api/player/action", json={"action": "volume", "value": 2.5}).status_code == 200
+    assert (
+        client.post("/api/player/action", json={"action": "volume", "value": "loud"}).json()["ok"]
+        is False
+    )
+    assert (
+        client.post("/api/player/action", json={"action": "seek", "value": -5}).status_code == 200
+    )
+    assert (
+        client.post("/api/player/action", json={"action": "volume", "value": 2.5}).status_code
+        == 200
+    )
     actions = client.get("/api/player/actions").json()["actions"]
     assert actions == [
         {"action": "seek", "value": 0.0},
@@ -1009,4 +1026,6 @@ def test_api_ui_settings_roundtrip(tmp_path, monkeypatch):
     assert "hack" not in s
 
     # 文件已落盘
-    assert json.loads((tmp_path / "ui_settings.json").read_text(encoding="utf-8"))["theme"] == "light"
+    assert (
+        json.loads((tmp_path / "ui_settings.json").read_text(encoding="utf-8"))["theme"] == "light"
+    )

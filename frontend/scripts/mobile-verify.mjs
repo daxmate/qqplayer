@@ -15,7 +15,9 @@ async function checkNoHScroll(page, label) {
     bodySw: document.body.scrollWidth,
   }));
   const ok = sw <= iw + 1 && bodySw <= iw + 1;
-  results.push(`${label}: 横向滚动 ${ok ? "无 ✓" : `有 (scrollW=${sw}, innerW=${iw}, body=${bodySw}) ✗`}`);
+  results.push(
+    `${label}: 横向滚动 ${ok ? "无 ✓" : `有 (scrollW=${sw}, innerW=${iw}, body=${bodySw}) ✗`}`,
+  );
   return ok;
 }
 
@@ -79,20 +81,26 @@ async function runMobileFlow(browser, { width, height, name }) {
   await page.waitForTimeout(400);
   const mini = await page.locator(".mini-player").boundingBox();
   const miniVisible = mini && mini.y + mini.height <= height + 1 && mini.width > 0;
-  results.push(`${name}: 迷你播放条 ${miniVisible ? "常驻底部 ✓" : `位置异常 ✗ y=${mini?.y} h=${mini?.height}`}`);
+  results.push(
+    `${name}: 迷你播放条 ${miniVisible ? "常驻底部 ✓" : `位置异常 ✗ y=${mini?.y} h=${mini?.height}`}`,
+  );
   await page.screenshot({ path: `${OUT}/${name}-5-minibar.png` });
 
   // 点迷你播放条 → 重新展开播放器（链路闭环）
   await page.locator(".mini-player").click();
   await page.waitForSelector(".mobile-player", { timeout: 10000 });
-  results.push(`${name}: 迷你条→播放器链路 ${(await page.locator(".mobile-player").count()) === 1 ? "✓" : "✗"}`);
+  results.push(
+    `${name}: 迷你条→播放器链路 ${(await page.locator(".mobile-player").count()) === 1 ? "✓" : "✗"}`,
+  );
 
   // 列表返回链路：收起播放器 → 列表返回 → 首页
   await page.locator(".mp-head .mp-btn-round").first().click();
   await page.waitForSelector(".ml-page", { timeout: 10000 });
   await page.locator(".ml-back").click();
   await page.waitForSelector(".mh-page", { timeout: 10000 });
-  results.push(`${name}: 返回链路（播放器→列表→首页）${(await page.locator(".mh-page").count()) === 1 ? "✓" : "✗"}`);
+  results.push(
+    `${name}: 返回链路（播放器→列表→首页）${(await page.locator(".mh-page").count()) === 1 ? "✓" : "✗"}`,
+  );
 
   results.push(`${name}: JS 错误 ${errors.length ? "✗ " + errors.join(" | ") : "无 ✓"}`);
   await ctx.close();
@@ -114,7 +122,12 @@ async function runDesktopCheck(browser, { width, height, name }) {
     playlist: !!document.querySelector(".playlist"),
     mobile: !!document.querySelector(".mobile-shell"),
   }));
-  const ok = desktopTree.topbar && desktopTree.activity && desktopTree.sidebar && desktopTree.playlist && !desktopTree.mobile;
+  const ok =
+    desktopTree.topbar &&
+    desktopTree.activity &&
+    desktopTree.sidebar &&
+    desktopTree.playlist &&
+    !desktopTree.mobile;
   results.push(`${name}: 桌面三栏 ${ok ? "✓" : "✗"} ${JSON.stringify(desktopTree)}`);
   await checkNoHScroll(page, `${name} desktop`);
   results.push(`${name}: JS 错误 ${errors.length ? "✗ " + errors.join(" | ") : "无 ✓"}`);

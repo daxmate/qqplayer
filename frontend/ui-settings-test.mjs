@@ -1,4 +1,3 @@
-/* eslint-env browser */
 import { chromium } from "playwright";
 
 const browser = await chromium.launch({ headless: true });
@@ -36,16 +35,22 @@ console.log("开关:", switches, "开启:", onSwitches);
 // 交互：点掉 FLAC chip → 应触发保存（后端 audioExts 少一个）
 await page.locator(".ext-chip:has-text('FLAC')").click();
 await page.waitForTimeout(1000);
-const flacOn = await page.locator(".ext-chip:has-text('FLAC')").evaluate((el) => el.classList.contains("on"));
+const flacOn = await page
+  .locator(".ext-chip:has-text('FLAC')")
+  .evaluate((el) => el.classList.contains("on"));
 console.log("点击 FLAC 后选中态:", flacOn);
 await page.screenshot({ path: "/tmp/qqp-settings-library-2.png" });
 
 // 恢复默认按钮 → 设置回全选
 await page.locator(".reset-btn").click();
 await page.waitForTimeout(1000);
-const flacBack = await page.locator(".ext-chip:has-text('FLAC')").evaluate((el) => el.classList.contains("on"));
+const flacBack = await page
+  .locator(".ext-chip:has-text('FLAC')")
+  .evaluate((el) => el.classList.contains("on"));
 console.log("恢复默认后 FLAC 选中态:", flacBack);
-const mp3On = await page.locator(".ext-chip:has-text('MP3')").evaluate((el) => el.classList.contains("on"));
+const mp3On = await page
+  .locator(".ext-chip:has-text('MP3')")
+  .evaluate((el) => el.classList.contains("on"));
 console.log("MP3 选中态:", mp3On);
 
 // 切到播放分类确认无 JS 错误

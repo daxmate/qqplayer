@@ -259,7 +259,9 @@ def save_desktop_lyric_settings(patch: dict) -> dict:
             merged[k] = patch[k]
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        DESKTOP_LYRIC_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        DESKTOP_LYRIC_FILE.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except OSError:
         pass
     _desktop_lyric = merged
@@ -684,7 +686,9 @@ def api_now_playing_post(body: dict):
         _now_playing["duration"] = float(body.get("duration") or 0) or 0.0
         _now_playing["currentTime"] = float(body.get("currentTime") or 0) or 0.0
         _now_playing["isPlaying"] = bool(body.get("isPlaying"))
-        _now_playing["volume"] = float(body.get("volume") if body.get("volume") is not None else 1.0) or 0.0
+        _now_playing["volume"] = (
+            float(body.get("volume") if body.get("volume") is not None else 1.0) or 0.0
+        )
         _now_playing["lineIndex"] = int(body.get("lineIndex") or -1)
         _now_playing["accent"] = str(body.get("accent") or "") or None  # 强调色（跟随主题配色用）
         _now_playing["updatedAt"] = time.time()
@@ -1118,7 +1122,9 @@ def api_lyric_manual_put(body: dict):
     # 内容校验：必须能解析出歌词行，避免存了不可用的内容
     lines = parse_srt(text) if fmt == "srt" else parse_lrc(text)
     if not lines:
-        raise HTTPException(400, "歌词内容解析失败，请检查格式（LRC 需 [mm:ss] 时间戳，SRT 需序号+时间轴）")
+        raise HTTPException(
+            400, "歌词内容解析失败，请检查格式（LRC 需 [mm:ss] 时间戳，SRT 需序号+时间轴）"
+        )
     payload = save_manual_lyric(str(f), fmt, text, source, tlyric)
     return {"ok": True, **payload}
 

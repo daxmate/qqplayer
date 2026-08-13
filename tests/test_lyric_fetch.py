@@ -233,8 +233,18 @@ def test_search_netease_candidates(fake_http):
         {
             "result": {
                 "songs": [
-                    {"id": 1, "name": "夜に駆ける", "artists": [{"name": "YOASOBI"}], "duration": 1000},
-                    {"id": 2, "name": "夜に駆ける", "artists": [{"name": "某人"}], "duration": 2000},
+                    {
+                        "id": 1,
+                        "name": "夜に駆ける",
+                        "artists": [{"name": "YOASOBI"}],
+                        "duration": 1000,
+                    },
+                    {
+                        "id": 2,
+                        "name": "夜に駆ける",
+                        "artists": [{"name": "某人"}],
+                        "duration": 2000,
+                    },
                 ]
             }
         }
@@ -269,9 +279,28 @@ def test_search_lrclib_synced_only(fake_http):
     """lrclib 只保留带时间戳的 syncedLyrics：跳过 instrumental 与纯文本"""
     fake_http["lrclib.net"] = FakeResp(
         [
-            {"instrumental": False, "syncedLyrics": "[00:01.00]a", "trackName": "T", "artistName": "A", "duration": 100},
-            {"instrumental": True, "syncedLyrics": "[00:01.00]b", "trackName": "T2", "artistName": "A2", "duration": 100},
-            {"instrumental": False, "syncedLyrics": None, "plainLyrics": "纯文本", "trackName": "T3", "artistName": "A3", "duration": 100},
+            {
+                "instrumental": False,
+                "syncedLyrics": "[00:01.00]a",
+                "trackName": "T",
+                "artistName": "A",
+                "duration": 100,
+            },
+            {
+                "instrumental": True,
+                "syncedLyrics": "[00:01.00]b",
+                "trackName": "T2",
+                "artistName": "A2",
+                "duration": 100,
+            },
+            {
+                "instrumental": False,
+                "syncedLyrics": None,
+                "plainLyrics": "纯文本",
+                "trackName": "T3",
+                "artistName": "A3",
+                "duration": 100,
+            },
         ]
     )
     results = lyric_fetch.search_lrclib("x", "")

@@ -27,7 +27,11 @@ async function checkNoHScroll(page, label) {
     iw: window.innerWidth,
     bodySw: document.body.scrollWidth,
   }));
-  return push(label, sw <= iw + 1 && bodySw <= iw + 1, `(scrollW=${sw}, innerW=${iw}, body=${bodySw})`);
+  return push(
+    label,
+    sw <= iw + 1 && bodySw <= iw + 1,
+    `(scrollW=${sw}, innerW=${iw}, body=${bodySw})`,
+  );
 }
 
 // 元素间无重叠（a 的底部 <= b 的顶部）
@@ -35,7 +39,11 @@ async function checkNoOverlap(page, label, selA, selB) {
   const a = await page.locator(selA).boundingBox();
   const b = await page.locator(selB).boundingBox();
   if (!a || !b) return push(label, false, `locator missing: ${selA}=${!!a} ${selB}=${!!b}`);
-  return push(label, a.y + a.height <= b.y + 1, `head.bottom=${(a.y + a.height).toFixed(1)} nav.top=${b.y.toFixed(1)}`);
+  return push(
+    label,
+    a.y + a.height <= b.y + 1,
+    `head.bottom=${(a.y + a.height).toFixed(1)} nav.top=${b.y.toFixed(1)}`,
+  );
 }
 
 // 触摸拖拽（CDP）：from → to，中间可截图
@@ -94,7 +102,11 @@ async function runMobileFlow(browser, { width, height, name }) {
   const modalBox = await page.locator(".modal").boundingBox();
   const fullscreen =
     modalBox && Math.abs(modalBox.width - width) <= 2 && Math.abs(modalBox.height - height) <= 2;
-  push(`${name} 设置弹窗全屏`, fullscreen, `modal=${modalBox ? `${modalBox.width}x${modalBox.height}` : "null"}`);
+  push(
+    `${name} 设置弹窗全屏`,
+    fullscreen,
+    `modal=${modalBox ? `${modalBox.width}x${modalBox.height}` : "null"}`,
+  );
   // 移动端返回按钮可见
   push(`${name} 顶部返回按钮`, (await page.locator(".modal-back").count()) === 1);
   // 分类 tab 横向排布（side-nav 变顶部横条）
@@ -183,7 +195,11 @@ async function runMobileFlow(browser, { width, height, name }) {
     after.push(await rows.nth(i).getAttribute("data-path"));
   }
   const moved = before[0] !== after[0];
-  push(`${name} 触摸拖拽排序生效`, moved, `前:${before[0]?.split("/").pop()} → 后:${after[0]?.split("/").pop()}`);
+  push(
+    `${name} 触摸拖拽排序生效`,
+    moved,
+    `前:${before[0]?.split("/").pop()} → 后:${after[0]?.split("/").pop()}`,
+  );
   await page.screenshot({ path: `${OUT}/${name}-s7-drag-after.png` });
   await checkNoHScroll(page, `${name} 歌单列表`);
   // 还原顺序（避免污染真实歌单数据）
@@ -249,7 +265,10 @@ async function runDesktopCheck(browser, { width, height, name }) {
     playlist: !!document.querySelector(".playlist"),
     mobile: !!document.querySelector(".mobile-shell"),
   }));
-  push(`${name} 桌面三栏`, tree.topbar && tree.activity && tree.sidebar && tree.playlist && !tree.mobile);
+  push(
+    `${name} 桌面三栏`,
+    tree.topbar && tree.activity && tree.sidebar && tree.playlist && !tree.mobile,
+  );
 
   // ---------- 设置弹窗：居中 + 左侧导航（与改造前一致） ----------
   await page.locator('.topbar .gear-btn[title="设置"]').click();
@@ -257,7 +276,11 @@ async function runDesktopCheck(browser, { width, height, name }) {
   await page.waitForTimeout(400);
   const mBox = await page.locator(".modal").boundingBox();
   const centered = mBox && mBox.width < width * 0.9 && mBox.height < height;
-  push(`${name} 设置弹窗居中非全屏`, !!centered, `modal=${mBox ? `${mBox.width}x${mBox.height}` : "null"}`);
+  push(
+    `${name} 设置弹窗居中非全屏`,
+    !!centered,
+    `modal=${mBox ? `${mBox.width}x${mBox.height}` : "null"}`,
+  );
   push(`${name} 无移动端返回按钮`, (await page.locator(".modal-back").count()) === 0);
   const ni0 = await page.locator(".side-nav .nav-item").nth(0).boundingBox();
   const ni1 = await page.locator(".side-nav .nav-item").nth(1).boundingBox();
@@ -266,7 +289,10 @@ async function runDesktopCheck(browser, { width, height, name }) {
   // AB 循环小节
   await page.locator(".settings-scroll").evaluate((el) => (el.scrollTop = el.scrollHeight));
   await page.waitForTimeout(300);
-  push(`${name} 桌面AB循环小节可见`, (await page.locator(".group-title", { hasText: "AB 循环" }).isVisible()));
+  push(
+    `${name} 桌面AB循环小节可见`,
+    await page.locator(".group-title", { hasText: "AB 循环" }).isVisible(),
+  );
   await page.screenshot({ path: `${OUT}/${name}-d2-settings-abloop.png` });
   await page.locator(".modal-close").click();
   await page.waitForTimeout(300);
@@ -307,7 +333,11 @@ async function runDesktopCheck(browser, { width, height, name }) {
   for (let i = 0; i < Math.min(4, await plRows.count()); i++) {
     after.push(await plRows.nth(i).getAttribute("data-path"));
   }
-  push(`${name} 桌面鼠标拖拽排序生效`, before[0] !== after[0], `前:${before[0]?.split("/").pop()} → 后:${after[0]?.split("/").pop()}`);
+  push(
+    `${name} 桌面鼠标拖拽排序生效`,
+    before[0] !== after[0],
+    `前:${before[0]?.split("/").pop()} → 后:${after[0]?.split("/").pop()}`,
+  );
   await page.screenshot({ path: `${OUT}/${name}-d4-playlist-drag.png` });
   try {
     await page.evaluate(async (paths) => {
