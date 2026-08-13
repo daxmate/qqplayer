@@ -5,6 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QQPlayer 迷你窗</title>
     <style>
+      /* 主题变量：深色为默认，浅色通过 html[data-theme="light"] 覆盖（跟随主窗口主题） */
+      :root {
+        --panel-bg: rgba(20, 22, 31, 0.88);
+        --panel-border: rgba(255, 255, 255, 0.08);
+        --panel-shadow:
+          0 4px 16px rgba(0, 0, 0, 0.35),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        --text-strong: rgba(255, 255, 255, 0.95);
+        --text-mid: rgba(255, 255, 255, 0.85);
+        --text-dim: rgba(255, 255, 255, 0.5);
+        --text-faint: rgba(255, 255, 255, 0.4);
+        --idle-dim: rgba(255, 255, 255, 0.35);
+        --hover-bg: rgba(255, 255, 255, 0.12);
+        --close-hover-bg: rgba(255, 80, 80, 0.25);
+        --cover-bg: rgba(255, 255, 255, 0.06);
+        --track-bg: rgba(255, 255, 255, 0.14);
+        --track-bg2: rgba(255, 255, 255, 0.16);
+        --thumb-border: #fff;
+        --play-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+      }
+      html[data-theme="light"] {
+        --panel-bg: rgba(250, 251, 255, 0.92);
+        --panel-border: rgba(0, 0, 0, 0.1);
+        --panel-shadow:
+          0 4px 16px rgba(0, 0, 0, 0.14),
+          inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        --text-strong: rgba(20, 22, 31, 0.95);
+        --text-mid: rgba(20, 22, 31, 0.82);
+        --text-dim: rgba(20, 22, 31, 0.55);
+        --text-faint: rgba(20, 22, 31, 0.42);
+        --idle-dim: rgba(20, 22, 31, 0.35);
+        --hover-bg: rgba(20, 22, 31, 0.08);
+        --close-hover-bg: rgba(255, 80, 80, 0.16);
+        --cover-bg: rgba(20, 22, 31, 0.05);
+        --track-bg: rgba(20, 22, 31, 0.14);
+        --track-bg2: rgba(20, 22, 31, 0.18);
+        --thumb-border: #fff;
+        --play-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      }
       * {
         margin: 0;
         padding: 0;
@@ -20,7 +59,7 @@
         cursor: default;
         font-family: -apple-system, "PingFang SC", "Hiragino Sans", "Noto Sans SC", sans-serif;
       }
-      /* 面板：深色玻璃圆角卡片；顶部 24px 留给原生拖动条 */
+      /* 面板：玻璃圆角卡片（跟随主题）；顶部 24px 留给原生拖动条 */
       .panel {
         position: absolute;
         left: 6px;
@@ -32,11 +71,9 @@
         gap: 6px;
         padding: 8px 12px;
         border-radius: 14px;
-        background: rgba(20, 22, 31, 0.88);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        box-shadow:
-          0 4px 16px rgba(0, 0, 0, 0.35),
-          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--panel-shadow);
       }
       /* 第一行：封面 + 标题 + 控制按钮 */
       .row-main {
@@ -49,12 +86,12 @@
         height: 48px;
         border-radius: 10px;
         object-fit: cover;
-        background: rgba(255, 255, 255, 0.06);
+        background: var(--cover-bg);
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: rgba(255, 255, 255, 0.25);
+        color: var(--idle-dim);
       }
       .meta {
         flex: 1;
@@ -63,7 +100,7 @@
       .title {
         font-size: 13px;
         font-weight: 700;
-        color: rgba(255, 255, 255, 0.95);
+        color: var(--text-strong);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -71,13 +108,13 @@
       .artist {
         margin-top: 2px;
         font-size: 11px;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--text-dim);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .idle .title {
-        color: rgba(255, 255, 255, 0.35);
+        color: var(--idle-dim);
         font-weight: 600;
       }
       .controls {
@@ -92,7 +129,7 @@
         border: none;
         border-radius: 9px;
         background: transparent;
-        color: rgba(255, 255, 255, 0.85);
+        color: var(--text-mid);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -102,7 +139,7 @@
           transform 0.1s;
       }
       .btn:hover {
-        background: rgba(255, 255, 255, 0.12);
+        background: var(--hover-bg);
       }
       .btn:active {
         transform: scale(0.92);
@@ -113,7 +150,7 @@
         border-radius: 50%;
         background: var(--accent, #ff7e6b);
         color: #fff;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--play-shadow);
       }
       .btn.play:hover {
         background: var(--accent, #ff7e6b);
@@ -123,10 +160,10 @@
         width: 22px;
         height: 22px;
         border-radius: 7px;
-        color: rgba(255, 255, 255, 0.4);
+        color: var(--text-faint);
       }
       .btn.close:hover {
-        background: rgba(255, 80, 80, 0.25);
+        background: var(--close-hover-bg);
         color: #fff;
       }
       /* 第二行：进度条 + 时间 + 音量 */
@@ -141,7 +178,7 @@
         appearance: none;
         height: 4px;
         border-radius: 3px;
-        background: rgba(255, 255, 255, 0.14);
+        background: var(--track-bg);
         outline: none;
         cursor: pointer;
       }
@@ -152,12 +189,12 @@
         height: 11px;
         border-radius: 50%;
         background: var(--accent, #ff7e6b);
-        border: 2px solid #fff;
+        border: 2px solid var(--thumb-border);
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
       }
       .time {
         font-size: 10.5px;
-        color: rgba(255, 255, 255, 0.45);
+        color: var(--text-dim);
         font-variant-numeric: tabular-nums;
         min-width: 34px;
         text-align: center;
@@ -170,7 +207,7 @@
         flex-shrink: 0;
       }
       .vol-icon {
-        color: rgba(255, 255, 255, 0.55);
+        color: var(--text-dim);
         display: inline-flex;
       }
       .volume {
@@ -179,7 +216,7 @@
         width: 56px;
         height: 4px;
         border-radius: 2px;
-        background: rgba(255, 255, 255, 0.16);
+        background: var(--track-bg2);
         outline: none;
         cursor: pointer;
       }
@@ -189,7 +226,7 @@
         width: 9px;
         height: 9px;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.85);
+        background: var(--text-mid);
       }
       /* 未播放占位 */
       .placeholder {
@@ -346,6 +383,30 @@
         }
       }
 
+      // ============ 主题跟随（后端存储：主窗口与迷你窗跨引擎共享） ============
+      // theme: 'dark' | 'light' | 'auto'；miniTheme: 'theme' 跟随主窗口 | 'dark' | 'light'
+      function applyMiniTheme(settings) {
+        let resolved = settings.miniTheme === "theme" ? settings.theme : settings.miniTheme;
+        if (resolved === "auto") {
+          resolved =
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+        }
+        document.documentElement.dataset.theme = resolved === "light" ? "light" : "dark";
+      }
+
+      async function fetchUiSettings() {
+        try {
+          const res = await fetch("/api/ui/settings", { cache: "no-store" });
+          const d = await res.json();
+          applyMiniTheme(d.settings || {});
+        } catch {
+          /* 后端暂不可达：保持现状 */
+        }
+      }
+
       function render(d) {
         const hasSong = !!d.path;
         document.body.classList.toggle("idle", !hasSong);
@@ -498,6 +559,8 @@
       // 开始
       poll();
       setInterval(poll, 500);
+      fetchUiSettings();
+      setInterval(fetchUiSettings, 2000);
     </script>
   </body>
 </html>

@@ -113,6 +113,7 @@
                       placeholder="/Users/xxx/Music"
                       @keyup.enter="save"
                     />
+                    <button v-if="isNative" class="btn" @click="browseLibrary">浏览…</button>
                     <button class="btn primary" :disabled="saving" @click="save">
                       {{ saving ? "保存中…" : "保存" }}
                     </button>
@@ -665,6 +666,20 @@
                   </div>
                 </div>
                 <div class="setting-item">
+                  <div class="setting-label">迷你窗外观</div>
+                  <div class="seg" style="margin-top: 8px">
+                    <button
+                      v-for="m in miniThemeOptions"
+                      :key="m.value"
+                      class="seg-btn"
+                      :class="{ on: uiSettings.miniTheme === m.value }"
+                      @click="uiSettings.miniTheme = m.value"
+                    >
+                      {{ m.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
                   <div class="setting-label">强调色</div>
                   <div class="accent-grid">
                     <button
@@ -820,10 +835,34 @@ const libInput = ref("");
 const saving = ref(false);
 const error = ref("");
 
+// 原生壳环境（Swift 主窗口 WKWebView 注入 window.qqplayerNative）：切库走 NSOpenPanel 桥
+// （WKWebView 沙箱不支持 <input webkitdirectory>，浏览按钮只在桌面版显示）
+const isNative = typeof window !== "undefined" && !!window.qqplayerNative;
+
+function browseLibrary() {
+  if (window.webkit?.messageHandlers?.native) {
+    window.webkit.messageHandlers.native.postMessage("pickLibrary");
+  }
+}
+
+// 原生壳切库完成 → 同步输入框与当前库路径（Swift POST /api/library 后派发 CustomEvent）
+function onNativeLibrary(e) {
+  const p = e?.detail?.path;
+  if (!p) return;
+  libInput.value = p;
+  loadLibrary();
+}
+
 const themeOptions = [
   { value: "dark", label: "深色" },
   { value: "light", label: "浅色" },
   { value: "auto", label: "跟随系统" },
+];
+
+const miniThemeOptions = [
+  { value: "theme", label: "跟随主题" },
+  { value: "dark", label: "深色" },
+  { value: "light", label: "浅色" },
 ];
 
 // 音乐库设置（后端持久化）：模板里用 computed 解包，null=还没加载
@@ -992,8 +1031,14 @@ function close() {
 function onKey(e) {
   if (e.key === "Escape") close();
 }
-onMounted(() => window.addEventListener("keydown", onKey));
-onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
+onMounted(() => {
+  window.addEventListener("keydown", onKey);
+  window.addEventListener("qqplayer:nativelibrary", onNativeLibrary);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKey);
+  window.removeEventListener("qqplayer:nativelibrary", onNativeLibrary);
+});
 </script>
 
 <style scoped>

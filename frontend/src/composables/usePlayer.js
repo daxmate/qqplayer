@@ -79,6 +79,7 @@ export const UI_SETTINGS_DEFAULTS = {
   karaokeShowTime: false, // 跟唱模式每句显示起止时间戳
   karaokeShowNum: true, // 跟唱模式每句左侧显示行号（默认显示，用户可关）
   theme: "dark", // 主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
+  miniTheme: "theme", // 迷你窗外观：'theme' 跟随主窗口主题 | 'dark' 深色 | 'light' 浅色
   accent: "orange", // 强调色预设 key（见 ACCENT_OPTIONS）
   coverBlur: false, // 封面模糊背景（播放器背景铺当前歌曲封面模糊图）
   compact: false, // 紧凑模式（减小间距与尺寸，提高信息密度）
@@ -250,6 +251,26 @@ watch(
     }
   },
   { deep: true },
+);
+
+// 主题/迷你窗外观同步后端（迷你窗与主播放器跨引擎共享：主窗口在浏览器时 localStorage 不通）
+let uiSyncTimer = null;
+watch(
+  () => [uiSettings.theme, uiSettings.miniTheme],
+  () => {
+    if (uiSyncTimer) clearTimeout(uiSyncTimer);
+    uiSyncTimer = setTimeout(async () => {
+      try {
+        await fetch("/api/ui/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme: uiSettings.theme, miniTheme: uiSettings.miniTheme }),
+        });
+      } catch {
+        /* 忽略 */
+      }
+    }, 300);
+  },
 );
 
 function loadLyricSettings() {

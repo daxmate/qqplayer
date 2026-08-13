@@ -178,6 +178,55 @@ DESKTOP_LYRIC_DEFAULTS = {
 _desktop_lyric: dict | None = None
 
 
+# ============ 界面主题设置（主窗口与迷你窗跨引擎共享，存后端）============
+UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
+UI_SETTINGS_DEFAULTS = {
+    "theme": "dark",  # 主窗口主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
+    "miniTheme": "theme",  # 迷你窗外观：'theme' 跟随主窗口 | 'dark' 深色 | 'light' 浅色
+}
+
+_ui_settings: dict | None = None
+
+
+def load_ui_settings() -> dict:
+    """读取主题设置（内存缓存；文件缺失/损坏时回落默认值）"""
+    global _ui_settings
+    if _ui_settings is not None:
+        return _ui_settings
+    data = {}
+    try:
+        if UI_SETTINGS_FILE.exists():
+            raw = json.loads(UI_SETTINGS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    merged = dict(UI_SETTINGS_DEFAULTS)
+    for k in UI_SETTINGS_DEFAULTS:
+        if k in data and isinstance(data[k], str):
+            merged[k] = data[k]
+    _ui_settings = merged
+    return merged
+
+
+def save_ui_settings(patch: dict) -> dict:
+    """合并保存主题设置到磁盘并更新内存缓存"""
+    global _ui_settings
+    merged = dict(load_ui_settings())
+    for k in UI_SETTINGS_DEFAULTS:
+        if k in patch and isinstance(patch[k], str):
+            merged[k] = patch[k]
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        UI_SETTINGS_FILE.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass
+    _ui_settings = merged
+    return merged
+
+
 def load_desktop_lyric_settings() -> dict:
     """读取桌面歌词设置（内存缓存；文件缺失/损坏时回落默认值）"""
     global _desktop_lyric
@@ -704,6 +753,18 @@ def api_desktop_lyric_settings_get():
 def api_desktop_lyric_settings_put(body: dict):
     """保存桌面歌词设置（主播放器修改时调用）"""
     return {"settings": save_desktop_lyric_settings(body or {})}
+
+
+@app.get("/api/ui/settings")
+def api_ui_settings_get():
+    """返回主题设置（迷你窗轮询读取：主题 + 迷你窗外观）"""
+    return {"settings": load_ui_settings()}
+
+
+@app.put("/api/ui/settings")
+def api_ui_settings_put(body: dict):
+    """保存主题设置（主播放器修改时调用，防抖同步）"""
+    return {"settings": save_ui_settings(body or {})}
 
 
 @app.get("/api/playback")
