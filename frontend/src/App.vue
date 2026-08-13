@@ -51,7 +51,11 @@
         <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
         <div v-else class="no-lyric">
           <Music2 :size="40" class="no-lyric-icon" />
-          <span>暂无歌词（可放置同名 .srt / .lrc）</span>
+          <span>暂无歌词</span>
+          <button class="no-lyric-btn" @click="openLyricSpec()">
+            <FileMusic :size="14" />
+            指定歌词
+          </button>
         </div>
       </section>
       <ControlBar v-show="!state.controlsHidden" class="panel controls" />
@@ -90,12 +94,13 @@
     <div v-if="state.error" class="error-bar">{{ state.error }}</div>
 
     <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
+    <LyricSpecModal />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
-import { Music2, Mic, Play, Settings, PanelLeftOpen, ChevronUp } from "@lucide/vue";
+import { Music2, Mic, Play, Settings, PanelLeftOpen, ChevronUp, FileMusic } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
 import ActivityBar from "./components/ActivityBar.vue";
@@ -103,6 +108,7 @@ import Cover from "./components/Cover.vue";
 import LyricPanel from "./components/LyricPanel.vue";
 import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
+import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import {
   state,
@@ -116,6 +122,7 @@ import {
   restoreLastPlayed,
   toggleControls,
   toggleMusicLib,
+  openLyricSpec,
   currentLineIndex,
   uiSettings,
 } from "./composables/usePlayer.js";
@@ -424,15 +431,35 @@ onMounted(() => {
 .no-lyric {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--text3);
   font-size: 14px;
   min-height: 80px;
 }
 .no-lyric-icon {
   opacity: 0.6;
+}
+.no-lyric-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 7px 16px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text2);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.no-lyric-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 /* 跟唱模式：复用连播的面板 grid（选择器在上方成对共用），karaoke-panel 占中央区域 */
 .karaoke-panel {

@@ -25,7 +25,13 @@ from fastapi.staticfiles import StaticFiles
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from lyric_fetch import fetch_online_lyric
+from lyric_fetch import (
+    delete_manual_lyric,
+    fetch_online_lyric,
+    load_manual_lyric,
+    save_manual_lyric,
+    search_lyric_candidates,
+)
 
 try:
     from mutagen import File as MutagenFile
@@ -786,13 +792,21 @@ def merge_translation(lines: list, tlyric_text: str | None):
 
 @app.get("/api/lyric")
 def api_lyric(path: str, prefer: str = "local"):
-    """加载歌曲歌词：默认本地 srt/lrc 优先，无则在线获取（网易云→lrclib，缓存 ~/.cache）。
+    """加载歌曲歌词：手动指定 > 本地 srt/lrc > 在线获取（网易云→lrclib，缓存 ~/.cache）。
 
-    prefer=online 时在线优先（在线获取失败自动回退本地）。
+    prefer=online 时在线优先（在线获取失败自动回退本地）。手动指定始终最高优先级。
     """
     f = Path(path)
     if not f.exists():
         raise HTTPException(404, "文件不存在")
+
+    # 0. 用户手动指定歌词（最高优先级，不受 prefer 影响）
+    manual = load_manual_lyric(str(f))
+    if manual is not None:
+        data = parse_srt(manual["text"]) if manual["format"] == "srt" else parse_lrc(manual["text"])
+        if data:
+            return {"format": manual["format"], "lines": data, "source": "manual"}
+        # 手动指定内容解析不出行：当作没指定，继续走自动链路（不删除，弹窗里可改）
 
     def local_lyric():
         """返回 (format, lines) 或 None"""
@@ -841,6 +855,61 @@ def api_lyric(path: str, prefer: str = "local"):
     if res is not None:
         return {"format": res[0], "lines": res[1], "source": res[2]}
     raise HTTPException(404, "无歌词文件")
+
+
+# ============ 手动指定歌词 ============
+@app.get("/api/lyric/manual")
+def api_lyric_manual_get(path: str):
+    """查询歌曲是否有手动指定歌词"""
+    f = Path(path)
+    if not f.exists():
+        raise HTTPException(404, "文件不存在")
+    manual = load_manual_lyric(str(f))
+    if manual is None:
+        return {"specified": False}
+    return {"specified": True, **manual}
+
+
+@app.put("/api/lyric/manual")
+def api_lyric_manual_put(body: dict):
+    """保存手动指定歌词（上传文件/在线选择/粘贴文本统一走这里，覆盖旧值）"""
+    path = (body.get("path") or "").strip()
+    fmt = body.get("format") or "lrc"
+    text = body.get("text") or ""
+    source = body.get("source") or ""
+    if not path:
+        raise HTTPException(400, "缺少歌曲路径")
+    if not text.strip():
+        raise HTTPException(400, "歌词内容为空")
+    f = Path(path)
+    if not f.exists():
+        raise HTTPException(404, "文件不存在")
+    fmt = fmt if fmt in ("lrc", "srt") else "lrc"
+    # 内容校验：必须能解析出歌词行，避免存了不可用的内容
+    lines = parse_srt(text) if fmt == "srt" else parse_lrc(text)
+    if not lines:
+        raise HTTPException(400, "歌词内容解析失败，请检查格式（LRC 需 [mm:ss] 时间戳，SRT 需序号+时间轴）")
+    payload = save_manual_lyric(str(f), fmt, text, source)
+    return {"ok": True, **payload}
+
+
+@app.delete("/api/lyric/manual")
+def api_lyric_manual_delete(path: str):
+    """清除手动指定歌词，恢复自动获取"""
+    f = Path(path)
+    if not f.exists():
+        raise HTTPException(404, "文件不存在")
+    removed = delete_manual_lyric(str(f))
+    return {"ok": True, "removed": removed}
+
+
+@app.get("/api/lyric/search")
+def api_lyric_search(title: str = "", artist: str = ""):
+    """多源搜索歌词候选（网易云 + lrclib），供用户手动挑选"""
+    title = (title or "").strip()
+    if not title:
+        raise HTTPException(400, "缺少搜索关键词")
+    return {"results": search_lyric_candidates(title, artist or "")}
 
 
 # ============ 音频流（支持 Range） ============

@@ -16,6 +16,9 @@
       <span v-if="uiSettings.showSongInfo && state.currentSong" class="kp-song" :title="songTitle">
         {{ songTitle }}
       </span>
+      <button class="kp-spec-btn" title="指定歌词" @click="openLyricSpec()">
+        <FileMusic :size="14" />
+      </button>
       <span class="kp-hint">{{ abHint }}</span>
     </div>
     <div
@@ -60,8 +63,11 @@
           <Mic :size="44" />
         </div>
         <div>这首歌没有歌词文件</div>
-        <div class="kp-empty-sub">在歌曲同目录放置同名 .srt 或 .lrc 即可跟唱</div>
-        <div class="kp-empty-sub">SRT 格式：每句可 1~3 行（原文 / 罗马音 / 中文）</div>
+        <div class="kp-empty-sub">可放置同名 .srt / .lrc，或在线搜索 / 上传指定</div>
+        <button class="kp-empty-btn" @click="openLyricSpec()">
+          <FileMusic :size="14" />
+          指定歌词
+        </button>
       </div>
     </div>
   </div>
@@ -69,13 +75,14 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
-import { Mic, Music2, PanelLeftOpen } from "@lucide/vue";
+import { Mic, Music2, PanelLeftOpen, FileMusic } from "@lucide/vue";
 import {
   state,
   clickLine,
   lyricSettings,
   uiSettings,
   toggleMusicLib,
+  openLyricSpec,
 } from "../composables/usePlayer.js";
 
 const props = defineProps({
@@ -229,6 +236,25 @@ watch(
   font-weight: 400;
   color: var(--text3);
   margin-left: auto;
+}
+.kp-spec-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  background: var(--card2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.kp-spec-btn:hover {
+  color: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .kp-expand {
   width: 28px;
@@ -436,6 +462,31 @@ watch(
   margin-bottom: 14px;
   color: var(--text3);
   opacity: 0.6;
+}
+.kp-empty-sub {
+  font-size: 12.5px;
+  color: var(--text3);
+  opacity: 0.85;
+  margin-top: 4px;
+}
+.kp-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 8px 18px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text2);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.kp-empty-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 .kp-empty-sub {
   font-size: 12px;

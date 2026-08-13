@@ -78,6 +78,15 @@ def _isolate_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(backend, "SETTINGS_FILE", tmp_path / "settings.json")
     backend._settings = None
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_manual_dir(tmp_path, monkeypatch):
+    """手动指定歌词目录隔离：不碰真实用户缓存"""
+    import lyric_fetch
+
+    monkeypatch.setattr(lyric_fetch, "MANUAL_DIR", tmp_path / "manual")
+    yield
     backend._settings = None
 
 
@@ -784,3 +793,86 @@ def test_init_library_respects_settings(song_library, monkeypatch):
     backend.save_settings({"autoScanOnStart": False, "autoRefresh": False})
     backend.init_library()
     assert calls == {"scan": 1, "watch": 1}  # 不再额外调用
+
+
+# ============ 手动指定歌词 ============
+def test_manual_lyric_flow(song_library, tmp_path):
+    """保存 → 查询 → 手动优先（盖过本地 srt）→ 清除恢复自动"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    # 初始：无指定
+    r = client.get("/api/lyric/manual", params={"path": str(song)})
+    assert r.json() == {"specified": False}
+    # 保存
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "lrc", "text": "[00:01.00]手动指定", "source": "粘贴"},
+    )
+    assert r.status_code == 200
+    assert r.json()["format"] == "lrc"
+    # 查询
+    r = client.get("/api/lyric/manual", params={"path": str(song)})
+    assert r.json()["specified"] is True
+    assert r.json()["source"] == "粘贴"
+    # /api/lyric：手动优先，盖过同目录 srt
+    r = client.get("/api/lyric", params={"path": str(song)})
+    assert r.json()["source"] == "manual"
+    assert r.json()["lines"][0]["text"][0] == "手动指定"
+    # prefer=online 时手动仍优先
+    r = client.get("/api/lyric", params={"path": str(song), "prefer": "online"})
+    assert r.json()["source"] == "manual"
+    # 清除 → 恢复本地 srt
+    r = client.delete("/api/lyric/manual", params={"path": str(song)})
+    assert r.json() == {"ok": True, "removed": True}
+    r = client.get("/api/lyric", params={"path": str(song)})
+    assert r.json()["source"] == "local"
+
+
+def test_manual_lyric_srt_format(song_library, tmp_path):
+    """SRT 格式手动指定：保存 + 解析"""
+    song = tmp_path / "五月天 - 知足.mp3"
+    srt = "1\n00:00:01,000 --> 00:00:05,000\n指定歌词行\n"
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "srt", "text": srt, "source": "上传"},
+    )
+    assert r.status_code == 200
+    r = client.get("/api/lyric", params={"path": str(song)})
+    assert r.json()["format"] == "srt"
+    assert r.json()["source"] == "manual"
+    assert r.json()["lines"][0]["text"][0] == "指定歌词行"
+
+
+def test_manual_lyric_invalid_content(song_library, tmp_path):
+    """内容解析不出歌词行 → 400，不保存"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "lrc", "text": "没有任何时间戳的纯文本"},
+    )
+    assert r.status_code == 400
+    r = client.get("/api/lyric/manual", params={"path": str(song)})
+    assert r.json() == {"specified": False}
+
+
+def test_manual_lyric_missing_fields():
+    """缺 path / 空内容 → 400"""
+    assert (
+        client.put("/api/lyric/manual", json={"format": "lrc", "text": "[00:01.00]x"}).status_code
+        == 400
+    )
+    assert client.put("/api/lyric/manual", json={"path": "/x.mp3", "text": "   "}).status_code == 400
+
+
+def test_lyric_search_api(song_library, monkeypatch):
+    """搜索 API：返回候选列表；空关键词 400"""
+    monkeypatch.setattr(
+        backend,
+        "search_lyric_candidates",
+        lambda t, a: [{"source": "netease", "title": "T", "artist": "A", "text": "[00:01.00]hi"}],
+    )
+    r = client.get("/api/lyric/search", params={"title": "T", "artist": "A"})
+    assert r.status_code == 200
+    assert len(r.json()["results"]) == 1
+    assert r.json()["results"][0]["source"] == "netease"
+    r = client.get("/api/lyric/search", params={"title": "   "})
+    assert r.status_code == 400

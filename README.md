@@ -11,7 +11,7 @@
 - **紧凑模式**：减小间距与尺寸提高信息密度（设置 → 界面）
 - 歌曲库可切换任意本地文件夹（默认 iCloud 音乐库）
 - 封面：内嵌封面（ID3 APIC / MP4 covr）优先，其次文件夹 cover.jpg
-- 歌词：本地同名 `.srt` / `.lrc` 优先，其次文件夹内唯一歌词文件，最后在线获取（网易云原文+中文翻译，lrclib 兜底；缓存 `~/.cache/qqplayer/lyric/`）
+- 歌词：手动指定优先（`~/.cache/qqplayer/lyric/manual/`），其次本地同名 `.srt` / `.lrc`，最后在线获取（网易云原文+中文翻译，lrclib 兜底；缓存 `~/.cache/qqplayer/lyric/`）
 - 音频流支持 Range（可 seek）
 
 ## 数据位置
@@ -94,5 +94,9 @@ kimi ga mae ni tsuki atte ita hito no koto
 | `GET /api/songs` | 扫描歌曲库 |
 | `GET /api/library` / `POST /api/library` | 查看/设置歌曲库路径 |
 | `GET /api/cover?path=` | 提取封面 |
-| `GET /api/lyric?path=` | 解析歌词（本地 srt/lrc，无则在线获取） |
+| `GET /api/lyric?path=` | 解析歌词（手动指定 → 本地 srt/lrc → 在线获取） |
+| `GET /api/lyric/manual?path=` | 查询手动指定歌词状态 |
+| `PUT /api/lyric/manual` | 保存手动指定歌词（上传/在线选择/粘贴） |
+| `DELETE /api/lyric/manual?path=` | 清除手动指定歌词 |
+| `GET /api/lyric/search?title=&artist=` | 多源搜索歌词候选（网易云+lrclib） |
 | `GET /api/audio?path=` | 音频流（Range 支持） |

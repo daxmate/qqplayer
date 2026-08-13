@@ -1,5 +1,8 @@
 <template>
   <div class="lyric-panel">
+    <button class="lyric-spec-btn" title="指定歌词" @click="openLyricSpec()">
+      <FileMusic :size="15" />
+    </button>
     <div
       ref="scrollEl"
       class="lyric-scroll"
@@ -35,8 +38,8 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
-import { Music2 } from "@lucide/vue";
-import { seek, lyricSettings, state } from "../composables/usePlayer.js";
+import { Music2, FileMusic } from "@lucide/vue";
+import { seek, lyricSettings, state, openLyricSpec } from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -113,6 +116,28 @@ function seekLine(item) {
   background: var(--card);
   border-radius: 16px;
   border: 1px solid var(--border);
+  position: relative;
+}
+.lyric-spec-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  background: color-mix(in srgb, var(--card) 80%, transparent);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+.lyric-spec-btn:hover {
+  color: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .lyric-scroll {
   height: 100%;

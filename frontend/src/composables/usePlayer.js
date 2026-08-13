@@ -35,6 +35,7 @@ export const state = reactive({
   playlistOpen: true, // 播放列表面板开关
   controlsHidden: false, // 播放控制区收起（向下隐藏，localStorage 持久化）（左侧 tab 栏控制，localStorage 持久化）
   lastSource: "manual", // 最近一次选歌来源：manual | auto | media（播放统计用）
+  specLyricOpen: false, // 手动指定歌词弹窗开关
 });
 
 // ============ 歌词显示设置（localStorage 持久化）============
@@ -1111,6 +1112,60 @@ watch(
     loadLyric();
   },
 );
+
+// ============ 手动指定歌词 ============
+export function openLyricSpec() {
+  state.specLyricOpen = true;
+}
+
+export function closeLyricSpec() {
+  state.specLyricOpen = false;
+}
+
+// 查询歌曲是否有手动指定歌词
+export async function fetchManualLyric(path) {
+  try {
+    const res = await fetch("/api/lyric/manual?path=" + encodeURIComponent(path), {
+      cache: "no-store",
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    /* 网络错误 */
+  }
+  return { specified: false };
+}
+
+// 保存手动指定歌词（覆盖旧值）
+export async function saveManualLyric({ path, format, text, source }) {
+  const res = await fetch("/api/lyric/manual", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, format, text, source }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "保存失败");
+  return data;
+}
+
+// 清除手动指定歌词（恢复自动获取）
+export async function deleteManualLyric(path) {
+  try {
+    const res = await fetch("/api/lyric/manual?path=" + encodeURIComponent(path), {
+      method: "DELETE",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// 在线搜索歌词候选（网易云 + lrclib）
+export async function searchLyricCandidates(title, artist) {
+  const q = new URLSearchParams({ title: title || "", artist: artist || "" });
+  const res = await fetch("/api/lyric/search?" + q.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error("搜索失败");
+  return (await res.json()).results || [];
+}
 
 // ============ 播放控制 ============
 export function togglePlay() {
