@@ -475,6 +475,7 @@ function setupSortable() {
     handle: ".pl-drag",
     animation: 150,
     ghostClass: "pl-ghost",
+    supportPointer: true, // pointer 事件统一鼠标/触控笔/触摸（触屏可拖拽排序）
     onEnd: ({ oldIndex, newIndex }) => {
       if (oldIndex === newIndex || !state.activePlaylistId) return;
       const paths = [...listEl.value.querySelectorAll(".pl-item")].map((el) => el.dataset.path);
@@ -526,9 +527,11 @@ function fmtDur(d) {
   transition: all 0.15s;
   flex-shrink: 0;
 }
-.pl-refresh:hover {
-  background: var(--border);
-  color: var(--text);
+@media (hover: hover) {
+  .pl-refresh:hover {
+    background: var(--border);
+    color: var(--text);
+  }
 }
 .pl-refresh:active {
   transform: scale(0.92);
@@ -560,9 +563,11 @@ function fmtDur(d) {
   color: var(--text3);
   transition: all 0.12s;
 }
-.pb-tab:hover {
-  color: var(--text);
-  background: var(--card2);
+@media (hover: hover) {
+  .pb-tab:hover {
+    color: var(--text);
+    background: var(--card2);
+  }
 }
 .pb-tab.on {
   color: var(--accent);
@@ -590,9 +595,11 @@ function fmtDur(d) {
   transition: all 0.12s;
   flex-shrink: 0;
 }
-.pl-back:hover {
-  background: var(--border);
-  color: var(--text);
+@media (hover: hover) {
+  .pl-back:hover {
+    background: var(--border);
+    color: var(--text);
+  }
 }
 .pl-filter-title {
   font-size: 13px;
@@ -628,10 +635,15 @@ function fmtDur(d) {
   transition: all 0.12s;
   text-align: center;
 }
-.gr-card:hover {
-  background: var(--card2);
-  border-color: var(--border);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .gr-card:hover {
+    background: var(--card2);
+    border-color: var(--border);
+    transform: translateY(-1px);
+  }
+  .gr-card.album:hover {
+    transform: none;
+  }
 }
 /* 专辑卡：1 列横排（封面在左，信息在右） */
 .gr-card.album {
@@ -640,9 +652,6 @@ function fmtDur(d) {
   gap: 10px;
   padding: 8px 10px;
   text-align: left;
-}
-.gr-card.album:hover {
-  transform: none;
 }
 .gr-card.album .gr-cover {
   width: 44px;
@@ -750,8 +759,10 @@ function fmtDur(d) {
   cursor: pointer;
   flex-shrink: 0;
 }
-.pl-sort:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .pl-sort:hover {
+    color: var(--text);
+  }
 }
 .pl-fav-btn {
   width: 30px;
@@ -765,8 +776,10 @@ function fmtDur(d) {
   transition: all 0.15s;
   flex-shrink: 0;
 }
-.pl-fav-btn:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .pl-fav-btn:hover {
+    color: var(--text);
+  }
 }
 .pl-fav-btn.on {
   color: var(--red);
@@ -784,10 +797,14 @@ function fmtDur(d) {
   cursor: grab;
   flex-shrink: 0;
   opacity: 0.5;
+  /* 触屏拖拽：禁止浏览器接管手势（否则拖拽变成页面滚动） */
+  touch-action: none;
 }
-.pl-drag:hover {
-  opacity: 1;
-  color: var(--text2);
+@media (hover: hover) {
+  .pl-drag:hover {
+    opacity: 1;
+    color: var(--text2);
+  }
 }
 .pl-drag:active {
   cursor: grabbing;
@@ -805,8 +822,10 @@ function fmtDur(d) {
   cursor: pointer;
   transition: background 0.12s;
 }
-.pl-item:hover {
-  background: var(--card2);
+@media (hover: hover) {
+  .pl-item:hover {
+    background: var(--card2);
+  }
 }
 .pl-item.active {
   background: linear-gradient(
@@ -888,7 +907,7 @@ function fmtDur(d) {
     transform: scaleY(1);
   }
 }
-/* 行操作按钮：默认隐藏，hover 显示 */
+/* 行操作按钮：桌面 hover 显示；触屏设备常显半透明（无 hover 能力，不依赖悬停） */
 .pl-action {
   width: 26px;
   height: 26px;
@@ -901,18 +920,25 @@ function fmtDur(d) {
   transition: all 0.12s;
   flex-shrink: 0;
 }
-.pl-item:hover .pl-action {
-  opacity: 1;
+@media (hover: hover) {
+  .pl-item:hover .pl-action {
+    opacity: 1;
+  }
+  .pl-action:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+  .pl-action.remove:hover {
+    color: var(--red);
+  }
 }
-.pl-action:hover {
-  background: var(--border);
-  color: var(--text);
+@media (hover: none) {
+  .pl-action {
+    opacity: 0.55;
+  }
 }
 .pl-action.heart.on {
   opacity: 1;
-  color: var(--red);
-}
-.pl-action.remove:hover {
   color: var(--red);
 }
 .pl-empty {
@@ -961,9 +987,11 @@ function fmtDur(d) {
   cursor: pointer;
   transition: background 0.12s;
 }
-.am-item:hover {
-  background: var(--card2);
-  color: var(--text);
+@media (hover: hover) {
+  .am-item:hover {
+    background: var(--card2);
+    color: var(--text);
+  }
 }
 .am-item.in {
   color: var(--accent);

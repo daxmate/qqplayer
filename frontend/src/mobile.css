@@ -43,6 +43,88 @@
     padding-top: 18px;
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
+  /* ============ 管理功能移动化（A-2）：弹窗全屏化 ============
+     设置 / 指定歌词弹窗共用 .modal-mask/.modal 结构，窄屏改为全屏覆盖层：
+     顶栏固定（安全区）、分类 tab 变顶部横向滚动、内容区滚动、底栏固定。
+     组件 scoped 样式带 [data-v] 特异性更高，覆盖值加 !important。 */
+  .modal-mask {
+    padding: 0;
+  }
+  .modal {
+    width: 100vw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+  }
+  .modal-head {
+    flex-shrink: 0;
+    padding-top: calc(12px + env(safe-area-inset-top)) !important;
+  }
+  .modal-body {
+    flex-direction: column;
+  }
+  /* 分类 tab：桌面左侧导航 → 顶部横向滚动 tab */
+  .side-nav {
+    flex-direction: row !important;
+    width: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px !important;
+    gap: 6px !important;
+    overflow-x: auto;
+    flex-shrink: 0 !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .side-nav .nav-item {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    padding: 9px 14px !important;
+  }
+  .nav-item.on::before {
+    display: none; /* 桌面版左侧霓虹指示条在顶部 tab 布局下无意义 */
+  }
+  .content {
+    flex: 1;
+    min-height: 0 !important;
+  }
+  .settings-scroll {
+    padding: 16px 16px calc(26px + env(safe-area-inset-bottom)) !important;
+  }
+  .modal-foot {
+    flex-shrink: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* 指定歌词弹窗窄屏：搜索行换行、tabs 不挤压、脚注提示隐藏 */
+  .spec-body {
+    flex: 1 !important; /* 全屏下正文撑满，底部操作栏贴底（桌面短内容时仍跟随内容） */
+    padding: 12px 14px calc(22px + env(safe-area-inset-bottom)) !important;
+  }
+  /* 头部副标题（歌名/版本）：允许收缩出省略号，避免挤爆标题换行 */
+  .modal-head .head-sub {
+    min-width: 0;
+    max-width: 30vw !important;
+  }
+  .search-row {
+    flex-wrap: wrap;
+  }
+  .search-row .search-input {
+    flex: 1 1 calc(50% - 4px) !important;
+  }
+  .search-row .search-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .spec-tabs .spec-tab {
+    white-space: nowrap !important;
+    padding: 7px 4px !important;
+  }
+  .foot-hint {
+    display: none; /* 窄屏放不下说明文字，只留操作按钮 */
+  }
+
   /* 跟唱歌词页：底部留白多一点，最后一句可完整露出在控制条上方 */
   .mobile-player .karaoke-panel .kp-scroll {
     padding-bottom: 72px;

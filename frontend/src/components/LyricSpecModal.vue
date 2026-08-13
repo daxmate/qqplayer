@@ -3,7 +3,7 @@
     <div class="modal">
       <div class="modal-head">
         <FileMusic :size="16" />
-        指定歌词
+        <span class="spec-title">指定歌词</span>
         <span class="head-sub">{{ songName }}</span>
         <span class="src-badge" :class="{ manual: manualSpecified }">
           {{ manualSpecified ? "已手动指定" : "自动获取" }}
@@ -376,6 +376,11 @@ watch(
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* 标题固定不换行（窄屏下由 head-sub 收缩省略号让位） */
+.spec-title {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .modal-head svg {
   color: var(--accent);
 }
@@ -414,9 +419,11 @@ watch(
   transition: all 0.15s;
   flex-shrink: 0;
 }
-.modal-close:hover {
-  background: var(--card2);
-  color: var(--text);
+@media (hover: hover) {
+  .modal-close:hover {
+    background: var(--card2);
+    color: var(--text);
+  }
 }
 
 .spec-body {
@@ -457,8 +464,10 @@ watch(
   color: #ff6b6b;
   flex-shrink: 0;
 }
-.clear-link:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .clear-link:hover {
+    text-decoration: underline;
+  }
 }
 
 .spec-tabs {
@@ -482,8 +491,10 @@ watch(
   color: var(--text2);
   transition: all 0.15s;
 }
-.spec-tab:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .spec-tab:hover {
+    color: var(--text);
+  }
 }
 .spec-tab.on {
   background: var(--accent-on);
@@ -510,9 +521,11 @@ watch(
   transition: all 0.15s;
   text-align: center;
 }
-.drop-zone:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+@media (hover: hover) {
+  .drop-zone:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
 }
 .drop-zone.has {
   border-style: solid;
@@ -600,9 +613,11 @@ watch(
   transition: all 0.15s;
   font-size: 13px;
 }
-.result-item:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+@media (hover: hover) {
+  .result-item:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
 }
 .result-item:disabled {
   opacity: 0.6;
@@ -714,8 +729,10 @@ watch(
   border: 1px solid color-mix(in srgb, #ff6b6b 40%, transparent);
   transition: all 0.15s;
 }
-.btn-danger:hover {
-  background: rgba(255, 107, 107, 0.12);
+@media (hover: hover) {
+  .btn-danger:hover {
+    background: rgba(255, 107, 107, 0.12);
+  }
 }
 .btn-primary {
   display: inline-flex;

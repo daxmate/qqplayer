@@ -4,11 +4,7 @@
     <header class="mh-head">
       <h1 class="mh-title">音乐库</h1>
       <div class="mh-actions">
-        <button
-          class="mh-icon-btn"
-          title="搜索歌曲"
-          @click="$emit('open', { name: 'list', kind: 'songs', title: '所有歌曲' })"
-        >
+        <button class="mh-icon-btn" title="搜索歌曲" @click="$emit('open', searchEntry)">
           <Search :size="20" />
         </button>
         <button class="mh-icon-btn" title="设置" @click="$emit('open-settings')">
@@ -122,6 +118,15 @@ import { Music2, Heart, ListMusic, Users, Disc3, FolderInput, Search, Settings }
 import { state, isFavorite } from "../../composables/usePlayer.js";
 
 defineEmits(["open", "open-settings"]);
+
+// 首页顶栏搜索入口：进入全部歌曲列表并自动聚焦搜索框（复用列表内过滤）
+// 模块级常量保证同引用，连续点击可被页面栈去重
+const searchEntry = {
+  name: "list",
+  kind: "songs",
+  title: "所有歌曲",
+  payload: { focusSearch: true },
+};
 
 // 收藏数量：以曲库中实际收藏的歌曲计
 const favoriteCount = computed(() => state.songs.filter((s) => isFavorite(s.path)).length);
