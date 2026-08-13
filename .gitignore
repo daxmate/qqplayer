@@ -24,3 +24,6 @@ desktop-lyric/assets/icon.iconset/
 # 迷你窗构建产物（swiftc 编译生成，build.sh 可重建）
 desktop-mini/build/
 desktop-mini/assets/icon.iconset/
+# 三合一壳构建产物（swiftc 编译生成，build.sh 可重建）
+desktop-player/build/
+desktop-player/assets/icon.iconset/

@@ -259,6 +259,21 @@
               <path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z" />
             </svg>
           </button>
+          <button class="btn" id="restore" title="返回主窗口">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="9" y="9" width="12" height="12" rx="2" />
+              <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+            </svg>
+          </button>
           <button class="btn close" id="close" title="关闭迷你窗">
             <svg
               width="13"
@@ -447,13 +462,36 @@
         sendAction("volume", parseFloat($("volume").value));
       });
 
-      // 关闭：通知 Swift 壳退出
+      // 返回主窗口：通知 Swift 壳隐藏迷你面板 + 显示主窗口
+      const restoreBtn = $("restore");
+      if (restoreBtn) {
+        restoreBtn.addEventListener("click", () => {
+          try {
+            window.webkit.messageHandlers.native.postMessage({ type: "restore" });
+          } catch {
+            /* 浏览器环境无原生桥：忽略 */
+          }
+        });
+      }
+
+      // 关闭：通知 Swift 壳隐藏面板（不再退出整个 app）
       $("close").addEventListener("click", () => {
         try {
           window.webkit.messageHandlers.native.postMessage("close");
         } catch {
           // 浏览器环境无原生桥：尝试退出当前窗口
           window.close();
+        }
+      });
+
+      // 整窗拖动：按住非控件区域（按钮/滑杆外）任意处拖动窗口 → 原生 performDrag
+      // （顶部 24px 拖动条由 Swift 壳原生处理，此处覆盖下方面板区域）
+      document.addEventListener("pointerdown", (e) => {
+        if (e.target.closest("button, input, a")) return; // 控件交给网页交互
+        try {
+          window.webkit.messageHandlers.native.postMessage({ type: "nativeDrag" });
+        } catch {
+          /* 浏览器环境无原生桥：忽略 */
         }
       });
 

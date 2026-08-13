@@ -183,11 +183,17 @@ function switchMode(m) {
   state.mode = m;
 }
 
-// 桌面歌词悬浮窗：通过 URL scheme 调起 Swift 壳 app；状态记后端
+// 桌面歌词悬浮窗：原生壳内直接开关面板（同进程）；浏览器版走 URL scheme 调起（拉起主 app 显示面板）
 // 用隐藏 iframe 触发（location.href 会让当前页面尝试导航到未知协议，Vivaldi 可能弹窗/卡顿）
 function toggleDesktopLyric() {
   desktopLyricSettings.enabled = !desktopLyricSettings.enabled;
-  if (desktopLyricSettings.enabled) {
+  if (window.qqplayerNative) {
+    // Swift 壳内：通知壳显示/隐藏歌词面板（壳会回写面板状态保持同步）
+    window.webkit.messageHandlers.native.postMessage({
+      type: "lyric",
+      show: desktopLyricSettings.enabled,
+    });
+  } else if (desktopLyricSettings.enabled) {
     const iframe = document.createElement("iframe");
     iframe.style.display = "none";
     iframe.src = "qqplayerlyric://open";
@@ -196,14 +202,18 @@ function toggleDesktopLyric() {
   }
 }
 
-// 迷你模式：调起独立小窗 Swift 壳 app（控制指令走 /api/player/action 队列回主页面执行）
-// 运行状态由 miniRunning 轮询点亮开关（Swift 壳启动/退出时上报后端）
+// 迷你模式：原生壳内进程内开面板（主窗口自动隐藏由壳处理）；浏览器版走 scheme 调起
+// 控制指令走 /api/player/action 队列回主页面执行；运行状态由 miniRunning 轮询点亮开关
 function openMiniPlayer() {
-  const iframe = document.createElement("iframe");
-  iframe.style.display = "none";
-  iframe.src = "qqplayermini://open";
-  document.body.appendChild(iframe);
-  setTimeout(() => iframe.remove(), 1000);
+  if (window.qqplayerNative) {
+    window.webkit.messageHandlers.native.postMessage({ type: "openMini" });
+  } else {
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = "qqplayermini://open";
+    document.body.appendChild(iframe);
+    setTimeout(() => iframe.remove(), 1000);
+  }
   refreshMiniStatus(); // 立即查一次，点亮更快
 }
 

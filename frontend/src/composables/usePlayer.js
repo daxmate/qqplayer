@@ -142,6 +142,15 @@ async function loadDesktopLyricSettings() {
 }
 loadDesktopLyricSettings();
 
+// Swift 壳内歌词面板被原生关闭（✕/双击）时回写状态，主页面开关保持同步
+if (typeof window !== "undefined") {
+  window.addEventListener("qqplayer:lyricstate", (e) => {
+    if (e.detail && typeof e.detail.enabled === "boolean") {
+      desktopLyricSettings.enabled = e.detail.enabled;
+    }
+  });
+}
+
 watch(
   desktopLyricSettings,
   () => {
