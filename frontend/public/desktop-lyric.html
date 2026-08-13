@@ -30,6 +30,21 @@
         padding: 18px 24px;
         text-align: center;
       }
+      /* 字体（设置写入 body 内联） */
+      body.font-serif {
+        font-family: "Songti SC", "SimSun", "Noto Serif SC", serif;
+      }
+      body.font-rounded {
+        font-family: "Yuanti SC", "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+      body.align-left {
+        align-items: flex-start;
+        text-align: left;
+      }
+      body.align-right {
+        align-items: flex-end;
+        text-align: right;
+      }
       /* 双行：日文主行 + 中文翻译行；无翻译时只显示主行 */
       .line-jp {
         font-size: 26px;
@@ -96,6 +111,18 @@
           return {};
         }
       }
+
+      // 应用样式设置：字体/对齐/字号（字号渲染时直接设置）
+      function applyStyle() {
+        const s = settings();
+        document.body.classList.toggle("font-serif", s.fontFamily === "serif");
+        document.body.classList.toggle("font-rounded", s.fontFamily === "rounded");
+        document.body.classList.toggle("align-left", s.align === "left");
+        document.body.classList.toggle("align-right", s.align === "right");
+        $jp.style.fontSize = (s.fontSize || 26) + "px";
+        $zh.style.fontSize = (s.zhSize || 16) + "px";
+      }
+      applyStyle();
 
       // 拉歌词全文（line 列表）：成功返回 true，失败 false
       async function loadLyric(path) {
@@ -174,9 +201,10 @@
       // 启动立即查一次，然后 500ms 轮询
       tick();
       setInterval(tick, 500);
-      // 设置变化（主播放器改开关）即时生效
+      // 设置变化（主播放器改开关/样式）即时生效
       window.addEventListener("storage", (e) => {
         if (e.key === KEY) {
+          applyStyle();
           lastText = ""; // 强制重绘
           render(lastLine);
         }

@@ -478,6 +478,58 @@
                   </div>
                 </div>
                 <div class="setting-item">
+                  <div class="setting-label">字体</div>
+                  <div class="seg">
+                    <button
+                      v-for="f in fontOptions"
+                      :key="f.value"
+                      class="seg-btn"
+                      :class="{ on: desktopLyricSettings.fontFamily === f.value }"
+                      @click="desktopLyricSettings.fontFamily = f.value"
+                    >
+                      {{ f.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">主行字号</div>
+                  <div class="val-badge">{{ desktopLyricSettings.fontSize }}px</div>
+                  <input
+                    v-model.number="desktopLyricSettings.fontSize"
+                    class="slider"
+                    type="range"
+                    min="18"
+                    max="40"
+                    step="1"
+                  />
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">翻译字号</div>
+                  <div class="val-badge">{{ desktopLyricSettings.zhSize }}px</div>
+                  <input
+                    v-model.number="desktopLyricSettings.zhSize"
+                    class="slider"
+                    type="range"
+                    min="12"
+                    max="26"
+                    step="1"
+                  />
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">对齐</div>
+                  <div class="seg">
+                    <button
+                      v-for="a in alignOptions"
+                      :key="a.value"
+                      class="seg-btn"
+                      :class="{ on: desktopLyricSettings.align === a.value }"
+                      @click="desktopLyricSettings.align = a.value"
+                    >
+                      {{ a.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
                   <div class="setting-label">打开方式</div>
                   <div class="setting-desc">
                     播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。

@@ -28,17 +28,19 @@
           跟唱
         </button>
       </div>
-      <button class="gear-btn" title="设置" @click="settingsOpen = true">
-        <Settings :size="18" />
-      </button>
-      <button
-        class="gear-btn lyric-float-btn"
-        :class="{ on: desktopLyricSettings.enabled }"
-        :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
-        @click="toggleDesktopLyric()"
-      >
-        <MonitorPlay :size="18" />
-      </button>
+      <div class="topbar-right">
+        <button
+          class="gear-btn lyric-float-btn"
+          :class="{ on: desktopLyricSettings.enabled }"
+          :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
+          @click="toggleDesktopLyric()"
+        >
+          <MonitorPlay :size="18" />
+        </button>
+        <button class="gear-btn" title="设置" @click="settingsOpen = true">
+          <Settings :size="18" />
+        </button>
+      </div>
     </header>
 
     <!-- 主体：连播模式 -->
@@ -293,7 +295,6 @@ onMounted(() => {
   color: #fff;
 }
 .gear-btn {
-  margin-left: auto;
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -314,7 +315,14 @@ onMounted(() => {
 .gear-btn:hover svg {
   transform: rotate(60deg);
 }
-/* 桌面歌词悬浮窗开关：激活时 accent 高亮 */
+/* 顶栏右侧按钮组：整体推到最右，悬浮窗在左、设置贴右边缘 */
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .lyric-float-btn.on {
   color: var(--accent);
   background: var(--accent-soft);

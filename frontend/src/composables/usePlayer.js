@@ -89,6 +89,10 @@ export const DESKTOP_LYRIC_KEY = "qqplayer.desktopLyric.v1";
 export const DESKTOP_LYRIC_DEFAULTS = {
   enabled: false, // 主播放器顶栏开关记住状态（上次开着就开）
   showZh: true, // 显示中文翻译
+  fontFamily: "system", // 字体：'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
+  fontSize: 26, // 主行（日文）字号 px
+  zhSize: 16, // 翻译行字号 px
+  align: "center", // 对齐：'left' | 'center' | 'right'
 };
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
