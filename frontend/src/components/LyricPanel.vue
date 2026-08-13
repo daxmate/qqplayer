@@ -102,7 +102,16 @@ watch(
     if (!lyricSettings.autoScroll) return; // 关闭自动跟随：只高亮不滚动
     await nextTick();
     const active = scrollEl.value?.querySelector(".lyr.active");
-    if (active) scrollTo(active);
+    if (active) {
+      // 行间隔传入弹簧策略：快歌硬、慢歌软（amll getPosYSpringPolicy 同款）
+      const cur = props.lyric[v];
+      const prev = props.lyric[v - 1];
+      const intervalMs =
+        cur && prev && typeof cur.s === "number" && typeof prev.s === "number"
+          ? cur.s - prev.s
+          : undefined;
+      scrollTo(active, { intervalMs });
+    }
   },
 );
 
