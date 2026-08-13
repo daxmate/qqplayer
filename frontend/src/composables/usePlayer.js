@@ -48,7 +48,7 @@ export const LYRIC_SETTINGS_DEFAULTS = {
   showRoma: true, // 显示罗马音
   showZh: true, // 显示中文翻译
   showSec: true, // 显示段落标题
-  focusPos: 0.33, // 焦点句停靠位置（可视区高度比例）：0.33 | 0.5
+  focusPos: 0.5, // 焦点句停靠位置（可视区高度比例）：0.33 | 0.5
   fadeMask: true, // 上下渐隐遮罩
   autoScroll: true, // 切句自动跟随滚动
   offset: 0, // 歌词延迟校准（秒，-2~2）：正值 = 歌词比声音延后显示，负值 = 提前
@@ -82,6 +82,42 @@ export const UI_SETTINGS_DEFAULTS = {
 };
 
 export const uiSettings = reactive({ ...UI_SETTINGS_DEFAULTS });
+
+// ============ 桌面歌词悬浮窗设置（localStorage 持久化，同源共享给 /desktop-lyric 页）============
+export const DESKTOP_LYRIC_KEY = "qqplayer.desktopLyric.v1";
+
+export const DESKTOP_LYRIC_DEFAULTS = {
+  enabled: false, // 主播放器顶栏开关记住状态（上次开着就开）
+  showZh: true, // 显示中文翻译
+};
+
+export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
+
+function loadDesktopLyricSettings() {
+  try {
+    const raw = localStorage.getItem(DESKTOP_LYRIC_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    for (const k of Object.keys(desktopLyricSettings)) {
+      if (k in saved) desktopLyricSettings[k] = saved[k];
+    }
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadDesktopLyricSettings();
+
+watch(
+  desktopLyricSettings,
+  () => {
+    try {
+      localStorage.setItem(DESKTOP_LYRIC_KEY, JSON.stringify(desktopLyricSettings));
+    } catch {
+      /* 忽略写入失败 */
+    }
+  },
+  { deep: true },
+);
 
 // ============ 主题 / 强调色 / 封面模糊 / 紧凑模式应用（html data-* 属性驱动 CSS）============
 let themeMedia = null;
@@ -1249,7 +1285,7 @@ export function enterAbLoop() {
   const cur = currentLineIndex.value;
   if (cur < 0) return; // 无当前句（前奏/间隙）→ 忽略
   state.abLoop = { a: cur, b: null }; // b=null 等待选终点
-  playLine(cur); // 从起点句开始播
+  // 不重播当前句：AB 循环设定过程不影响当前播放
 }
 
 export function setAbEnd(lineIndex) {
@@ -1261,7 +1297,7 @@ export function setAbEnd(lineIndex) {
   let b = lineIndex;
   if (b < a) [a, b] = [b, a]; // 终点在起点前 → 自动交换
   state.abLoop = { a, b };
-  playLine(a); // 从区间起点句首开始播
+  // 不跳回区间起点重播：AB 循环设定过程不影响当前播放
 }
 
 export function exitAbLoop() {
@@ -1377,6 +1413,33 @@ export const currentLineIndex = computed(() => {
   }
   return idx;
 });
+
+// ============ 桌面歌词悬浮窗：当前句变化时上报后端（悬浮窗轮询读取）============
+// 节流 250ms 合并；切歌/seek/句切换都会触发，只报最新值
+let nowPlayingTimer = null;
+let nowPlayingPending = null;
+
+function flushNowPlaying() {
+  nowPlayingTimer = null;
+  const p = nowPlayingPending;
+  nowPlayingPending = null;
+  if (!p) return;
+  fetch("/api/now-playing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(p),
+  }).catch(() => {});
+}
+
+watch(
+  [() => state.currentSong?.path, currentLineIndex],
+  ([path, line]) => {
+    if (!path || line < 0) return;
+    nowPlayingPending = { path, lineIndex: line };
+    if (nowPlayingTimer) return; // 节流中，等定时器触发上报最新值
+    nowPlayingTimer = setTimeout(flushNowPlaying, 250);
+  },
+);
 
 // ============ 恢复上次播放（localStorage；受 playbackSettings.resumeLast 控制）============
 export const LAST_PLAYED_KEY = "qqplayer.lastPlayed.v1";

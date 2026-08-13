@@ -924,13 +924,13 @@ describe("AB 循环", () => {
     state.lyric = LYRIC;
   }
 
-  it("enterAbLoop：当前句为起点等待终点，并播放起点", () => {
+  it("enterAbLoop：当前句为起点等待终点，不影响当前播放", () => {
     setup();
     state.currentTime = 12; // 第二句内
+    const before = audio().currentTime;
     enterAbLoop();
     expect(state.abLoop).toEqual({ a: 1, b: null });
-    expect(audio().currentTime).toBe(10);
-    expect(audio().paused).toBe(false);
+    expect(audio().currentTime).toBe(before); // 播放位置不变
   });
 
   it("enterAbLoop：无当前句（前奏）忽略", () => {
@@ -948,21 +948,22 @@ describe("AB 循环", () => {
     expect(state.abLoop).toEqual({ a: 0, b: 1 });
   });
 
-  it("setAbEnd：点终点后从区间起点开始播放", () => {
+  it("setAbEnd：点终点后设定区间，不影响当前播放", () => {
     setup();
     state.abLoop = { a: 0, b: null };
+    const before = audio().currentTime;
     setAbEnd(2);
     expect(state.abLoop).toEqual({ a: 0, b: 2 });
-    expect(audio().currentTime).toBe(0);
-    expect(audio().paused).toBe(false);
+    expect(audio().currentTime).toBe(before); // 播放位置不变
   });
 
   it("setAbEnd：终点在起点前自动交换", () => {
     setup();
     state.abLoop = { a: 3, b: null };
+    const before = audio().currentTime;
     setAbEnd(1);
     expect(state.abLoop).toEqual({ a: 1, b: 3 });
-    expect(audio().currentTime).toBe(10); // 新起点（第二句）句首
+    expect(audio().currentTime).toBe(before); // 播放位置不变
   });
 
   it("setAbEnd：点起点本身忽略", () => {
@@ -1061,13 +1062,13 @@ describe("AB 循环", () => {
     expect(audio().paused).toBe(false);
   });
 
-  it("等选终点时点击：设为终点并播起点（路由）", () => {
+  it("等选终点时点击：设为终点，不影响当前播放（路由）", () => {
     setup();
     state.abLoop = { a: 1, b: null };
+    const before = audio().currentTime;
     clickLine(2);
     expect(state.abLoop).toEqual({ a: 1, b: 2 });
-    expect(audio().currentTime).toBe(10); // 从区间起点开始播
-    expect(audio().paused).toBe(false);
+    expect(audio().currentTime).toBe(before); // 播放位置不变
   });
 
   it("无 AB 循环时点击：直接播放该句", () => {
@@ -1121,7 +1122,7 @@ describe("歌词显示设置（lyricSettings）", () => {
     expect(lyricSettings.showRoma).toBe(true);
     expect(lyricSettings.showZh).toBe(true);
     expect(lyricSettings.showSec).toBe(true);
-    expect(lyricSettings.focusPos).toBe(0.33);
+    expect(lyricSettings.focusPos).toBe(0.5);
     expect(lyricSettings.fadeMask).toBe(true);
     expect(lyricSettings.autoScroll).toBe(true);
   });

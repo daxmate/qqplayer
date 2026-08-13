@@ -458,6 +458,35 @@
               </div>
             </section>
 
+            <!-- ============ 桌面歌词 ============ -->
+            <section v-else-if="tab === 'desktop'" class="settings-scroll">
+              <div class="group">
+                <div class="group-title">
+                  <MonitorPlay :size="13" />
+                  桌面歌词
+                </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="desktopLyricSettings.showZh = !desktopLyricSettings.showZh"
+                  >
+                    <div>
+                      <div class="setting-label">显示中文翻译</div>
+                      <div class="setting-desc">桌面歌词悬浮窗当前句下方显示中文翻译</div>
+                    </div>
+                    <span class="switch" :class="{ on: desktopLyricSettings.showZh }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">打开方式</div>
+                  <div class="setting-desc">
+                    播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。
+                    双击悬浮窗可关闭。
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <!-- ============ 快捷键 ============ -->
             <section v-else-if="tab === 'shortcuts'" class="settings-scroll">
               <div class="group">
@@ -570,6 +599,7 @@ import {
   lyricSettings,
   uiSettings,
   playbackSettings,
+  desktopLyricSettings,
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
   PLAYBACK_SETTINGS_DEFAULTS,
@@ -642,6 +672,7 @@ const categories = [
   { key: "library", label: "音乐库", icon: FolderOpen },
   { key: "lyric", label: "歌词", icon: Music2 },
   { key: "ui", label: "界面", icon: LayoutGrid },
+  { key: "desktop", label: "桌面歌词", icon: MonitorPlay },
   { key: "shortcuts", label: "快捷键", icon: Keyboard },
   { key: "about", label: "关于", icon: Info },
 ];

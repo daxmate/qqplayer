@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import threading
+import time
 import uuid
 import webbrowser
 from datetime import datetime, timezone
@@ -55,6 +56,9 @@ PLAYBACK_FILE = DATA_DIR / "playback.json"
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
 PLAYBACK_MIN_SECONDS = 3
+# 桌面歌词悬浮窗：主页面句切换时上报，悬浮窗轮询读取（内存态，不持久化）
+_now_playing: dict = {"path": None, "lineIndex": -1, "updatedAt": 0.0}
+_now_playing_lock = threading.Lock()
 # 库变动监听：事件去抖窗口（秒）与扫描缓存
 WATCH_DEBOUNCE_SECONDS = 2.0
 _scan_cache: dict | None = None  # {"library": str, "songs": [...]}
@@ -541,6 +545,23 @@ async def api_playback(body: dict):
         return {"ok": False, "reason": "invalid"}
     _append_playback(record)
     return {"ok": True}
+
+
+@app.post("/api/now-playing")
+def api_now_playing_post(body: dict):
+    """主页面句切换时上报当前播放状态（供桌面歌词悬浮窗读取）"""
+    with _now_playing_lock:
+        _now_playing["path"] = str(body.get("path") or "") or None
+        _now_playing["lineIndex"] = int(body.get("lineIndex") or -1)
+        _now_playing["updatedAt"] = time.time()
+    return {"ok": True}
+
+
+@app.get("/api/now-playing")
+def api_now_playing_get():
+    """返回当前播放状态（悬浮窗 500ms 轮询）"""
+    with _now_playing_lock:
+        return dict(_now_playing)
 
 
 @app.get("/api/playback")

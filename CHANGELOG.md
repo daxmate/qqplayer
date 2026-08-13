@@ -9,6 +9,14 @@
 
 ### ✨ 新功能
 
+- 桌面歌词悬浮窗（Swift 原生壳 `desktop-lyric/`）：无边框 / 透明 / 置顶 / 不占 Dock / 可拖动 / 双击关闭
+  - 播放器顶栏新增悬浮窗开关按钮（状态 localStorage 记住），通过 URL scheme（`qqplayerlyric://`）调起壳 app
+  - 歌词 UI 走 Web 页 `/desktop-lyric.html`：当前句日文 + 中文翻译双行（翻译可关），纯 HTML 零依赖
+  - 同步链路：主页面句切换时上报 `POST /api/now-playing`（节流 250ms），悬浮窗 500ms 轮询 `GET /api/now-playing`
+  - 设置新增「桌面歌词」分类：显示中文翻译开关（localStorage 同源共享，悬浮窗即时生效）
+  - 构建：`desktop-lyric/build.sh [--install]`（swiftc 编译，产物 <1MB，安装到 /Applications）
+  - 后端新增 API：`POST /api/now-playing`（上报）、`GET /api/now-playing`（轮询），内存态不持久化
+
 - 手动指定歌词：用户可为单曲指定歌词（优先级最高，不受来源优先级设置影响）
   - 三种指定方式：上传本地 `.lrc` / `.srt` 文件、在线搜索候选手动挑选（网易云多结果含中文翻译 + lrclib）、直接粘贴歌词文本
   - 入口：歌词面板右上角悬浮按钮 / 跟唱模式顶部按钮 / 无歌词空态「指定歌词」按钮

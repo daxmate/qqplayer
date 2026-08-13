@@ -31,6 +31,14 @@
       <button class="gear-btn" title="设置" @click="settingsOpen = true">
         <Settings :size="18" />
       </button>
+      <button
+        class="gear-btn lyric-float-btn"
+        :class="{ on: desktopLyricSettings.enabled }"
+        :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
+        @click="toggleDesktopLyric()"
+      >
+        <MonitorPlay :size="18" />
+      </button>
     </header>
 
     <!-- 主体：连播模式 -->
@@ -100,7 +108,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
-import { Music2, Mic, Play, Settings, PanelLeftOpen, ChevronUp, FileMusic } from "@lucide/vue";
+import { Music2, Mic, Play, Settings, PanelLeftOpen, ChevronUp, FileMusic, MonitorPlay } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
 import ActivityBar from "./components/ActivityBar.vue";
@@ -125,6 +133,7 @@ import {
   openLyricSpec,
   currentLineIndex,
   uiSettings,
+  desktopLyricSettings,
 } from "./composables/usePlayer.js";
 
 const settingsOpen = ref(false);
@@ -148,6 +157,19 @@ const panelClass = computed(() => {
 
 function switchMode(m) {
   state.mode = m;
+}
+
+// 桌面歌词悬浮窗：通过 URL scheme 调起 Swift 壳 app；状态记住（localStorage）
+function toggleDesktopLyric() {
+  desktopLyricSettings.enabled = !desktopLyricSettings.enabled;
+  if (desktopLyricSettings.enabled) {
+    // 调起壳 app（qqplayerlyric:// 已注册；失败静默——app 可能未安装）
+    try {
+      window.location.href = "qqplayerlyric://open";
+    } catch {
+      /* 忽略 */
+    }
+  }
 }
 
 onMounted(() => {
@@ -291,6 +313,14 @@ onMounted(() => {
 }
 .gear-btn:hover svg {
   transform: rotate(60deg);
+}
+/* 桌面歌词悬浮窗开关：激活时 accent 高亮 */
+.lyric-float-btn.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.lyric-float-btn.on svg {
+  transform: none;
 }
 
 /* 主体 */

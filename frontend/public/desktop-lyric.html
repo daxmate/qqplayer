@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>桌面歌词</title>
+    <style>
+      /* 透明背景：窗口由 Swift 壳负责透明，页面只画文字 */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        background: transparent;
+        overflow: hidden;
+        height: 100%;
+        -webkit-user-select: none;
+        user-select: none;
+        cursor: default;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family:
+          -apple-system, "PingFang SC", "Hiragino Sans", "Noto Sans SC", sans-serif;
+        padding: 18px 24px;
+        text-align: center;
+      }
+      /* 双行：日文主行 + 中文翻译行；无翻译时只显示主行 */
+      .line-jp {
+        font-size: 26px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.95);
+        line-height: 1.45;
+        text-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.8),
+          0 0 12px rgba(0, 0, 0, 0.35);
+        transition: opacity 0.2s;
+      }
+      .line-zh {
+        margin-top: 6px;
+        font-size: 16px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.72);
+        line-height: 1.4;
+        text-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.8),
+          0 0 10px rgba(0, 0, 0, 0.3);
+      }
+      /* 无歌词/未播放状态 */
+      .idle {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.45);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      }
+      /* 切换动画：旧行淡出新行淡入 */
+      .fade-in {
+        animation: fadeIn 0.25s ease-out;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="jp" class="line-jp"></div>
+    <div id="zh" class="line-zh"></div>
+    <script>
+      // 桌面歌词悬浮窗页面
+      // 轮询后端 /api/now-playing 拿 {path, lineIndex}；歌词全文拉一次缓存，切歌重拉
+      // 设置读取同源 localStorage（主播放器设置弹窗写入）：{ showZh }
+      const KEY = "qqplayer.desktopLyric.v1";
+      const $jp = document.getElementById("jp");
+      const $zh = document.getElementById("zh");
+
+      let lyric = []; // 当前歌的 line 列表（含原文/翻译）
+      let currentPath = null;
+      let lastLine = -1;
+      let lastText = "";
+
+      function settings() {
+        try {
+          return JSON.parse(localStorage.getItem(KEY)) || {};
+        } catch {
+          return {};
+        }
+      }
+
+      // 拉歌词全文（line 列表）：成功返回 true，失败 false
+      async function loadLyric(path) {
+        try {
+          const res = await fetch("/api/lyric?path=" + encodeURIComponent(path), {
+            cache: "no-store",
+          });
+          if (!res.ok) throw new Error("lyric " + res.status);
+          const data = await res.json();
+          lyric = (data.lines || []).filter((l) => l.type === "line");
+          return true;
+        } catch {
+          lyric = [];
+          return false;
+        }
+      }
+
+      // 渲染当前句；无变化不重绘（避免闪烁）
+      function render(lineIndex) {
+        const line = lyric[lineIndex];
+        if (!line) {
+          if (lastText !== "idle") {
+            lastText = "idle";
+            $jp.textContent = "";
+            $zh.textContent = "";
+          }
+          return;
+        }
+        const jp = line.text?.[0] || "";
+        const zh = (settings().showZh !== false ? line.text?.[2] : "") || "";
+        const key = jp + "\u0000" + zh;
+        if (key === lastText) return;
+        lastText = key;
+        $jp.textContent = jp;
+        $zh.textContent = zh;
+        $jp.className = "line-jp fade-in";
+        $zh.className = zh ? "line-zh fade-in" : "line-zh";
+      }
+
+      // 空闲态提示（未播放/无歌）
+      function showIdle() {
+        if (lastText === "idle") return;
+        lastText = "idle";
+        $jp.textContent = "未在播放";
+        $zh.textContent = "";
+        $jp.className = "line-jp idle";
+      }
+
+      async function tick() {
+        try {
+          const res = await fetch("/api/now-playing", { cache: "no-store" });
+          if (!res.ok) throw new Error("np " + res.status);
+          const np = await res.json();
+          if (!np.path) {
+            showIdle();
+            return;
+          }
+          if (np.path !== currentPath) {
+            currentPath = np.path;
+            lastLine = -1;
+            lastText = "";
+            const ok = await loadLyric(np.path);
+            if (!ok) showIdle();
+            else render(np.lineIndex);
+            return;
+          }
+          if (np.lineIndex !== lastLine) {
+            lastLine = np.lineIndex;
+            render(np.lineIndex);
+          }
+        } catch {
+          showIdle();
+        }
+      }
+
+      // 启动立即查一次，然后 500ms 轮询
+      tick();
+      setInterval(tick, 500);
+      // 设置变化（主播放器改开关）即时生效
+      window.addEventListener("storage", (e) => {
+        if (e.key === KEY) {
+          lastText = ""; // 强制重绘
+          render(lastLine);
+        }
+      });
+    </script>
+  </body>
+</html>

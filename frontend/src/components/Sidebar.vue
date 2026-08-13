@@ -89,6 +89,7 @@ import { state, createPlaylist, renamePlaylist, deletePlaylist } from "../compos
 
 function activate(pid) {
   state.activePlaylistId = pid;
+  state.playlistOpen = true; // 点击曲库条目时自动打开播放列表面板
 }
 
 // ============ 新建 ============
