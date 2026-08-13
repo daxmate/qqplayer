@@ -978,3 +978,35 @@ def test_api_mini_status_roundtrip():
     assert client.get("/api/mini/status").json() == {"running": False}
     assert client.post("/api/mini/status", json={"running": "yes"}).json()["ok"] is False
     assert client.post("/api/mini/status", json={}).json()["ok"] is False
+
+
+def test_api_ui_settings_roundtrip(tmp_path, monkeypatch):
+    """主题设置：迷你窗读 / 主窗口写；非法值忽略；文件隔离不碰真实用户数据"""
+    monkeypatch.setattr(backend, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
+    monkeypatch.setattr(backend, "_ui_settings", None)
+
+    # 默认值
+    s = client.get("/api/ui/settings").json()["settings"]
+    assert s["theme"] == "dark"
+    assert s["miniTheme"] == "theme"
+
+    # 保存 → 读回
+    assert client.put("/api/ui/settings", json={"theme": "light"}).status_code == 200
+    s = client.get("/api/ui/settings").json()["settings"]
+    assert s["theme"] == "light"
+    assert s["miniTheme"] == "theme"
+
+    assert client.put("/api/ui/settings", json={"miniTheme": "dark"}).status_code == 200
+    s = client.get("/api/ui/settings").json()["settings"]
+    assert s["miniTheme"] == "dark"
+    # 未提交字段保留
+    assert s["theme"] == "light"
+
+    # 非法类型/未知字段忽略
+    assert client.put("/api/ui/settings", json={"theme": 123, "hack": "x"}).status_code == 200
+    s = client.get("/api/ui/settings").json()["settings"]
+    assert s["theme"] == "light"
+    assert "hack" not in s
+
+    # 文件已落盘
+    assert json.loads((tmp_path / "ui_settings.json").read_text(encoding="utf-8"))["theme"] == "light"
