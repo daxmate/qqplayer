@@ -14,7 +14,7 @@
     </header>
 
     <div class="mh-scroll">
-      <!-- 六个入口卡片 -->
+      <!-- 九张入口卡片 -->
       <div class="mh-grid">
         <button
           class="mh-card"
@@ -90,6 +90,39 @@
             <span class="mh-card-count">导入音乐</span>
           </span>
         </button>
+
+        <!-- 智能视图入口：最近添加 / 最近播放 / 常听排行 -->
+        <button class="mh-card" @click="openSmartView('recentAdded')">
+          <span class="mh-tile" style="--tile: #06b6d4; --tile2: #22d3ee">
+            <Sparkles :size="22" />
+          </span>
+          <span class="mh-card-meta">
+            <span class="mh-card-name">最近添加</span>
+            <span class="mh-card-count"
+              >{{ Math.min(SMART_VIEW_LIMIT, state.songs.length) }} 首</span
+            >
+          </span>
+        </button>
+
+        <button class="mh-card" @click="openSmartView('recentPlayed')">
+          <span class="mh-tile" style="--tile: #ec4899; --tile2: #f472b6">
+            <History :size="22" />
+          </span>
+          <span class="mh-card-meta">
+            <span class="mh-card-name">最近播放</span>
+            <span class="mh-card-count">最近 {{ SMART_VIEW_LIMIT }} 首</span>
+          </span>
+        </button>
+
+        <button class="mh-card" @click="openSmartView('topPlayed')">
+          <span class="mh-tile" style="--tile: #eab308; --tile2: #fde047">
+            <TrendingUp :size="22" />
+          </span>
+          <span class="mh-card-meta">
+            <span class="mh-card-name">常听排行</span>
+            <span class="mh-card-count">播放次数排行</span>
+          </span>
+        </button>
       </div>
 
       <!-- 文件选择提示 -->
@@ -109,13 +142,35 @@
       multiple
       @change="onFilePicked"
     />
+
+    <!-- 智能视图列表（覆盖首页，保留底部迷你播放条） -->
+    <MobileSmartList
+      v-if="smartKind"
+      :kind="smartKind"
+      @close="smartKind = null"
+      @open-player="$emit('open', { name: 'player' })"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from "vue";
-import { Music2, Heart, ListMusic, Users, Disc3, FolderInput, Search, Settings } from "@lucide/vue";
+import {
+  Music2,
+  Heart,
+  ListMusic,
+  Users,
+  Disc3,
+  FolderInput,
+  Search,
+  Settings,
+  Sparkles,
+  History,
+  TrendingUp,
+} from "@lucide/vue";
 import { state, isFavorite } from "../../composables/usePlayer.js";
+import { SMART_VIEW_LIMIT } from "../../composables/useSmartViews.js";
+import MobileSmartList from "./MobileSmartList.vue";
 
 defineEmits(["open", "open-settings"]);
 
@@ -158,6 +213,13 @@ const albumGroups = computed(() => {
   return [...m.values()].sort((a, b) => a.album.localeCompare(b.album, "zh"));
 });
 
+// ============ 智能视图入口（卡片 → 列表浮层） ============
+const smartKind = ref(null); // 当前打开的智能视图 kind；null = 关闭
+
+function openSmartView(kind) {
+  smartKind.value = smartKind.value === kind ? null : kind; // 再点同一卡片 = 关闭
+}
+
 // ============ 打开文件 ============
 const fileInput = ref(null);
 const toast = ref("");
@@ -188,6 +250,7 @@ function showToast(msg) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative; /* 智能视图列表浮层定位基准 */
 }
 .mh-head {
   flex-shrink: 0;
