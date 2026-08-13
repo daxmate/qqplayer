@@ -9,13 +9,27 @@
 
 ### ✨ 新功能
 
+- 迷你模式（Swift 原生壳 `desktop-mini/`）：独立迷你小窗，右下角悬浮常驻
+  - 播放器顶栏新增迷你窗开关按钮，通过 URL scheme（`qqplayermini://`）调起壳 app；按钮实时反映迷你窗运行状态（Swift 壳启动/退出上报 `POST /api/mini/status`，主页面 2s 轮询点亮/熄灭）
+  - 迷你窗 UI 走 Web 页 `/mini.html`：封面 + 歌名/歌手 + 上一首/播放暂停/下一首 + 可拖动进度条（本地时钟平滑推算，不跳帧）+ 音量滑杆 + 关闭按钮，深色玻璃圆角卡片，强调色跟随主题
+  - 控制链路：迷你窗按钮 `POST /api/player/action` 入队（togglePlay/play/pause/next/prev/seek/volume，白名单校验 + seek/volume 范围 clamp），主播放器页面 800ms 轮询取走执行
+  - 窗口结构：顶部 24px 拖动条（拖动窗口 / 双击关闭），下方 WKWebView 正常交互（区别于桌面歌词纯显示页）
+  - 退出状态兜底：拦截 SIGTERM/SIGINT（pkill / 系统关机）——C signal handler 写标记文件 + 主线程 Timer 优雅退出上报；DispatchSourceSignal 实测失效故不用
+  - 应用图标：小窗轮廓 + 双 Q 泡泡 + 播放条（`assets/icon.svg` → icon.icns）
+  - 构建：`desktop-mini/build.sh [--install]`（swiftc 编译，安装到 /Applications）
+  - 后端新增 API：`POST /api/player/action`、`GET /api/player/actions`（指令队列）、`POST/GET /api/mini/status`（运行状态）；`POST /api/now-playing` 扩展 name/artist/duration/currentTime/isPlaying/volume 字段
+
 - 桌面歌词悬浮窗（Swift 原生壳 `desktop-lyric/`）：无边框 / 透明 / 置顶 / 不占 Dock / 可拖动 / 双击关闭
-  - 播放器顶栏新增悬浮窗开关按钮（状态 localStorage 记住），通过 URL scheme（`qqplayerlyric://`）调起壳 app
+  - 播放器顶栏新增悬浮窗开关按钮（状态 localStorage 记住），通过 URL scheme（`qqplayerlyric://`）调起壳 app；调起走隐藏 iframe，不阻塞页面
   - 歌词 UI 走 Web 页 `/desktop-lyric.html`：当前句日文 + 中文翻译双行（翻译可关），纯 HTML 零依赖
-  - 同步链路：主页面句切换时上报 `POST /api/now-playing`（节流 250ms），悬浮窗 500ms 轮询 `GET /api/now-playing`
-  - 设置新增「桌面歌词」分类：显示中文翻译开关（localStorage 同源共享，悬浮窗即时生效）
+  - 样式设置：字体 / 主行字号 / 翻译字号 / 对齐方式；窗体宽高可调（设置滑杆 + WebKit 消息驱动原生 resize）
+  - 配色：7 种预设配色方案 + 字体颜色自定义 + 一键恢复默认；支持「跟随主题」——强调色经 now-playing accent 字段实时跟随
+  - 设置后端持久化（`~/Library/Application Support/qqplayer/desktop_lyric.json`）：修复跨引擎 localStorage 不通（Vivaldi/WKWebView）导致配色不生效的问题
+  - 同步链路：主页面状态上报 `POST /api/now-playing`（节流 250ms），悬浮窗 500ms 轮询 `GET /api/now-playing`
+  - 设置「歌词」tab 子页化（APP 歌词 / 桌面歌词）：桌面歌词子页含显示中文翻译开关、样式与配色；APP 歌词新增配色方案（含跟随主题）
+  - 应用图标：双 Q 泡泡呼应主 logo（`assets/icon.svg` → icon.icns）
   - 构建：`desktop-lyric/build.sh [--install]`（swiftc 编译，产物 <1MB，安装到 /Applications）
-  - 后端新增 API：`POST /api/now-playing`（上报）、`GET /api/now-playing`（轮询），内存态不持久化
+  - 后端新增 API：`POST /api/now-playing`（上报）、`GET /api/now-playing`（轮询）、`GET/PUT /api/desktop-lyric/settings`（设置落盘）
 
 - 手动指定歌词：用户可为单曲指定歌词（优先级最高，不受来源优先级设置影响）
   - 三种指定方式：上传本地 `.lrc` / `.srt` 文件、在线搜索候选手动挑选（网易云多结果含中文翻译 + lrclib）、直接粘贴歌词文本
@@ -31,6 +45,7 @@
   - 强调色：6 种预设（橙红/蓝/绿/紫/粉/青），衍生色（发光/浅底/文字）用 color-mix 自动跟随，换色全局生效
   - 封面模糊背景：背景铺当前歌曲封面模糊图，主面板半透明 + backdrop-filter 毛玻璃（Apple Music 风格）；浅深主题各有独立遮罩
   - 紧凑模式：集中减小顶栏/列表行/封面/控制栏间距与尺寸，提高信息密度
+  - 浅色主题对比度调优：active 歌词行补浅橙背景条、次级文字加深、远近层次透明度提高，保证浅底可读
 - 设置界面专业化改造（第三批）：音乐库分类新增「文件类型」「忽略隐藏」「自动刷新」「启动扫描」四项
   - 文件类型多选：7 种音频格式（MP3/FLAC/M4A/WAV/OGG/AAC/OPUS）chip 多选，只扫描勾选的格式（至少保留一种，防止扫不出歌）
   - 忽略隐藏文件/文件夹：跳过以 `.` 开头的目录与文件（如 .DS_Store）；关闭后隐藏路径中的歌曲也进列表

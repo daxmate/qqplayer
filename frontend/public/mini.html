@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QQPlayer 迷你窗</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        background: transparent;
+        overflow: hidden;
+        height: 100%;
+        -webkit-user-select: none;
+        user-select: none;
+        cursor: default;
+        font-family: -apple-system, "PingFang SC", "Hiragino Sans", "Noto Sans SC", sans-serif;
+      }
+      /* 面板：深色玻璃圆角卡片；顶部 24px 留给原生拖动条 */
+      .panel {
+        position: absolute;
+        left: 6px;
+        top: 26px;
+        right: 6px;
+        bottom: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 14px;
+        background: rgba(20, 22, 31, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow:
+          0 4px 16px rgba(0, 0, 0, 0.35),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      }
+      /* 第一行：封面 + 标题 + 控制按钮 */
+      .row-main {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .cover {
+        width: 48px;
+        height: 48px;
+        border-radius: 10px;
+        object-fit: cover;
+        background: rgba(255, 255, 255, 0.06);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.25);
+      }
+      .meta {
+        flex: 1;
+        min-width: 0;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.95);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .artist {
+        margin-top: 2px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.5);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .idle .title {
+        color: rgba(255, 255, 255, 0.35);
+        font-weight: 600;
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+      .btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 9px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.85);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          transform 0.1s;
+      }
+      .btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .btn:active {
+        transform: scale(0.92);
+      }
+      .btn.play {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--accent, #ff7e6b);
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+      }
+      .btn.play:hover {
+        background: var(--accent, #ff7e6b);
+        filter: brightness(1.08);
+      }
+      .btn.close {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        color: rgba(255, 255, 255, 0.4);
+      }
+      .btn.close:hover {
+        background: rgba(255, 80, 80, 0.25);
+        color: #fff;
+      }
+      /* 第二行：进度条 + 时间 + 音量 */
+      .row-bottom {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .progress {
+        flex: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 4px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.14);
+        outline: none;
+        cursor: pointer;
+      }
+      .progress::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--accent, #ff7e6b);
+        border: 2px solid #fff;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      }
+      .time {
+        font-size: 10.5px;
+        color: rgba(255, 255, 255, 0.45);
+        font-variant-numeric: tabular-nums;
+        min-width: 34px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+      .volume-wrap {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .vol-icon {
+        color: rgba(255, 255, 255, 0.55);
+        display: inline-flex;
+      }
+      .volume {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 56px;
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.16);
+        outline: none;
+        cursor: pointer;
+      }
+      .volume::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.85);
+      }
+      /* 未播放占位 */
+      .placeholder {
+        display: none;
+      }
+      body.idle .placeholder {
+        display: block;
+      }
+      body.idle .cover,
+      body.idle .progress,
+      body.idle .volume-wrap {
+        opacity: 0.35;
+        pointer-events: none;
+      }
+      /* 封面占位文字 */
+      .cover svg {
+        width: 22px;
+        height: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <div class="row-main">
+        <div class="cover" id="cover">
+          <!-- 占位音符 -->
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+        </div>
+        <div class="meta">
+          <div class="title" id="title">未在播放</div>
+          <div class="artist" id="artist">在播放器里点一首歌吧</div>
+        </div>
+        <div class="controls">
+          <button class="btn" id="prev" title="上一首">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+            </svg>
+          </button>
+          <button class="btn play" id="toggle" title="播放/暂停">
+            <svg id="icon-play" width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            <svg
+              id="icon-pause"
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              style="display: none"
+            >
+              <path d="M6 5h4v14H6zm8 0h4v14h-4z" />
+            </svg>
+          </button>
+          <button class="btn" id="next" title="下一首">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z" />
+            </svg>
+          </button>
+          <button class="btn close" id="close" title="关闭迷你窗">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="row-bottom">
+        <input
+          class="progress"
+          id="progress"
+          type="range"
+          min="0"
+          max="0"
+          value="0"
+          step="0.1"
+          title="拖动跳转"
+        />
+        <span class="time" id="time">0:00</span>
+        <div class="volume-wrap">
+          <span class="vol-icon">
+            <svg id="icon-vol" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" />
+            </svg>
+          </span>
+          <input
+            class="volume"
+            id="volume"
+            type="range"
+            min="0"
+            max="1"
+            value="1"
+            step="0.01"
+            title="音量"
+          />
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ============ 状态与轮询 ============
+      // 进度本地平滑：轮询拿到 (currentTime, isPlaying) 后本地时钟推算，避免进度条一跳一跳
+      let snap = { currentTime: 0, duration: 0, isPlaying: false, at: 0 };
+      let dragging = false;
+      let lastVolSend = 0;
+
+      const $ = (id) => document.getElementById(id);
+      const fmt = (s) => {
+        if (!isFinite(s) || s < 0) s = 0;
+        const m = Math.floor(s / 60);
+        const sec = Math.floor(s % 60);
+        return m + ":" + String(sec).padStart(2, "0");
+      };
+
+      async function poll() {
+        try {
+          const res = await fetch("/api/now-playing", { cache: "no-store" });
+          const d = await res.json();
+          render(d);
+        } catch {
+          // 后端暂不可达：保持现状
+        }
+      }
+
+      function render(d) {
+        const hasSong = !!d.path;
+        document.body.classList.toggle("idle", !hasSong);
+
+        if (d.accent) {
+          document.documentElement.style.setProperty("--accent", d.accent);
+        }
+        $("title").textContent = d.name || "未知歌曲";
+        $("artist").textContent = d.artist ? d.artist + " · 迷你窗" : "迷你窗";
+
+        // 封面
+        if (hasSong) {
+          $("cover").innerHTML =
+            '<img src="/api/cover?path=' + encodeURIComponent(d.path) + '" alt="" />';
+          $("cover").querySelector("img").style.cssText =
+            "width:100%;height:100%;border-radius:10px;object-fit:cover;";
+        } else {
+          $("cover").innerHTML =
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+        }
+
+        // 播放状态图标
+        const playing = !!d.isPlaying;
+        $("icon-play").style.display = playing ? "none" : "";
+        $("icon-pause").style.display = playing ? "" : "none";
+
+        // 进度（只在非拖动时同步，拖动中由用户控制）
+        snap = {
+          currentTime: d.currentTime || 0,
+          duration: d.duration || 0,
+          isPlaying: playing,
+          at: Date.now(),
+        };
+        if (!dragging) {
+          const t = nowDisplay();
+          $("progress").max = snap.duration || 0;
+          $("progress").value = t;
+          $("time").textContent = fmt(t) + " / " + fmt(snap.duration);
+        } else {
+          $("time").textContent = fmt(parseFloat($("progress").value)) + " / " + fmt(snap.duration);
+        }
+
+        // 音量
+        if (typeof d.volume === "number" && !$("volume").matches(":active")) {
+          $("volume").value = d.volume;
+        }
+      }
+
+      // 本地推算当前播放位置（播放中按真实时间流逝）
+      function nowDisplay() {
+        if (!snap.isPlaying || dragging) return snap.currentTime;
+        return Math.min(
+          snap.duration || snap.currentTime,
+          snap.currentTime + (Date.now() - snap.at) / 1000,
+        );
+      }
+
+      // 本地进度平滑：播放中每秒刷新一次时间显示
+      setInterval(() => {
+        if (snap.isPlaying && !dragging) {
+          const t = nowDisplay();
+          $("progress").value = t;
+          $("time").textContent = fmt(t) + " / " + fmt(snap.duration);
+        }
+      }, 1000);
+
+      // ============ 控制指令（走后端队列，主播放器页面轮询执行） ============
+      async function sendAction(action, value) {
+        try {
+          await fetch("/api/player/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, value }),
+          });
+        } catch {
+          /* 忽略 */
+        }
+      }
+
+      $("toggle").addEventListener("click", () => sendAction("togglePlay"));
+      $("prev").addEventListener("click", () => sendAction("prev"));
+      $("next").addEventListener("click", () => sendAction("next"));
+
+      // 进度条拖动：拖动中不渲染（本地推算暂停），松开发 seek
+      $("progress").addEventListener("pointerdown", () => {
+        dragging = true;
+      });
+      $("progress").addEventListener("pointerup", () => {
+        dragging = false;
+        sendAction("seek", parseFloat($("progress").value));
+      });
+      $("progress").addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          const cur = parseFloat($("progress").value) || 0;
+          const step = e.key === "ArrowLeft" ? -5 : 5;
+          const v = Math.max(0, Math.min(snap.duration || 0, cur + step));
+          $("progress").value = v;
+          $("time").textContent = fmt(v) + " / " + fmt(snap.duration);
+          sendAction("seek", v);
+        }
+      });
+
+      // 音量：滑动中节流发送（100ms 合并），松手兜底发送最终值
+      $("volume").addEventListener("input", () => {
+        const v = parseFloat($("volume").value);
+        const now = Date.now();
+        if (now - lastVolSend > 100) {
+          lastVolSend = now;
+          sendAction("volume", v);
+        }
+      });
+      $("volume").addEventListener("change", () => {
+        sendAction("volume", parseFloat($("volume").value));
+      });
+
+      // 关闭：通知 Swift 壳退出
+      $("close").addEventListener("click", () => {
+        try {
+          window.webkit.messageHandlers.native.postMessage("close");
+        } catch {
+          // 浏览器环境无原生桥：尝试退出当前窗口
+          window.close();
+        }
+      });
+
+      // 开始
+      poll();
+      setInterval(poll, 500);
+    </script>
+  </body>
+</html>

@@ -92,6 +92,12 @@ const {
   setupPlaybackFlush,
   setupAutoRefresh,
   stopAutoRefresh,
+  setupPlayerActions,
+  stopPlayerActions,
+  setupMiniStatus,
+  stopMiniStatus,
+  refreshMiniStatus,
+  miniRunning,
   loadLibrarySettings,
   saveLibrarySettings,
   _resetPlaybackSession,
@@ -2374,5 +2380,161 @@ describe("音乐库设置 librarySettings", () => {
       })),
     );
     await expect(saveLibrarySettings({ autoRefresh: true })).rejects.toThrow("保存失败");
+  });
+});
+
+// ============ 迷你窗控制指令消费（setupPlayerActions） ============
+describe("setupPlayerActions（迷你窗控制指令消费）", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    stopPlayerActions();
+  });
+
+  function stubActions(actions) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        if (url === "/api/player/actions") {
+          return { ok: true, json: async () => ({ actions }) };
+        }
+        if (url.startsWith("/api/lyric")) {
+          return { ok: true, json: async () => ({ lyric: [], source: null }) };
+        }
+        if (url === "/api/cover") {
+          return { ok: true };
+        }
+        throw new Error("unexpected url " + url);
+      }),
+    );
+  }
+
+  it("取到指令依次执行：togglePlay / seek / volume / next / prev", async () => {
+    // 重置模块级单例 audio 的播放状态（跨测试残留：上一个测试可能停在播放中）
+    const fake = FakeAudio.instances[0];
+    fake.paused = true;
+    fake.currentTime = 0;
+    fake.duration = 0;
+    state.songs = [
+      { path: "/a.mp3", name: "A", artist: "X", duration: 100 },
+      { path: "/b.mp3", name: "B", artist: "Y", duration: 100 },
+    ];
+    state.currentIndex = 0;
+    state.currentSong = state.songs[0];
+    state.duration = 100;
+    vi.useFakeTimers();
+
+    // 第一轮：播放控制类指令（同一轮会同步全部执行，末条状态为准）
+    stubActions([
+      { action: "togglePlay", value: null },
+      { action: "seek", value: 42 },
+      { action: "volume", value: 0.3 },
+    ]);
+    setupPlayerActions(100);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(FakeAudio.instances[0].paused).toBe(false); // togglePlay
+    expect(state.currentTime).toBe(42); // seek
+    expect(state.volume).toBe(0.3); // volume
+
+    // 第二轮：next → 切到下一首（selectSong 换源后默认暂停）
+    stubActions([{ action: "next", value: null }]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.currentIndex).toBe(1);
+    expect(state.currentSong.name).toBe("B");
+
+    // 第三轮：prev → 回到上一首
+    stubActions([{ action: "prev", value: null }]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("未知指令忽略，不抛错", async () => {
+    stubActions([
+      { action: "rm -rf /", value: null },
+      { action: "seek", value: 10 },
+    ]);
+    vi.useFakeTimers();
+    setupPlayerActions(100);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.currentTime).toBe(10);
+  });
+
+  it("重复调用幂等，不叠加 timer", async () => {
+    stubActions([{ action: "volume", value: 0.5 }]);
+    vi.useFakeTimers();
+    setupPlayerActions(100);
+    setupPlayerActions(100);
+    setupPlayerActions(100);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetch).toHaveBeenCalledTimes(3); // 3 轮 × 1 次（非 3 个 timer × 3 轮）
+    expect(state.volume).toBe(0.5);
+  });
+
+  it("接口异常时静默，不影响下一轮", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        throw new Error("backend down");
+      }),
+    );
+    vi.useFakeTimers();
+    setupPlayerActions(100);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(calls).toBe(3);
+  });
+});
+
+// ============ 迷你窗运行状态（顶栏开关点亮） ============
+describe("setupMiniStatus（迷你窗运行状态轮询）", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    stopMiniStatus();
+    miniRunning.value = false;
+  });
+
+  function stubStatus(running) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        if (url === "/api/mini/status") {
+          return { ok: true, json: async () => ({ running }) };
+        }
+        throw new Error("unexpected url " + url);
+      }),
+    );
+  }
+
+  it("迷你窗运行 → 开关点亮", async () => {
+    stubStatus(true);
+    vi.useFakeTimers();
+    setupMiniStatus(100);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(miniRunning.value).toBe(true);
+  });
+
+  it("迷你窗退出 → 开关熄灭", async () => {
+    miniRunning.value = true;
+    stubStatus(false);
+    vi.useFakeTimers();
+    setupMiniStatus(100);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(miniRunning.value).toBe(false);
+  });
+
+  it("refreshMiniStatus 手动刷新", async () => {
+    stubStatus(true);
+    await refreshMiniStatus();
+    expect(miniRunning.value).toBe(true);
+  });
+
+  it("重复调用幂等，不叠加 timer", async () => {
+    stubStatus(true);
+    vi.useFakeTimers();
+    setupMiniStatus(100);
+    setupMiniStatus(100);
+    setupMiniStatus(100);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetch).toHaveBeenCalledTimes(3); // 首次立即查 1 次 + 200ms 内轮询 2 次（非 3 个 timer × 3 倍）
   });
 });

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e2237"/>
+      <stop offset="1" stop-color="#12141f"/>
+    </linearGradient>
+    <linearGradient id="q1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff9ab5"/>
+      <stop offset="0.55" stop-color="#ff7e6b"/>
+      <stop offset="1" stop-color="#ff9a5c"/>
+    </linearGradient>
+    <linearGradient id="q2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc06b"/>
+      <stop offset="1" stop-color="#ff9a5c"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff9ab5"/>
+      <stop offset="1" stop-color="#ff9a5c"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- 深色圆角底 -->
+  <rect x="48" y="48" width="928" height="928" rx="200" fill="url(#bg)"/>
+  <rect x="48" y="48" width="928" height="928" rx="200" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="6"/>
+
+  <!-- 迷你窗：小窗轮廓（表达"迷你模式"） -->
+  <rect x="192" y="170" width="640" height="640" rx="90" fill="#14161f" stroke="#ffffff" stroke-opacity="0.14" stroke-width="8" filter="url(#shadow)"/>
+  <!-- 顶部拖动条 -->
+  <rect x="192" y="170" width="640" height="64" rx="90" fill="#ffffff" fill-opacity="0.06"/>
+  <circle cx="264" cy="202" r="14" fill="#ff7e6b"/>
+  <circle cx="308" cy="202" r="14" fill="#ffc06b"/>
+
+  <!-- 窗内双 Q 泡泡（缩小版，呼应主 logo） -->
+  <g>
+    <circle cx="600" cy="400" r="120" fill="url(#q2)"/>
+    <circle cx="470" cy="400" r="120" fill="url(#q1)"/>
+    <text x="470" y="436" text-anchor="middle" font-family="Didot, Baskerville, Georgia, serif" font-size="130" font-weight="700" fill="#fff">Q</text>
+    <text x="600" y="436" text-anchor="middle" font-family="Didot, Baskerville, Georgia, serif" font-size="130" font-weight="700" fill="#fff" transform="scale(-1,1) translate(-1200,0)">Q</text>
+  </g>
+
+  <!-- 窗内底部播放条：进度 + 播放键（表达"迷你播放器"） -->
+  <rect x="252" y="620" width="400" height="16" rx="8" fill="#fff" fill-opacity="0.16"/>
+  <rect x="252" y="620" width="240" height="16" rx="8" fill="url(#bar)"/>
+  <circle cx="680" cy="628" r="46" fill="url(#bar)"/>
+  <polygon points="666,606 666,650 706,628" fill="#fff"/>
+</svg>

@@ -1,4 +1,4 @@
-import { reactive, computed, watch } from "vue";
+import { reactive, computed, watch, ref } from "vue";
 
 // 全局唯一 audio 元素
 const audio = new Audio();
@@ -1457,10 +1457,24 @@ export const currentLineIndex = computed(() => {
   return idx;
 });
 
-// ============ 桌面歌词悬浮窗：当前句变化时上报后端（悬浮窗轮询读取）============
-// 节流 250ms 合并；切歌/seek/句切换都会触发，只报最新值
+// ============ 桌面歌词/迷你窗：当前播放状态上报（悬浮窗轮询读取）============
+// 节流 250ms 合并；切歌/seek/句切换/播放状态变化都会触发，只报最新值
 let nowPlayingTimer = null;
 let nowPlayingPending = null;
+
+// 当前播放快照（桌面歌词 + 迷你窗共用的完整状态）
+function nowPlayingSnapshot() {
+  const song = state.currentSong;
+  return {
+    path: song?.path || null,
+    name: song?.name || null,
+    artist: song?.artist || null,
+    duration: state.duration || 0,
+    currentTime: state.currentTime || 0,
+    isPlaying: state.isPlaying,
+    volume: state.muted ? 0 : state.volume,
+  };
+}
 
 function flushNowPlaying() {
   nowPlayingTimer = null;
@@ -1472,19 +1486,26 @@ function flushNowPlaying() {
   fetch("/api/now-playing", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...p, accent }),
+    body: JSON.stringify({ ...nowPlayingSnapshot(), ...p, accent }),
   }).catch(() => {});
 }
 
-watch(
-  [() => state.currentSong?.path, currentLineIndex],
-  ([path, line]) => {
-    if (!path || line < 0) return;
-    nowPlayingPending = { path, lineIndex: line };
-    if (nowPlayingTimer) return; // 节流中，等定时器触发上报最新值
-    nowPlayingTimer = setTimeout(flushNowPlaying, 250);
-  },
-);
+function scheduleNowPlaying(extra = {}) {
+  nowPlayingPending = { ...extra };
+  if (nowPlayingTimer) return; // 节流中，等定时器触发上报最新值
+  nowPlayingTimer = setTimeout(flushNowPlaying, 250);
+}
+
+watch([() => state.currentSong?.path, currentLineIndex], ([path, line]) => {
+  if (!path || line < 0) return;
+  scheduleNowPlaying({ path, lineIndex: line });
+});
+
+// 播放状态/音量/时长变化 → 上报（迷你窗进度条与播放键状态实时跟随）
+watch([() => state.isPlaying, () => state.volume, () => state.muted, () => state.duration], () => {
+  if (!state.currentSong) return;
+  scheduleNowPlaying({ lineIndex: currentLineIndex.value });
+});
 
 // 强调色变化 → 立即上报（桌面歌词「跟随主题」配色实时跟随）
 watch(
@@ -1493,11 +1514,89 @@ watch(
     const path = state.currentSong?.path;
     const line = currentLineIndex.value;
     if (!path || line < 0) return;
-    nowPlayingPending = { path, lineIndex: line };
-    if (nowPlayingTimer) return;
-    nowPlayingTimer = setTimeout(flushNowPlaying, 250);
+    scheduleNowPlaying({ path, lineIndex: line });
   },
 );
+
+// ============ 迷你窗控制指令消费（主页面轮询取走执行）============
+let playerActionsTimer = null;
+
+function executePlayerAction(a) {
+  switch (a.action) {
+    case "togglePlay":
+      togglePlay();
+      break;
+    case "play":
+      play();
+      break;
+    case "pause":
+      pause();
+      break;
+    case "next":
+      nextSong();
+      break;
+    case "prev":
+      prevSong();
+      break;
+    case "seek":
+      seek(a.value);
+      break;
+    case "volume":
+      setVolume(a.value);
+      break;
+    default:
+      break; // 未知指令忽略
+  }
+}
+
+export function setupPlayerActions(intervalMs = 800) {
+  // 幂等：重复调用不叠加 timer
+  if (playerActionsTimer) return;
+  playerActionsTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/api/player/actions", { cache: "no-store" });
+      const { actions } = await res.json();
+      for (const a of actions || []) executePlayerAction(a);
+    } catch {
+      // 后端暂不可用：静默，下轮重试
+    }
+  }, intervalMs);
+}
+
+export function stopPlayerActions() {
+  if (playerActionsTimer) {
+    clearInterval(playerActionsTimer);
+    playerActionsTimer = null;
+  }
+}
+
+// ============ 迷你窗运行状态（顶栏开关点亮/熄灭） ============
+export const miniRunning = ref(false);
+let miniStatusTimer = null;
+
+export async function refreshMiniStatus() {
+  try {
+    const res = await fetch("/api/mini/status", { cache: "no-store" });
+    const { running } = await res.json();
+    miniRunning.value = !!running;
+  } catch {
+    // 后端暂不可达：保持现状
+  }
+}
+
+export function setupMiniStatus(intervalMs = 2000) {
+  // 幂等：重复调用不叠加 timer
+  if (miniStatusTimer) return;
+  refreshMiniStatus(); // 立即查一次（页面加载/点开迷你窗后快速点亮）
+  miniStatusTimer = setInterval(refreshMiniStatus, intervalMs);
+}
+
+export function stopMiniStatus() {
+  if (miniStatusTimer) {
+    clearInterval(miniStatusTimer);
+    miniStatusTimer = null;
+  }
+}
 
 // ============ 恢复上次播放（localStorage；受 playbackSettings.resumeLast 控制）============
 export const LAST_PLAYED_KEY = "qqplayer.lastPlayed.v1";

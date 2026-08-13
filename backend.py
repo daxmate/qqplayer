@@ -57,9 +57,29 @@ DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
 PLAYBACK_MIN_SECONDS = 3
-# 桌面歌词悬浮窗：主页面句切换时上报，悬浮窗轮询读取（内存态，不持久化）
-_now_playing: dict = {"path": None, "lineIndex": -1, "updatedAt": 0.0, "accent": None}
+# 桌面歌词/迷你窗：主页面状态上报，悬浮窗轮询读取（内存态，不持久化）
+_now_playing: dict = {
+    "path": None,
+    "name": None,
+    "artist": None,
+    "duration": 0.0,
+    "currentTime": 0.0,
+    "isPlaying": False,
+    "volume": 1.0,
+    "lineIndex": -1,
+    "updatedAt": 0.0,
+    "accent": None,
+}
 _now_playing_lock = threading.Lock()
+# 迷你窗控制指令队列：迷你窗 POST 入队，主播放器页面轮询取走执行（内存态）
+# 元素: {"action": str, "value": float|None}
+_player_actions: list[dict] = []
+_player_actions_lock = threading.Lock()
+# 合法指令白名单（防止任意指令注入）
+_PLAYER_ACTIONS = {"togglePlay", "play", "pause", "next", "prev", "seek", "volume"}
+# 迷你窗运行状态：Swift 壳启动/退出时上报，主页面轮询点亮顶栏开关
+_mini_status: dict = {"running": False}
+_mini_status_lock = threading.Lock()
 # 库变动监听：事件去抖窗口（秒）与扫描缓存
 WATCH_DEBOUNCE_SECONDS = 2.0
 _scan_cache: dict | None = None  # {"library": str, "songs": [...]}
@@ -607,13 +627,64 @@ async def api_playback(body: dict):
 
 @app.post("/api/now-playing")
 def api_now_playing_post(body: dict):
-    """主页面句切换时上报当前播放状态（供桌面歌词悬浮窗读取）"""
+    """主页面状态上报（桌面歌词/迷你窗轮询读取；迷你窗控制靠 /api/player/action 队列）"""
     with _now_playing_lock:
         _now_playing["path"] = str(body.get("path") or "") or None
+        _now_playing["name"] = str(body.get("name") or "") or None
+        _now_playing["artist"] = str(body.get("artist") or "") or None
+        _now_playing["duration"] = float(body.get("duration") or 0) or 0.0
+        _now_playing["currentTime"] = float(body.get("currentTime") or 0) or 0.0
+        _now_playing["isPlaying"] = bool(body.get("isPlaying"))
+        _now_playing["volume"] = float(body.get("volume") if body.get("volume") is not None else 1.0) or 0.0
         _now_playing["lineIndex"] = int(body.get("lineIndex") or -1)
         _now_playing["accent"] = str(body.get("accent") or "") or None  # 强调色（跟随主题配色用）
         _now_playing["updatedAt"] = time.time()
     return {"ok": True}
+
+
+@app.post("/api/player/action")
+def api_player_action_post(body: dict):
+    """迷你窗控制指令入队（主播放器页面轮询 /api/player/actions 取走执行）"""
+    action = str(body.get("action") or "")
+    if action not in _PLAYER_ACTIONS:
+        return {"ok": False, "reason": "unknown_action"}
+    value = body.get("value")
+    if action in ("seek", "volume") and not isinstance(value, (int, float)):
+        return {"ok": False, "reason": "value_required"}
+    if action == "seek":
+        value = max(0.0, float(value))
+    if action == "volume":
+        value = min(1.0, max(0.0, float(value)))
+    with _player_actions_lock:
+        _player_actions.append({"action": action, "value": value})
+    return {"ok": True}
+
+
+@app.get("/api/player/actions")
+def api_player_actions_get():
+    """主播放器页面轮询：取走并清空全部待执行指令"""
+    with _player_actions_lock:
+        actions = list(_player_actions)
+        _player_actions.clear()
+    return {"actions": actions}
+
+
+@app.post("/api/mini/status")
+def api_mini_status_post(body: dict):
+    """迷你窗 Swift 壳上报运行状态（启动 running=true，退出 running=false）"""
+    running = body.get("running")
+    if not isinstance(running, bool):
+        return {"ok": False, "reason": "running_required"}
+    with _mini_status_lock:
+        _mini_status["running"] = running
+    return {"ok": True}
+
+
+@app.get("/api/mini/status")
+def api_mini_status_get():
+    """迷你窗当前是否在运行（主页面顶栏开关轮询点亮）"""
+    with _mini_status_lock:
+        return dict(_mini_status)
 
 
 @app.get("/api/now-playing")

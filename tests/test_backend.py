@@ -897,3 +897,84 @@ def test_lyric_search_api(song_library, monkeypatch):
     assert r.json()["results"][0]["source"] == "netease"
     r = client.get("/api/lyric/search", params={"title": "   "})
     assert r.status_code == 400
+
+
+# ============ 桌面歌词/迷你窗：now-playing 上报 + 播放控制指令队列 ============
+
+def test_api_now_playing_roundtrip():
+    """now-playing 上报完整字段（含迷你窗需要的 name/artist/duration/isPlaying）→ GET 原样返回"""
+    backend._now_playing_lock.acquire()
+    try:
+        backend._now_playing["path"] = None
+        backend._now_playing["updatedAt"] = 0.0
+    finally:
+        backend._now_playing_lock.release()
+    r = client.post(
+        "/api/now-playing",
+        json={
+            "path": "/x/song.mp3",
+            "name": "ヤキモチ",
+            "artist": "高橋優",
+            "duration": 240.0,
+            "currentTime": 12.5,
+            "isPlaying": True,
+            "volume": 0.7,
+            "lineIndex": 3,
+            "accent": "#ff7e6b",
+        },
+    )
+    assert r.status_code == 200
+    body = client.get("/api/now-playing").json()
+    assert body["path"] == "/x/song.mp3"
+    assert body["name"] == "ヤキモチ"
+    assert body["artist"] == "高橋優"
+    assert body["duration"] == 240.0
+    assert body["currentTime"] == 12.5
+    assert body["isPlaying"] is True
+    assert body["volume"] == 0.7
+    assert body["lineIndex"] == 3
+    assert body["accent"] == "#ff7e6b"
+
+
+def test_api_player_action_queue():
+    """指令入队 → 轮询取走并清空（迷你窗控制主播放器的核心链路）"""
+    for a in ["togglePlay", "next", "prev"]:
+        assert client.post("/api/player/action", json={"action": a}).status_code == 200
+    r = client.get("/api/player/actions")
+    assert r.status_code == 200
+    assert r.json()["actions"] == [
+        {"action": "togglePlay", "value": None},
+        {"action": "next", "value": None},
+        {"action": "prev", "value": None},
+    ]
+    # 取走即清空
+    assert client.get("/api/player/actions").json()["actions"] == []
+
+
+def test_api_player_action_unknown_rejected():
+    """非法指令拒绝入队"""
+    assert client.post("/api/player/action", json={"action": "rm -rf"}).json()["ok"] is False
+    assert client.get("/api/player/actions").json()["actions"] == []
+
+
+def test_api_player_action_seek_volume_validation():
+    """seek/volume 必须带数值，且 clamp 到合法范围"""
+    assert client.post("/api/player/action", json={"action": "seek"}).json()["ok"] is False
+    assert client.post("/api/player/action", json={"action": "volume", "value": "loud"}).json()["ok"] is False
+    assert client.post("/api/player/action", json={"action": "seek", "value": -5}).status_code == 200
+    assert client.post("/api/player/action", json={"action": "volume", "value": 2.5}).status_code == 200
+    actions = client.get("/api/player/actions").json()["actions"]
+    assert actions == [
+        {"action": "seek", "value": 0.0},
+        {"action": "volume", "value": 1.0},
+    ]
+
+
+def test_api_mini_status_roundtrip():
+    """迷你窗运行状态：Swift 壳上报 → GET 返回；非 bool 拒绝"""
+    assert client.post("/api/mini/status", json={"running": True}).status_code == 200
+    assert client.get("/api/mini/status").json() == {"running": True}
+    assert client.post("/api/mini/status", json={"running": False}).status_code == 200
+    assert client.get("/api/mini/status").json() == {"running": False}
+    assert client.post("/api/mini/status", json={"running": "yes"}).json()["ok"] is False
+    assert client.post("/api/mini/status", json={}).json()["ok"] is False

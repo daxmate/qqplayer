@@ -30,6 +30,14 @@
       </div>
       <div class="topbar-right">
         <button
+          class="gear-btn mini-btn"
+          :class="{ on: miniRunning }"
+          :title="miniRunning ? '迷你模式（运行中，点击置前）' : '迷你模式（独立小窗）'"
+          @click="openMiniPlayer()"
+        >
+          <PictureInPicture2 :size="18" />
+        </button>
+        <button
           class="gear-btn lyric-float-btn"
           :class="{ on: desktopLyricSettings.enabled }"
           :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
@@ -110,7 +118,17 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
-import { Music2, Mic, Play, Settings, PanelLeftOpen, ChevronUp, FileMusic, MonitorPlay } from "@lucide/vue";
+import {
+  Music2,
+  Mic,
+  Play,
+  Settings,
+  PanelLeftOpen,
+  ChevronUp,
+  FileMusic,
+  MonitorPlay,
+  PictureInPicture2,
+} from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
 import ActivityBar from "./components/ActivityBar.vue";
@@ -129,6 +147,8 @@ import {
   setupMediaSession,
   setupPlaybackFlush,
   setupAutoRefresh,
+  setupPlayerActions,
+  setupMiniStatus,
   restoreLastPlayed,
   toggleControls,
   toggleMusicLib,
@@ -136,6 +156,8 @@ import {
   currentLineIndex,
   uiSettings,
   desktopLyricSettings,
+  miniRunning,
+  refreshMiniStatus,
 } from "./composables/usePlayer.js";
 
 const settingsOpen = ref(false);
@@ -174,6 +196,17 @@ function toggleDesktopLyric() {
   }
 }
 
+// 迷你模式：调起独立小窗 Swift 壳 app（控制指令走 /api/player/action 队列回主页面执行）
+// 运行状态由 miniRunning 轮询点亮开关（Swift 壳启动/退出时上报后端）
+function openMiniPlayer() {
+  const iframe = document.createElement("iframe");
+  iframe.style.display = "none";
+  iframe.src = "qqplayermini://open";
+  document.body.appendChild(iframe);
+  setTimeout(() => iframe.remove(), 1000);
+  refreshMiniStatus(); // 立即查一次，点亮更快
+}
+
 onMounted(() => {
   loadSongs().then(() => restoreLastPlayed());
   loadFavorites();
@@ -182,6 +215,8 @@ onMounted(() => {
   setupMediaSession();
   setupPlaybackFlush();
   setupAutoRefresh();
+  setupPlayerActions();
+  setupMiniStatus();
 });
 </script>
 
@@ -328,6 +363,14 @@ onMounted(() => {
   background: var(--accent-soft);
 }
 .lyric-float-btn.on svg {
+  transform: none;
+}
+/* 迷你模式开关：点亮样式与桌面歌词按钮一致 */
+.mini-btn.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.mini-btn.on svg {
   transform: none;
 }
 
