@@ -9,6 +9,14 @@
 
 ### ✨ 新功能
 
+- 均衡器 EQ（Web Audio API）：10 段经典频点（31/62/125/250/500/1K/2K/4K/8K/16K Hz，±12dB）
+  - 设置 → 播放 → 均衡器：总开关 + 7 个预设（平直/流行/摇滚/爵士/古典/低音增强/人声）+ 自定义 10 段滑杆
+  - 拖滑杆自动切「自定义」，增益实时生效（不用重启播放）；选预设以预设值为自定义基点
+  - 技术实现：懒初始化 AudioContext + MediaElementSource + 10 段 BiquadFilter（peaking）级联，首次播放（用户手势）创建后常驻；`audio.play` 包装确保每次播放前图就绪 + resume（autoplay policy）
+  - 开关关闭 = 全部 0dB 直通（createMediaElementSource 一个元素只能接管一次，不做动态路由切换）
+  - 无 AudioContext 环境（旧浏览器）静默降级，不影响播放
+  - 持久化 `playbackSettings`（localStorage）：eqEnabled / eqPreset / eqGains，启动恢复 + 脏数据归一化（长度/范围/非法预设）
+
 - 迷你模式（Swift 原生壳 `desktop-mini/`）：独立迷你小窗，右下角悬浮常驻
   - 播放器顶栏新增迷你窗开关按钮，通过 URL scheme（`qqplayermini://`）调起壳 app；按钮实时反映迷你窗运行状态（Swift 壳启动/退出上报 `POST /api/mini/status`，主页面 2s 轮询点亮/熄灭）
   - 迷你窗 UI 走 Web 页 `/mini.html`：封面 + 歌名/歌手 + 上一首/播放暂停/下一首 + 可拖动进度条（本地时钟平滑推算，不跳帧）+ 音量滑杆 + 关闭按钮，深色玻璃圆角卡片，强调色跟随主题
