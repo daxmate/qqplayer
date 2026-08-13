@@ -193,6 +193,19 @@ def test_manual_roundtrip(cache_dir):
     assert lyric_fetch.load_manual_lyric("/tmp/x.mp3") is None
 
 
+def test_manual_with_tlyric(cache_dir):
+    """JSON 歌词：lrc 原文 + tlyric 翻译一起保存/读取"""
+    lyric_fetch.save_manual_lyric(
+        "/tmp/x.mp3", "lrc", "[00:01.00]hi", "上传·x.json", tlyric="[00:01.00]你好"
+    )
+    data = lyric_fetch.load_manual_lyric("/tmp/x.mp3")
+    assert data["tlyric"] == "[00:01.00]你好"
+    assert data["source"] == "上传·x.json"
+    # 无 tlyric 时不落字段
+    lyric_fetch.save_manual_lyric("/tmp/x.mp3", "lrc", "[00:01.00]hi", "粘贴")
+    assert "tlyric" not in lyric_fetch.load_manual_lyric("/tmp/x.mp3")
+
+
 def test_manual_key_by_path():
     """不同歌曲路径 → 不同 key；同路径稳定"""
     assert lyric_fetch.manual_key("/a/b.mp3") == lyric_fetch.manual_key("/a/b.mp3")

@@ -87,6 +87,21 @@ kimi ga mae ni tsuki atte ita hito no koto
 关于你之前交往过的那个人
 ```
 
+## JSON 歌词格式（手动指定）
+
+手动指定歌词支持 QQPlayer 缓存 JSON 结构（`~/.cache/qqplayer/lyric/` 或 `align_lyric.py` 对齐产物）：
+
+```json
+{
+  "lrc": "[00:01.00]原文行",
+  "tlyric": "[00:01.00]中文翻译行",
+  "source": "netease"
+}
+```
+
+- `lrc` 必填（LRC 文本），`tlyric` 可选（中文翻译，自动合并进歌词行）
+- 上传或粘贴 JSON 时自动提取并转成 LRC 保存
+
 ## API
 
 | 接口 | 说明 |

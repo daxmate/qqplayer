@@ -47,7 +47,9 @@ function mockFetch(routes = {}) {
       });
     }
     if (u.includes("/api/lyric/manual") && opts?.method === "PUT") {
-      return routes.put ? routes.put() : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
+      return routes.put
+        ? routes.put()
+        : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
     }
     if (u.includes("/api/lyric/manual") && opts?.method === "DELETE") {
       return Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
@@ -121,7 +123,9 @@ describe("LyricSpecModal 上传文件", () => {
 
     // 模拟选择 .lrc 文件（FileReader 读文本）
     const input = w.find('input[type="file"]');
-    const file = new File(["[00:01.00]一行歌词\n[00:05.00]二行歌词"], "test.lrc", { type: "text/plain" });
+    const file = new File(["[00:01.00]一行歌词\n[00:05.00]二行歌词"], "test.lrc", {
+      type: "text/plain",
+    });
     Object.defineProperty(input.element, "files", { value: [file] });
     await input.trigger("change");
     await tick(); // 等 FileReader.onload
@@ -150,8 +154,20 @@ describe("LyricSpecModal 在线搜索", () => {
   it("搜索返回候选列表，点选即保存并关闭", async () => {
     const fetchMock = mockFetch({
       search: [
-        { source: "netease", title: "夜に駆ける", artist: "YOASOBI", text: "[00:01.00]沈む", tlyric: "[00:01.00]像是沉溺" },
-        { source: "lrclib", title: "夜に駆ける", artist: "YOASOBI", text: "[00:01.00]走れ", tlyric: null },
+        {
+          source: "netease",
+          title: "夜に駆ける",
+          artist: "YOASOBI",
+          text: "[00:01.00]沈む",
+          tlyric: "[00:01.00]像是沉溺",
+        },
+        {
+          source: "lrclib",
+          title: "夜に駆ける",
+          artist: "YOASOBI",
+          text: "[00:01.00]走れ",
+          tlyric: null,
+        },
       ],
     });
     const w = await openModal();
@@ -177,6 +193,58 @@ describe("LyricSpecModal 在线搜索", () => {
     expect(body.text).toContain("沈む");
     expect(body.source).toContain("网易云");
     expect(state.specLyricOpen).toBe(false); // 保存后关闭
+    w.unmount();
+  });
+});
+
+describe("LyricSpecModal JSON 歌词", () => {
+  it("上传 JSON（lrc + tlyric）→ 检测 JSON → 保存时提取 lrc 并携带 tlyric", async () => {
+    const fetchMock = mockFetch();
+    const w = await openModal();
+
+    const input = w.find('input[type="file"]');
+    const json = JSON.stringify({
+      lrc: "[00:01.00]原文行\n[00:05.00]原文二行",
+      tlyric: "[00:01.00]翻译行",
+      source: "netease",
+    });
+    const file = new File([json], "song.json", { type: "application/json" });
+    Object.defineProperty(input.element, "files", { value: [file] });
+    await input.trigger("change");
+    await tick();
+    await nextTick();
+
+    expect(w.text()).toContain("song.json");
+    expect(w.text()).toContain("JSON");
+    const saveBtn = w.find(".btn-primary");
+    expect(saveBtn.attributes("disabled")).toBeUndefined();
+    await saveBtn.trigger("click");
+    await nextTick();
+    await nextTick();
+
+    const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
+    expect(putCall).toBeTruthy();
+    const body = JSON.parse(putCall[1].body);
+    expect(body.format).toBe("lrc"); // JSON 转成 LRC 保存
+    expect(body.text).toBe("[00:01.00]原文行\n[00:05.00]原文二行");
+    expect(body.tlyric).toBe("[00:01.00]翻译行");
+    expect(body.source).toContain("song.json");
+    w.unmount();
+  });
+
+  it("上传无 lrc 字段的 JSON → 格式未识别 → 保存禁用", async () => {
+    mockFetch();
+    const w = await openModal();
+    const input = w.find('input[type="file"]');
+    const file = new File([JSON.stringify({ foo: "bar" })], "bad.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(input.element, "files", { value: [file] });
+    await input.trigger("change");
+    await tick();
+    await nextTick();
+    expect(w.text()).toContain("未识别");
+    expect(w.find(".btn-primary").attributes("disabled")).toBeDefined();
     w.unmount();
   });
 });

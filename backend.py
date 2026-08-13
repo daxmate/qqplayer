@@ -805,6 +805,8 @@ def api_lyric(path: str, prefer: str = "local"):
     if manual is not None:
         data = parse_srt(manual["text"]) if manual["format"] == "srt" else parse_lrc(manual["text"])
         if data:
+            if manual.get("tlyric"):
+                data = merge_translation(data, manual["tlyric"])
             return {"format": manual["format"], "lines": data, "source": "manual"}
         # 手动指定内容解析不出行：当作没指定，继续走自动链路（不删除，弹窗里可改）
 
@@ -872,11 +874,15 @@ def api_lyric_manual_get(path: str):
 
 @app.put("/api/lyric/manual")
 def api_lyric_manual_put(body: dict):
-    """保存手动指定歌词（上传文件/在线选择/粘贴文本统一走这里，覆盖旧值）"""
+    """保存手动指定歌词（上传文件/在线选择/粘贴文本统一走这里，覆盖旧值）
+
+    tlyric 可选：中文翻译 LRC（JSON 歌词上传时携带），/api/lyric 返回时合并进歌词行。
+    """
     path = (body.get("path") or "").strip()
     fmt = body.get("format") or "lrc"
     text = body.get("text") or ""
     source = body.get("source") or ""
+    tlyric = body.get("tlyric") or None
     if not path:
         raise HTTPException(400, "缺少歌曲路径")
     if not text.strip():
@@ -889,7 +895,7 @@ def api_lyric_manual_put(body: dict):
     lines = parse_srt(text) if fmt == "srt" else parse_lrc(text)
     if not lines:
         raise HTTPException(400, "歌词内容解析失败，请检查格式（LRC 需 [mm:ss] 时间戳，SRT 需序号+时间轴）")
-    payload = save_manual_lyric(str(f), fmt, text, source)
+    payload = save_manual_lyric(str(f), fmt, text, source, tlyric)
     return {"ok": True, **payload}
 
 

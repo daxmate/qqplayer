@@ -65,8 +65,10 @@ def load_manual_lyric(path: str):
         return None
 
 
-def save_manual_lyric(path: str, format: str, text: str, source: str = "manual") -> dict:
-    """保存手动指定歌词（覆盖旧值），返回完整 payload"""
+def save_manual_lyric(
+    path: str, format: str, text: str, source: str = "manual", tlyric: str | None = None
+) -> dict:
+    """保存手动指定歌词（覆盖旧值），返回完整 payload；tlyric 为可选中文翻译 LRC"""
     fmt = format if format in ("lrc", "srt") else "lrc"
     payload = {
         "format": fmt,
@@ -74,6 +76,8 @@ def save_manual_lyric(path: str, format: str, text: str, source: str = "manual")
         "source": source or "manual",
         "created_at": int(time.time()),
     }
+    if tlyric:
+        payload["tlyric"] = tlyric
     try:
         MANUAL_DIR.mkdir(parents=True, exist_ok=True)
         (MANUAL_DIR / f"{manual_key(path)}.json").write_text(

@@ -40,19 +40,19 @@
         <!-- 上传文件 -->
         <div v-if="tab === 'upload'" class="spec-pane">
           <label class="drop-zone" :class="{ has: file }">
-            <input type="file" accept=".lrc,.srt,.txt" @change="onFile" />
+            <input type="file" accept=".lrc,.srt,.json,.txt" @change="onFile" />
             <FileUp :size="26" />
             <div class="dz-main">{{ file ? file.name : "点击选择歌词文件" }}</div>
             <div class="dz-sub">
               {{
                 file
                   ? "格式：" + (detectedFormat ? detectedFormat.toUpperCase() : "未识别")
-                  : "支持 .lrc / .srt（需包含时间戳）"
+                  : "支持 .lrc / .srt / .json（需包含时间戳）"
               }}
             </div>
           </label>
           <div v-if="file && !detectedFormat" class="spec-error">
-            未识别到时间戳格式：LRC 需 [mm:ss]，SRT 需序号 + 时间轴
+            未识别到可用歌词格式：LRC 需 [mm:ss]，SRT 需序号+时间轴，JSON 需包含 lrc 字段
           </div>
           <pre v-if="file && detectedFormat" class="spec-preview">{{ preview }}</pre>
         </div>
@@ -105,7 +105,7 @@
           <textarea
             v-model="pasteText"
             class="paste-area"
-            placeholder="粘贴 LRC / SRT 歌词文本…&#10;&#10;LRC 示例：&#10;[00:12.34]一行歌词&#10;&#10;SRT 示例：&#10;1&#10;00:00:12,340 --> 00:00:17,000&#10;一行歌词"
+            placeholder='粘贴 LRC / SRT / JSON 歌词…&#10;&#10;LRC 示例：&#10;[00:12.34]一行歌词&#10;&#10;SRT 示例：&#10;1&#10;00:00:12,340 --&gt; 00:00:17,000&#10;一行歌词&#10;&#10;JSON 示例：&#10;{&#10;  "lrc": "[00:12.34]一行歌词",&#10;  "tlyric": "[00:12.34]中文翻译"&#10;}'
             spellcheck="false"
           />
           <div v-if="pasteText.trim()" class="paste-meta">
@@ -171,7 +171,17 @@ const songName = computed(() =>
 const file = ref(null);
 const fileText = ref("");
 const detectedFormat = computed(() => (fileText.value ? detectFormat(fileText.value) : null));
-const preview = computed(() => fileText.value.split("\n").slice(0, 6).join("\n"));
+const preview = computed(() => {
+  const text = fileText.value;
+  if (detectedFormat.value === "json") {
+    try {
+      return JSON.parse(text).lrc.split("\n").slice(0, 6).join("\n");
+    } catch {
+      return text.slice(0, 300);
+    }
+  }
+  return text.split("\n").slice(0, 6).join("\n");
+});
 
 function onFile(e) {
   const f = e.target.files?.[0];
@@ -249,8 +259,16 @@ const canSave = computed(() => {
 
 async function save() {
   if (!canSave.value || !song.value) return;
-  const text = tab.value === "upload" ? fileText.value : pasteText.value;
-  const format = tab.value === "upload" ? detectedFormat.value : pasteFormat.value;
+  let text = tab.value === "upload" ? fileText.value : pasteText.value;
+  let format = tab.value === "upload" ? detectedFormat.value : pasteFormat.value;
+  let tlyric = undefined;
+  if (format === "json") {
+    // JSON 歌词：提取 lrc 原文 + tlyric 翻译，按 LRC 保存
+    const obj = JSON.parse(text);
+    text = obj.lrc;
+    format = "lrc";
+    if (typeof obj.tlyric === "string" && obj.tlyric.trim()) tlyric = obj.tlyric;
+  }
   saving.value = true;
   try {
     await saveManualLyric({
@@ -258,6 +276,7 @@ async function save() {
       format,
       text,
       source: tab.value === "upload" ? `上传·${file.value?.name || ""}` : "粘贴",
+      tlyric,
     });
     await afterSaved();
   } catch (err) {
@@ -287,6 +306,16 @@ function close() {
 
 function detectFormat(text) {
   if (!text) return null;
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const obj = JSON.parse(trimmed);
+      if (typeof obj?.lrc === "string" && obj.lrc.trim()) return "json";
+      return null; // 是 JSON 但没有 lrc 字段 → 不支持的歌词结构
+    } catch {
+      /* 不是 JSON，继续按 srt/lrc 判断 */
+    }
+  }
   if (/\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(text)) return "srt";
   if (/\[\d{1,2}:\d{2}([:.]\d{1,3})?\]/.test(text)) return "lrc";
   return null;

@@ -842,6 +842,27 @@ def test_manual_lyric_srt_format(song_library, tmp_path):
     assert r.json()["lines"][0]["text"][0] == "指定歌词行"
 
 
+def test_manual_lyric_with_tlyric(song_library, tmp_path):
+    """JSON 歌词上传（lrc + tlyric）：/api/lyric 合并中文翻译"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    lrc = "[00:01.00]原文第一行\n[00:05.00]原文第二行\n"
+    tlyric = "[00:01.00]翻译第一行\n[00:05.00]翻译第二行\n"
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "lrc", "text": lrc, "source": "上传·x.json", "tlyric": tlyric},
+    )
+    assert r.status_code == 200
+    assert r.json()["tlyric"] == tlyric
+    r = client.get("/api/lyric", params={"path": str(song)})
+    assert r.json()["source"] == "manual"
+    lines = r.json()["lines"]
+    assert lines[0]["text"][0] == "原文第一行"
+    assert lines[0]["text"][2] == "翻译第一行"  # 中文翻译已合并
+    # 查询接口也返回 tlyric
+    r = client.get("/api/lyric/manual", params={"path": str(song)})
+    assert r.json()["tlyric"] == tlyric
+
+
 def test_manual_lyric_invalid_content(song_library, tmp_path):
     """内容解析不出歌词行 → 400，不保存"""
     song = tmp_path / "yakimochi" / "song.mp3"

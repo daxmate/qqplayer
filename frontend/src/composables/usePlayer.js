@@ -1135,12 +1135,12 @@ export async function fetchManualLyric(path) {
   return { specified: false };
 }
 
-// 保存手动指定歌词（覆盖旧值）
-export async function saveManualLyric({ path, format, text, source }) {
+// 保存手动指定歌词（覆盖旧值）；tlyric 为可选中文翻译 LRC（JSON 歌词携带）
+export async function saveManualLyric({ path, format, text, source, tlyric }) {
   const res = await fetch("/api/lyric/manual", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path, format, text, source }),
+    body: JSON.stringify({ path, format, text, source, tlyric: tlyric || undefined }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "保存失败");
