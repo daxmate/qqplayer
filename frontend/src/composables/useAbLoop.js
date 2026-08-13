@@ -1,4 +1,4 @@
-import { state, audio } from "./playerCore.js";
+import { state, audio, playbackSettings } from "./playerCore.js";
 import {
   currentLineIndex,
   playLine,
@@ -8,6 +8,33 @@ import {
   lyricTime,
   locateLine,
 } from "./useLyric.js";
+
+// ============ AB 循环计数（防走开安全阀）============
+// 语义：B 句播完算一遍；满 N 遍后停止循环，停回 A 句句首（暂停，方便继续练习）。
+// 计数规则（2026-08-13 拍板）：
+//   · 进入 AB / 重设区间 / 退出 AB / 切歌 → 计数清零
+//   · 满 N 暂停在 A 句首并保持区间；再次播放后，下一次 B 句播完视为新一轮第 1 遍
+//     （等价于计数重置——避免"再播一遍就立刻又停"）
+//   · 等选终点（b=null）与单句循环不计数；AB 区间确定后仅 B 终点句完成计 1 遍
+let abLoopCount = 0; // 已完成的区间循环遍数（B 句播完 +1）
+let abLoopPaused = false; // 满 N 暂停标记：下次 B 完成视为新一轮第 1 遍
+
+// 循环上限钳制（设置持久化可能写入脏值：非数字/越界 → 回落合法范围）
+function abLoopMax() {
+  const n = Math.floor(Number(playbackSettings.abLoopMaxCount));
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(20, Math.max(1, n));
+}
+
+export function resetAbLoopCount() {
+  abLoopCount = 0;
+  abLoopPaused = false;
+}
+
+// 仅供测试：读取当前计数
+export function _getAbLoopCount() {
+  return abLoopCount;
+}
 
 // ============ 跟唱开关 ============
 export function toggleKaraoke() {
@@ -27,6 +54,7 @@ export function enterAbLoop() {
   const cur = currentLineIndex.value;
   if (cur < 0) return; // 无当前句（前奏/间隙）→ 忽略
   state.abLoop = { a: cur, b: null }; // b=null 等待选终点
+  resetAbLoopCount(); // 新一轮循环：计数清零
   // 不重播当前句：AB 循环设定过程不影响当前播放
 }
 
@@ -39,11 +67,13 @@ export function setAbEnd(lineIndex) {
   let b = lineIndex;
   if (b < a) [a, b] = [b, a]; // 终点在起点前 → 自动交换
   state.abLoop = { a, b };
+  resetAbLoopCount(); // 区间重设：计数清零
   // 不跳回区间起点重播：AB 循环设定过程不影响当前播放
 }
 
 export function exitAbLoop() {
   state.abLoop = null;
+  resetAbLoopCount(); // 退出循环：计数清零
 }
 
 // 歌词点击统一入口（跟唱面板）
@@ -63,8 +93,8 @@ export function clickLine(lineIndex) {
     return;
   }
   if (lineIndex < ab.a || lineIndex > ab.b) {
-    // 区间外：退出 AB 循环，恢复正常跟唱并播放该句
-    state.abLoop = null;
+    // 区间外：退出 AB 循环（计数一并清零），恢复正常跟唱并播放该句
+    exitAbLoop();
     playLine(lineIndex);
     return;
   }
@@ -90,7 +120,23 @@ export function handleKaraokeTick(t) {
       const ab = state.abLoop;
       if (ab && karaokeState.line >= ab.a) {
         if (ab.b !== null && karaokeState.line === ab.b) {
-          // AB 终点句播完 → 跳回起点句首重播
+          // AB 终点句播完 → 完成一遍区间循环
+          if (playbackSettings.abLoopCountOn) {
+            if (abLoopPaused) {
+              // 满 N 暂停后再播放：本轮 B 完成 = 新一轮第 1 遍
+              abLoopCount = 1;
+              abLoopPaused = false;
+            } else {
+              abLoopCount += 1;
+            }
+            if (abLoopCount >= abLoopMax()) {
+              // 满 N 遍：停回 A 句首并暂停（防走开安全阀；区间保持，再播放从新一轮计数）
+              abLoopPaused = true; // 下次 B 完成 = 新一轮第 1 遍
+              jumpToLine(ab.a, false);
+              audio.pause();
+              break;
+            }
+          }
           jumpToLine(ab.a, true);
           break;
         }

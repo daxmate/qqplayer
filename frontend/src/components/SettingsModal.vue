@@ -137,6 +137,55 @@
                   </template>
                 </div>
               </div>
+
+              <div class="group">
+                <div class="group-title">
+                  <Repeat2 :size="13" />
+                  AB 循环
+                </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="playbackSettings.abVisual = !playbackSettings.abVisual"
+                  >
+                    <div>
+                      <div class="setting-label">区间可视化</div>
+                      <div class="setting-desc">起点句 A / 终点句 B 徽标与区间进度显示</div>
+                    </div>
+                    <span class="switch" :class="{ on: playbackSettings.abVisual }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="playbackSettings.abLoopCountOn = !playbackSettings.abLoopCountOn"
+                  >
+                    <div>
+                      <div class="setting-label">循环计数（防走开安全阀）</div>
+                      <div class="setting-desc">B 句播完算一遍，满次数后停回 A 句首暂停</div>
+                    </div>
+                    <span class="switch" :class="{ on: playbackSettings.abLoopCountOn }"
+                      ><i
+                    /></span>
+                  </div>
+                  <div v-if="playbackSettings.abLoopCountOn" class="fade-row">
+                    <span class="setting-desc">次数</span>
+                    <input
+                      v-model.number="playbackSettings.abLoopMaxCount"
+                      class="slider"
+                      type="range"
+                      min="1"
+                      max="20"
+                      step="1"
+                    />
+                    <div class="stepper">
+                      <button class="step-btn" title="减 1" @click="stepAbMax(-1)">−</button>
+                      <span class="val-badge">{{ playbackSettings.abLoopMaxCount }} 遍</span>
+                      <button class="step-btn" title="加 1" @click="stepAbMax(1)">＋</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </section>
 
             <!-- ============ 音乐库 ============ -->
@@ -894,6 +943,7 @@ import {
   Database,
   FileAudio,
   Palette,
+  Repeat2,
 } from "@lucide/vue";
 import {
   state,
@@ -1092,7 +1142,14 @@ function onRecordKeydown(e) {
 function toggleFade() {
   playbackSettings.fadeSec = playbackSettings.fadeSec > 0 ? 0 : 1.5;
 }
-
+// AB 循环次数步进（范围 1-20 钳制）
+function stepAbMax(delta) {
+  const cur = Math.floor(Number(playbackSettings.abLoopMaxCount));
+  playbackSettings.abLoopMaxCount = Math.min(
+    20,
+    Math.max(1, (Number.isFinite(cur) ? cur : 10) + delta),
+  );
+}
 // 恢复默认：重置全部设置为出厂值（watch 自动持久化；音乐库设置走后端）
 function resetAll() {
   Object.assign(playbackSettings, PLAYBACK_SETTINGS_DEFAULTS);
@@ -1668,6 +1725,33 @@ onBeforeUnmount(() => {
 }
 .fade-row .slider {
   flex: 1;
+}
+
+/* AB 循环次数步进器 */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.step-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text2);
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.step-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 
 /* 均衡器 */

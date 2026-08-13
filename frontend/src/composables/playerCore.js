@@ -2,7 +2,7 @@ import { reactive, watch, ref } from "vue";
 import { uiSettings, ACCENT_OPTIONS } from "./useSettings.js";
 import { EQ_BANDS, EQ_PRESETS, _normalizeEqPreset } from "./useEq.js";
 import { loadLyric, reanchorKaraoke, currentLineIndex, nextLine, prevLine } from "./useLyric.js";
-import { handleKaraokeTick } from "./useAbLoop.js";
+import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -66,6 +66,9 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   eqEnabled: false, // 均衡器开关（false = 全部 0dB 直通）
   eqPreset: "flat", // 均衡器预设：EQ_PRESETS 的 key；'custom' = 用户自定义
   eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 自定义增益（dB，-12~12，10 段，与 EQ_BANDS 对齐）
+  abVisual: true, // AB 循环区间可视化（起点 A / 终点 B 徽标 + 区间进度条）
+  abLoopCountOn: true, // AB 循环计数（防走开安全阀）：B 句播完算一遍，满 N 遍停回 A 句首暂停
+  abLoopMaxCount: 10, // AB 循环计数上限（1-20）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
@@ -840,6 +843,7 @@ export async function selectSong(index, opts = {}) {
   state.lyricFormat = null;
   state.lyricSource = null;
   state.abLoop = null; // 切歌重置 AB 循环
+  resetAbLoopCount(); // 切歌重置 AB 循环计数（防走开安全阀）
   // 自动播放（播完自动切歌场景）：上一首结束切到新歌后继续播放
   if (opts.autoPlay) {
     audio.play().catch(() => {});
