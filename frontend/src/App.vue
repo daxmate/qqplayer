@@ -1,110 +1,115 @@
 <template>
   <div class="app">
     <div v-if="blurCoverUrl" class="bg-blur" :style="{ backgroundImage: `url(${blurCoverUrl})` }" />
-    <!-- 顶栏 -->
-    <header class="topbar">
-      <h1 class="logo">
-        <img src="/logo.png" class="logo-img" alt="QQPlayer" />
-        <span class="logo-text">Player</span>
-      </h1>
-      <div class="mode-tabs">
-        <button
-          class="tab"
-          :class="{ on: state.mode === 'continuous' }"
-          @click="switchMode('continuous')"
-        >
-          <Play :size="13" />
-          连播
-        </button>
-        <button
-          class="tab"
-          :class="{ on: state.mode === 'karaoke' }"
-          @click="switchMode('karaoke')"
-        >
-          <Mic :size="13" />
-          跟唱
-        </button>
-      </div>
-      <div class="topbar-right">
-        <button
-          class="gear-btn mini-btn"
-          :class="{ on: miniRunning }"
-          :title="miniRunning ? '迷你模式（运行中，点击置前）' : '迷你模式（独立小窗）'"
-          @click="openMiniPlayer()"
-        >
-          <PictureInPicture2 :size="18" />
-        </button>
-        <button
-          class="gear-btn lyric-float-btn"
-          :class="{ on: desktopLyricSettings.enabled }"
-          :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
-          @click="toggleDesktopLyric()"
-        >
-          <MonitorPlay :size="18" />
-        </button>
-        <button class="gear-btn" title="设置" @click="settingsOpen = true">
-          <Settings :size="18" />
-        </button>
-      </div>
-    </header>
-
-    <!-- 主体：连播模式 -->
-    <main v-if="state.mode === 'continuous'" class="main continuous" :class="panelClass">
-      <ActivityBar v-if="panelsActive" class="activity-bar" />
-      <button
-        v-if="!panelsActive"
-        class="floating-panel-btn"
-        title="展开面板"
-        @click="toggleMusicLib()"
-      >
-        <PanelLeftOpen :size="16" />
-      </button>
-      <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
-      <Playlist v-if="state.playlistOpen" class="panel playlist" />
-      <section class="center">
-        <Cover :song="state.currentSong" />
-        <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
-        <div v-else class="no-lyric">
-          <Music2 :size="40" class="no-lyric-icon" />
-          <span>暂无歌词</span>
-          <button class="no-lyric-btn" @click="openLyricSpec()">
-            <FileMusic :size="14" />
-            指定歌词
+    <!-- 移动端（<1024px）：页面栈式布局（媒体库首页 / 列表 / 全屏播放器 + 迷你播放条） -->
+    <MobileShell v-if="isMobile" @open-settings="settingsOpen = true" />
+    <!-- 桌面端（≥1024px）：三栏布局（完全不变） -->
+    <template v-else>
+      <!-- 顶栏 -->
+      <header class="topbar">
+        <h1 class="logo">
+          <img src="/logo.png" class="logo-img" alt="QQPlayer" />
+          <span class="logo-text">Player</span>
+        </h1>
+        <div class="mode-tabs">
+          <button
+            class="tab"
+            :class="{ on: state.mode === 'continuous' }"
+            @click="switchMode('continuous')"
+          >
+            <Play :size="13" />
+            连播
+          </button>
+          <button
+            class="tab"
+            :class="{ on: state.mode === 'karaoke' }"
+            @click="switchMode('karaoke')"
+          >
+            <Mic :size="13" />
+            跟唱
           </button>
         </div>
-      </section>
-      <ControlBar v-show="!state.controlsHidden" class="panel controls" />
-      <button
-        v-if="state.controlsHidden"
-        class="expand-controls-btn"
-        title="展开控制区"
-        @click="toggleControls()"
-      >
-        <ChevronUp :size="18" />
-      </button>
-    </main>
+        <div class="topbar-right">
+          <button
+            class="gear-btn mini-btn"
+            :class="{ on: miniRunning }"
+            :title="miniRunning ? '迷你模式（运行中，点击置前）' : '迷你模式（独立小窗）'"
+            @click="openMiniPlayer()"
+          >
+            <PictureInPicture2 :size="18" />
+          </button>
+          <button
+            class="gear-btn lyric-float-btn"
+            :class="{ on: desktopLyricSettings.enabled }"
+            :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
+            @click="toggleDesktopLyric()"
+          >
+            <MonitorPlay :size="18" />
+          </button>
+          <button class="gear-btn" title="设置" @click="settingsOpen = true">
+            <Settings :size="18" />
+          </button>
+        </div>
+      </header>
 
-    <!-- 主体：跟唱模式 -->
-    <main v-else class="main karaoke" :class="panelClass">
-      <ActivityBar v-if="panelsActive" class="activity-bar" />
-      <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
-      <Playlist v-if="state.playlistOpen" class="panel playlist" />
-      <KaraokePanel
-        class="panel karaoke-panel"
-        :lyric="state.lyric"
-        :current="currentLineIndex"
-        :expand-btn="!panelsActive"
-      />
-      <ControlBar v-show="!state.controlsHidden" class="panel controls" karaoke />
-      <button
-        v-if="state.controlsHidden"
-        class="expand-controls-btn"
-        title="展开控制区"
-        @click="toggleControls()"
-      >
-        <ChevronUp :size="18" />
-      </button>
-    </main>
+      <!-- 主体：连播模式 -->
+      <main v-if="state.mode === 'continuous'" class="main continuous" :class="panelClass">
+        <ActivityBar v-if="panelsActive" class="activity-bar" />
+        <button
+          v-if="!panelsActive"
+          class="floating-panel-btn"
+          title="展开面板"
+          @click="toggleMusicLib()"
+        >
+          <PanelLeftOpen :size="16" />
+        </button>
+        <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
+        <Playlist v-if="state.playlistOpen" class="panel playlist" />
+        <section class="center">
+          <Cover :song="state.currentSong" />
+          <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
+          <div v-else class="no-lyric">
+            <Music2 :size="40" class="no-lyric-icon" />
+            <span>暂无歌词</span>
+            <button class="no-lyric-btn" @click="openLyricSpec()">
+              <FileMusic :size="14" />
+              指定歌词
+            </button>
+          </div>
+        </section>
+        <ControlBar v-show="!state.controlsHidden" class="panel controls" />
+        <button
+          v-if="state.controlsHidden"
+          class="expand-controls-btn"
+          title="展开控制区"
+          @click="toggleControls()"
+        >
+          <ChevronUp :size="18" />
+        </button>
+      </main>
+
+      <!-- 主体：跟唱模式 -->
+      <main v-else class="main karaoke" :class="panelClass">
+        <ActivityBar v-if="panelsActive" class="activity-bar" />
+        <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
+        <Playlist v-if="state.playlistOpen" class="panel playlist" />
+        <KaraokePanel
+          class="panel karaoke-panel"
+          :lyric="state.lyric"
+          :current="currentLineIndex"
+          :expand-btn="!panelsActive"
+        />
+        <ControlBar v-show="!state.controlsHidden" class="panel controls" karaoke />
+        <button
+          v-if="state.controlsHidden"
+          class="expand-controls-btn"
+          title="展开控制区"
+          @click="toggleControls()"
+        >
+          <ChevronUp :size="18" />
+        </button>
+      </main>
+    </template>
 
     <div v-if="state.error" class="error-bar">{{ state.error }}</div>
 
@@ -135,6 +140,8 @@ import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
 import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
+import MobileShell from "./components/mobile/MobileShell.vue";
+import { isMobile } from "./composables/useMobileViewport.js";
 import {
   state,
   loadSongs,
