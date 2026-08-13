@@ -4,10 +4,7 @@
     <!-- 顶栏 -->
     <header class="topbar">
       <h1 class="logo">
-        <span class="logo-bubbles" aria-hidden="true">
-          <span class="qq q1">Q</span>
-          <span class="qq q2"><span class="qq-face">Q</span></span>
-        </span>
+        <img src="/logo.png" class="logo-img" alt="QQPlayer" />
         <span class="logo-text">Player</span>
       </h1>
       <div class="mode-tabs">
@@ -278,37 +275,12 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
 }
-.logo-bubbles {
-  display: inline-flex;
-  align-items: center;
-}
-.qq {
+.logo-img {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "Didot", "Baskerville", Georgia, serif;
-  font-size: 24px;
-  font-weight: 700;
-  color: #fff;
-  box-shadow: 0 3px 8px var(--shadow-sm);
+  border-radius: 9px;
   flex-shrink: 0;
-}
-.q1 {
-  background: linear-gradient(135deg, #ff9ab5, #ff7e6b);
-  transform: rotate(-10deg);
-  z-index: 1;
-}
-.q2 {
-  background: linear-gradient(135deg, #ffc06b, #ff9a5c);
-  transform: rotate(10deg);
-  margin-left: -6px;
-}
-.qq-face {
-  display: block;
-  transform: scaleX(-1);
+  box-shadow: 0 3px 8px var(--shadow-sm);
 }
 .logo-text {
   font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
