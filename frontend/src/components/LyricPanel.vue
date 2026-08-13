@@ -12,6 +12,7 @@
       v-if="engine === 'amll'"
       class="amll-host"
       :class="{ 'no-mask': !lyricSettings.fadeMask }"
+      :data-align="lyricSettings.align"
       :lyric-lines="amllLines"
       :current-time="amllTime"
       :align-position="lyricSettings.focusPos"
@@ -398,5 +399,29 @@ function onAmllLineClick(e) {
 .amll-host.no-mask {
   -webkit-mask-image: none;
   mask-image: none;
+}
+/* ============ amll 引擎：水平对齐覆盖 ============
+   amll 组件无水平对齐 prop/CSS 变量；歌词主行是 flex 容器 + inline-block span
+   （text-align: start）。按 data-align 覆盖内部类（[class*=] 抗 hash 变化）：
+   - mainLine 本身 text-align（纯文本节点行）+ span（逐词结构行）双覆盖
+   - 行容器 align-items 同步（flex 布局下兜底）
+*/
+.amll-host[data-align="center"] :deep([class*="lyricMainLine"]) {
+  text-align: center;
+}
+.amll-host[data-align="center"] :deep([class*="lyricMainLine"]) span {
+  text-align: center;
+}
+.amll-host[data-align="center"] :deep([class*="lyricLineWrapper"]) {
+  align-items: center;
+}
+.amll-host[data-align="right"] :deep([class*="lyricMainLine"]) {
+  text-align: right;
+}
+.amll-host[data-align="right"] :deep([class*="lyricMainLine"]) span {
+  text-align: right;
+}
+.amll-host[data-align="right"] :deep([class*="lyricLineWrapper"]) {
+  align-items: flex-end;
 }
 </style>

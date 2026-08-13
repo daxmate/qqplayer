@@ -160,3 +160,33 @@ describe("LyricPanel 中文翻译显示（amll 引擎数据映射）", () => {
     expect(lines[0].words[0].word).toBe("君が");
   });
 });
+
+describe("LyricPanel 对齐设置", () => {
+  it("native 引擎：容器 textAlign 跟随设置（left/center/right）", async () => {
+    for (const a of ["left", "center", "right"]) {
+      lyricSettings.engine = "native";
+      lyricSettings.align = a;
+      const wrapper = mountPanel();
+      const el = wrapper.find(".lyric-scroll");
+      expect(el.attributes("style")).toContain(`text-align: ${a}`);
+      wrapper.unmount();
+    }
+  });
+
+  it("spring 引擎：容器 textAlign 跟随设置", () => {
+    lyricSettings.engine = "spring";
+    lyricSettings.align = "center";
+    const wrapper = mountPanel();
+    const el = wrapper.find(".lyric-scroll");
+    expect(el.attributes("style")).toContain("text-align: center");
+  });
+
+  it("amll 引擎：data-align 属性透传给组件（组件内 CSS 据此覆盖）", async () => {
+    lyricSettings.engine = "amll";
+    lyricSettings.align = "right";
+    const wrapper = mountPanel();
+    await flushPromises();
+    const host = wrapper.find(".amll-host");
+    expect(host.attributes("data-align")).toBe("right");
+  });
+});
