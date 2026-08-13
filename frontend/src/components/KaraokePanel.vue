@@ -31,35 +31,35 @@
         <!-- 顶部占位（高度 JS 设为视口一半）：让第一句能滚到垂直居中 -->
         <div class="kp-spacer" aria-hidden="true"></div>
         <template v-for="(item, i) in lyric" :key="i">
-        <div v-if="item.type === 'sec' && lyricSettings.showSec" class="sec">
-          <Music2 :size="12" />
-          {{ item.name }}
-        </div>
-        <div
-          v-else-if="item.type === 'line'"
-          class="kline"
-          :class="klineClass(i)"
-          @click="playLineAt(i)"
-        >
-          <span
-            v-if="uiSettings.karaokeShowNum"
-            class="kline-num"
-            :class="{ 'ab-badge': abBadge(i) }"
-            >{{ abBadge(i) || lineNumber(i) }}</span
-          >
-          <div class="kline-body" :style="{ textAlign: lyricSettings.align }">
-            <div class="kline-jp">{{ item.text[0] || "…" }}</div>
-            <div v-if="item.text[1] && lyricSettings.showRoma" class="kline-roma">
-              {{ item.text[1] }}
-            </div>
-            <div v-if="item.text[2] && lyricSettings.showZh && state.zhVisible" class="kline-zh">
-              {{ item.text[2] }}
-            </div>
+          <div v-if="item.type === 'sec' && lyricSettings.showSec" class="sec">
+            <Music2 :size="12" />
+            {{ item.name }}
           </div>
-          <span v-if="uiSettings.karaokeShowTime" class="kline-time"
-            >{{ fmt(item.s) }} – {{ fmt(item.e) }}</span
+          <div
+            v-else-if="item.type === 'line'"
+            class="kline"
+            :class="klineClass(i)"
+            @click="playLineAt(i)"
           >
-        </div>
+            <span
+              v-if="uiSettings.karaokeShowNum"
+              class="kline-num"
+              :class="{ 'ab-badge': abBadge(i) }"
+              >{{ abBadge(i) || lineNumber(i) }}</span
+            >
+            <div class="kline-body" :style="{ textAlign: lyricSettings.align }">
+              <div class="kline-jp">{{ item.text[0] || "…" }}</div>
+              <div v-if="item.text[1] && lyricSettings.showRoma" class="kline-roma">
+                {{ item.text[1] }}
+              </div>
+              <div v-if="item.text[2] && lyricSettings.showZh && state.zhVisible" class="kline-zh">
+                {{ item.text[2] }}
+              </div>
+            </div>
+            <span v-if="uiSettings.karaokeShowTime" class="kline-time"
+              >{{ fmt(item.s) }} – {{ fmt(item.e) }}</span
+            >
+          </div>
         </template>
         <div v-if="!lyric.length" class="kp-empty">
           <div class="kp-empty-icon">
@@ -131,8 +131,14 @@ const scrollStyle = computed(() => ({
   fontFamily: FONTS[lyricSettings.fontFamily] || "",
   "--fs-active": lyricSettings.fontSize + "px",
   // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
-  "--lyr-jp": lyricSettings.jpColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.jp || "var(--accent-text)",
-  "--lyr-zh": lyricSettings.zhColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.zh || "var(--text2)",
+  "--lyr-jp":
+    lyricSettings.jpColor ||
+    LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.jp ||
+    "var(--accent-text)",
+  "--lyr-zh":
+    lyricSettings.zhColor ||
+    LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.zh ||
+    "var(--text2)",
 }));
 
 watch(

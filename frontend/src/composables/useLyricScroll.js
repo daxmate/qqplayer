@@ -100,11 +100,9 @@ export function useLyricScroll(scrollEl, trackEl, opts = {}) {
   // 顶部/底部占位 = 内容区一半高度：第一句/最后一句可滚到中央（随视口变化，resize 时重算）
   function layoutSpacers() {
     const h = viewH() / 2;
-    scrollEl.value
-      ?.querySelectorAll(".lyric-spacer, .kp-spacer")
-      .forEach((s) => {
-        s.style.height = `${h}px`;
-      });
+    scrollEl.value?.querySelectorAll(".lyric-spacer, .kp-spacer").forEach((s) => {
+      s.style.height = `${h}px`;
+    });
   }
 
   // 计算某行滚到焦点停靠位需要的偏移
@@ -187,8 +185,7 @@ export function useLyricScroll(scrollEl, trackEl, opts = {}) {
       alignTimer = setTimeout(() => {
         alignTimer = null;
         // 自动跟随仍开启 + 有目标行 → 恢复对齐（amll: onAutoAlignResume）
-        const active =
-          scrollEl.value?.querySelector(".lyr.active, .kline.active") || lastActive;
+        const active = scrollEl.value?.querySelector(".lyr.active, .kline.active") || lastActive;
         if (active && opts.autoScroll !== false) scrollTo(active, { isSeeking: false });
       }, AUTO_ALIGN_DELAY);
     }

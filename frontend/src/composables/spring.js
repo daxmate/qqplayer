@@ -68,7 +68,12 @@ export class Spring {
   _resetSolver() {
     const v = this._velocity(this.time);
     this.time = 0;
-    this.solver = solveSpring(this.solver ? this.solver(0) : this.target, v, this.target, this.params);
+    this.solver = solveSpring(
+      this.solver ? this.solver(0) : this.target,
+      v,
+      this.target,
+      this.params,
+    );
   }
 
   /** 数值微分求速度（h=1ms，对歌词滚动足够精确） */
@@ -106,9 +111,7 @@ function solveSpring(from, velocity, to, params = {}) {
   return (t) => {
     if (t < 0) return from;
     return (
-      to -
-      (Math.cos(t * omega) * delta + Math.sin(t * omega) * leftover) *
-        Math.E ** (t * decay)
+      to - (Math.cos(t * omega) * delta + Math.sin(t * omega) * leftover) * Math.E ** (t * decay)
     );
   };
 }

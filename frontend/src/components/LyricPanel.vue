@@ -76,7 +76,13 @@
 <script setup>
 import { ref, watch, computed, nextTick, defineAsyncComponent } from "vue";
 import { Music2, FileMusic } from "@lucide/vue";
-import { seek, lyricSettings, state, openLyricSpec, LYRIC_SCHEMES } from "../composables/usePlayer.js";
+import {
+  seek,
+  lyricSettings,
+  state,
+  openLyricSpec,
+  LYRIC_SCHEMES,
+} from "../composables/usePlayer.js";
 import { useLyricScroll } from "../composables/useLyricScroll.js";
 
 // amll 组件异步加载（vite 自动分包，仅 amll 引擎时下载）
@@ -113,8 +119,14 @@ const scrollStyle = computed(() => ({
   textAlign: lyricSettings.align,
   "--fs-active": lyricSettings.fontSize + "px",
   // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
-  "--lyr-jp": lyricSettings.jpColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.jp || "var(--accent-text)",
-  "--lyr-zh": lyricSettings.zhColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.zh || "var(--text2)",
+  "--lyr-jp":
+    lyricSettings.jpColor ||
+    LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.jp ||
+    "var(--accent-text)",
+  "--lyr-zh":
+    lyricSettings.zhColor ||
+    LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.zh ||
+    "var(--text2)",
 }));
 
 // 距离分级：0 = 当前句，1 = 相邻句，2 = 更远（决定字号/透明度层级）
@@ -192,8 +204,7 @@ const amllLines = computed(() =>
           endTime: Math.round(x.e * 1000),
         },
       ],
-      translatedLyric:
-        x.text[2] && lyricSettings.showZh && state.zhVisible ? x.text[2] : "",
+      translatedLyric: x.text[2] && lyricSettings.showZh && state.zhVisible ? x.text[2] : "",
       romanLyric: x.text[1] && lyricSettings.showRoma ? x.text[1] : "",
       startTime: Math.round(x.s * 1000),
       endTime: Math.round(x.e * 1000),
