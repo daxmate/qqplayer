@@ -1169,4 +1169,4 @@ if __name__ == "__main__":
     else:
         print("   📁 自动刷新已关闭（设置里可开启）")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host="127.0.0.1", port=DEFAULT_PORT, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=DEFAULT_PORT, log_level="warning")
