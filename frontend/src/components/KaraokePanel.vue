@@ -24,10 +24,13 @@
     <div
       ref="scrollEl"
       class="kp-scroll"
-      :class="{ 'no-mask': !lyricSettings.fadeMask }"
+      :class="{ 'no-mask': !lyricSettings.fadeMask, 'native-mode': karaokeEngine === 'native' }"
       :style="scrollStyle"
     >
-      <template v-for="(item, i) in lyric" :key="i">
+      <div ref="trackEl" class="kp-track">
+        <!-- 顶部占位（高度 JS 设为视口一半）：让第一句能滚到垂直居中 -->
+        <div class="kp-spacer" aria-hidden="true"></div>
+        <template v-for="(item, i) in lyric" :key="i">
         <div v-if="item.type === 'sec' && lyricSettings.showSec" class="sec">
           <Music2 :size="12" />
           {{ item.name }}
@@ -57,17 +60,20 @@
             >{{ fmt(item.s) }} – {{ fmt(item.e) }}</span
           >
         </div>
-      </template>
-      <div v-if="!lyric.length" class="kp-empty">
-        <div class="kp-empty-icon">
-          <Mic :size="44" />
+        </template>
+        <div v-if="!lyric.length" class="kp-empty">
+          <div class="kp-empty-icon">
+            <Mic :size="44" />
+          </div>
+          <div>这首歌没有歌词文件</div>
+          <div class="kp-empty-sub">可放置同名 .srt / .lrc，或在线搜索 / 上传指定</div>
+          <button class="kp-empty-btn" @click="openLyricSpec()">
+            <FileMusic :size="14" />
+            指定歌词
+          </button>
         </div>
-        <div>这首歌没有歌词文件</div>
-        <div class="kp-empty-sub">可放置同名 .srt / .lrc，或在线搜索 / 上传指定</div>
-        <button class="kp-empty-btn" @click="openLyricSpec()">
-          <FileMusic :size="14" />
-          指定歌词
-        </button>
+        <!-- 底部占位（高度 JS 设为视口一半）：让最后一句能滚到垂直居中 -->
+        <div class="kp-spacer" aria-hidden="true"></div>
       </div>
     </div>
   </div>
@@ -85,6 +91,7 @@ import {
   openLyricSpec,
   LYRIC_SCHEMES,
 } from "../composables/usePlayer.js";
+import { useLyricScroll } from "../composables/useLyricScroll.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -97,8 +104,21 @@ function expandPanels() {
 }
 
 const scrollEl = ref(null);
+const trackEl = ref(null);
 const lineIndexMap = ref([]); // lyric 数组索引 -> 行号（只计 line）
 let lastCurrent = -1;
+
+// 跟唱面板不支持 amll（自定义 AB 循环/行号/时间 UI）：amll 时回退弹簧引擎
+const karaokeEngine = computed(() =>
+  lyricSettings.engine === "amll" ? "spring" : lyricSettings.engine,
+);
+const springActive = computed(() => karaokeEngine.value === "spring");
+
+// transform 平移滚动（弹簧引擎；滚轮手动接管，动画被用户滚动打断时自动让位）
+const { scrollTo } = useLyricScroll(scrollEl, trackEl, {
+  getFocusPos: () => lyricSettings.focusPos,
+  enabled: springActive,
+});
 
 const FONTS = {
   system: "",
@@ -192,19 +212,34 @@ watch(
     lastCurrent = v;
     if (!lyricSettings.autoScroll) return; // 关闭自动跟随：只高亮不滚动
     await nextTick();
-    const el = scrollEl.value;
-    if (!el) return;
-    const active = el.querySelector(".kline.active");
+    if (karaokeEngine.value === "native") {
+      // 原生引擎：scrollTo smooth
+      const el = scrollEl.value;
+      if (!el) return;
+      const active = el.querySelector(".kline.active");
+      if (active) {
+        // 与连播歌词一致：停靠焦点位置（默认 1/3 高度）+ 平滑滚动
+        const rect = active.getBoundingClientRect();
+        const crect = el.getBoundingClientRect();
+        const top =
+          el.scrollTop +
+          (rect.top - crect.top) -
+          el.clientHeight * lyricSettings.focusPos +
+          rect.height / 2;
+        el.scrollTo({ top, behavior: "smooth" });
+      }
+      return;
+    }
+    const active = scrollEl.value?.querySelector(".kline.active");
     if (active) {
-      // 与连播歌词一致：停靠焦点位置（默认 1/3 高度）+ 平滑滚动
-      const rect = active.getBoundingClientRect();
-      const crect = el.getBoundingClientRect();
-      const top =
-        el.scrollTop +
-        (rect.top - crect.top) -
-        el.clientHeight * lyricSettings.focusPos +
-        rect.height / 2;
-      el.scrollTo({ top, behavior: "smooth" });
+      // 弹簧引擎：行间隔传入弹簧策略（快歌硬、慢歌软）
+      const cur = props.lyric[v];
+      const prev = props.lyric[v - 1];
+      const intervalMs =
+        cur && prev && typeof cur.s === "number" && typeof prev.s === "number"
+          ? cur.s - prev.s
+          : undefined;
+      scrollTo(active, { intervalMs });
     }
   },
 );
@@ -291,15 +326,26 @@ watch(
 }
 .kp-scroll {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden; /* transform 平移滚动：不再用原生滚动 */
   padding: 16px 22px 48px;
   /* 上下渐隐遮罩（与连播歌词一致） */
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
   mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
 }
+/* native 引擎：原生滚动容器 */
+.kp-scroll.native-mode {
+  overflow-y: auto;
+}
+.kp-track {
+  position: relative; /* 行 offsetTop 的定位基准 */
+}
 .kp-scroll.no-mask {
   -webkit-mask-image: none;
   mask-image: none;
+}
+.kp-spacer {
+  /* 高度由 useLyricScroll 按视口一半动态设置（第一句/最后一句可滚到中央） */
+  flex-shrink: 0;
 }
 .sec {
   font-size: 12px;

@@ -45,6 +45,7 @@ export const LYRIC_SETTINGS_DEFAULTS = {
   fontFamily: "system", // 'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
   fontSize: 20, // 当前句基准字号（px），其他层级按比例缩放
   align: "left", // 'left' | 'center' | 'right'
+  engine: "amll", // 歌词滚动引擎：'amll' amll 组件（默认）| 'spring' 自研弹簧 | 'native' 原生平滑
   showRoma: true, // 显示罗马音
   showZh: true, // 显示中文翻译
   showSec: true, // 显示段落标题

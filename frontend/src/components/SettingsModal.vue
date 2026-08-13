@@ -199,6 +199,23 @@
                   外观排版
                 </div>
                 <div class="setting-item">
+                  <div class="setting-label">滚动引擎</div>
+                  <div class="setting-desc">
+                    amll = Apple Music 风格逐词高亮（默认）；弹簧 = 自研物理滚动；原生 = 浏览器平滑滚动
+                  </div>
+                  <div class="seg">
+                    <button
+                      v-for="e in engineOptions"
+                      :key="e.value"
+                      class="seg-btn"
+                      :class="{ on: lyricSettings.engine === e.value }"
+                      @click="lyricSettings.engine = e.value"
+                    >
+                      {{ e.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
                   <div class="setting-label">歌词字体</div>
                   <div class="seg">
                     <button
@@ -922,6 +939,11 @@ const fontOptions = [
   { value: "system", label: "系统默认", css: "" },
   { value: "serif", label: "衬线", css: '"Songti SC", "SimSun", serif' },
   { value: "rounded", label: "圆体", css: '"Yuanti SC", "PingFang SC", sans-serif' },
+];
+const engineOptions = [
+  { value: "amll", label: "amll" },
+  { value: "spring", label: "弹簧" },
+  { value: "native", label: "原生" },
 ];
 const alignOptions = [
   { value: "left", label: "左对齐" },
