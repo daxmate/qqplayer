@@ -189,6 +189,36 @@
                   </div>
                 </div>
               </div>
+
+              <div class="group">
+                <div class="group-title">
+                  <Timer :size="13" />
+                  睡眠定时器
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="toggleSleepTimer">
+                    <div>
+                      <div class="setting-label">睡眠定时器</div>
+                      <div class="setting-desc">到点自动暂停播放</div>
+                    </div>
+                    <span class="switch" :class="{ on: playbackSettings.sleepTimerOn }"><i /></span>
+                  </div>
+                </div>
+                <div v-if="playbackSettings.sleepTimerOn" class="setting-item">
+                  <div class="setting-label">时长</div>
+                  <div class="ext-grid">
+                    <button
+                      v-for="m in SLEEP_TIMER_OPTIONS"
+                      :key="m"
+                      class="ext-chip"
+                      :class="{ on: playbackSettings.sleepTimerMinutes === m }"
+                      @click="setSleepTimerMinutes(m)"
+                    >
+                      {{ m }} 分钟
+                    </button>
+                  </div>
+                </div>
+              </div>
             </section>
 
             <!-- ============ 音乐库 ============ -->
@@ -972,6 +1002,11 @@ import {
   ACCENT_OPTIONS,
 } from "../composables/usePlayer.js";
 import { isMobile } from "../composables/useMobileViewport.js";
+import {
+  SLEEP_TIMER_OPTIONS,
+  toggleSleepTimer,
+  setSleepTimerMinutes,
+} from "../composables/useSleepTimer.js";
 import pkg from "../../package.json";
 
 const props = defineProps({

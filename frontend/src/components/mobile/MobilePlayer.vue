@@ -60,6 +60,8 @@
     </div>
 
     <!-- 控制条（复用 ControlBar：进度/播放模式三态/循环/音量/译 等） -->
+    <!-- 睡眠定时器倒计时（从简小字） -->
+    <div v-if="sleepTimerText" class="mp-sleep-timer">{{ sleepTimerText }}</div>
     <ControlBar :karaoke="state.mode === 'karaoke'" hide-collapse class="mp-controls" />
   </div>
 </template>
@@ -75,6 +77,7 @@ import {
 import Cover from "../Cover.vue";
 import KaraokePanel from "../KaraokePanel.vue";
 import ControlBar from "../ControlBar.vue";
+import { sleepTimerText } from "../../composables/useSleepTimer.js";
 
 defineEmits(["back"]);
 
@@ -187,6 +190,14 @@ function switchMode(m) {
 .mp-karaoke > * {
   flex: 1;
   min-height: 0;
+}
+.mp-sleep-timer {
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text3);
+  padding: 2px 0 0;
+  font-variant-numeric: tabular-nums;
 }
 .mp-controls {
   flex-shrink: 0;
