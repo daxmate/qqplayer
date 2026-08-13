@@ -62,9 +62,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 cp "$BUILD_DIR/$APP_NAME" "$APP/Contents/MacOS/"
-# 应用图标：优先复用桌面歌词/迷你窗同款 icns（双 Q 泡泡主 logo）
+# 应用图标：使用本目录 assets/icon.icns（双 Q 泡泡主 logo，已入库）
 ICON_SRC=""
-for cand in assets/icon.icns ../desktop-mini/assets/icon.icns ../desktop-lyric/assets/icon.icns; do
+for cand in assets/icon.icns; do
     if [ -f "$cand" ]; then ICON_SRC="$cand"; break; fi
 done
 if [ -n "$ICON_SRC" ]; then

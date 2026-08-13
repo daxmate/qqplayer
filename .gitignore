@@ -12,18 +12,12 @@ frontend/node_modules/
 # 构建产物（后端运行时由 CI/本地 pnpm build 生成）
 dist/
 
-# 桌面歌词悬浮窗构建产物（swiftc 编译生成，build.sh 可重建）
-desktop-lyric/build/
+# 桌面歌词/迷你窗/三合一壳构建产物（swiftc 编译生成，build.sh 可重建）
+desktop-player/build/
+desktop-player/assets/icon.iconset/
 
 # macOS
 .DS_Store
 
 # 本地歌词缓存
 .cache/
-desktop-lyric/assets/icon.iconset/
-# 迷你窗构建产物（swiftc 编译生成，build.sh 可重建）
-desktop-mini/build/
-desktop-mini/assets/icon.iconset/
-# 三合一壳构建产物（swiftc 编译生成，build.sh 可重建）
-desktop-player/build/
-desktop-player/assets/icon.iconset/
