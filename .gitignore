@@ -21,3 +21,6 @@ desktop-lyric/build/
 # 本地歌词缓存
 .cache/
 desktop-lyric/assets/icon.iconset/
+# 迷你窗构建产物（swiftc 编译生成，build.sh 可重建）
+desktop-mini/build/
+desktop-mini/assets/icon.iconset/
