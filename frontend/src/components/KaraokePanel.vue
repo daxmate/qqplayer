@@ -27,7 +27,10 @@
       :class="{ 'no-mask': !lyricSettings.fadeMask }"
       :style="scrollStyle"
     >
-      <template v-for="(item, i) in lyric" :key="i">
+      <div ref="trackEl" class="kp-track">
+        <!-- 顶部占位（高度 JS 设为视口一半）：让第一句能滚到垂直居中 -->
+        <div class="kp-spacer" aria-hidden="true"></div>
+        <template v-for="(item, i) in lyric" :key="i">
         <div v-if="item.type === 'sec' && lyricSettings.showSec" class="sec">
           <Music2 :size="12" />
           {{ item.name }}
@@ -69,6 +72,9 @@
           指定歌词
         </button>
       </div>
+        <!-- 底部占位（高度 JS 设为视口一半）：让最后一句能滚到垂直居中 -->
+        <div class="kp-spacer" aria-hidden="true"></div>
+      </div>
     </div>
   </div>
 </template>
@@ -85,6 +91,7 @@ import {
   openLyricSpec,
   LYRIC_SCHEMES,
 } from "../composables/usePlayer.js";
+import { useLyricScroll } from "../composables/useLyricScroll.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -97,8 +104,14 @@ function expandPanels() {
 }
 
 const scrollEl = ref(null);
+const trackEl = ref(null);
 const lineIndexMap = ref([]); // lyric 数组索引 -> 行号（只计 line）
 let lastCurrent = -1;
+
+// transform 平移滚动（引擎无关；滚轮手动接管，动画被用户滚动打断时自动让位）
+const { scrollTo } = useLyricScroll(scrollEl, trackEl, {
+  getFocusPos: () => lyricSettings.focusPos,
+});
 
 const FONTS = {
   system: "",
@@ -192,20 +205,8 @@ watch(
     lastCurrent = v;
     if (!lyricSettings.autoScroll) return; // 关闭自动跟随：只高亮不滚动
     await nextTick();
-    const el = scrollEl.value;
-    if (!el) return;
-    const active = el.querySelector(".kline.active");
-    if (active) {
-      // 与连播歌词一致：停靠焦点位置（默认 1/3 高度）+ 平滑滚动
-      const rect = active.getBoundingClientRect();
-      const crect = el.getBoundingClientRect();
-      const top =
-        el.scrollTop +
-        (rect.top - crect.top) -
-        el.clientHeight * lyricSettings.focusPos +
-        rect.height / 2;
-      el.scrollTo({ top, behavior: "smooth" });
-    }
+    const active = scrollEl.value?.querySelector(".kline.active");
+    if (active) scrollTo(active);
   },
 );
 </script>
@@ -291,15 +292,22 @@ watch(
 }
 .kp-scroll {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden; /* transform 平移滚动：不再用原生滚动 */
   padding: 16px 22px 48px;
   /* 上下渐隐遮罩（与连播歌词一致） */
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
   mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 82%, transparent);
 }
+.kp-track {
+  position: relative; /* 行 offsetTop 的定位基准 */
+}
 .kp-scroll.no-mask {
   -webkit-mask-image: none;
   mask-image: none;
+}
+.kp-spacer {
+  /* 高度由 useLyricScroll 按视口一半动态设置（第一句/最后一句可滚到中央） */
+  flex-shrink: 0;
 }
 .sec {
   font-size: 12px;
@@ -315,13 +323,14 @@ watch(
   margin-top: 0;
 }
 /* 纯文字流：字体层级跟随连播歌词，功能元素（行号/时间/AB）保留 */
+/* 切换过渡统一节奏（0.45s ease-in-out）：滚动动画同为 0.3~0.55s，动作连贯柔和 */
 .kline {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 9px 14px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
   border-left: 3px solid transparent;
 }
 .kline:hover {
@@ -334,36 +343,37 @@ watch(
 }
 .kline-jp {
   font-size: calc(var(--fs-active, 20px) * 0.675);
+  /* 行高固定（由设置字号决定，不随状态字号变）：切句时行不跳动、滚动目标稳定 */
+  line-height: calc(var(--fs-active, 20px) * 1.5);
   font-weight: 400;
   color: var(--text3);
-  line-height: 1.6;
   transition:
-    font-size 0.3s,
-    color 0.3s,
-    font-weight 0.3s;
+    font-size 0.45s cubic-bezier(0.25, 0.1, 0.25, 1),
+    color 0.45s cubic-bezier(0.25, 0.1, 0.25, 1),
+    font-weight 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .kline-roma {
   font-size: calc(var(--fs-active, 20px) * 0.55);
+  line-height: calc(var(--fs-active, 20px) * 0.625 * 1.4);
   color: var(--text3);
   margin-top: 2px;
   font-style: italic;
-  line-height: 1.4;
   opacity: 0.75;
   transition:
-    font-size 0.3s,
-    color 0.3s,
-    opacity 0.3s;
+    font-size 0.45s cubic-bezier(0.25, 0.1, 0.25, 1),
+    color 0.45s cubic-bezier(0.25, 0.1, 0.25, 1),
+    opacity 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .kline-zh {
   font-size: calc(var(--fs-active, 20px) * 0.575);
+  line-height: calc(var(--fs-active, 20px) * 0.65 * 1.4);
   color: var(--text3);
   margin-top: 3px;
-  line-height: 1.4;
   opacity: 0.7;
   transition:
-    font-size 0.3s,
-    color 0.3s,
-    opacity 0.3s;
+    font-size 0.45s cubic-bezier(0.25, 0.1, 0.25, 1),
+    color 0.45s cubic-bezier(0.25, 0.1, 0.25, 1),
+    opacity 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .kline-zh.hidden {
   display: none;
