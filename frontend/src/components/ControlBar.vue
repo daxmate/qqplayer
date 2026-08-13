@@ -125,6 +125,9 @@
       </span>
       <span v-else class="song-line-text dim">未选择歌曲</span>
     </div>
+
+    <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
+    <div v-if="!isMobile && sleepTimerText" class="sleep-timer">{{ sleepTimerText }}</div>
   </div>
 </template>
 
@@ -146,6 +149,8 @@ import {
   Languages,
 } from "@lucide/vue";
 import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
+import { sleepTimerText } from "../composables/useSleepTimer.js";
+import { isMobile } from "../composables/useMobileViewport.js";
 import {
   togglePlay,
   nextSong,
@@ -398,6 +403,14 @@ function fmt(t) {
 }
 .song-line-text.dim {
   color: var(--text3);
+}
+/* 睡眠定时器倒计时：不显眼小字 */
+.sleep-timer {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text3);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
 }
 .fmt-badge {
   display: inline-block;
