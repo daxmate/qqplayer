@@ -151,6 +151,8 @@ const RESET = {
 
 beforeEach(() => {
   Object.assign(state, RESET);
+  playbackSettings.karaokeNextKey = "KeyN";
+  playbackSettings.karaokePrevKey = "KeyP";
   _resetKaraokeAnchor();
   _resetPlayMode();
   _resetPlaybackSession();
@@ -622,6 +624,83 @@ describe("键盘快捷键", () => {
       globalThis.window = orig;
     }
   });
+
+  // 跟唱句跳转（默认 N 下一句 / P 上一句，仅跟唱模式生效，键位可配置）
+  const K_LRC = [
+    { type: "line", s: 0, e: 10, text: ["第一句"] },
+    { type: "line", s: 10, e: 20, text: ["第二句"] },
+  ];
+
+  it("跟唱模式：N 下一句 / P 上一句（跳句首并播放）", () => {
+    const h = captureHandler();
+    state.mode = "karaoke";
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.src = "/a.mp3";
+    state.lyric = K_LRC;
+    playLine(0);
+    fire(h, "KeyN");
+    expect(a.currentTime).toBe(10); // 下一句句首
+    expect(a.paused).toBe(false);
+    fire(h, "KeyP");
+    expect(a.currentTime).toBe(0); // 上一句句首
+    expect(a.paused).toBe(false);
+  });
+
+  it("跟唱快捷键可配置：改键后新键生效、旧键失效", () => {
+    const h = captureHandler();
+    state.mode = "karaoke";
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.src = "/a.mp3";
+    state.lyric = K_LRC;
+    playbackSettings.karaokeNextKey = "KeyJ";
+    playLine(0);
+    fire(h, "KeyN"); // 旧键不再生效
+    expect(a.currentTime).toBe(0);
+    fire(h, "KeyJ"); // 新键生效
+    expect(a.currentTime).toBe(10);
+  });
+
+  it("连播模式：N/P 不生效", () => {
+    const h = captureHandler();
+    state.mode = "continuous";
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.src = "/a.mp3";
+    state.lyric = K_LRC;
+    playLine(0);
+    fire(h, "KeyN");
+    expect(a.currentTime).toBe(0); // 没有跳句
+  });
+
+  it("边界：第一句按 P、最后一句按 N 不动作", () => {
+    const h = captureHandler();
+    state.mode = "karaoke";
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.src = "/a.mp3";
+    state.lyric = K_LRC;
+    playLine(0);
+    fire(h, "KeyP"); // 第一句：无上一句
+    expect(a.currentTime).toBe(0);
+    nextLine(); // 跳到第二句（最后一句）
+    fire(h, "KeyN"); // 最后一句：无下一句
+    expect(a.currentTime).toBe(10);
+  });
+
+  it("输入框聚焦时 N/P 不拦截（可正常打字）", () => {
+    const h = captureHandler();
+    state.mode = "karaoke";
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.src = "/a.mp3";
+    state.lyric = K_LRC;
+    playLine(0);
+    const ev = fire(h, "KeyN", { tagName: "INPUT" });
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+    expect(a.currentTime).toBe(0);
+  });
 });
 
 describe("loadSongs", () => {
@@ -723,17 +802,18 @@ describe("跟唱模式自动停（锚点方案，bug 回归）", () => {
     expect(audio().paused).toBe(true);
   });
 
-  it("句末暂停后点播放 → 锚定下一句继续，不立刻停", () => {
+  it("句末回句首暂停后点播放 → 重播本句，播完再停", () => {
     setup();
     state.lyric = LRC_LYRIC;
     playLine(0);
-    fireTimeupdate(10.5); // 第一句结束自动停
+    fireTimeupdate(10.5); // 第一句结束自动停 → 回句首
     expect(audio().paused).toBe(true);
-    togglePlay(); // 用户继续 → 应从 10.5 锚定第二句
+    expect(audio().currentTime).toBe(0);
+    togglePlay(); // 用户继续 → 从句首重播本句
     expect(audio().paused).toBe(false);
-    fireTimeupdate(15); // 第二句内不停
+    fireTimeupdate(5); // 句内不停
     expect(audio().paused).toBe(false);
-    fireTimeupdate(20.5); // 第二句结束停
+    fireTimeupdate(10.5); // 再次到句末停
     expect(audio().paused).toBe(true);
   });
 
@@ -877,6 +957,29 @@ describe("单句循环", () => {
     playLine(0);
     fireTimeupdate(10.5);
     expect(audio().paused).toBe(true);
+  });
+
+  it("循环关闭（默认）：句末回句首暂停（指针回到本句开始时间戳）", () => {
+    setup();
+    state.karaokeLoop = false;
+    state.lyric = LRC_LYRIC;
+    playLine(0);
+    fireTimeupdate(10.5); // 越过 e=10
+    expect(audio().paused).toBe(true);
+    expect(audio().currentTime).toBe(0); // 回到本句句首，而非停在句尾/下一句起点
+    expect(state.currentTime).toBe(0);
+  });
+
+  it("循环关闭：带歌词延迟偏移时回句首用校准后的音频时间", () => {
+    setup();
+    state.karaokeLoop = false;
+    lyricSettings.offset = 2; // 歌词比声音延后 2s：句首音频时间 = s + 2
+    state.lyric = LRC_LYRIC;
+    playLine(0); // audio.currentTime = 2
+    fireTimeupdate(12.5); // lyricTime = 10.5 越过 e=10
+    expect(audio().paused).toBe(true);
+    expect(audio().currentTime).toBe(2); // 回到校准后的本句句首
+    lyricSettings.offset = 0;
   });
 
   it("跟唱开关关闭：循环不生效（不重播也不暂停）", () => {

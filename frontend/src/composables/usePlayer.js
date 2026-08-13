@@ -309,6 +309,8 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   resumeLast: true, // 启动时恢复上次播放的歌曲与进度
   rememberVolume: true, // 记住音量（关闭则每次启动回到默认音量）
   fadeSec: 0, // 切歌淡入淡出时长（秒）；0 = 关闭
+  karaokeNextKey: "KeyN", // 跟唱：下一句快捷键（设置可改）
+  karaokePrevKey: "KeyP", // 跟唱：上一句快捷键（设置可改）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
@@ -675,6 +677,16 @@ const SHORTCUT_HANDLER = (e) => {
     el &&
     (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
   ) {
+    return;
+  }
+  // 跟唱模式句跳转快捷键（设置可配置，默认 N 下一句 / P 上一句；仅跟唱模式生效）
+  if (
+    state.mode === "karaoke" &&
+    (e.code === playbackSettings.karaokeNextKey || e.code === playbackSettings.karaokePrevKey)
+  ) {
+    e.preventDefault();
+    if (e.code === playbackSettings.karaokeNextKey) nextLine();
+    else prevLine();
     return;
   }
   switch (e.code) {
@@ -1456,14 +1468,23 @@ export function playLine(lineIndex) {
   audio.play().catch(() => {});
 }
 
+// 当前跟唱句索引（快捷键跳句用，不经 computed 缓存）
+// currentLineIndex 是 computed，而 karaokeLine 是非响应式模块变量：
+// 连续按键（n 后立即 p）时 computed 可能返回缓存旧值，导致上一句/下一句跳错。
+// 这里直接读最新值：暂停时用锚点句，播放中用时间反推。
+function currentKaraokeIndex() {
+  if (state.mode === "karaoke" && karaokeLine >= 0 && !state.isPlaying) return karaokeLine;
+  return locateLine(state.currentTime);
+}
+
 export function prevLine() {
-  const cur = currentLineIndex.value;
+  const cur = currentKaraokeIndex();
   if (cur > 0) playLine(cur - 1);
 }
 
 export function nextLine() {
   const lines = lineItems.value;
-  const cur = currentLineIndex.value;
+  const cur = currentKaraokeIndex();
   if (cur >= 0 && cur < lines.length - 1) playLine(cur + 1);
 }
 
@@ -1711,6 +1732,8 @@ audio.addEventListener("timeupdate", () => {
           // 单句循环：回到句首重播（不暂停）
           jumpToLine(karaokeLine, true);
         } else {
+          // 句末回句首暂停：指针回到本句开始时间戳，方便反复跟唱本句
+          jumpToLine(karaokeLine, false);
           audio.pause();
         }
         break;

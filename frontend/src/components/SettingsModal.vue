@@ -726,6 +726,36 @@
                     <kbd v-for="k in s.keys" :key="k">{{ k }}</kbd>
                   </span>
                 </div>
+                <div class="group-title sub-title">
+                  <Music2 :size="13" />
+                  跟唱句跳转
+                  <span class="sub-note">点击键位可重新录制</span>
+                </div>
+                <div
+                  class="shortcut-item editable"
+                  :class="{ recording: recording === 'next' }"
+                  title="点击后按新按键"
+                  @click="startRecord('next')"
+                >
+                  <span class="shortcut-desc">跟唱：下一句</span>
+                  <span class="shortcut-keys">
+                    <kbd v-if="recording === 'next'" class="recording-kbd">按新键…</kbd>
+                    <kbd v-else>{{ fmtKey(playbackSettings.karaokeNextKey) }}</kbd>
+                  </span>
+                </div>
+                <div
+                  class="shortcut-item editable"
+                  :class="{ recording: recording === 'prev' }"
+                  title="点击后按新按键"
+                  @click="startRecord('prev')"
+                >
+                  <span class="shortcut-desc">跟唱：上一句</span>
+                  <span class="shortcut-keys">
+                    <kbd v-if="recording === 'prev'" class="recording-kbd">按新键…</kbd>
+                    <kbd v-else>{{ fmtKey(playbackSettings.karaokePrevKey) }}</kbd>
+                  </span>
+                </div>
+                <div class="setting-desc hint">仅跟唱模式生效；按 Esc / Enter 保留原键。</div>
               </div>
               <div class="group">
                 <div class="group-title">
@@ -971,6 +1001,36 @@ const shortcuts = [
   { keys: ["↓"], desc: "音量 -10%" },
 ];
 
+// 跟唱句跳转快捷键录制（默认 N 下一句 / P 上一句，仅跟唱模式生效）
+const recording = ref(null); // null | 'next' | 'prev'
+function startRecord(which) {
+  recording.value = which;
+}
+function fmtKey(code) {
+  if (!code) return "—";
+  if (code === "Space") return "Space";
+  const arrows = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+  if (arrows[code]) return arrows[code];
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  return code;
+}
+// capture 阶段拦截：录制时按键不触发播放快捷键（stopImmediatePropagation 挡住 bubble 阶段的 SHORTCUT_HANDLER）
+function onRecordKeydown(e) {
+  if (!recording.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  if (e.key === "Escape" || e.key === "Enter") {
+    recording.value = null; // 取消录制，保留原键
+    return;
+  }
+  if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab"].includes(e.code)) return; // 纯修饰键不绑定
+  if (recording.value === "next") playbackSettings.karaokeNextKey = e.code;
+  else playbackSettings.karaokePrevKey = e.code;
+  recording.value = null;
+}
+
 function toggleFade() {
   playbackSettings.fadeSec = playbackSettings.fadeSec > 0 ? 0 : 1.5;
 }
@@ -1056,10 +1116,12 @@ function onKey(e) {
 onMounted(() => {
   window.addEventListener("keydown", onKey);
   window.addEventListener("qqplayer:nativelibrary", onNativeLibrary);
+  window.addEventListener("keydown", onRecordKeydown, true);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
   window.removeEventListener("qqplayer:nativelibrary", onNativeLibrary);
+  window.removeEventListener("keydown", onRecordKeydown, true);
 });
 </script>
 
@@ -1599,6 +1661,38 @@ onBeforeUnmount(() => {
 }
 .shortcut-item:last-of-type {
   border-bottom: none;
+}
+.sub-title {
+  margin-top: 14px;
+}
+.sub-note {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text2);
+}
+.shortcut-item.editable {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 9px 8px;
+  margin: 0 -8px;
+  transition: background 0.15s;
+  border-bottom-color: transparent;
+}
+.shortcut-item.editable:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+.shortcut-item.editable.recording {
+  background: rgba(255, 107, 107, 0.1);
+}
+.recording-kbd {
+  color: #ff6b6b;
+  animation: kbd-blink 1s ease-in-out infinite;
+}
+@keyframes kbd-blink {
+  50% {
+    opacity: 0.45;
+  }
 }
 .shortcut-desc {
   font-size: 13px;
