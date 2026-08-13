@@ -530,6 +530,30 @@
                   </div>
                 </div>
                 <div class="setting-item">
+                  <div class="setting-label">窗体宽度</div>
+                  <div class="val-badge">{{ desktopLyricSettings.width }}px</div>
+                  <input
+                    v-model.number="desktopLyricSettings.width"
+                    class="slider"
+                    type="range"
+                    min="300"
+                    max="800"
+                    step="10"
+                  />
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">窗体高度</div>
+                  <div class="val-badge">{{ desktopLyricSettings.height }}px</div>
+                  <input
+                    v-model.number="desktopLyricSettings.height"
+                    class="slider"
+                    type="range"
+                    min="80"
+                    max="300"
+                    step="10"
+                  />
+                </div>
+                <div class="setting-item">
                   <div class="setting-label">打开方式</div>
                   <div class="setting-desc">
                     播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。

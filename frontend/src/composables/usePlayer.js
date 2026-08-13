@@ -93,6 +93,8 @@ export const DESKTOP_LYRIC_DEFAULTS = {
   fontSize: 26, // 主行（日文）字号 px
   zhSize: 16, // 翻译行字号 px
   align: "center", // 对齐：'left' | 'center' | 'right'
+  width: 460, // 悬浮窗宽度 px
+  height: 140, // 悬浮窗高度 px
 };
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });

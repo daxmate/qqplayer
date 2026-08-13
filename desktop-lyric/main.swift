@@ -100,10 +100,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         NSApp.terminate(nil)
     }
 
-    // 网页端可调用 window.webkit.messageHandlers.native.postMessage("close") 关闭
+    // 网页端消息：
+    //   postMessage("close") 或 {type:"close"} → 退出；
+    //   {type:"resize", width, height} → 调整窗口大小（左上角锚定，右下角延伸）
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if let body = message.body as? String, body == "close" {
             NSApp.terminate(nil)
+            return
+        }
+        if let dict = message.body as? [String: Any], let type = dict["type"] as? String {
+            if type == "close" {
+                NSApp.terminate(nil)
+            } else if type == "resize",
+                      let w = dict["width"] as? Double,
+                      let h = dict["height"] as? Double {
+                // 左上角不动，只改右下角（窗口悬浮在屏幕角落，改大时向下向右延伸）
+                let origin = window.frame.origin
+                let newFrame = NSRect(x: origin.x, y: origin.y, width: max(200, min(1200, w)), height: max(60, min(600, h)))
+                window.setFrame(newFrame, display: true, animate: true)
+            }
         }
     }
 
