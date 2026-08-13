@@ -1,6 +1,6 @@
 <template>
   <div class="controls" :class="{ karaoke }">
-    <button class="collapse-btn" title="收起控制区" @click="toggleControls()">
+    <button v-if="!hideCollapse" class="collapse-btn" title="收起控制区" @click="toggleControls()">
       <ChevronDown :size="16" />
     </button>
     <!-- 进度条 -->
@@ -166,6 +166,8 @@ import { ChevronDown, Volume1, Volume2, VolumeX } from "@lucide/vue";
 
 defineProps({
   karaoke: { type: Boolean, default: false },
+  // 全屏播放器等场景：不显示“收起控制区”按钮（移动端控制条始终展开）
+  hideCollapse: { type: Boolean, default: false },
 });
 
 function onSeek(e) {

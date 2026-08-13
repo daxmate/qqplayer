@@ -1,0 +1,83 @@
+/* ============ 移动端布局（<1024px，单一断点） ============
+   与 useMobileViewport.js 的 (max-width: 1023.98px) 保持一致：
+   <1024px 移动布局，≥1024px 桌面三栏（此文件全部规则都在断点内，桌面零影响）。
+   移动端不渲染桌面 DOM（App.vue 按 isMobile 条件渲染），
+   这里只处理全局样式层：视口高度 / 触摸适配 / 复用组件（ControlBar/KaraokePanel/Cover）的尺寸与 hover。 */
+@media (max-width: 1023.98px) {
+  /* 动态视口高度：移动浏览器地址栏收起/展开时全屏层自适应（覆盖 App.vue scoped 的 100vh） */
+  .app {
+    height: 100dvh !important;
+  }
+  #app {
+    height: 100dvh !important;
+  }
+  html,
+  body {
+    overscroll-behavior: none; /* 防止滚动穿透到浏览器边缘手势 */
+  }
+
+  /* 触摸适配：按钮禁用系统长按菜单/文本选择（长按 AB 循环不触发 iOS callout/选词），
+     双击缩放延迟去除（touch-action: manipulation） */
+  .mobile-shell button,
+  .mobile-player .controls button,
+  .mobile-player .controls input {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* 全屏播放器封面：移动端尺寸（覆盖 Cover 组件 scoped 的 min(46vh, 340px)） */
+  .mobile-player .cover-wrap .cover-box {
+    width: min(52vw, 300px);
+    box-shadow: 0 8px 30px var(--shadow);
+  }
+
+  /* 控制条：移动端铺满底部 + 安全区 + 更大触摸滑块 */
+  .mobile-player .controls {
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding-top: 18px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  /* 跟唱歌词页：底部留白多一点，最后一句可完整露出在控制条上方 */
+  .mobile-player .karaoke-panel .kp-scroll {
+    padding-bottom: 72px;
+  }
+  .mobile-player .controls .progress::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+  }
+  .mobile-player .controls .vol-slider {
+    width: 64px;
+  }
+}
+
+/* 触摸设备禁用 hover 粘滞（复用桌面组件时的 :hover 效果只在 pointer:fine 生效；
+   移动端组件本身只用 :active，无需处理）。
+   特异性高于组件 scoped 的 .btn:hover[data-v]，保证覆盖生效。 */
+@media (hover: none) {
+  .mobile-player .controls .btn:hover {
+    background: var(--card2);
+    color: var(--text);
+  }
+  .mobile-player .controls .btn.play:hover {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+    box-shadow: 0 4px 14px var(--accent-glow2);
+  }
+  .mobile-player .controls .btn.on:hover {
+    background: var(--accent-on);
+    color: var(--accent-ink);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .mobile-player .karaoke-panel .kp-spec-btn:hover,
+  .mobile-player .karaoke-panel .kp-empty-btn:hover {
+    border-color: var(--border);
+    color: var(--text2);
+    background: var(--card2);
+  }
+}
