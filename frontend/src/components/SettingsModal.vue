@@ -927,11 +927,16 @@ function resetAll() {
   });
 }
 
-// 桌面歌词：应用配色方案（写 colorScheme + 落地颜色值）；一键恢复默认
+// 桌面歌词：应用配色方案（'theme' 跟随主题 → 清空自定义颜色）；一键恢复默认
 function applyScheme(sc) {
   desktopLyricSettings.colorScheme = sc.key;
-  desktopLyricSettings.jpColor = sc.jp;
-  desktopLyricSettings.zhColor = sc.zh;
+  if (sc.key === "theme") {
+    desktopLyricSettings.jpColor = "";
+    desktopLyricSettings.zhColor = "";
+  } else {
+    desktopLyricSettings.jpColor = sc.jp;
+    desktopLyricSettings.zhColor = sc.zh;
+  }
 }
 
 // APP 歌词：应用配色方案（'theme' 跟随主题 → 清空自定义颜色）

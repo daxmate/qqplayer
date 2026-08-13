@@ -58,7 +58,7 @@ PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
 PLAYBACK_MIN_SECONDS = 3
 # 桌面歌词悬浮窗：主页面句切换时上报，悬浮窗轮询读取（内存态，不持久化）
-_now_playing: dict = {"path": None, "lineIndex": -1, "updatedAt": 0.0}
+_now_playing: dict = {"path": None, "lineIndex": -1, "updatedAt": 0.0, "accent": None}
 _now_playing_lock = threading.Lock()
 # 库变动监听：事件去抖窗口（秒）与扫描缓存
 WATCH_DEBOUNCE_SECONDS = 2.0
@@ -611,6 +611,7 @@ def api_now_playing_post(body: dict):
     with _now_playing_lock:
         _now_playing["path"] = str(body.get("path") or "") or None
         _now_playing["lineIndex"] = int(body.get("lineIndex") or -1)
+        _now_playing["accent"] = str(body.get("accent") or "") or None  # 强调色（跟随主题配色用）
         _now_playing["updatedAt"] = time.time()
     return {"ok": True}
 

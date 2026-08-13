@@ -20,3 +20,4 @@ desktop-lyric/build/
 
 # 本地歌词缓存
 .cache/
+desktop-lyric/assets/icon.iconset/

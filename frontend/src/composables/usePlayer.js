@@ -96,7 +96,7 @@ export const DESKTOP_LYRIC_DEFAULTS = {
   align: "center", // 对齐：'left' | 'center' | 'right'
   width: 460, // 悬浮窗宽度 px
   height: 140, // 悬浮窗高度 px
-  colorScheme: "white", // 配色方案 key（见 DESKTOP_LYRIC_SCHEMES）
+  colorScheme: "white", // 配色方案 key（见 DESKTOP_LYRIC_SCHEMES；'theme' = 跟随主播放器强调色）
   jpColor: "#ffffff", // 主行文字颜色（配色方案的落地值，可被方案覆盖）
   zhColor: "#ffffff", // 翻译行文字颜色
 };
@@ -114,8 +114,11 @@ export const LYRIC_SCHEMES = [
   { key: "blue", label: "星空蓝", jp: "#a8c8ff", zh: "#6f9dff" },
 ];
 
-// 桌面歌词 7 种配色方案（不含跟随主题）：{ key, label, jp 主行色, zh 翻译色 }
-export const DESKTOP_LYRIC_SCHEMES = LYRIC_SCHEMES.filter((s) => s.key !== "theme");
+// 桌面歌词配色方案（含「跟随主题」）：{ key, label, jp 主行色, zh 翻译色 }
+export const DESKTOP_LYRIC_SCHEMES = [
+  { key: "theme", label: "跟随主题", jp: "", zh: "" },
+  ...LYRIC_SCHEMES.filter((s) => s.key !== "theme"),
+];
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 
@@ -1464,10 +1467,12 @@ function flushNowPlaying() {
   const p = nowPlayingPending;
   nowPlayingPending = null;
   if (!p) return;
+  // 带上强调色（桌面歌词「跟随主题」配色用）
+  const accent = ACCENT_OPTIONS.find((a) => a.key === uiSettings.accent)?.color || "";
   fetch("/api/now-playing", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(p),
+    body: JSON.stringify({ ...p, accent }),
   }).catch(() => {});
 }
 
@@ -1477,6 +1482,19 @@ watch(
     if (!path || line < 0) return;
     nowPlayingPending = { path, lineIndex: line };
     if (nowPlayingTimer) return; // 节流中，等定时器触发上报最新值
+    nowPlayingTimer = setTimeout(flushNowPlaying, 250);
+  },
+);
+
+// 强调色变化 → 立即上报（桌面歌词「跟随主题」配色实时跟随）
+watch(
+  () => uiSettings.accent,
+  () => {
+    const path = state.currentSong?.path;
+    const line = currentLineIndex.value;
+    if (!path || line < 0) return;
+    nowPlayingPending = { path, lineIndex: line };
+    if (nowPlayingTimer) return;
     nowPlayingTimer = setTimeout(flushNowPlaying, 250);
   },
 );

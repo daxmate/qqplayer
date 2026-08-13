@@ -16,7 +16,7 @@ swiftc main.swift -o "$BUILD_DIR/$APP_NAME" -framework Cocoa -framework WebKit -
 echo "🏗️  组装 .app bundle..."
 APP="$BUILD_DIR/$APP_NAME.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -30,6 +30,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>1.0.0</string>
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>icon</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
@@ -46,6 +47,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 cp "$BUILD_DIR/$APP_NAME" "$APP/Contents/MacOS/"
+# 应用图标（assets/icon.icns，缺失时用 svg 现场生成）
+if [ ! -f assets/icon.icns ]; then
+    echo "🎨 生成图标 icns..."
+    if [ -f assets/icon.svg ]; then
+        rsvg-convert -w 1024 -h 1024 assets/icon.svg -o /tmp/qqplayer-lyric-icon.png 2>/dev/null \
+            || qlmanage -t -s 1024 -o /tmp assets/icon.svg >/dev/null 2>&1
+        mkdir -p assets/icon.iconset
+        for size in 16 32 128 256 512; do
+            sips -z $size $size /tmp/qqplayer-lyric-icon.png --out assets/icon.iconset/icon_${size}x${size}.png >/dev/null 2>&1
+            sips -z $((size*2)) $((size*2)) /tmp/qqplayer-lyric-icon.png --out assets/icon.iconset/icon_${size}x${size}@2x.png >/dev/null 2>&1
+        done
+        iconutil -c icns assets/icon.iconset -o assets/icon.icns
+    fi
+fi
+if [ -f assets/icon.icns ]; then
+    cp assets/icon.icns "$APP/Contents/Resources/icon.icns"
+fi
+
 codesign --force --sign - "$APP" 2>/dev/null || true
 
 echo "✅ 构建完成: $APP"

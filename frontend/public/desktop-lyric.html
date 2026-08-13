@@ -103,6 +103,7 @@
       let lastLine = -1;
       let lastText = "";
       let cachedSettings = {}; // 后端拉取的设置（Vivaldi/WKWebView 跨引擎共享）
+      let cachedAccent = "#ff7e5f"; // 主播放器强调色（跟随主题配色用，now-playing 携带）
 
       function settings() {
         return cachedSettings;
@@ -145,8 +146,11 @@
         document.body.classList.toggle("align-right", s.align === "right");
         $jp.style.fontSize = (s.fontSize || 26) + "px";
         $zh.style.fontSize = (s.zhSize || 16) + "px";
-        $jp.style.color = s.jpColor || "rgba(255,255,255,0.95)";
-        $zh.style.color = s.zhColor || "rgba(255,255,255,0.72)";
+        // 颜色：自定义优先 → 配色方案落地值 → 跟随主题用强调色
+        const jp = s.jpColor || (s.colorScheme === "theme" ? cachedAccent : "rgba(255,255,255,0.95)");
+        const zh = s.zhColor || (s.colorScheme === "theme" ? cachedAccent : "rgba(255,255,255,0.72)");
+        $jp.style.color = jp;
+        $zh.style.color = zh;
         applyWindowSize();
       }
 
@@ -216,6 +220,13 @@
           const res = await fetch("/api/now-playing", { cache: "no-store" });
           if (!res.ok) throw new Error("np " + res.status);
           const np = await res.json();
+          // 强调色更新（跟随主题配色）；变化时重绘
+          if (np.accent && np.accent !== cachedAccent) {
+            cachedAccent = np.accent;
+            applyStyle();
+            lastText = "";
+            render(lastLine);
+          }
           if (!np.path) {
             showIdle();
             return;

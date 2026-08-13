@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e2237"/>
+      <stop offset="1" stop-color="#12141f"/>
+    </linearGradient>
+    <linearGradient id="q1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff9ab5"/>
+      <stop offset="0.55" stop-color="#ff7e6b"/>
+      <stop offset="1" stop-color="#ff9a5c"/>
+    </linearGradient>
+    <linearGradient id="q2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc06b"/>
+      <stop offset="1" stop-color="#ff9a5c"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff9ab5"/>
+      <stop offset="1" stop-color="#ff9a5c"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- 深色圆角底 -->
+  <rect x="48" y="48" width="928" height="928" rx="200" fill="url(#bg)"/>
+  <rect x="48" y="48" width="928" height="928" rx="200" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="6"/>
+
+  <!-- 双 Q 泡泡（呼应主 logo：粉珊瑚 + 暖橙交叠） -->
+  <g filter="url(#shadow)">
+    <!-- 后圆：暖橙 Q2，右偏 -->
+    <circle cx="592" cy="380" r="190" fill="url(#q2)"/>
+    <!-- 前圆：粉珊瑚 Q1，左偏 -->
+    <circle cx="432" cy="380" r="190" fill="url(#q1)"/>
+    <!-- 内圈描边 -->
+    <circle cx="432" cy="380" r="158" fill="none" stroke="#fff" stroke-opacity="0.28" stroke-width="8"/>
+    <circle cx="592" cy="380" r="158" fill="none" stroke="#fff" stroke-opacity="0.22" stroke-width="8"/>
+  </g>
+
+  <!-- Q 字母（衬线，尾巴朝右下） -->
+  <text x="432" y="428" text-anchor="middle" font-family="Didot, Baskerville, Georgia, serif" font-size="210" font-weight="700" fill="#fff">Q</text>
+  <text x="592" y="428" text-anchor="middle" font-family="Didot, Baskerville, Georgia, serif" font-size="210" font-weight="700" fill="#fff" transform="scale(-1,1) translate(-1184,0)">Q</text>
+
+  <!-- 底部歌词条（高亮 + 暗行，表达"歌词"） -->
+  <g filter="url(#glow)">
+    <rect x="232" y="660" width="560" height="56" rx="28" fill="url(#bar)"/>
+  </g>
+  <rect x="232" y="740" width="380" height="24" rx="12" fill="#fff" fill-opacity="0.35"/>
+  <rect x="232" y="780" width="300" height="24" rx="12" fill="#fff" fill-opacity="0.18"/>
+</svg>
