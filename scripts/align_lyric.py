@@ -185,10 +185,10 @@ def transcribe_chunks(audio: str, model_name: str):
 
 def align_lrc(lines, words):
     """LRC 全文 vs whisper 词流全文，SequenceMatcher 对齐，返回每行 (start,end)"""
-    lrc_text = "".join(l[3] for l in lines)
+    lrc_text = "".join(row[3] for row in lines)
     ranges = []
     cs = 0
-    for idx, t, text, h in lines:
+    for _idx, _t, _text, h in lines:
         ranges.append((cs, cs + len(h)))
         cs += len(h)
 
@@ -208,7 +208,7 @@ def align_lrc(lines, words):
             lrc_to_w[li + k] = wi + k
 
     results, misses = [], []
-    for idx, t, text, h in lines:
+    for idx, t, text, _h in lines:
         c0, c1 = ranges[idx]
         times = [wtime[lrc_to_w[c]] for c in range(c0, c1) if c in lrc_to_w]
         if not times:

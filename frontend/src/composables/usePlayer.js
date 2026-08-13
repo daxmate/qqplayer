@@ -3,6 +3,15 @@ import { reactive, computed, watch, ref } from "vue";
 // 全局唯一 audio 元素
 const audio = new Audio();
 audio.preload = "auto";
+// 包装 play：每次播放前确保 Web Audio 图就绪（懒创建 + resume，autoplay policy 需要用户手势）
+// 均衡器常驻音频图后，audio 元素的声音只经过 AudioContext 输出，context suspended 时会无声，
+// 所以必须在 play 前 resume。注意：图创建与 resume 发起是同步的（在手势栈内生效），
+// 但 play() 的返回不受异步 resume 阻塞——否则自动切歌等场景的播放状态更新会延迟。
+const origPlay = audio.play.bind(audio);
+audio.play = () => {
+  ensureAudioGraph();
+  return origPlay();
+};
 
 export const state = reactive({
   songs: [],
@@ -311,6 +320,9 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   fadeSec: 0, // 切歌淡入淡出时长（秒）；0 = 关闭
   karaokeNextKey: "KeyN", // 跟唱：下一句快捷键（设置可改）
   karaokePrevKey: "KeyP", // 跟唱：上一句快捷键（设置可改）
+  eqEnabled: false, // 均衡器开关（false = 全部 0dB 直通）
+  eqPreset: "flat", // 均衡器预设：EQ_PRESETS 的 key；'custom' = 用户自定义
+  eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 自定义增益（dB，-12~12，10 段，与 EQ_BANDS 对齐）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
@@ -328,6 +340,15 @@ function loadPlaybackSettings() {
   }
 }
 loadPlaybackSettings();
+// 脏数据归一化：eqGains 必须是长度 10 的数组，值 clamp 到 ±12
+if (!Array.isArray(playbackSettings.eqGains) || playbackSettings.eqGains.length !== 10) {
+  playbackSettings.eqGains = [...PLAYBACK_SETTINGS_DEFAULTS.eqGains];
+} else {
+  playbackSettings.eqGains = playbackSettings.eqGains.map((g) =>
+    Math.min(12, Math.max(-12, Number(g) || 0)),
+  );
+}
+// eqPreset 非法值回落 flat 的校验在 EQ_PRESETS 定义之后执行（见均衡器模块）
 
 watch(
   playbackSettings,
@@ -354,6 +375,106 @@ watch(
   },
   { flush: "sync" },
 );
+
+// ============ 均衡器（Web Audio API）============
+// 10 段经典频点（foobar2000/网易云同款），±12dB
+// 技术要点：createMediaElementSource 一个 audio 元素只能接管一次，
+// 所以音频图常驻（首次播放懒创建），开关关闭 = 增益全 0（0dB peaking 近似直通），不做动态路由切换。
+export const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+export const EQ_PRESETS = {
+  flat: { name: "平直", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  pop: { name: "流行", gains: [-1, 0, 1.5, 2.5, 3, 2.5, 1.5, 0, -0.5, -1] },
+  rock: { name: "摇滚", gains: [4, 3, 1.5, 0, -1, 0, 1.5, 3, 3.5, 4] },
+  jazz: { name: "爵士", gains: [3, 2, 1, 1, -0.5, -1, 0, 1, 2, 3] },
+  classical: { name: "古典", gains: [3, 2, 1, -0.5, -1, -1, -0.5, 1, 2, 3] },
+  bass: { name: "低音增强", gains: [6, 4.5, 3, 1.5, 0, 0, 0, 0, 0, 0] },
+  vocal: { name: "人声", gains: [-1.5, -1, 0, 1, 2.5, 3.5, 3, 1.5, 0, -1] },
+  custom: { name: "自定义", gains: null }, // gains 由 eqGains 决定
+};
+// 非法预设回落 flat（EQ_PRESETS 定义后执行）
+if (!(playbackSettings.eqPreset in EQ_PRESETS)) playbackSettings.eqPreset = "flat";
+
+let audioCtx = null; // AudioContext 实例（懒初始化，常驻）
+let eqFilters = []; // 10 个 BiquadFilter（peaking），与 EQ_BANDS 对齐
+let eqGraphFailed = false; // 创建失败标记（降级为直通，不再重试）
+
+// 确保音频图就绪（首次播放/用户手势时创建并 resume）。
+// 无 AudioContext 环境（旧浏览器/测试）静默降级，不影响播放。
+function ensureAudioGraph() {
+  if (audioCtx || eqGraphFailed) return Promise.resolve();
+  const AC = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
+  if (!AC) return Promise.resolve();
+  try {
+    const ctx = new AC();
+    const src = ctx.createMediaElementSource(audio);
+    let node = src;
+    for (const f of EQ_BANDS) {
+      const filter = ctx.createBiquadFilter();
+      filter.type = "peaking";
+      filter.frequency.value = f;
+      filter.Q.value = 1.0;
+      filter.gain.value = 0;
+      node.connect(filter);
+      node = filter;
+      eqFilters.push(filter);
+    }
+    node.connect(ctx.destination);
+    audioCtx = ctx;
+    applyEqToGraph(); // 创建前可能已改过设置（恢复持久化值）
+    return ctx.resume().catch(() => {});
+  } catch {
+    // 创建失败：清空半成品，标记降级（浏览器不支持等情况）
+    audioCtx = null;
+    eqFilters = [];
+    eqGraphFailed = true;
+    return Promise.resolve();
+  }
+}
+
+// 把当前均衡器设置应用到音频图（图未创建时无操作，创建时统一应用）
+function applyEqToGraph() {
+  if (!audioCtx) return;
+  const enabled = !!playbackSettings.eqEnabled;
+  const preset = EQ_PRESETS[playbackSettings.eqPreset] || EQ_PRESETS.flat;
+  // 关闭 → 全 0 直通；自定义 → eqGains；预设 → 预设值
+  const gains = enabled ? preset.gains || playbackSettings.eqGains : EQ_PRESETS.flat.gains;
+  eqFilters.forEach((f, i) => {
+    f.gain.value = gains[i] ?? 0;
+  });
+}
+
+// 应用预设（值同步进 eqGains，作为切回自定义的基点）
+export function setEqPreset(key) {
+  const preset = EQ_PRESETS[key];
+  if (!preset) return;
+  playbackSettings.eqPreset = key;
+  if (preset.gains) playbackSettings.eqGains = [...preset.gains];
+  applyEqToGraph(); // 同步应用（watch 兜底开关路径，这里保证即时生效）
+}
+
+// 调整自定义增益（拖滑杆）：自动切到自定义预设
+export function setEqGain(index, v) {
+  if (index < 0 || index >= EQ_BANDS.length) return;
+  const g = Math.min(12, Math.max(-12, Number(v) || 0));
+  playbackSettings.eqGains[index] = g;
+  playbackSettings.eqPreset = "custom";
+  applyEqToGraph(); // 同步应用（拖滑杆实时生效）
+}
+
+// 均衡器设置变化 → 实时应用到音频图（未创建时下次创建应用）
+watch(
+  () => [playbackSettings.eqEnabled, playbackSettings.eqPreset, playbackSettings.eqGains],
+  () => applyEqToGraph(),
+  { deep: true },
+);
+
+// 测试钩子：重置音频图（用例隔离）
+export function _resetEqGraph() {
+  audioCtx = null;
+  eqFilters = [];
+  eqGraphFailed = false;
+}
 
 // ============ 音量（localStorage 持久化）============
 export const VOLUME_KEY = "qqplayer.volume.v1";

@@ -93,6 +93,49 @@
                     <span class="val-badge">{{ playbackSettings.fadeSec }}s</span>
                   </div>
                 </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="playbackSettings.eqEnabled = !playbackSettings.eqEnabled"
+                  >
+                    <div>
+                      <div class="setting-label">均衡器</div>
+                      <div class="setting-desc">10 段均衡（31Hz~16kHz，±12dB），实时生效</div>
+                    </div>
+                    <span class="switch" :class="{ on: playbackSettings.eqEnabled }"><i /></span>
+                  </div>
+                  <template v-if="playbackSettings.eqEnabled">
+                    <div class="eq-presets">
+                      <button
+                        v-for="(p, key) in EQ_PRESETS"
+                        :key="key"
+                        class="ext-chip"
+                        :class="{ on: playbackSettings.eqPreset === key }"
+                        @click="setEqPreset(key)"
+                      >
+                        {{ p.name }}
+                      </button>
+                    </div>
+                    <div class="eq-grid">
+                      <div v-for="(f, i) in EQ_BANDS" :key="f" class="eq-cell">
+                        <span class="eq-val"
+                          >{{ playbackSettings.eqGains[i] > 0 ? "+" : ""
+                          }}{{ playbackSettings.eqGains[i] }}</span
+                        >
+                        <input
+                          class="eq-slider"
+                          type="range"
+                          min="-12"
+                          max="12"
+                          step="1"
+                          :value="playbackSettings.eqGains[i]"
+                          @input="setEqGain(i, $event.target.value)"
+                        />
+                        <span class="eq-band">{{ fmtBand(f) }}</span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
               </div>
             </section>
 
@@ -192,410 +235,416 @@
               </div>
 
               <template v-if="lyricSubTab === 'app'">
-              <!-- 外观排版 -->
-              <div class="group">
-                <div class="group-title">
-                  <Type :size="13" />
-                  外观排版
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">滚动引擎</div>
-                  <div class="setting-desc">
-                    amll = Apple Music 风格逐词高亮（默认）；弹簧 = 自研物理滚动；原生 = 浏览器平滑滚动
+                <!-- 外观排版 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Type :size="13" />
+                    外观排版
                   </div>
-                  <div class="seg">
-                    <button
-                      v-for="e in engineOptions"
-                      :key="e.value"
-                      class="seg-btn"
-                      :class="{ on: lyricSettings.engine === e.value }"
-                      @click="lyricSettings.engine = e.value"
-                    >
-                      {{ e.label }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">歌词字体</div>
-                  <div class="seg">
-                    <button
-                      v-for="f in fontOptions"
-                      :key="f.value"
-                      class="seg-btn"
-                      :class="{ on: lyricSettings.fontFamily === f.value }"
-                      :style="{ fontFamily: f.css }"
-                      @click="lyricSettings.fontFamily = f.value"
-                    >
-                      {{ f.label }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">
-                    字号
-                    <span class="val-badge">{{ lyricSettings.fontSize }}px</span>
-                  </div>
-                  <div class="setting-desc">当前句基准大小，其他层级按比例缩放</div>
-                  <input
-                    v-model.number="lyricSettings.fontSize"
-                    class="slider"
-                    type="range"
-                    min="14"
-                    max="30"
-                    step="1"
-                  />
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">对齐方式</div>
-                  <div class="seg">
-                    <button
-                      v-for="a in alignOptions"
-                      :key="a.value"
-                      class="seg-btn"
-                      :class="{ on: lyricSettings.align === a.value }"
-                      @click="lyricSettings.align = a.value"
-                    >
-                      {{ a.label }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 显示内容 -->
-              <div class="group">
-                <div class="group-title">
-                  <Eye :size="13" />
-                  显示内容
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="lyricSettings.showRoma = !lyricSettings.showRoma">
-                    <div>
-                      <div class="setting-label">显示罗马音</div>
-                      <div class="setting-desc">原文下方的罗马音标注行</div>
+                  <div class="setting-item">
+                    <div class="setting-label">滚动引擎</div>
+                    <div class="setting-desc">
+                      amll = Apple Music 风格逐词高亮（默认）；弹簧 = 自研物理滚动；原生 =
+                      浏览器平滑滚动
                     </div>
-                    <span class="switch" :class="{ on: lyricSettings.showRoma }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="lyricSettings.showZh = !lyricSettings.showZh">
-                    <div>
-                      <div class="setting-label">显示中文翻译</div>
-                      <div class="setting-desc">连播与跟唱面板同时生效</div>
+                    <div class="seg">
+                      <button
+                        v-for="e in engineOptions"
+                        :key="e.value"
+                        class="seg-btn"
+                        :class="{ on: lyricSettings.engine === e.value }"
+                        @click="lyricSettings.engine = e.value"
+                      >
+                        {{ e.label }}
+                      </button>
                     </div>
-                    <span class="switch" :class="{ on: lyricSettings.showZh }"><i /></span>
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="lyricSettings.showSec = !lyricSettings.showSec">
-                    <div>
-                      <div class="setting-label">显示段落标题</div>
-                      <div class="setting-desc">副歌 / 主歌等小节标题</div>
+                  <div class="setting-item">
+                    <div class="setting-label">歌词字体</div>
+                    <div class="seg">
+                      <button
+                        v-for="f in fontOptions"
+                        :key="f.value"
+                        class="seg-btn"
+                        :class="{ on: lyricSettings.fontFamily === f.value }"
+                        :style="{ fontFamily: f.css }"
+                        @click="lyricSettings.fontFamily = f.value"
+                      >
+                        {{ f.label }}
+                      </button>
                     </div>
-                    <span class="switch" :class="{ on: lyricSettings.showSec }"><i /></span>
                   </div>
-                </div>
-              </div>
-
-              <!-- 效果行为 -->
-              <div class="group">
-                <div class="group-title">
-                  <Sparkles :size="13" />
-                  效果行为
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">焦点句停靠位置</div>
-                  <div class="seg">
-                    <button
-                      v-for="p in focusOptions"
-                      :key="p.value"
-                      class="seg-btn"
-                      :class="{ on: lyricSettings.focusPos === p.value }"
-                      @click="lyricSettings.focusPos = p.value"
-                    >
-                      {{ p.label }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="lyricSettings.fadeMask = !lyricSettings.fadeMask">
-                    <div>
-                      <div class="setting-label">上下渐隐</div>
-                      <div class="setting-desc">歌词列表顶部/底部淡出过渡</div>
+                  <div class="setting-item">
+                    <div class="setting-label">
+                      字号
+                      <span class="val-badge">{{ lyricSettings.fontSize }}px</span>
                     </div>
-                    <span class="switch" :class="{ on: lyricSettings.fadeMask }"><i /></span>
+                    <div class="setting-desc">当前句基准大小，其他层级按比例缩放</div>
+                    <input
+                      v-model.number="lyricSettings.fontSize"
+                      class="slider"
+                      type="range"
+                      min="14"
+                      max="30"
+                      step="1"
+                    />
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="lyricSettings.autoScroll = !lyricSettings.autoScroll"
-                  >
-                    <div>
-                      <div class="setting-label">自动跟随滚动</div>
-                      <div class="setting-desc">切句时自动滚动到焦点句</div>
+                  <div class="setting-item">
+                    <div class="setting-label">对齐方式</div>
+                    <div class="seg">
+                      <button
+                        v-for="a in alignOptions"
+                        :key="a.value"
+                        class="seg-btn"
+                        :class="{ on: lyricSettings.align === a.value }"
+                        @click="lyricSettings.align = a.value"
+                      >
+                        {{ a.label }}
+                      </button>
                     </div>
-                    <span class="switch" :class="{ on: lyricSettings.autoScroll }"><i /></span>
                   </div>
                 </div>
-              </div>
 
-              <!-- 时间校准 -->
-              <div class="group">
-                <div class="group-title">
-                  <Timer :size="13" />
-                  时间校准
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">
-                    歌词延迟
-                    <span class="val-badge">{{ fmtOffset }}</span>
-                    <button
-                      v-if="lyricSettings.offset !== 0"
-                      class="mini-btn"
-                      @click="lyricSettings.offset = 0"
+                <!-- 显示内容 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Eye :size="13" />
+                    显示内容
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="lyricSettings.showRoma = !lyricSettings.showRoma"
                     >
-                      重置
-                    </button>
+                      <div>
+                        <div class="setting-label">显示罗马音</div>
+                        <div class="setting-desc">原文下方的罗马音标注行</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.showRoma }"><i /></span>
+                    </div>
                   </div>
-                  <div class="setting-desc">
-                    歌词与声音不同步时微调：正值为歌词延后显示，负值为提前
+                  <div class="setting-item">
+                    <div class="toggle-row" @click="lyricSettings.showZh = !lyricSettings.showZh">
+                      <div>
+                        <div class="setting-label">显示中文翻译</div>
+                        <div class="setting-desc">连播与跟唱面板同时生效</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.showZh }"><i /></span>
+                    </div>
                   </div>
-                  <input
-                    v-model.number="lyricSettings.offset"
-                    class="slider"
-                    type="range"
-                    min="-2"
-                    max="2"
-                    step="0.1"
-                  />
+                  <div class="setting-item">
+                    <div class="toggle-row" @click="lyricSettings.showSec = !lyricSettings.showSec">
+                      <div>
+                        <div class="setting-label">显示段落标题</div>
+                        <div class="setting-desc">副歌 / 主歌等小节标题</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.showSec }"><i /></span>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <!-- 歌词来源 -->
-              <div class="group">
-                <div class="group-title">
-                  <Database :size="13" />
-                  歌词来源
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">来源优先级</div>
-                  <div class="seg">
-                    <button
-                      v-for="s in sourceOptions"
-                      :key="s.value"
-                      class="seg-btn"
-                      :class="{ on: lyricSettings.source === s.value }"
-                      @click="lyricSettings.source = s.value"
-                    >
-                      {{ s.label }}
-                    </button>
+                <!-- 效果行为 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Sparkles :size="13" />
+                    效果行为
                   </div>
-                  <div class="setting-desc">在线优先：使用在线歌词，本地歌词文件作兜底</div>
+                  <div class="setting-item">
+                    <div class="setting-label">焦点句停靠位置</div>
+                    <div class="seg">
+                      <button
+                        v-for="p in focusOptions"
+                        :key="p.value"
+                        class="seg-btn"
+                        :class="{ on: lyricSettings.focusPos === p.value }"
+                        @click="lyricSettings.focusPos = p.value"
+                      >
+                        {{ p.label }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="lyricSettings.fadeMask = !lyricSettings.fadeMask"
+                    >
+                      <div>
+                        <div class="setting-label">上下渐隐</div>
+                        <div class="setting-desc">歌词列表顶部/底部淡出过渡</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.fadeMask }"><i /></span>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="lyricSettings.autoScroll = !lyricSettings.autoScroll"
+                    >
+                      <div>
+                        <div class="setting-label">自动跟随滚动</div>
+                        <div class="setting-desc">切句时自动滚动到焦点句</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.autoScroll }"><i /></span>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <!-- APP 歌词配色（参照桌面歌词） -->
-              <div class="group">
-                <div class="group-title">
-                  <Palette :size="13" />
-                  配色
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">配色方案</div>
-                  <div class="desktop-schemes">
-                    <button
-                      v-for="sc in LYRIC_SCHEMES"
-                      :key="sc.key"
-                      class="scheme-swatch"
-                      :class="{ on: lyricSettings.colorScheme === sc.key }"
-                      :title="sc.label"
-                      @click="applyLyricScheme(sc)"
-                    >
-                      <span class="scheme-dot" :style="{ background: sc.jp || 'var(--accent)' }" />
-                      <span class="scheme-dot" :style="{ background: sc.zh || 'var(--text2)' }" />
-                      <span class="scheme-name">{{ sc.label }}</span>
-                    </button>
+                <!-- 时间校准 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Timer :size="13" />
+                    时间校准
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">
+                      歌词延迟
+                      <span class="val-badge">{{ fmtOffset }}</span>
+                      <button
+                        v-if="lyricSettings.offset !== 0"
+                        class="mini-btn"
+                        @click="lyricSettings.offset = 0"
+                      >
+                        重置
+                      </button>
+                    </div>
+                    <div class="setting-desc">
+                      歌词与声音不同步时微调：正值为歌词延后显示，负值为提前
+                    </div>
+                    <input
+                      v-model.number="lyricSettings.offset"
+                      class="slider"
+                      type="range"
+                      min="-2"
+                      max="2"
+                      step="0.1"
+                    />
                   </div>
                 </div>
-                <div class="setting-item">
-                  <div class="setting-label">字体颜色</div>
-                  <div class="desktop-colors">
-                    <label class="color-field">
-                      <span>主行</span>
-                      <input
-                        v-model="lyricSettings.jpColor"
-                        type="color"
-                        class="color-input"
-                      />
-                    </label>
-                    <label class="color-field">
-                      <span>翻译</span>
-                      <input
-                        v-model="lyricSettings.zhColor"
-                        type="color"
-                        class="color-input"
-                      />
-                    </label>
-                    <button
-                      v-if="lyricSettings.jpColor || lyricSettings.zhColor"
-                      class="mini-btn"
-                      @click="lyricSettings.jpColor = ''; lyricSettings.zhColor = ''"
-                    >
-                      清除自定义
-                    </button>
+
+                <!-- 歌词来源 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Database :size="13" />
+                    歌词来源
                   </div>
-                  <div class="setting-desc">主行/翻译颜色自定义；「跟随主题」配色下留空使用主题强调色</div>
+                  <div class="setting-item">
+                    <div class="setting-label">来源优先级</div>
+                    <div class="seg">
+                      <button
+                        v-for="s in sourceOptions"
+                        :key="s.value"
+                        class="seg-btn"
+                        :class="{ on: lyricSettings.source === s.value }"
+                        @click="lyricSettings.source = s.value"
+                      >
+                        {{ s.label }}
+                      </button>
+                    </div>
+                    <div class="setting-desc">在线优先：使用在线歌词，本地歌词文件作兜底</div>
+                  </div>
                 </div>
-              </div>
+
+                <!-- APP 歌词配色（参照桌面歌词） -->
+                <div class="group">
+                  <div class="group-title">
+                    <Palette :size="13" />
+                    配色
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">配色方案</div>
+                    <div class="desktop-schemes">
+                      <button
+                        v-for="sc in LYRIC_SCHEMES"
+                        :key="sc.key"
+                        class="scheme-swatch"
+                        :class="{ on: lyricSettings.colorScheme === sc.key }"
+                        :title="sc.label"
+                        @click="applyLyricScheme(sc)"
+                      >
+                        <span
+                          class="scheme-dot"
+                          :style="{ background: sc.jp || 'var(--accent)' }"
+                        />
+                        <span class="scheme-dot" :style="{ background: sc.zh || 'var(--text2)' }" />
+                        <span class="scheme-name">{{ sc.label }}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">字体颜色</div>
+                    <div class="desktop-colors">
+                      <label class="color-field">
+                        <span>主行</span>
+                        <input v-model="lyricSettings.jpColor" type="color" class="color-input" />
+                      </label>
+                      <label class="color-field">
+                        <span>翻译</span>
+                        <input v-model="lyricSettings.zhColor" type="color" class="color-input" />
+                      </label>
+                      <button
+                        v-if="lyricSettings.jpColor || lyricSettings.zhColor"
+                        class="mini-btn"
+                        @click="
+                          lyricSettings.jpColor = '';
+                          lyricSettings.zhColor = '';
+                        "
+                      >
+                        清除自定义
+                      </button>
+                    </div>
+                    <div class="setting-desc">
+                      主行/翻译颜色自定义；「跟随主题」配色下留空使用主题强调色
+                    </div>
+                  </div>
+                </div>
               </template>
 
               <!-- ============ 桌面歌词（子 tab） ============ -->
               <template v-else>
-              <div class="group">
-                <div class="group-title">
-                  <MonitorPlay :size="13" />
-                  桌面歌词
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="desktopLyricSettings.showZh = !desktopLyricSettings.showZh"
-                  >
-                    <div>
-                      <div class="setting-label">显示中文翻译</div>
-                      <div class="setting-desc">桌面歌词悬浮窗当前句下方显示中文翻译</div>
+                <div class="group">
+                  <div class="group-title">
+                    <MonitorPlay :size="13" />
+                    桌面歌词
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="desktopLyricSettings.showZh = !desktopLyricSettings.showZh"
+                    >
+                      <div>
+                        <div class="setting-label">显示中文翻译</div>
+                        <div class="setting-desc">桌面歌词悬浮窗当前句下方显示中文翻译</div>
+                      </div>
+                      <span class="switch" :class="{ on: desktopLyricSettings.showZh }"><i /></span>
                     </div>
-                    <span class="switch" :class="{ on: desktopLyricSettings.showZh }"><i /></span>
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">字体</div>
-                  <div class="seg">
-                    <button
-                      v-for="f in fontOptions"
-                      :key="f.value"
-                      class="seg-btn"
-                      :class="{ on: desktopLyricSettings.fontFamily === f.value }"
-                      @click="desktopLyricSettings.fontFamily = f.value"
-                    >
-                      {{ f.label }}
+                  <div class="setting-item">
+                    <div class="setting-label">字体</div>
+                    <div class="seg">
+                      <button
+                        v-for="f in fontOptions"
+                        :key="f.value"
+                        class="seg-btn"
+                        :class="{ on: desktopLyricSettings.fontFamily === f.value }"
+                        @click="desktopLyricSettings.fontFamily = f.value"
+                      >
+                        {{ f.label }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">主行字号</div>
+                    <div class="val-badge">{{ desktopLyricSettings.fontSize }}px</div>
+                    <input
+                      v-model.number="desktopLyricSettings.fontSize"
+                      class="slider"
+                      type="range"
+                      min="18"
+                      max="40"
+                      step="1"
+                    />
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">翻译字号</div>
+                    <div class="val-badge">{{ desktopLyricSettings.zhSize }}px</div>
+                    <input
+                      v-model.number="desktopLyricSettings.zhSize"
+                      class="slider"
+                      type="range"
+                      min="12"
+                      max="26"
+                      step="1"
+                    />
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">对齐</div>
+                    <div class="seg">
+                      <button
+                        v-for="a in alignOptions"
+                        :key="a.value"
+                        class="seg-btn"
+                        :class="{ on: desktopLyricSettings.align === a.value }"
+                        @click="desktopLyricSettings.align = a.value"
+                      >
+                        {{ a.label }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">窗体宽度</div>
+                    <div class="val-badge">{{ desktopLyricSettings.width }}px</div>
+                    <input
+                      v-model.number="desktopLyricSettings.width"
+                      class="slider"
+                      type="range"
+                      min="300"
+                      max="800"
+                      step="10"
+                    />
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">窗体高度</div>
+                    <div class="val-badge">{{ desktopLyricSettings.height }}px</div>
+                    <input
+                      v-model.number="desktopLyricSettings.height"
+                      class="slider"
+                      type="range"
+                      min="80"
+                      max="300"
+                      step="10"
+                    />
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">配色方案</div>
+                    <div class="desktop-schemes">
+                      <button
+                        v-for="sc in DESKTOP_LYRIC_SCHEMES"
+                        :key="sc.key"
+                        class="scheme-swatch"
+                        :class="{ on: desktopLyricSettings.colorScheme === sc.key }"
+                        :title="sc.label"
+                        @click="applyScheme(sc)"
+                      >
+                        <span class="scheme-dot" :style="{ background: sc.jp }" />
+                        <span class="scheme-dot" :style="{ background: sc.zh }" />
+                        <span class="scheme-name">{{ sc.label }}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">字体颜色</div>
+                    <div class="desktop-colors">
+                      <label class="color-field">
+                        <span>主行</span>
+                        <input
+                          v-model="desktopLyricSettings.jpColor"
+                          type="color"
+                          class="color-input"
+                        />
+                      </label>
+                      <label class="color-field">
+                        <span>翻译</span>
+                        <input
+                          v-model="desktopLyricSettings.zhColor"
+                          type="color"
+                          class="color-input"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <button class="desktop-reset-btn" @click="resetDesktopLyric">
+                      <RotateCcw :size="13" />
+                      恢复桌面歌词默认
                     </button>
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">主行字号</div>
-                  <div class="val-badge">{{ desktopLyricSettings.fontSize }}px</div>
-                  <input
-                    v-model.number="desktopLyricSettings.fontSize"
-                    class="slider"
-                    type="range"
-                    min="18"
-                    max="40"
-                    step="1"
-                  />
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">翻译字号</div>
-                  <div class="val-badge">{{ desktopLyricSettings.zhSize }}px</div>
-                  <input
-                    v-model.number="desktopLyricSettings.zhSize"
-                    class="slider"
-                    type="range"
-                    min="12"
-                    max="26"
-                    step="1"
-                  />
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">对齐</div>
-                  <div class="seg">
-                    <button
-                      v-for="a in alignOptions"
-                      :key="a.value"
-                      class="seg-btn"
-                      :class="{ on: desktopLyricSettings.align === a.value }"
-                      @click="desktopLyricSettings.align = a.value"
-                    >
-                      {{ a.label }}
-                    </button>
+                  <div class="setting-item">
+                    <div class="setting-label">打开方式</div>
+                    <div class="setting-desc">
+                      播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。 双击悬浮窗可关闭。
+                    </div>
                   </div>
                 </div>
-                <div class="setting-item">
-                  <div class="setting-label">窗体宽度</div>
-                  <div class="val-badge">{{ desktopLyricSettings.width }}px</div>
-                  <input
-                    v-model.number="desktopLyricSettings.width"
-                    class="slider"
-                    type="range"
-                    min="300"
-                    max="800"
-                    step="10"
-                  />
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">窗体高度</div>
-                  <div class="val-badge">{{ desktopLyricSettings.height }}px</div>
-                  <input
-                    v-model.number="desktopLyricSettings.height"
-                    class="slider"
-                    type="range"
-                    min="80"
-                    max="300"
-                    step="10"
-                  />
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">配色方案</div>
-                  <div class="desktop-schemes">
-                    <button
-                      v-for="sc in DESKTOP_LYRIC_SCHEMES"
-                      :key="sc.key"
-                      class="scheme-swatch"
-                      :class="{ on: desktopLyricSettings.colorScheme === sc.key }"
-                      :title="sc.label"
-                      @click="applyScheme(sc)"
-                    >
-                      <span class="scheme-dot" :style="{ background: sc.jp }" />
-                      <span class="scheme-dot" :style="{ background: sc.zh }" />
-                      <span class="scheme-name">{{ sc.label }}</span>
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">字体颜色</div>
-                  <div class="desktop-colors">
-                    <label class="color-field">
-                      <span>主行</span>
-                      <input
-                        v-model="desktopLyricSettings.jpColor"
-                        type="color"
-                        class="color-input"
-                      />
-                    </label>
-                    <label class="color-field">
-                      <span>翻译</span>
-                      <input
-                        v-model="desktopLyricSettings.zhColor"
-                        type="color"
-                        class="color-input"
-                      />
-                    </label>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <button class="desktop-reset-btn" @click="resetDesktopLyric">
-                    <RotateCcw :size="13" />
-                    恢复桌面歌词默认
-                  </button>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">打开方式</div>
-                  <div class="setting-desc">
-                    播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。
-                    双击悬浮窗可关闭。
-                  </div>
-                </div>
-              </div>
               </template>
             </section>
 
@@ -855,6 +904,10 @@ import {
   lyricSettings,
   uiSettings,
   playbackSettings,
+  EQ_PRESETS,
+  EQ_BANDS,
+  setEqPreset,
+  setEqGain,
   desktopLyricSettings,
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
@@ -905,6 +958,11 @@ const themeOptions = [
   { value: "light", label: "浅色" },
   { value: "auto", label: "跟随系统" },
 ];
+
+// 频点显示：1000 及以上缩写为 K（31/62/125/250/500/1K/2K/4K/8K/16K）
+function fmtBand(f) {
+  return f >= 1000 ? `${f / 1000}K` : String(f);
+}
 
 const miniThemeOptions = [
   { value: "theme", label: "跟随主题" },
@@ -1610,6 +1668,68 @@ onBeforeUnmount(() => {
 }
 .fade-row .slider {
   flex: 1;
+}
+
+/* 均衡器 */
+.eq-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.eq-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px 12px;
+  margin-top: 14px;
+  padding: 12px 10px;
+  border-radius: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.eq-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.eq-val {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.eq-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--bg3), var(--bg3));
+  outline: none;
+  cursor: pointer;
+}
+.eq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 1px 4px var(--accent-glow2);
+  border: none;
+}
+.eq-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+}
+.eq-band {
+  font-size: 10px;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 开关 */

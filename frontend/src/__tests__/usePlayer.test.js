@@ -98,6 +98,11 @@ const {
   stopMiniStatus,
   refreshMiniStatus,
   miniRunning,
+  EQ_PRESETS,
+  EQ_BANDS,
+  setEqPreset,
+  setEqGain,
+  _resetEqGraph,
   loadLibrarySettings,
   saveLibrarySettings,
   _resetPlaybackSession,
@@ -2639,5 +2644,194 @@ describe("setupMiniStatus（迷你窗运行状态轮询）", () => {
     setupMiniStatus(100);
     await vi.advanceTimersByTimeAsync(200);
     expect(fetch).toHaveBeenCalledTimes(3); // 首次立即查 1 次 + 200ms 内轮询 2 次（非 3 个 timer × 3 倍）
+  });
+});
+
+// ============ 均衡器 EQ（Web Audio API）============
+describe("均衡器 EQ", () => {
+  // FakeAudioContext：jsdom 无 Web Audio，stub 记录滤波器链
+  class FakeAudioContext {
+    static instances = [];
+    constructor() {
+      this.destination = {};
+      this.filters = [];
+      this.state = "running";
+      this.resumeMock = vi.fn().mockResolvedValue();
+      FakeAudioContext.instances.push(this);
+    }
+    createMediaElementSource() {
+      this.source = { connect: vi.fn() };
+      return this.source;
+    }
+    createBiquadFilter() {
+      const f = {
+        type: "",
+        frequency: { value: 0 },
+        Q: { value: 0 },
+        gain: { value: 0 },
+        connect: vi.fn(),
+      };
+      this.filters.push(f);
+      return f;
+    }
+    resume() {
+      return this.resumeMock();
+    }
+  }
+
+  function stubAudioContext() {
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+  }
+
+  function setupSong() {
+    state.currentSong = { path: "/fake/song.mp3" };
+  }
+
+  beforeEach(() => {
+    _resetEqGraph();
+    playbackSettings.eqEnabled = false;
+    playbackSettings.eqPreset = "flat";
+    playbackSettings.eqGains = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  });
+
+  it("首次播放懒创建音频图：10 段滤波器、频点正确、关闭时增益全 0（直通）", async () => {
+    stubAudioContext();
+    setupSong();
+    await play();
+    const ctx = FakeAudioContext.instances.at(-1);
+    expect(ctx.filters).toHaveLength(10);
+    ctx.filters.forEach((f, i) => {
+      expect(f.type).toBe("peaking");
+      expect(f.frequency.value).toBe(EQ_BANDS[i]);
+      expect(f.gain.value).toBe(0);
+    });
+    // source → 10 filters → destination 串联
+    expect(ctx.source.connect).toHaveBeenCalledWith(ctx.filters[0]);
+    ctx.filters.forEach((f, i) => {
+      expect(f.connect).toHaveBeenCalledWith(i === 9 ? ctx.destination : ctx.filters[i + 1]);
+    });
+  });
+
+  it("创建前已设置的均衡器值在创建时应用（启动恢复持久化场景）", async () => {
+    stubAudioContext();
+    playbackSettings.eqEnabled = true;
+    playbackSettings.eqPreset = "bass";
+    playbackSettings.eqGains = [...EQ_PRESETS.bass.gains];
+    setupSong();
+    await play();
+    const ctx = FakeAudioContext.instances.at(-1);
+    ctx.filters.forEach((f, i) => {
+      expect(f.gain.value).toBe(EQ_PRESETS.bass.gains[i]);
+    });
+  });
+
+  it("选择预设：增益应用 + eqGains 同步（作为切回自定义的基点）", () => {
+    stubAudioContext();
+    playbackSettings.eqEnabled = true;
+    setEqPreset("rock");
+    expect(playbackSettings.eqPreset).toBe("rock");
+    expect(playbackSettings.eqGains).toEqual(EQ_PRESETS.rock.gains);
+    // 图未创建：不抛错（创建时应用）
+    expect(() => setEqPreset("jazz")).not.toThrow();
+    expect(playbackSettings.eqGains).toEqual(EQ_PRESETS.jazz.gains);
+  });
+
+  it("非法预设 key 忽略", () => {
+    setEqPreset("nonexistent");
+    expect(playbackSettings.eqPreset).toBe("flat");
+  });
+
+  it("拖滑杆：切到自定义 + 值更新 + clamp ±12 + 实时应用到图", () => {
+    stubAudioContext();
+    playbackSettings.eqEnabled = true;
+    setupSong();
+    play();
+    const ctx = FakeAudioContext.instances.at(-1);
+    setEqGain(0, 6);
+    expect(playbackSettings.eqPreset).toBe("custom");
+    expect(playbackSettings.eqGains[0]).toBe(6);
+    expect(ctx.filters[0].gain.value).toBe(6);
+    // clamp
+    setEqGain(1, 99);
+    expect(playbackSettings.eqGains[1]).toBe(12);
+    setEqGain(2, -99);
+    expect(playbackSettings.eqGains[2]).toBe(-12);
+    // 越界 index 忽略
+    setEqGain(10, 5);
+    expect(playbackSettings.eqGains).toHaveLength(10);
+  });
+
+  it("关闭开关 = 全部 0dB 直通", async () => {
+    stubAudioContext();
+    playbackSettings.eqEnabled = true;
+    playbackSettings.eqPreset = "bass";
+    setupSong();
+    play();
+    const ctx = FakeAudioContext.instances.at(-1);
+    playbackSettings.eqEnabled = false;
+    await nextTick(); // 开关走 watch 异步应用
+    ctx.filters.forEach((f) => expect(f.gain.value).toBe(0));
+  });
+
+  it("修改后自动持久化到 localStorage", async () => {
+    localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
+    playbackSettings.eqEnabled = true;
+    setEqPreset("vocal");
+    await nextTick(); // 持久化 watch 异步落盘
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    expect(saved.eqEnabled).toBe(true);
+    expect(saved.eqPreset).toBe("vocal");
+    expect(saved.eqGains).toEqual(EQ_PRESETS.vocal.gains);
+  });
+
+  it("启动恢复：持久化的均衡器设置读回", async () => {
+    localStorage.setItem(
+      PLAYBACK_SETTINGS_KEY,
+      JSON.stringify({
+        eqEnabled: true,
+        eqPreset: "pop",
+        eqGains: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      }),
+    );
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    expect(m.playbackSettings.eqEnabled).toBe(true);
+    expect(m.playbackSettings.eqPreset).toBe("pop");
+    expect(m.playbackSettings.eqGains).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("脏数据归一化：eqGains 长度不对 → 重置；长度对但值非法 → clamp；非法预设 → flat", async () => {
+    // 场景 A：长度不对 → 重置全 0
+    localStorage.setItem(
+      PLAYBACK_SETTINGS_KEY,
+      JSON.stringify({ eqEnabled: true, eqPreset: "bad", eqGains: [99, "x", null] }),
+    );
+    vi.resetModules();
+    let m = await import("../composables/usePlayer.js");
+    expect(m.playbackSettings.eqGains).toHaveLength(10);
+    expect(m.playbackSettings.eqGains[0]).toBe(0); // 长度 3 ≠ 10 → 整体重置
+    expect(m.playbackSettings.eqPreset).toBe("flat"); // 非法预设回落
+    // 场景 B：长度 10 但值非法 → 逐项 clamp/置 0
+    localStorage.setItem(
+      PLAYBACK_SETTINGS_KEY,
+      JSON.stringify({ eqGains: [99, "x", null, -99, 3, 0, 0, 0, 0, 0] }),
+    );
+    vi.resetModules();
+    m = await import("../composables/usePlayer.js");
+    expect(m.playbackSettings.eqGains[0]).toBe(12); // clamp 99 → 12
+    expect(m.playbackSettings.eqGains[1]).toBe(0); // "x" → 0
+    expect(m.playbackSettings.eqGains[3]).toBe(-12); // clamp -99 → -12
+  });
+
+  it("无 AudioContext 环境（测试/旧浏览器）：静默降级，播放不抛错", () => {
+    // 不 stub AudioContext（jsdom 无）
+    setupSong();
+    expect(() => play()).not.toThrow();
+    // 设置均衡器也不抛错
+    expect(() => {
+      setEqPreset("bass");
+      setEqGain(0, 3);
+      playbackSettings.eqEnabled = true;
+    }).not.toThrow();
   });
 });
