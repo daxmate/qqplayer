@@ -4,6 +4,9 @@
       <div class="modal">
         <!-- 头部 -->
         <div class="modal-head">
+          <button v-if="isMobile" class="modal-back" title="返回" @click="close">
+            <ChevronDown :size="18" />
+          </button>
           <Settings :size="16" />
           设置
           <span class="head-sub">QQ Player v{{ version }}</span>
@@ -928,6 +931,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import {
   Settings,
   X,
+  ChevronDown,
   FolderOpen,
   Music2,
   Type,
@@ -967,6 +971,7 @@ import {
   LYRIC_SCHEMES,
   ACCENT_OPTIONS,
 } from "../composables/usePlayer.js";
+import { isMobile } from "../composables/useMobileViewport.js";
 import pkg from "../../package.json";
 
 const props = defineProps({
@@ -1293,7 +1298,25 @@ onBeforeUnmount(() => {
   color: var(--text2);
   transition: all 0.15s;
 }
-.modal-close:hover {
+@media (hover: hover) {
+  .modal-close:hover {
+    background: var(--card2);
+    color: var(--text);
+  }
+}
+/* 移动端返回按钮（仅 <1024px 渲染，桌面不出现） */
+.modal-back {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.modal-back:active {
   background: var(--card2);
   color: var(--text);
 }
@@ -1331,12 +1354,14 @@ onBeforeUnmount(() => {
   color: var(--text3);
   transition: color 0.15s;
 }
-.nav-item:hover {
-  background: var(--card2);
-  color: var(--text);
-}
-.nav-item:hover svg {
-  color: var(--text2);
+@media (hover: hover) {
+  .nav-item:hover {
+    background: var(--card2);
+    color: var(--text);
+  }
+  .nav-item:hover svg {
+    color: var(--text2);
+  }
 }
 .nav-item.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -1434,9 +1459,11 @@ onBeforeUnmount(() => {
   color: var(--text2);
   background: var(--card2);
 }
-.btn:hover {
-  filter: brightness(1.1);
-  color: var(--text);
+@media (hover: hover) {
+  .btn:hover {
+    filter: brightness(1.1);
+    color: var(--text);
+  }
 }
 .btn.primary {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -1463,9 +1490,11 @@ onBeforeUnmount(() => {
   transition: all 0.15s;
   vertical-align: 1px;
 }
-.mini-btn:hover {
-  color: var(--text);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .mini-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
 }
 
 /* 文件类型多选（chip 网格） */
@@ -1486,9 +1515,11 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   transition: all 0.15s;
 }
-.ext-chip:hover {
-  color: var(--text);
-  border-color: var(--text3);
+@media (hover: hover) {
+  .ext-chip:hover {
+    color: var(--text);
+    border-color: var(--text3);
+  }
 }
 .ext-chip.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -1512,8 +1543,10 @@ onBeforeUnmount(() => {
   transition: all 0.15s;
   position: relative;
 }
-.accent-swatch:hover {
-  transform: scale(1.12);
+@media (hover: hover) {
+  .accent-swatch:hover {
+    transform: scale(1.12);
+  }
 }
 .accent-swatch.on {
   border-color: var(--text);
@@ -1574,8 +1607,10 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: all 0.15s;
 }
-.scheme-swatch:hover {
-  border-color: var(--text3);
+@media (hover: hover) {
+  .scheme-swatch:hover {
+    border-color: var(--text3);
+  }
 }
 .scheme-swatch.on {
   border-color: var(--accent);
@@ -1639,10 +1674,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: all 0.15s;
 }
-.desktop-reset-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--accent-soft);
+@media (hover: hover) {
+  .desktop-reset-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent-text);
+    background: var(--accent-soft);
+  }
 }
 
 /* 分段选择器 */
@@ -1663,8 +1700,10 @@ onBeforeUnmount(() => {
   transition: all 0.15s;
   white-space: nowrap;
 }
-.seg-btn:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .seg-btn:hover {
+    color: var(--text);
+  }
 }
 .seg-btn.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -1705,8 +1744,10 @@ onBeforeUnmount(() => {
   cursor: pointer;
   transition: transform 0.15s;
 }
-.slider::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
+@media (hover: hover) {
+  .slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
 }
 .slider::-moz-range-thumb {
   width: 18px;
@@ -1748,10 +1789,12 @@ onBeforeUnmount(() => {
   transition: all 0.15s;
   line-height: 1;
 }
-.step-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent-text);
-  background: var(--accent-soft);
+@media (hover: hover) {
+  .step-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent-text);
+    background: var(--accent-soft);
+  }
 }
 
 /* 均衡器 */
@@ -1883,8 +1926,10 @@ onBeforeUnmount(() => {
   transition: background 0.15s;
   border-bottom-color: transparent;
 }
-.shortcut-item.editable:hover {
-  background: rgba(127, 127, 127, 0.08);
+@media (hover: hover) {
+  .shortcut-item.editable:hover {
+    background: rgba(127, 127, 127, 0.08);
+  }
 }
 .shortcut-item.editable.recording {
   background: rgba(255, 107, 107, 0.1);
@@ -1951,8 +1996,10 @@ kbd {
   color: var(--accent);
   text-decoration: none;
 }
-.link:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .link:hover {
+    text-decoration: underline;
+  }
 }
 .about-desc {
   margin-top: 14px;
@@ -1984,9 +2031,11 @@ kbd {
   border: 1px solid var(--border);
   transition: all 0.15s;
 }
-.reset-btn:hover {
-  background: rgba(255, 107, 107, 0.12);
-  border-color: rgba(255, 107, 107, 0.4);
-  color: #ff6b6b;
+@media (hover: hover) {
+  .reset-btn:hover {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.4);
+    color: #ff6b6b;
+  }
 }
 </style>

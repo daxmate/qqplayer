@@ -12,14 +12,20 @@
     <!-- 搜索框 -->
     <div class="ml-search">
       <Search :size="15" />
-      <input v-model="query" type="text" :placeholder="searchPlaceholder" spellcheck="false" />
+      <input
+        ref="searchInput"
+        v-model="query"
+        type="text"
+        :placeholder="searchPlaceholder"
+        spellcheck="false"
+      />
       <button v-if="query" class="ml-clear" title="清除" @click="query = ''">
         <X :size="14" />
       </button>
     </div>
 
     <!-- 列表 -->
-    <div class="ml-scroll">
+    <div ref="listEl" class="ml-scroll">
       <!-- 歌曲列表 -->
       <template v-if="display === 'songs'">
         <div
@@ -27,8 +33,12 @@
           :key="song.path"
           class="ml-item"
           :class="{ active: i === state.currentIndex }"
+          :data-path="song.path"
           @click="onPlay(song)"
         >
+          <span v-if="canReorder" class="ml-drag" title="拖拽排序">
+            <GripVertical :size="15" />
+          </span>
           <div class="ml-row-cover">
             <img
               v-if="coverOk(song.path)"
@@ -100,9 +110,24 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
-import { ChevronLeft, ChevronRight, Search, X, Music2, ListMusic, Heart } from "@lucide/vue";
-import { state, isFavorite, toggleFavorite } from "../../composables/usePlayer.js";
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import Sortable from "sortablejs";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  X,
+  Music2,
+  ListMusic,
+  Heart,
+  GripVertical,
+} from "@lucide/vue";
+import {
+  state,
+  isFavorite,
+  toggleFavorite,
+  setPlaylistOrder,
+} from "../../composables/usePlayer.js";
 
 const props = defineProps({
   kind: { type: String, required: true }, // songs | favorites | playlist | artist | album | playlists | artists | albums
@@ -264,6 +289,39 @@ function onGroup(g) {
   emit("open", g.entry);
 }
 
+// 搜索入口自动聚焦（首页顶栏搜索 → 进入列表页直接开键盘输入）
+const searchInput = ref(null);
+onMounted(() => {
+  if (props.payload?.focusSearch) searchInput.value?.focus();
+});
+
+// ============ 歌单拖拽排序（触屏/鼠标，pointer 事件） ============
+// 仅在歌单视图 + 未搜索时启用（可见集 = 歌单全量，排序不丢歌；与桌面 Playlist 同规则）
+const listEl = ref(null);
+const canReorder = computed(() => props.kind === "playlist" && !query.value.trim());
+let sortable = null;
+
+function setupSortable() {
+  sortable?.destroy();
+  sortable = null;
+  if (!canReorder.value || !listEl.value) return;
+  sortable = Sortable.create(listEl.value, {
+    handle: ".ml-drag",
+    animation: 150,
+    ghostClass: "ml-ghost",
+    supportPointer: true, // pointer 事件统一触摸/鼠标
+    onEnd: ({ oldIndex, newIndex }) => {
+      if (oldIndex === newIndex || !props.payload?.playlist) return;
+      const paths = [...listEl.value.querySelectorAll(".ml-item")].map((el) => el.dataset.path);
+      setPlaylistOrder(props.payload.playlist.id, paths).catch((e) => alert(e.message));
+    },
+  });
+}
+
+watch([canReorder, () => props.payload?.playlist?.id], () => nextTick(setupSortable));
+onMounted(() => nextTick(setupSortable));
+onBeforeUnmount(() => sortable?.destroy());
+
 // ============ 封面错误缓存 ============
 const coverErrors = ref(new Set());
 function coverOk(path) {
@@ -394,6 +452,21 @@ function hashBg(name) {
     color-mix(in srgb, var(--accent) 20%, transparent),
     color-mix(in srgb, var(--accent2) 10%, transparent)
   );
+}
+.ml-drag {
+  width: 26px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none; /* 触屏拖拽：禁止浏览器接管手势（否则变滚动） */
+}
+.ml-ghost {
+  opacity: 0.4;
+  background: var(--card2);
 }
 .ml-row-cover {
   width: 44px;
