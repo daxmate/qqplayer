@@ -4,6 +4,15 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 
+// amll LyricPlayer 依赖 pixi（jsdom 下 ESM 互操作报错）；面板测试只关心行为，mock 掉组件
+vi.mock("@applemusic-like-lyrics/vue", () => ({
+  LyricPlayer: {
+    name: "LyricPlayer",
+    template: '<div class="amll-mock" />',
+    props: ["lyricLines", "currentTime", "alignPosition"],
+  },
+}));
+
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
   static instances = [];
@@ -57,12 +66,20 @@ function mountPanel() {
   });
 }
 
-describe("LyricPanel 中文翻译显示", () => {
-  it("默认显示中文翻译行", () => {
+// amll 方案：翻译/罗马音通过 LyricLine 字段传给 LyricPlayer（mock 组件），
+// 断言 props 数据映射正确（zhVisible/showZh → translatedLyric，showRoma → romanLyric）
+function amllProps(wrapper) {
+  const player = wrapper.findComponent({ name: "LyricPlayer" });
+  return player.props("lyricLines");
+}
+
+describe("LyricPanel 中文翻译显示（amll 数据映射）", () => {
+  it("默认带中文翻译行（translatedLyric）", () => {
     const wrapper = mountPanel();
-    const zhDivs = wrapper.findAll(".lyr-zh");
-    expect(zhDivs).toHaveLength(2);
-    expect(zhDivs[0].text()).toBe("你");
+    const lines = amllProps(wrapper);
+    expect(lines).toHaveLength(2);
+    expect(lines[0].translatedLyric).toBe("你");
+    expect(lines[0].romanLyric).toBe("kimi ga");
   });
 
   it("译按钮关闭（zhVisible=false）后中文隐藏，原文/罗马音保留", async () => {
@@ -70,9 +87,10 @@ describe("LyricPanel 中文翻译显示", () => {
     toggleZh(); // state.zhVisible: true → false
     expect(state.zhVisible).toBe(false);
     await nextTick();
-    expect(wrapper.findAll(".lyr-zh")).toHaveLength(0);
-    expect(wrapper.findAll(".lyr-jp")).toHaveLength(2); // 原文仍在
-    expect(wrapper.findAll(".lyr-roma")).toHaveLength(2); // 罗马音仍在
+    const lines = amllProps(wrapper);
+    expect(lines.every((l) => l.translatedLyric === "")).toBe(true); // 中文隐藏
+    expect(lines[0].words[0].word).toBe("君が"); // 原文仍在
+    expect(lines[0].romanLyric).toBe("kimi ga"); // 罗马音仍在
   });
 
   it("再点一次恢复中文显示", async () => {
@@ -81,21 +99,25 @@ describe("LyricPanel 中文翻译显示", () => {
     await nextTick();
     toggleZh(); // false → true
     await nextTick();
-    expect(wrapper.findAll(".lyr-zh")).toHaveLength(2);
+    const lines = amllProps(wrapper);
+    expect(lines[0].translatedLyric).toBe("你");
   });
 
   it("设置里关闭中文（lyricSettings.showZh=false）同样隐藏", async () => {
     const wrapper = mountPanel();
     lyricSettings.showZh = false;
     await nextTick();
-    expect(wrapper.findAll(".lyr-zh")).toHaveLength(0);
+    const lines = amllProps(wrapper);
+    expect(lines.every((l) => l.translatedLyric === "")).toBe(true);
   });
 
   it("歌词没有中文行时不渲染（即使开关全开）", () => {
     const wrapper = mount(LyricPanel, {
       props: { lyric: [{ type: "line", s: 0, e: 10, text: ["君が", "kimi ga"] }], current: 0 },
     });
-    expect(wrapper.findAll(".lyr-zh")).toHaveLength(0);
-    expect(wrapper.findAll(".lyr-jp")).toHaveLength(1);
+    const lines = amllProps(wrapper);
+    expect(lines).toHaveLength(1); // 无中文行的句子仍映射为一行
+    expect(lines[0].translatedLyric).toBe("");
+    expect(lines[0].words[0].word).toBe("君が"); // 原文仍在
   });
 });
