@@ -83,9 +83,7 @@ export const UI_SETTINGS_DEFAULTS = {
 
 export const uiSettings = reactive({ ...UI_SETTINGS_DEFAULTS });
 
-// ============ 桌面歌词悬浮窗设置（localStorage 持久化，同源共享给 /desktop-lyric 页）============
-export const DESKTOP_LYRIC_KEY = "qqplayer.desktopLyric.v1";
-
+// ============ 桌面歌词悬浮窗设置（后端存储：主播放器与悬浮窗跨引擎共享）============
 export const DESKTOP_LYRIC_DEFAULTS = {
   enabled: false, // 主播放器顶栏开关记住状态（上次开着就开）
   showZh: true, // 显示中文翻译
@@ -113,16 +111,22 @@ export const DESKTOP_LYRIC_SCHEMES = [
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 
-function loadDesktopLyricSettings() {
+// 桌面歌词设置走后端存储（主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享，localStorage 不通）
+let desktopLyricLoaded = false;
+let desktopLyricSaveTimer = null;
+
+async function loadDesktopLyricSettings() {
   try {
-    const raw = localStorage.getItem(DESKTOP_LYRIC_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
+    const res = await fetch("/api/desktop-lyric/settings", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const saved = data.settings || {};
     for (const k of Object.keys(desktopLyricSettings)) {
       if (k in saved) desktopLyricSettings[k] = saved[k];
     }
+    desktopLyricLoaded = true;
   } catch {
-    /* 忽略损坏的缓存 */
+    /* 忽略 */
   }
 }
 loadDesktopLyricSettings();
@@ -130,11 +134,19 @@ loadDesktopLyricSettings();
 watch(
   desktopLyricSettings,
   () => {
-    try {
-      localStorage.setItem(DESKTOP_LYRIC_KEY, JSON.stringify(desktopLyricSettings));
-    } catch {
-      /* 忽略写入失败 */
-    }
+    if (!desktopLyricLoaded) return; // 初始加载完成前不写回（避免覆盖后端值）
+    if (desktopLyricSaveTimer) clearTimeout(desktopLyricSaveTimer);
+    desktopLyricSaveTimer = setTimeout(async () => {
+      try {
+        await fetch("/api/desktop-lyric/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...desktopLyricSettings }),
+        });
+      } catch {
+        /* 忽略 */
+      }
+    }, 300); // 防抖合并连续修改
   },
   { deep: true },
 );

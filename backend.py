@@ -52,6 +52,7 @@ DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
+DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
 # 播放记录滚动保留上限（超了删最旧）
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
@@ -136,6 +137,63 @@ def save_settings(patch: dict) -> dict:
     except OSError:
         pass
     _settings = merged
+    return merged
+
+
+# ============ 桌面歌词设置（后端存储：主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享）============
+DESKTOP_LYRIC_DEFAULTS = {
+    "enabled": False,
+    "showZh": True,
+    "fontFamily": "system",
+    "fontSize": 26,
+    "zhSize": 16,
+    "align": "center",
+    "width": 460,
+    "height": 140,
+    "colorScheme": "white",
+    "jpColor": "#ffffff",
+    "zhColor": "#ffffff",
+}
+
+_desktop_lyric: dict | None = None
+
+
+def load_desktop_lyric_settings() -> dict:
+    """读取桌面歌词设置（内存缓存；文件缺失/损坏时回落默认值）"""
+    global _desktop_lyric
+    if _desktop_lyric is not None:
+        return _desktop_lyric
+    data = {}
+    try:
+        if DESKTOP_LYRIC_FILE.exists():
+            raw = json.loads(DESKTOP_LYRIC_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    merged = dict(DESKTOP_LYRIC_DEFAULTS)
+    for k in DESKTOP_LYRIC_DEFAULTS:
+        if k in data:
+            v = data[k]
+            if isinstance(v, (bool, str, int, float)):
+                merged[k] = v
+    _desktop_lyric = merged
+    return merged
+
+
+def save_desktop_lyric_settings(patch: dict) -> dict:
+    """合并保存桌面歌词设置到磁盘并更新内存缓存"""
+    global _desktop_lyric
+    merged = dict(load_desktop_lyric_settings())
+    for k in DESKTOP_LYRIC_DEFAULTS:
+        if k in patch:
+            merged[k] = patch[k]
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        DESKTOP_LYRIC_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    _desktop_lyric = merged
     return merged
 
 
@@ -562,6 +620,18 @@ def api_now_playing_get():
     """返回当前播放状态（悬浮窗 500ms 轮询）"""
     with _now_playing_lock:
         return dict(_now_playing)
+
+
+@app.get("/api/desktop-lyric/settings")
+def api_desktop_lyric_settings_get():
+    """返回桌面歌词设置（主播放器与悬浮窗跨引擎共享，存后端）"""
+    return {"settings": load_desktop_lyric_settings()}
+
+
+@app.put("/api/desktop-lyric/settings")
+def api_desktop_lyric_settings_put(body: dict):
+    """保存桌面歌词设置（主播放器修改时调用）"""
+    return {"settings": save_desktop_lyric_settings(body or {})}
 
 
 @app.get("/api/playback")
