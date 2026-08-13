@@ -139,6 +139,22 @@
                     </div>
                   </template>
                 </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="
+                      playbackSettings.visualizerEnabled = !playbackSettings.visualizerEnabled
+                    "
+                  >
+                    <div>
+                      <div class="setting-label">频谱可视化</div>
+                      <div class="setting-desc">播放时封面下方显示动态频谱条（暂停时静止）</div>
+                    </div>
+                    <span class="switch" :class="{ on: playbackSettings.visualizerEnabled }"
+                      ><i
+                    /></span>
+                  </div>
+                </div>
               </div>
 
               <div class="group">

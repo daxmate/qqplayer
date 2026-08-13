@@ -67,6 +67,7 @@
         <Playlist v-if="state.playlistOpen" class="panel playlist" />
         <section class="center">
           <Cover :song="state.currentSong" />
+          <Visualizer />
           <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
           <div v-else class="no-lyric">
             <Music2 :size="40" class="no-lyric-icon" />
@@ -135,6 +136,7 @@ import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
 import ActivityBar from "./components/ActivityBar.vue";
 import Cover from "./components/Cover.vue";
+import Visualizer from "./components/Visualizer.vue";
 import LyricPanel from "./components/LyricPanel.vue";
 import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
