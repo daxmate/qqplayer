@@ -1,4 +1,26 @@
 /* ============ 全局样式 ============ */
+/* ============ WebKit（WKWebView / Swift 壳）渲染适配 ============
+ * WebKit 的 layout 比 Chromium 重：font-size 过渡每帧触发文本重排 → 掉帧一顿一顿。
+ * 在 WebKit 里字号瞬时切换（Apple Music 式），只保留颜色/透明度过渡（不触发 reflow）；
+ * Chromium（Vivaldi）不受影响，保留字号过渡。 */
+html.webkit .lyr,
+html.webkit .kline {
+  transition:
+    color 0.45s ease-in-out,
+    opacity 0.45s ease-in-out,
+    transform 0.45s ease-in-out;
+}
+html.webkit .lyr-jp,
+html.webkit .lyr-roma,
+html.webkit .lyr-zh,
+html.webkit .kline-jp,
+html.webkit .kline-roma,
+html.webkit .kline-zh {
+  transition:
+    color 0.45s ease-in-out,
+    opacity 0.45s ease-in-out,
+    font-weight 0.45s ease-in-out;
+}
 /* 主题变量：深色为默认（:root），浅色通过 html[data-theme="light"] 覆盖 */
 :root {
   /* 强调色（data-accent 覆盖，衍生色用 color-mix 自动跟随） */
