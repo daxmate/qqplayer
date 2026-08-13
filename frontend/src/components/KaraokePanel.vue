@@ -21,6 +21,15 @@
       </button>
       <span class="kp-hint">{{ abHint }}</span>
     </div>
+    <!-- AB 区间进度：区间确定后显示当前句在区间内的位置（abVisual 开关控制） -->
+    <div v-if="abProgress" class="ab-progress">
+      <div class="ab-progress-track">
+        <i class="ab-progress-fill" :style="{ width: abProgress.pct + '%' }"></i>
+      </div>
+      <span v-if="abProgress.inside" class="ab-progress-label"
+        >第 {{ abProgress.pos }}/{{ abProgress.total }} 句</span
+      >
+    </div>
     <div
       ref="scrollEl"
       class="kp-scroll"
@@ -42,7 +51,7 @@
             @click="playLineAt(i)"
           >
             <span
-              v-if="uiSettings.karaokeShowNum"
+              v-if="uiSettings.karaokeShowNum || abBadge(i)"
               class="kline-num"
               :class="{ 'ab-badge': abBadge(i) }"
               >{{ abBadge(i) || lineNumber(i) }}</span
@@ -87,6 +96,7 @@ import {
   clickLine,
   lyricSettings,
   uiSettings,
+  playbackSettings,
   toggleMusicLib,
   openLyricSpec,
   LYRIC_SCHEMES,
@@ -197,13 +207,27 @@ function klineClass(lyricIdx) {
 }
 
 function abBadge(lyricIdx) {
+  if (!playbackSettings.abVisual) return "";
   const ab = state.abLoop;
   const n = abLineNo(lyricIdx);
-  if (!ab || ab.b === null) return "";
-  if (n === ab.a) return "A";
-  if (n === ab.b) return "B";
+  if (!ab) return "";
+  if (n === ab.a) return "A"; // 等选终点（b=null）时也标出起点
+  if (ab.b !== null && n === ab.b) return "B";
   return "";
 }
+
+// AB 区间进度：b 确定后显示当前句在区间内的位置（第 pos/total 句）
+// 当前句在区间外（如 seek 跳出区间但 AB 未退）→ 进度条归零、不显示标签
+const abProgress = computed(() => {
+  if (!playbackSettings.abVisual) return null;
+  const ab = state.abLoop;
+  if (!ab || ab.b === null) return null;
+  const total = ab.b - ab.a + 1;
+  const cur = abLineNo(props.current);
+  const inside = cur >= ab.a && cur <= ab.b;
+  const pos = inside ? cur - ab.a + 1 : 0;
+  return { pos, total, inside, pct: inside ? (pos / total) * 100 : 0 };
+});
 
 function playLineAt(lyricIdx) {
   const lineNo = abLineNo(lyricIdx);
@@ -281,6 +305,35 @@ watch(
   font-weight: 400;
   color: var(--text3);
   margin-left: auto;
+}
+/* AB 区间进度条：区间确定后显示（细绿条，与区间高亮色系协调） */
+.ab-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px 8px;
+  flex-shrink: 0;
+}
+.ab-progress-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--green-soft);
+  overflow: hidden;
+}
+.ab-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--green-grad1), var(--green));
+  transition: width 0.3s;
+}
+.ab-progress-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .kp-spec-btn {
   width: 28px;
@@ -505,6 +558,11 @@ watch(
 }
 /* AB 端点 A/B 徽标：绿色渐变（末尾定义，特异性覆盖 active 与区间底色） */
 .kline.ab-in .kline-num.ab-badge {
+  background: linear-gradient(135deg, var(--green-grad1), var(--green));
+  color: #fff;
+}
+/* 等选终点（b=null）：起点 A 徽标落在 active 行上，独立规则覆盖 active 橙色渐变 */
+.kline.active .kline-num.ab-badge {
   background: linear-gradient(135deg, var(--green-grad1), var(--green));
   color: #fff;
 }
