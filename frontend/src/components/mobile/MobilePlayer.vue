@@ -44,6 +44,7 @@
         <div class="mp-cover-area">
           <Cover :song="state.currentSong" />
         </div>
+        <Visualizer small />
         <div class="mp-song-info">
           <div class="mp-song-name">{{ state.currentSong?.name || "未选择歌曲" }}</div>
           <div class="mp-song-artist">
@@ -75,6 +76,7 @@ import {
   currentLineIndex,
 } from "../../composables/usePlayer.js";
 import Cover from "../Cover.vue";
+import Visualizer from "../Visualizer.vue";
 import KaraokePanel from "../KaraokePanel.vue";
 import ControlBar from "../ControlBar.vue";
 import { sleepTimerText } from "../../composables/useSleepTimer.js";
@@ -159,6 +161,9 @@ function switchMode(m) {
 .mp-cover-area {
   display: flex;
   justify-content: center;
+}
+.mp-body :deep(.visualizer) {
+  margin-top: 14px;
 }
 .mp-song-info {
   text-align: center;

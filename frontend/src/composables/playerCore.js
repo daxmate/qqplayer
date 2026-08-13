@@ -69,6 +69,7 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   abVisual: true, // AB 循环区间可视化（起点 A / 终点 B 徽标 + 区间进度条）
   abLoopCountOn: true, // AB 循环计数（防走开安全阀）：B 句播完算一遍，满 N 遍停回 A 句首暂停
   abLoopMaxCount: 10, // AB 循环计数上限（1-20）
+  visualizerEnabled: true, // 频谱可视化开关（默认开；仅播放中活跃，暂停静止平线）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
@@ -163,6 +164,14 @@ function ensureAudioGraph() {
     eqGraphFailed = true;
     return Promise.resolve();
   }
+}
+
+// 频谱可视化：暴露音频图访问器（useVisualizer 懒挂 AnalyserNode 到图尾，纯直通不改音频路径）
+// 返回 { audioCtx, eqFilters }；图未创建（首次播放前/无 AudioContext）时 audioCtx 为 null
+// 图节点为模块私有（createMediaElementSource 一个 audio 元素只能接管一次，图必须常驻），
+// 故只暴露只读引用，连接拓扑的改动由 useVisualizer 在拿到引用后完成。
+export function getEqGraph() {
+  return { audioCtx, eqFilters };
 }
 
 // 把当前均衡器设置应用到音频图（图未创建时无操作，创建时统一应用）
