@@ -18,6 +18,7 @@
     "@pixi/filter-blur": "^7.4.3",
     "@pixi/filter-color-matrix": "^7.4.3",
     "@pixi/sprite": "^7.4.3",
+    "chinese-conv": "^4.0.0",
     "jss": "^10.10.0",
     "jss-preset-default": "^10.10.0",
     "sortablejs": "^1.15.7",

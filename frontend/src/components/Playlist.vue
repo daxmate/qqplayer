@@ -247,6 +247,7 @@ import {
   removeFromPlaylist,
   setPlaylistOrder,
 } from "../composables/usePlayer.js";
+import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -337,11 +338,11 @@ const albumGroups = computed(() => {
 // 网格视图当前分组列表（支持搜索过滤卡片）
 const gridGroups = computed(() => {
   const groups = browseMode.value === "artists" ? artistGroups.value : albumGroups.value;
-  const q = query.value.trim().toLowerCase();
+  const q = normalizeQuery(query.value);
   if (!q) return groups;
   return groups.filter((g) => {
     const text = browseMode.value === "artists" ? g.name : g.album + " " + g.artist;
-    return text.toLowerCase().includes(q);
+    return normalizeText(text).includes(q);
   });
 });
 
@@ -390,12 +391,11 @@ const visible = computed(() => {
   if (favOnly.value) {
     list = list.filter(({ song }) => isFavorite(song.path));
   }
-  const q = query.value.trim().toLowerCase();
+  const q = normalizeQuery(query.value);
   if (q) {
     list = list.filter(
       ({ song }) =>
-        (song.name || "").toLowerCase().includes(q) ||
-        (song.artist || "").toLowerCase().includes(q),
+        normalizeText(song.name || "").includes(q) || normalizeText(song.artist || "").includes(q),
     );
   }
   const key = sortKey.value;
