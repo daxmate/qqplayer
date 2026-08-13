@@ -122,6 +122,51 @@ describe("Playlist", () => {
     expect(wrapper.text()).toContain("没有匹配的歌曲");
   });
 
+  it("搜索：繁体输入能筛出简体歌名（简繁互通）", async () => {
+    state.songs = [
+      { id: "a", name: "温柔", artist: "五月天" },
+      { id: "b", name: "知足", artist: "五月天" },
+    ];
+    const wrapper = mount(Playlist);
+    await wrapper.find(".pl-search input").setValue("溫柔");
+    expect(wrapper.findAll(".pl-item")).toHaveLength(1);
+    expect(wrapper.text()).toContain("温柔");
+    expect(wrapper.text()).not.toContain("知足");
+  });
+
+  it("搜索：简体输入能筛出繁体歌名", async () => {
+    state.songs = [
+      { id: "a", name: "溫柔", artist: "五月天" },
+      { id: "b", name: "知足", artist: "五月天" },
+    ];
+    const wrapper = mount(Playlist);
+    await wrapper.find(".pl-search input").setValue("温柔");
+    expect(wrapper.findAll(".pl-item")).toHaveLength(1);
+    expect(wrapper.text()).toContain("溫柔");
+  });
+
+  it("搜索：带声调输入能筛出无调歌名（é→e）", async () => {
+    state.songs = [
+      { id: "a", name: "Resume", artist: "" },
+      { id: "b", name: "知足", artist: "" },
+    ];
+    const wrapper = mount(Playlist);
+    await wrapper.find(".pl-search input").setValue("résumé");
+    expect(wrapper.findAll(".pl-item")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Resume");
+  });
+
+  it("搜索：全角输入能筛出半角歌名", async () => {
+    state.songs = [
+      { id: "a", name: "ABC 123", artist: "" },
+      { id: "b", name: "知足", artist: "" },
+    ];
+    const wrapper = mount(Playlist);
+    await wrapper.find(".pl-search input").setValue("ＡＢＣ");
+    expect(wrapper.findAll(".pl-item")).toHaveLength(1);
+    expect(wrapper.text()).toContain("ABC 123");
+  });
+
   it("排序：按标题排序", async () => {
     state.songs = [
       { id: "b", name: "B歌", artist: "" },
