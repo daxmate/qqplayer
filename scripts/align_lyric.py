@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-align_lyric.py — 用 whisper 词级时间戳对齐 QQPlayer 缓存歌词
+align_lyric.py — 用 whisper 词级时间戳对齐 QQPlayer 缓存歌词的时间戳
 
-背景：在线歌词（网易云/lrclib）的时间戳经常和本地音频版本不匹配（前奏长度、
-版本差异），需要按实际音频重新对齐。本脚本跑 whisper 分段转录拿词级时间戳，
-再用全文序列对齐把 LRC 每行映射到真实时间，tlyric（中文翻译）同步对齐。
+核心思路：歌词内容完全用现成的（缓存里已有网易云拉的原文 lrc + 翻译 tlyric），
+一个字不改；whisper 只用来重新计算每行歌词的实际演唱时间（对齐到本地音频）。
+
+为什么分段转录：整首一次转录开头会幻觉（把长前奏识别成"作詞・作曲・編曲 初音ミク"
+之类）且漏掉前几句歌词；截取片段单独转录则正确。窗口大小（默认 30s+3s 重叠）
+不是关键，关键是不能一次转整首。
 
 用法（用 openai-whisper 的 venv python 跑，因为依赖 whisper + pykakasi）：
     /opt/homebrew/Cellar/openai-whisper/<ver>/libexec/bin/python3 \\
@@ -14,6 +17,7 @@ align_lyric.py — 用 whisper 词级时间戳对齐 QQPlayer 缓存歌词
     --audio   音频文件路径（必填）
     --cache   歌词缓存 json（默认按 sha1(title|artist) 从 ~/.cache/qqplayer/lyric/ 找）
     --write   对齐结果写回缓存文件（默认只输出到 /tmp 并打印对比）
+    --chunks  复用已有的词级时间戳 json（跳过 whisper 转录）
     --model   whisper 模型名（默认 large-v3-turbo，来自 ~/.cache/whisper/）
 
 输出：
@@ -123,7 +127,11 @@ def parse_tlyric_lines(tlyric_text: str):
 # ---------- 1. whisper 分段转录 ----------
 
 def transcribe_chunks(audio: str, model_name: str):
-    """30s 窗口（重叠 3s）分段转录，返回词级时间戳列表"""
+    """分段转录：转 wav 后切窗口逐段识别，返回词级时间戳列表。
+
+    不能整首一次转：实测整首转录开头会幻觉（长前奏被识别成"作詞・作曲・編曲
+    初音ミク"）且漏掉前几句歌词；窗口大小（默认 30s+3s 重叠）只是实现选择。
+    """
     import whisper
 
     dur = float(subprocess.check_output(
