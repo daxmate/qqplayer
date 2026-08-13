@@ -95,7 +95,21 @@ export const DESKTOP_LYRIC_DEFAULTS = {
   align: "center", // 对齐：'left' | 'center' | 'right'
   width: 460, // 悬浮窗宽度 px
   height: 140, // 悬浮窗高度 px
+  colorScheme: "white", // 配色方案 key（见 DESKTOP_LYRIC_SCHEMES）
+  jpColor: "#ffffff", // 主行文字颜色（配色方案的落地值，可被方案覆盖）
+  zhColor: "#ffffff", // 翻译行文字颜色
 };
+
+// 桌面歌词 7 种配色方案：{ key, label, jp 主行色, zh 翻译色, jpAlpha 主行透明度 }
+export const DESKTOP_LYRIC_SCHEMES = [
+  { key: "white", label: "经典白", jp: "#ffffff", zh: "#e8e8e8" },
+  { key: "warm", label: "暖阳橙", jp: "#ffd9a0", zh: "#ffc46b" },
+  { key: "pink", label: "樱花粉", jp: "#ffb7c5", zh: "#ff8fa3" },
+  { key: "cyan", label: "冰川青", jp: "#9be8ff", zh: "#5cc8ee" },
+  { key: "green", label: "薄荷绿", jp: "#b8f5c8", zh: "#7fd99a" },
+  { key: "purple", label: "薰衣草紫", jp: "#d4c4ff", zh: "#a88fff" },
+  { key: "blue", label: "星空蓝", jp: "#a8c8ff", zh: "#6f9dff" },
+];
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 

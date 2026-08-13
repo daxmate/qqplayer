@@ -112,7 +112,7 @@
         }
       }
 
-      // 应用样式设置：字体/对齐/字号（字号渲染时直接设置）
+      // 应用样式设置：字体/对齐/字号/颜色（字号渲染时直接设置）
       function applyStyle() {
         const s = settings();
         document.body.classList.toggle("font-serif", s.fontFamily === "serif");
@@ -121,6 +121,8 @@
         document.body.classList.toggle("align-right", s.align === "right");
         $jp.style.fontSize = (s.fontSize || 26) + "px";
         $zh.style.fontSize = (s.zhSize || 16) + "px";
+        $jp.style.color = s.jpColor || "rgba(255,255,255,0.95)";
+        $zh.style.color = s.zhColor || "rgba(255,255,255,0.72)";
         applyWindowSize();
       }
 

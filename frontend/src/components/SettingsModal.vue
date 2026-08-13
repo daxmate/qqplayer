@@ -554,6 +554,50 @@
                   />
                 </div>
                 <div class="setting-item">
+                  <div class="setting-label">配色方案</div>
+                  <div class="desktop-schemes">
+                    <button
+                      v-for="sc in DESKTOP_LYRIC_SCHEMES"
+                      :key="sc.key"
+                      class="scheme-swatch"
+                      :class="{ on: desktopLyricSettings.colorScheme === sc.key }"
+                      :title="sc.label"
+                      @click="applyScheme(sc)"
+                    >
+                      <span class="scheme-dot" :style="{ background: sc.jp }" />
+                      <span class="scheme-dot" :style="{ background: sc.zh }" />
+                      <span class="scheme-name">{{ sc.label }}</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">字体颜色</div>
+                  <div class="desktop-colors">
+                    <label class="color-field">
+                      <span>主行</span>
+                      <input
+                        v-model="desktopLyricSettings.jpColor"
+                        type="color"
+                        class="color-input"
+                      />
+                    </label>
+                    <label class="color-field">
+                      <span>翻译</span>
+                      <input
+                        v-model="desktopLyricSettings.zhColor"
+                        type="color"
+                        class="color-input"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <button class="desktop-reset-btn" @click="resetDesktopLyric">
+                    <RotateCcw :size="13" />
+                    恢复桌面歌词默认
+                  </button>
+                </div>
+                <div class="setting-item">
                   <div class="setting-label">打开方式</div>
                   <div class="setting-desc">
                     播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。
@@ -679,6 +723,8 @@ import {
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
   PLAYBACK_SETTINGS_DEFAULTS,
+  DESKTOP_LYRIC_DEFAULTS,
+  DESKTOP_LYRIC_SCHEMES,
   ACCENT_OPTIONS,
 } from "../composables/usePlayer.js";
 import pkg from "../../package.json";
@@ -804,6 +850,17 @@ function resetAll() {
     autoRefresh: true,
     autoScanOnStart: true,
   });
+}
+
+// 桌面歌词：应用配色方案（写 colorScheme + 落地颜色值）；一键恢复默认
+function applyScheme(sc) {
+  desktopLyricSettings.colorScheme = sc.key;
+  desktopLyricSettings.jpColor = sc.jp;
+  desktopLyricSettings.zhColor = sc.zh;
+}
+
+function resetDesktopLyric() {
+  Object.assign(desktopLyricSettings, DESKTOP_LYRIC_DEFAULTS);
 }
 
 // 每次打开时同步当前歌曲库路径 + 音乐库设置
@@ -1138,6 +1195,95 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   font-weight: 800;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+/* 桌面歌词配色方案（双色块 + 名称） */
+.desktop-schemes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.scheme-swatch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.scheme-swatch:hover {
+  border-color: var(--text3);
+}
+.scheme-swatch.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.scheme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex-shrink: 0;
+}
+.scheme-name {
+  font-size: 11px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+/* 桌面歌词字体颜色（主行/翻译两个色块） */
+.desktop-colors {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+}
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.color-input {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+.color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+/* 桌面歌词一键恢复默认 */
+.desktop-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.desktop-reset-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 
 /* 分段选择器 */
