@@ -83,6 +83,7 @@ import {
   uiSettings,
   toggleMusicLib,
   openLyricSpec,
+  LYRIC_SCHEMES,
 } from "../composables/usePlayer.js";
 
 const props = defineProps({
@@ -109,6 +110,9 @@ const FONTS = {
 const scrollStyle = computed(() => ({
   fontFamily: FONTS[lyricSettings.fontFamily] || "",
   "--fs-active": lyricSettings.fontSize + "px",
+  // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
+  "--lyr-jp": lyricSettings.jpColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.jp || "var(--accent-text)",
+  "--lyr-zh": lyricSettings.zhColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.zh || "var(--text2)",
 }));
 
 watch(
@@ -394,7 +398,7 @@ watch(
 .kline.active .kline-jp {
   font-size: var(--fs-active, 20px);
   font-weight: 700;
-  color: var(--accent-text);
+  color: var(--lyr-jp, var(--accent-text));
 }
 .kline.active .kline-roma {
   font-size: calc(var(--fs-active, 20px) * 0.625);
@@ -403,7 +407,7 @@ watch(
 }
 .kline.active .kline-zh {
   font-size: calc(var(--fs-active, 20px) * 0.65);
-  color: var(--text2);
+  color: var(--lyr-zh, var(--text2));
   opacity: 1;
 }
 /* 每句时间戳（设置开关控制） */

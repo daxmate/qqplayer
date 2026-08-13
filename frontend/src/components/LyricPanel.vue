@@ -39,7 +39,7 @@
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
 import { Music2, FileMusic } from "@lucide/vue";
-import { seek, lyricSettings, state, openLyricSpec } from "../composables/usePlayer.js";
+import { seek, lyricSettings, state, openLyricSpec, LYRIC_SCHEMES } from "../composables/usePlayer.js";
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -60,6 +60,9 @@ const scrollStyle = computed(() => ({
   fontFamily: FONTS[lyricSettings.fontFamily] || "",
   textAlign: lyricSettings.align,
   "--fs-active": lyricSettings.fontSize + "px",
+  // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
+  "--lyr-jp": lyricSettings.jpColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.jp || "var(--accent-text)",
+  "--lyr-zh": lyricSettings.zhColor || LYRIC_SCHEMES.find((s) => s.key === lyricSettings.colorScheme)?.zh || "var(--text2)",
 }));
 
 // 距离分级：0 = 当前句，1 = 相邻句，2 = 更远（决定字号/透明度层级）
@@ -241,7 +244,7 @@ function seekLine(item) {
 .lyr.active .lyr-jp {
   font-size: var(--fs-active, 20px);
   font-weight: 700;
-  color: var(--accent-text);
+  color: var(--lyr-jp, var(--accent-text));
 }
 .lyr.active .lyr-roma {
   font-size: calc(var(--fs-active, 20px) * 0.625);
@@ -250,7 +253,7 @@ function seekLine(item) {
 }
 .lyr.active .lyr-zh {
   font-size: calc(var(--fs-active, 20px) * 0.65);
-  color: var(--text2);
+  color: var(--lyr-zh, var(--text2));
   opacity: 1;
 }
 .lyr-empty {

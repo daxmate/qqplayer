@@ -53,6 +53,9 @@ export const LYRIC_SETTINGS_DEFAULTS = {
   autoScroll: true, // 切句自动跟随滚动
   offset: 0, // 歌词延迟校准（秒，-2~2）：正值 = 歌词比声音延后显示，负值 = 提前
   source: "local", // 歌词来源优先级：'local' 本地优先 | 'online' 在线优先（失败回退本地）
+  colorScheme: "theme", // 配色方案：'theme' 跟随主题强调色 | 其他见 LYRIC_SCHEMES
+  jpColor: "", // 主行文字颜色（自定义，空 = 跟随 colorScheme）
+  zhColor: "", // 翻译行文字颜色（自定义，空 = 跟随 colorScheme）
 };
 
 export const lyricSettings = reactive({ ...LYRIC_SETTINGS_DEFAULTS });
@@ -98,8 +101,10 @@ export const DESKTOP_LYRIC_DEFAULTS = {
   zhColor: "#ffffff", // 翻译行文字颜色
 };
 
-// 桌面歌词 7 种配色方案：{ key, label, jp 主行色, zh 翻译色, jpAlpha 主行透明度 }
-export const DESKTOP_LYRIC_SCHEMES = [
+// 歌词配色方案（APP 歌词 + 桌面歌词共用）：{ key, label, jp 主行色, zh 翻译色 }
+// 'theme' 为 APP 歌词专属：跟随主题强调色（默认）
+export const LYRIC_SCHEMES = [
+  { key: "theme", label: "跟随主题", jp: "", zh: "" },
   { key: "white", label: "经典白", jp: "#ffffff", zh: "#e8e8e8" },
   { key: "warm", label: "暖阳橙", jp: "#ffd9a0", zh: "#ffc46b" },
   { key: "pink", label: "樱花粉", jp: "#ffb7c5", zh: "#ff8fa3" },
@@ -108,6 +113,9 @@ export const DESKTOP_LYRIC_SCHEMES = [
   { key: "purple", label: "薰衣草紫", jp: "#d4c4ff", zh: "#a88fff" },
   { key: "blue", label: "星空蓝", jp: "#a8c8ff", zh: "#6f9dff" },
 ];
+
+// 桌面歌词 7 种配色方案（不含跟随主题）：{ key, label, jp 主行色, zh 翻译色 }
+export const DESKTOP_LYRIC_SCHEMES = LYRIC_SCHEMES.filter((s) => s.key !== "theme");
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 

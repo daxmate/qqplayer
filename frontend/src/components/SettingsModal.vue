@@ -172,6 +172,25 @@
 
             <!-- ============ 歌词 ============ -->
             <section v-else-if="tab === 'lyric'" class="settings-scroll">
+              <!-- 子 tab：APP 歌词 / 桌面歌词 -->
+              <div class="lyric-subtabs">
+                <button
+                  class="seg-btn"
+                  :class="{ on: lyricSubTab === 'app' }"
+                  @click="lyricSubTab = 'app'"
+                >
+                  APP 歌词
+                </button>
+                <button
+                  class="seg-btn"
+                  :class="{ on: lyricSubTab === 'desktop' }"
+                  @click="lyricSubTab = 'desktop'"
+                >
+                  桌面歌词
+                </button>
+              </div>
+
+              <template v-if="lyricSubTab === 'app'">
               <!-- 外观排版 -->
               <div class="group">
                 <div class="group-title">
@@ -356,110 +375,64 @@
                   <div class="setting-desc">在线优先：使用在线歌词，本地歌词文件作兜底</div>
                 </div>
               </div>
-            </section>
 
-            <!-- ============ 界面 ============ -->
-            <section v-else-if="tab === 'ui'" class="settings-scroll">
-              <div class="group">
-                <div class="group-title">
-                  <LayoutGrid :size="13" />
-                  界面偏好
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="uiSettings.showSongInfo = !uiSettings.showSongInfo"
-                  >
-                    <div>
-                      <div class="setting-label">显示当前歌曲信息</div>
-                      <div class="setting-desc">跟唱模式歌词面板顶部显示歌名 / 歌手</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.showSongInfo }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="uiSettings.karaokeShowTime = !uiSettings.karaokeShowTime"
-                  >
-                    <div>
-                      <div class="setting-label">跟唱显示每句时间戳</div>
-                      <div class="setting-desc">跟唱模式每句歌词右侧显示起止时间</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.karaokeShowTime }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="uiSettings.karaokeShowNum = !uiSettings.karaokeShowNum"
-                  >
-                    <div>
-                      <div class="setting-label">跟唱显示行号</div>
-                      <div class="setting-desc">跟唱模式每句歌词左侧显示句子序号</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.karaokeShowNum }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="uiSettings.coverBlur = !uiSettings.coverBlur">
-                    <div>
-                      <div class="setting-label">封面模糊背景</div>
-                      <div class="setting-desc">背景铺当前歌曲封面模糊图，面板呈毛玻璃效果</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.coverBlur }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
-                    <div>
-                      <div class="setting-label">紧凑模式</div>
-                      <div class="setting-desc">减小间距与封面尺寸，提高信息密度</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.compact }"><i /></span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 主题与强调色 -->
+              <!-- APP 歌词配色（参照桌面歌词） -->
               <div class="group">
                 <div class="group-title">
                   <Palette :size="13" />
-                  主题与强调色
+                  配色
                 </div>
                 <div class="setting-item">
-                  <div class="setting-label">外观</div>
-                  <div class="seg" style="margin-top: 8px">
+                  <div class="setting-label">配色方案</div>
+                  <div class="desktop-schemes">
                     <button
-                      v-for="t in themeOptions"
-                      :key="t.value"
-                      class="seg-btn"
-                      :class="{ on: uiSettings.theme === t.value }"
-                      @click="uiSettings.theme = t.value"
+                      v-for="sc in LYRIC_SCHEMES"
+                      :key="sc.key"
+                      class="scheme-swatch"
+                      :class="{ on: lyricSettings.colorScheme === sc.key }"
+                      :title="sc.label"
+                      @click="applyLyricScheme(sc)"
                     >
-                      {{ t.label }}
+                      <span class="scheme-dot" :style="{ background: sc.jp || 'var(--accent)' }" />
+                      <span class="scheme-dot" :style="{ background: sc.zh || 'var(--text2)' }" />
+                      <span class="scheme-name">{{ sc.label }}</span>
                     </button>
                   </div>
                 </div>
                 <div class="setting-item">
-                  <div class="setting-label">强调色</div>
-                  <div class="accent-grid">
+                  <div class="setting-label">字体颜色</div>
+                  <div class="desktop-colors">
+                    <label class="color-field">
+                      <span>主行</span>
+                      <input
+                        v-model="lyricSettings.jpColor"
+                        type="color"
+                        class="color-input"
+                      />
+                    </label>
+                    <label class="color-field">
+                      <span>翻译</span>
+                      <input
+                        v-model="lyricSettings.zhColor"
+                        type="color"
+                        class="color-input"
+                      />
+                    </label>
                     <button
-                      v-for="a in ACCENT_OPTIONS"
-                      :key="a.key"
-                      class="accent-swatch"
-                      :class="{ on: uiSettings.accent === a.key }"
-                      :style="{ '--swatch': a.color, '--swatch2': a.color2 }"
-                      :title="a.key"
-                      @click="uiSettings.accent = a.key"
-                    />
+                      v-if="lyricSettings.jpColor || lyricSettings.zhColor"
+                      class="mini-btn"
+                      @click="lyricSettings.jpColor = ''; lyricSettings.zhColor = ''"
+                    >
+                      清除自定义
+                    </button>
                   </div>
+                  <div class="setting-desc">主行/翻译颜色自定义；「跟随主题」配色下留空使用主题强调色</div>
                 </div>
               </div>
-            </section>
+              </template>
 
-            <!-- ============ 桌面歌词 ============ -->
-            <section v-else-if="tab === 'desktop'" class="settings-scroll">
+              <!-- ============ 桌面歌词（子 tab） ============ -->
+              <template v-else>
               <div class="group">
                 <div class="group-title">
                   <MonitorPlay :size="13" />
@@ -605,6 +578,107 @@
                   </div>
                 </div>
               </div>
+              </template>
+            </section>
+
+            <!-- ============ 界面 ============ -->
+            <section v-else-if="tab === 'ui'" class="settings-scroll">
+              <div class="group">
+                <div class="group-title">
+                  <LayoutGrid :size="13" />
+                  界面偏好
+                </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="uiSettings.showSongInfo = !uiSettings.showSongInfo"
+                  >
+                    <div>
+                      <div class="setting-label">显示当前歌曲信息</div>
+                      <div class="setting-desc">跟唱模式歌词面板顶部显示歌名 / 歌手</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.showSongInfo }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="uiSettings.karaokeShowTime = !uiSettings.karaokeShowTime"
+                  >
+                    <div>
+                      <div class="setting-label">跟唱显示每句时间戳</div>
+                      <div class="setting-desc">跟唱模式每句歌词右侧显示起止时间</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.karaokeShowTime }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="uiSettings.karaokeShowNum = !uiSettings.karaokeShowNum"
+                  >
+                    <div>
+                      <div class="setting-label">跟唱显示行号</div>
+                      <div class="setting-desc">跟唱模式每句歌词左侧显示句子序号</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.karaokeShowNum }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="uiSettings.coverBlur = !uiSettings.coverBlur">
+                    <div>
+                      <div class="setting-label">封面模糊背景</div>
+                      <div class="setting-desc">背景铺当前歌曲封面模糊图，面板呈毛玻璃效果</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.coverBlur }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
+                    <div>
+                      <div class="setting-label">紧凑模式</div>
+                      <div class="setting-desc">减小间距与封面尺寸，提高信息密度</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.compact }"><i /></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 主题与强调色 -->
+              <div class="group">
+                <div class="group-title">
+                  <Palette :size="13" />
+                  主题与强调色
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">外观</div>
+                  <div class="seg" style="margin-top: 8px">
+                    <button
+                      v-for="t in themeOptions"
+                      :key="t.value"
+                      class="seg-btn"
+                      :class="{ on: uiSettings.theme === t.value }"
+                      @click="uiSettings.theme = t.value"
+                    >
+                      {{ t.label }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">强调色</div>
+                  <div class="accent-grid">
+                    <button
+                      v-for="a in ACCENT_OPTIONS"
+                      :key="a.key"
+                      class="accent-swatch"
+                      :class="{ on: uiSettings.accent === a.key }"
+                      :style="{ '--swatch': a.color, '--swatch2': a.color2 }"
+                      :title="a.key"
+                      @click="uiSettings.accent = a.key"
+                    />
+                  </div>
+                </div>
+              </div>
             </section>
 
             <!-- ============ 快捷键 ============ -->
@@ -725,6 +799,7 @@ import {
   PLAYBACK_SETTINGS_DEFAULTS,
   DESKTOP_LYRIC_DEFAULTS,
   DESKTOP_LYRIC_SCHEMES,
+  LYRIC_SCHEMES,
   ACCENT_OPTIONS,
 } from "../composables/usePlayer.js";
 import pkg from "../../package.json";
@@ -740,6 +815,7 @@ const localUrl = "http://localhost:17627";
 const repoUrl = "https://github.com/daxmate/qqplayer";
 
 const tab = ref("playback");
+const lyricSubTab = ref("app"); // 歌词 tab 子页：'app' APP 歌词 | 'desktop' 桌面歌词
 const libInput = ref("");
 const saving = ref(false);
 const error = ref("");
@@ -794,7 +870,6 @@ const categories = [
   { key: "library", label: "音乐库", icon: FolderOpen },
   { key: "lyric", label: "歌词", icon: Music2 },
   { key: "ui", label: "界面", icon: LayoutGrid },
-  { key: "desktop", label: "桌面歌词", icon: MonitorPlay },
   { key: "shortcuts", label: "快捷键", icon: Keyboard },
   { key: "about", label: "关于", icon: Info },
 ];
@@ -857,6 +932,18 @@ function applyScheme(sc) {
   desktopLyricSettings.colorScheme = sc.key;
   desktopLyricSettings.jpColor = sc.jp;
   desktopLyricSettings.zhColor = sc.zh;
+}
+
+// APP 歌词：应用配色方案（'theme' 跟随主题 → 清空自定义颜色）
+function applyLyricScheme(sc) {
+  lyricSettings.colorScheme = sc.key;
+  if (sc.key === "theme") {
+    lyricSettings.jpColor = "";
+    lyricSettings.zhColor = "";
+  } else {
+    lyricSettings.jpColor = sc.jp;
+    lyricSettings.zhColor = sc.zh;
+  }
 }
 
 function resetDesktopLyric() {
@@ -1195,6 +1282,29 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   font-weight: 800;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+/* 歌词 tab 子页切换（APP 歌词 / 桌面歌词） */
+.lyric-subtabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 3px;
+  background: var(--bg2);
+  border-radius: 12px;
+  width: fit-content;
+}
+.lyric-subtabs .seg-btn {
+  padding: 7px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  transition: all 0.15s;
+}
+.lyric-subtabs .seg-btn.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
 }
 
 /* 桌面歌词配色方案（双色块 + 名称） */
