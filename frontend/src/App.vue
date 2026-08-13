@@ -161,16 +161,16 @@ function switchMode(m) {
   state.mode = m;
 }
 
-// 桌面歌词悬浮窗：通过 URL scheme 调起 Swift 壳 app；状态记住（localStorage）
+// 桌面歌词悬浮窗：通过 URL scheme 调起 Swift 壳 app；状态记后端
+// 用隐藏 iframe 触发（location.href 会让当前页面尝试导航到未知协议，Vivaldi 可能弹窗/卡顿）
 function toggleDesktopLyric() {
   desktopLyricSettings.enabled = !desktopLyricSettings.enabled;
   if (desktopLyricSettings.enabled) {
-    // 调起壳 app（qqplayerlyric:// 已注册；失败静默——app 可能未安装）
-    try {
-      window.location.href = "qqplayerlyric://open";
-    } catch {
-      /* 忽略 */
-    }
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = "qqplayerlyric://open";
+    document.body.appendChild(iframe);
+    setTimeout(() => iframe.remove(), 1000);
   }
 }
 
