@@ -6,7 +6,7 @@
         :src="coverUrl"
         class="cover-img"
         :class="{ spinning: state.isPlaying && !small }"
-        alt="封面"
+        :alt="t('app.coverAlt')"
         @error="onCoverError"
       />
       <div v-else class="cover-fallback">
@@ -19,7 +19,10 @@
 <script setup>
 import { ref, watch } from "vue";
 import { Music } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import { state } from "../composables/usePlayer.js";
+
+const { t } = useI18n();
 
 const props = defineProps({
   song: { type: Object, default: null },
