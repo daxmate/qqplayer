@@ -3,6 +3,7 @@ import { uiSettings, ACCENT_OPTIONS } from "./useSettings.js";
 import { EQ_BANDS, EQ_PRESETS, _normalizeEqPreset } from "./useEq.js";
 import { loadLyric, reanchorKaraoke, currentLineIndex, nextLine, prevLine } from "./useLyric.js";
 import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
+import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
 import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
@@ -71,11 +72,13 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   abLoopCountOn: true, // AB 循环计数（防走开安全阀）：B 句播完算一遍，满 N 遍停回 A 句首暂停
   abLoopMaxCount: 10, // AB 循环计数上限（1-20）
   visualizerEnabled: true, // 频谱可视化开关（默认开；仅播放中活跃，暂停静止平线）
+  sleepTimerOn: false, // 睡眠定时器开关（统一层持久化；运行中的倒计时不持久化，页面刷新即取消）
+  sleepTimerMinutes: 30, // 睡眠定时器时长（分钟，chip 单选）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
 
-function loadPlaybackSettings() {
+export function loadPlaybackSettings() {
   try {
     const raw = localStorage.getItem(PLAYBACK_SETTINGS_KEY);
     if (!raw) return;
@@ -98,18 +101,7 @@ if (!Array.isArray(playbackSettings.eqGains) || playbackSettings.eqGains.length 
 }
 // eqPreset 非法值回落 flat（EQ_PRESETS 定义后执行；校验逻辑在 useEq.js）
 _normalizeEqPreset();
-
-watch(
-  playbackSettings,
-  () => {
-    try {
-      localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify(playbackSettings));
-    } catch {
-      /* 忽略写入失败 */
-    }
-  },
-  { deep: true },
-);
+// 注：playbackSettings 的 localStorage 写透 + 后端 PUT 由统一 Settings 层负责（settingsSync.js）
 
 // 播放模式随设置恢复（用户手动三态切换时也会同步回 playbackSettings，见 cyclePlayMode）
 if (["order", "shuffle", "repeatOne"].includes(playbackSettings.playMode)) {
@@ -1082,9 +1074,23 @@ export function stopMiniStatus() {
   }
 }
 
-// ============ 恢复上次播放（localStorage；受 playbackSettings.resumeLast 控制）============
+// ============ 恢复上次播放（统一层 player.lastPlayed；受 playbackSettings.resumeLast 控制）============
 export const LAST_PLAYED_KEY = "qqplayer.lastPlayed.v1";
 let lastSaveAt = 0;
+
+// 内存态 lastPlayed（统一层 GET 应用 / saveLastPlayed 写入；写透缓存到 localStorage）
+export const lastPlayedState = reactive({ path: null, position: 0, ts: 0 });
+
+// 启动缓存种子（同步读 localStorage；后端 GET 返回后由统一层覆盖）
+function loadLastPlayedCache() {
+  try {
+    const raw = localStorage.getItem(LAST_PLAYED_KEY);
+    if (raw) Object.assign(lastPlayedState, JSON.parse(raw));
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadLastPlayedCache();
 
 // 保存当前播放位置（timeupdate 节流 + 页面关闭兑底调用）
 export function saveLastPlayed() {
@@ -1092,11 +1098,10 @@ export function saveLastPlayed() {
   if (!playbackSettings.resumeLast || !song || !audio.src) return;
   const pos = audio.currentTime || 0;
   if (!(pos > 0)) return;
+  const rec = { path: song.path, position: pos, ts: Date.now() };
+  Object.assign(lastPlayedState, rec); // 统一层 watch → PUT player.lastPlayed
   try {
-    localStorage.setItem(
-      LAST_PLAYED_KEY,
-      JSON.stringify({ path: song.path, position: pos, ts: Date.now() }),
-    );
+    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify(rec)); // 写透缓存（同步）
   } catch {
     /* 忽略写入失败 */
   }
@@ -1105,18 +1110,46 @@ export function saveLastPlayed() {
 // 启动时恢复上次播放的歌曲与进度（需在歌曲列表加载完成后调用；不自动播放，避免浏览器拦截）
 export async function restoreLastPlayed() {
   if (!playbackSettings.resumeLast || !state.songs.length) return;
-  let saved = null;
-  try {
-    const raw = localStorage.getItem(LAST_PLAYED_KEY);
-    if (raw) saved = JSON.parse(raw);
-  } catch {
-    /* 忽略损坏的缓存 */
-  }
-  if (!saved || !saved.path) return;
+  // 等待统一层初始加载完成（GET 成功或失败），确保数据源为后端值而非本地缓存
+  if (settingsLoadPromise) await settingsLoadPromise;
+  const saved = { path: lastPlayedState.path, position: lastPlayedState.position };
+  if (!saved.path) return;
   const idx = state.songs.findIndex((s) => s.path === saved.path);
   if (idx < 0) return;
   await selectSong(idx, { record: false, resumeAt: saved.position });
 }
+
+// 统一 Settings 层写透 player 侧缓存（playbackSettings + volume/panel/controls/lastPlayed）
+export function persistPlayerCache() {
+  try {
+    localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify(playbackSettings));
+    // 开关语义：rememberVolume=false 不写音量缓存
+    if (playbackSettings.rememberVolume) {
+      localStorage.setItem(VOLUME_KEY, String(state.volume));
+    }
+    localStorage.setItem(
+      PANEL_KEY,
+      JSON.stringify({ musicLib: state.musicLibOpen, playlist: state.playlistOpen }),
+    );
+    localStorage.setItem(CONTROLS_KEY, state.controlsHidden ? "1" : "0");
+    // 从未播放过（path 为空）时不写，避免用空记录覆盖有效缓存
+    if (lastPlayedState.path) {
+      localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify(lastPlayedState));
+    }
+  } catch {
+    /* 忽略写入失败 */
+  }
+}
+
+// 注册统一 Settings 层桥（必须在本模块所有 player 状态定义之后执行）
+registerPlayerBridge({
+  state,
+  audio,
+  playbackSettings,
+  lastPlayedState,
+  keys: { PLAYBACK_SETTINGS_KEY, VOLUME_KEY, PANEL_KEY, CONTROLS_KEY, LAST_PLAYED_KEY },
+  persistPlayerCache,
+});
 
 // ============ 音频事件 ============
 audio.addEventListener("timeupdate", () => {

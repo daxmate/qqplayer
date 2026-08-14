@@ -4,7 +4,7 @@
 // 到点暂停：只读调用 playerCore 的 audio/state（audio.pause() 后由 playerCore 的
 // pause 事件监听同步 state.isPlaying，与手动暂停完全一致），不修改 playerCore.js。
 import { reactive, computed } from "vue";
-import { audio, state, playbackSettings, PLAYBACK_SETTINGS_KEY } from "./playerCore.js";
+import { audio, state, playbackSettings, loadPlaybackSettings } from "./playerCore.js";
 import i18n from "../locales/i18n.js";
 
 // 时长选项（分钟，chip 单选）
@@ -24,24 +24,9 @@ export const sleepTimer = reactive({
 let timerId = null;
 let firedMessageTimer = null;
 
-// 从持久化块恢复开关/时长（playerCore 的 loadPlaybackSettings 只认它定义时的键，
-// 本模块在 playerCore 之后加载，故这里自行读取同一 localStorage 键）
-function loadPersisted() {
-  try {
-    const raw = localStorage.getItem(PLAYBACK_SETTINGS_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (typeof saved.sleepTimerOn === "boolean") {
-      playbackSettings.sleepTimerOn = saved.sleepTimerOn;
-    }
-    if (SLEEP_TIMER_OPTIONS.includes(saved.sleepTimerMinutes)) {
-      playbackSettings.sleepTimerMinutes = saved.sleepTimerMinutes;
-    }
-  } catch {
-    /* 忽略损坏的缓存 */
-  }
-}
-loadPersisted();
+// 注：开关/时长持久化走统一 Settings 层（playerCore 的 loadPlaybackSettings 同步缓存加载 +
+// settingsSync 的 GET/PUT /api/settings），不再由本模块直接读 localStorage 原始串；
+// sleepTimerOn/sleepTimerMinutes 已纳入 PLAYBACK_SETTINGS_DEFAULTS，随 playbackSettings 一并恢复。
 
 function clearFiredMessage() {
   if (firedMessageTimer) {
@@ -143,7 +128,7 @@ export function _resetSleepTimer() {
   sleepTimer.status = "";
 }
 
-// 仅供测试：重新从 localStorage 恢复（模拟页面刷新）
+// 仅供测试：重新从 localStorage 恢复（模拟页面刷新）——走 playerCore 的同步缓存加载（统一层）
 export function _reloadPersisted() {
-  loadPersisted();
+  loadPlaybackSettings();
 }

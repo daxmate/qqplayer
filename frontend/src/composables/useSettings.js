@@ -86,26 +86,8 @@ export const DESKTOP_LYRIC_SCHEMES = [
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 
-// 桌面歌词设置走后端存储（主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享，localStorage 不通）
-let desktopLyricLoaded = false;
-let desktopLyricSaveTimer = null;
-
-async function loadDesktopLyricSettings() {
-  try {
-    const res = await fetch("/api/desktop-lyric/settings", { cache: "no-store" });
-    if (!res.ok) return;
-    const data = await res.json();
-    const saved = data.settings || {};
-    for (const k of Object.keys(desktopLyricSettings)) {
-      if (k in saved) desktopLyricSettings[k] = saved[k];
-    }
-    desktopLyricLoaded = true;
-  } catch {
-    /* 忽略 */
-  }
-}
-loadDesktopLyricSettings();
-
+// 桌面歌词设置并入统一 Settings 层（settingsSync.js）：load/save 走 GET/PUT /api/settings 的
+// desktopLyric namespace（主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享，localStorage 不通）
 // Swift 壳内歌词面板被原生关闭（✕/双击）时回写状态，主页面开关保持同步
 if (typeof window !== "undefined") {
   window.addEventListener("qqplayer:lyricstate", (e) => {
@@ -114,26 +96,6 @@ if (typeof window !== "undefined") {
     }
   });
 }
-
-watch(
-  desktopLyricSettings,
-  () => {
-    if (!desktopLyricLoaded) return; // 初始加载完成前不写回（避免覆盖后端值）
-    if (desktopLyricSaveTimer) clearTimeout(desktopLyricSaveTimer);
-    desktopLyricSaveTimer = setTimeout(async () => {
-      try {
-        await fetch("/api/desktop-lyric/settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...desktopLyricSettings }),
-        });
-      } catch {
-        /* 忽略 */
-      }
-    }, 300); // 防抖合并连续修改
-  },
-  { deep: true },
-);
 
 // ============ 主题 / 强调色 / 封面模糊 / 紧凑模式应用（html data-* 属性驱动 CSS）============
 let themeMedia = null;
@@ -178,7 +140,7 @@ function applyCoverBlur() {
   else delete root.dataset.blur;
 }
 
-// 设置变化即时应用
+// 设置变化即时应用（持久化由统一 Settings 层负责：settingsSync.js 防抖 PUT + 写透缓存）
 watch(() => uiSettings.theme, applyTheme);
 watch(() => uiSettings.accent, applyAccent);
 watch(() => uiSettings.compact, applyCompact);
@@ -203,38 +165,7 @@ applyTheme();
 applyAccent();
 applyCompact();
 applyCoverBlur();
-
-watch(
-  uiSettings,
-  () => {
-    try {
-      localStorage.setItem(UI_SETTINGS_KEY, JSON.stringify(uiSettings));
-    } catch {
-      /* 忽略写入失败 */
-    }
-  },
-  { deep: true },
-);
-
-// 主题/迷你窗外观同步后端（迷你窗与主播放器跨引擎共享：主窗口在浏览器时 localStorage 不通）
-let uiSyncTimer = null;
-watch(
-  () => [uiSettings.theme, uiSettings.miniTheme],
-  () => {
-    if (uiSyncTimer) clearTimeout(uiSyncTimer);
-    uiSyncTimer = setTimeout(async () => {
-      try {
-        await fetch("/api/ui/settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ theme: uiSettings.theme, miniTheme: uiSettings.miniTheme }),
-        });
-      } catch {
-        /* 忽略 */
-      }
-    }, 300);
-  },
-);
+// 注：旧的 theme/miniTheme → /api/ui/settings 双写 watch（uiSyncTimer）已删除——统一 Settings 层全量管
 
 function loadLyricSettings() {
   try {
@@ -249,15 +180,4 @@ function loadLyricSettings() {
   }
 }
 loadLyricSettings();
-
-watch(
-  lyricSettings,
-  () => {
-    try {
-      localStorage.setItem(LYRIC_SETTINGS_KEY, JSON.stringify(lyricSettings));
-    } catch {
-      /* 忽略写入失败 */
-    }
-  },
-  { deep: true },
-);
+// 注：lyricSettings 持久化由统一 Settings 层负责（settingsSync.js：防抖 PUT + 写透缓存）
