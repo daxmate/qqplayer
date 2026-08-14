@@ -128,7 +128,15 @@ def test_fetch_netease_success(fake_netease):
 def test_fetch_netease_no_tlyric(fake_netease):
     """无翻译时 tlyric 为 None，不报错"""
     fake_netease["search"] = lambda q, limit=20: [
-        {"id": "123", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+        {
+            "id": "123",
+            "title": "x",
+            "artist": "",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        }
     ]
     fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": "[00:01.00]hi"}, "tlyric": None}
     assert lyric_fetch.fetch_netease("x", "") == ("[00:01.00]hi", None)
@@ -142,7 +150,15 @@ def test_fetch_netease_no_result(fake_netease):
 def test_fetch_netease_empty_lyric(fake_netease):
     """搜索命中但歌词为空（uncollected）→ 返回 None"""
     fake_netease["search"] = lambda q, limit=20: [
-        {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+        {
+            "id": "1",
+            "title": "x",
+            "artist": "",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        }
     ]
     fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": ""}}
     assert lyric_fetch.fetch_netease("x", "") is None
@@ -159,7 +175,15 @@ def test_fetch_netease_network_error(fake_netease):
 def test_fetch_netease_word_json_lyric(fake_netease):
     """新版逐字歌词（lrc.lyric 为 JSON-lines）→ 自动转普通 LRC"""
     fake_netease["search"] = lambda q, limit=20: [
-        {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+        {
+            "id": "1",
+            "title": "x",
+            "artist": "",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        }
     ]
     fake_netease["get_lyric"] = lambda sid: {
         "lrc": {"lyric": '{"t":0,"c":[{"tx":"作词: "},{"tx":"某人"}]}\n[00:10.00]正文'},
@@ -221,7 +245,15 @@ def test_online_cache_hit_no_request(fake_netease, cache_dir):
     def fake_search(q, limit=20):
         calls["search"] += 1
         return [
-            {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "00:01", "level": "exhigh"}
+            {
+                "id": "1",
+                "title": "x",
+                "artist": "",
+                "album": "",
+                "cover": "",
+                "duration": "00:01",
+                "level": "exhigh",
+            }
         ]
 
     def fake_lyric(sid):
@@ -341,7 +373,15 @@ def test_search_netease_candidates(fake_netease):
 def test_search_netease_skip_empty_lyric(fake_netease):
     """无歌词的候选被过滤"""
     fake_netease["search"] = lambda q, limit=20: [
-        {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+        {
+            "id": "1",
+            "title": "x",
+            "artist": "",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        }
     ]
     fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": ""}}
     assert lyric_fetch.search_netease("x", "") == []

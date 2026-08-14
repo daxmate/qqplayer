@@ -811,13 +811,21 @@ def test_api_settings_get_all_namespaces():
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
     # ui 8 字段
     assert set(s["ui"]) == {
-        "showSongInfo", "karaokeShowTime", "karaokeShowNum", "theme",
-        "miniTheme", "accent", "coverBlur", "compact",
+        "showSongInfo",
+        "karaokeShowTime",
+        "karaokeShowNum",
+        "theme",
+        "miniTheme",
+        "accent",
+        "coverBlur",
+        "compact",
     }
     assert s["ui"]["theme"] == "dark" and s["ui"]["accent"] == "orange"
     # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
     assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
-    assert s["lyric"]["fontSize"] == 20 and s["lyric"]["focusPos"] == 0.5 and s["lyric"]["offset"] == 0
+    assert (
+        s["lyric"]["fontSize"] == 20 and s["lyric"]["focusPos"] == 0.5 and s["lyric"]["offset"] == 0
+    )
     # playback 15 字段（含睡眠定时器，与前端 PLAYBACK_SETTINGS_DEFAULTS 一致）
     assert set(s["playback"]) == set(backend.PLAYBACK_SETTINGS_DEFAULTS)
     assert s["playback"]["playMode"] == "order" and s["playback"]["eqGains"] == [0] * 10
@@ -835,9 +843,7 @@ def test_api_settings_get_all_namespaces():
 
 def test_api_settings_put_deep_merge():
     """PUT 两级深合并：只改传入字段，未传字段不动；返回合并后全量"""
-    r = client.put(
-        "/api/settings", json={"lyric": {"fontSize": 24}, "player": {"volume": 0.5}}
-    )
+    r = client.put("/api/settings", json={"lyric": {"fontSize": 24}, "player": {"volume": 0.5}})
     assert r.status_code == 200
     s = r.json()["settings"]
     assert s["lyric"]["fontSize"] == 24
@@ -881,10 +887,14 @@ def test_api_settings_put_validation():
     assert s["player"]["lastPlayed"] is None  # 非法结构回落 null
 
     # sleepTimer：合法值保留、非法值回落默认
-    r = client.put("/api/settings", json={"playback": {"sleepTimerOn": True, "sleepTimerMinutes": 45}})
+    r = client.put(
+        "/api/settings", json={"playback": {"sleepTimerOn": True, "sleepTimerMinutes": 45}}
+    )
     assert r.json()["settings"]["playback"]["sleepTimerOn"] is True
     assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 45
-    r = client.put("/api/settings", json={"playback": {"sleepTimerOn": "x", "sleepTimerMinutes": 20}})
+    r = client.put(
+        "/api/settings", json={"playback": {"sleepTimerOn": "x", "sleepTimerMinutes": 20}}
+    )
     assert r.json()["settings"]["playback"]["sleepTimerOn"] is False
     assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 30  # 不在选项内回落 30
 
@@ -951,7 +961,15 @@ def test_migrate_legacy_settings_idempotent():
     backend.SETTINGS_FILE.write_text(json.dumps({"audioExts": [".mp3"]}), encoding="utf-8")
     backend.migrate_legacy_settings()
     first = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
-    assert set(first) == {"library", "ui", "lyric", "playback", "desktopLyric", "player", "download"}
+    assert set(first) == {
+        "library",
+        "ui",
+        "lyric",
+        "playback",
+        "desktopLyric",
+        "player",
+        "download",
+    }
     backend._settings = None
     backend.migrate_legacy_settings()  # 再跑一次
     second = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -974,7 +992,9 @@ def test_migrate_legacy_settings_keeps_player_namespace():
     """迁移时 player namespace 用默认值；迁移后写入新值不被旧文件覆盖"""
     backend.SETTINGS_FILE.write_text(json.dumps({"audioExts": [".mp3"]}), encoding="utf-8")
     backend.migrate_legacy_settings()
-    backend.save_all_settings({"player": {"volume": 0.7, "lastPlayed": {"path": "/x.mp3", "time": 3}}})
+    backend.save_all_settings(
+        {"player": {"volume": 0.7, "lastPlayed": {"path": "/x.mp3", "time": 3}}}
+    )
     backend._settings = None
     backend.migrate_legacy_settings()  # 新格式已存在 → 跳过
     s = backend.load_all_settings()
@@ -985,9 +1005,7 @@ def test_migrate_legacy_settings_keeps_player_namespace():
 # ============ 兼容层：旧三端点读写统一存储 ============
 def test_compat_ui_settings_reads_unified_store():
     """GET/PUT /api/ui/settings 读写统一 settings.json 的 ui namespace（现可接受全部 8 字段）"""
-    client.put(
-        "/api/settings", json={"ui": {"theme": "light", "accent": "blue", "compact": True}}
-    )
+    client.put("/api/settings", json={"ui": {"theme": "light", "accent": "blue", "compact": True}})
     s = client.get("/api/ui/settings").json()["settings"]
     assert s["theme"] == "light" and s["accent"] == "blue" and s["compact"] is True
     # 兼容层写 → 新区读
@@ -997,7 +1015,12 @@ def test_compat_ui_settings_reads_unified_store():
     # 兼容层 PUT 接受全部 8 个 ui 字段
     client.put(
         "/api/ui/settings",
-        json={"showSongInfo": True, "karaokeShowTime": True, "karaokeShowNum": False, "coverBlur": True},
+        json={
+            "showSongInfo": True,
+            "karaokeShowTime": True,
+            "karaokeShowNum": False,
+            "coverBlur": True,
+        },
     )
     s = client.get("/api/ui/settings").json()["settings"]
     assert s["showSongInfo"] is True
@@ -1022,9 +1045,7 @@ def test_compat_desktop_lyric_settings_reads_unified_store():
 
 def test_compat_library_settings_reads_unified_store(song_library):
     """GET/PUT /api/library/settings 读写统一存储的 library namespace（扫描副作用保持）"""
-    client.put(
-        "/api/settings", json={"library": {"audioExts": [".flac"], "autoRefresh": False}}
-    )
+    client.put("/api/settings", json={"library": {"audioExts": [".flac"], "autoRefresh": False}})
     s = client.get("/api/library/settings").json()["settings"]
     assert s["audioExts"] == [".flac"] and s["autoRefresh"] is False
     # 兼容层写 → 新区读
@@ -1278,9 +1299,9 @@ def test_settings_download_namespace():
     )["download"]
     assert s == {"downloadDir": "/tmp/dl", "defaultQuality": "lossless"}
     # 非法值回落默认
-    s = backend.save_all_settings(
-        {"download": {"downloadDir": 123, "defaultQuality": "jymaster"}}
-    )["download"]
+    s = backend.save_all_settings({"download": {"downloadDir": 123, "defaultQuality": "jymaster"}})[
+        "download"
+    ]
     assert s["downloadDir"] == ""  # 非字符串回落默认
     assert s["defaultQuality"] == "exhigh"  # 不在白名单回落默认
     # 合法音质枚举保留

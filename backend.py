@@ -262,13 +262,18 @@ _SETTINGS_SPEC = {
         "miniTheme": ("theme", lambda v, d: _norm_str(v, d, allowed={"theme", "dark", "light"})),
         "accent": (
             "orange",
-            lambda v, d: _norm_str(v, d, allowed={"orange", "blue", "green", "purple", "pink", "teal"}),
+            lambda v, d: _norm_str(
+                v, d, allowed={"orange", "blue", "green", "purple", "pink", "teal"}
+            ),
         ),
         "coverBlur": (UI_SETTINGS_DEFAULTS["coverBlur"], _norm_bool),
         "compact": (UI_SETTINGS_DEFAULTS["compact"], _norm_bool),
     },
     "lyric": {
-        "fontFamily": ("system", lambda v, d: _norm_str(v, d, allowed={"system", "serif", "rounded"})),
+        "fontFamily": (
+            "system",
+            lambda v, d: _norm_str(v, d, allowed={"system", "serif", "rounded"}),
+        ),
         "fontSize": (20, lambda v, d: _norm_num(v, d, lo=14, hi=30)),
         "align": ("left", lambda v, d: _norm_str(v, d, allowed={"left", "center", "right"})),
         "engine": ("amll", lambda v, d: _norm_str(v, d, allowed={"amll", "spring", "native"})),
@@ -285,7 +290,10 @@ _SETTINGS_SPEC = {
         "zhColor": ("", _norm_str),
     },
     "playback": {
-        "playMode": ("order", lambda v, d: _norm_str(v, d, allowed={"order", "shuffle", "repeatOne"})),
+        "playMode": (
+            "order",
+            lambda v, d: _norm_str(v, d, allowed={"order", "shuffle", "repeatOne"}),
+        ),
         "resumeLast": (True, _norm_bool),
         "rememberVolume": (True, _norm_bool),
         "fadeSec": (0, lambda v, d: _norm_num(v, d, lo=0.0, hi=5.0)),
@@ -294,7 +302,11 @@ _SETTINGS_SPEC = {
         "eqEnabled": (False, _norm_bool),
         "eqPreset": (
             "flat",
-            lambda v, d: _norm_str(v, d, allowed={"flat", "pop", "rock", "jazz", "classical", "bass", "vocal", "custom"}),
+            lambda v, d: _norm_str(
+                v,
+                d,
+                allowed={"flat", "pop", "rock", "jazz", "classical", "bass", "vocal", "custom"},
+            ),
         ),
         "eqGains": (PLAYBACK_SETTINGS_DEFAULTS["eqGains"], lambda v, d: _norm_eq_gains(v)),
         "abVisual": (True, _norm_bool),
@@ -307,7 +319,10 @@ _SETTINGS_SPEC = {
     "desktopLyric": {
         "enabled": (False, _norm_bool),
         "showZh": (True, _norm_bool),
-        "fontFamily": ("system", lambda v, d: _norm_str(v, d, allowed={"system", "serif", "rounded"})),
+        "fontFamily": (
+            "system",
+            lambda v, d: _norm_str(v, d, allowed={"system", "serif", "rounded"}),
+        ),
         "fontSize": (26, lambda v, d: _norm_num(v, d, lo=18, hi=40)),
         "zhSize": (16, lambda v, d: _norm_num(v, d, lo=12, hi=26)),
         "align": ("center", lambda v, d: _norm_str(v, d, allowed={"left", "center", "right"})),

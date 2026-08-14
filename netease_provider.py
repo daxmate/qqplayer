@@ -323,7 +323,11 @@ class NeteaseProvider:
         )
         resp.raise_for_status()
         data = resp.json()
-        if not isinstance(data, dict) or data.get("code") != 200 or not isinstance(data.get("data"), dict):
+        if (
+            not isinstance(data, dict)
+            or data.get("code") != 200
+            or not isinstance(data.get("data"), dict)
+        ):
             raise ValueError("Cenguigui parse failed")
         payload = data["data"]
         url = str(payload.get("url") or "").strip()

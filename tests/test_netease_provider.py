@@ -91,7 +91,14 @@ def test_word_json_to_lrc_negative_timestamp():
 
 # ============ mock HTTP ============
 class FakeResponse:
-    def __init__(self, payload=None, status_code=200, content_type="application/json", headers=None, text=None):
+    def __init__(
+        self,
+        payload=None,
+        status_code=200,
+        content_type="application/json",
+        headers=None,
+        text=None,
+    ):
         self.status_code = status_code
         self.headers = dict(headers or {})
         self.headers.setdefault("content-type", content_type)
@@ -220,7 +227,9 @@ def test_search_skips_invalid_song():
 def test_play_info_meting_302():
     """Meting 302 → Location 头为直链"""
     client = FakeClient()
-    client.gets.append(FakeResponse(status_code=302, headers={"location": "http://cdn.example.com/a.mp3"}))
+    client.gets.append(
+        FakeResponse(status_code=302, headers={"location": "http://cdn.example.com/a.mp3"})
+    )
     info = make_provider(client).get_play_info("123", "exhigh")
     assert info == {"url": "http://cdn.example.com/a.mp3", "ext": "mp3", "bitrate": "320"}
     _, url, kw = client.calls[0]
@@ -250,7 +259,9 @@ def test_play_info_fallback_cenguigui():
     """Meting 失败（无直链）→ cenguigui 兜底"""
     client = FakeClient()
     client.gets.append(FakeResponse(content_type="text/plain", text="not a url"))
-    client.gets.append(FakeResponse({"code": 200, "data": {"url": "https://cdn.x/z.flac", "format": "flac"}}))
+    client.gets.append(
+        FakeResponse({"code": 200, "data": {"url": "https://cdn.x/z.flac", "format": "flac"}})
+    )
     info = make_provider(client).get_play_info("123", "lossless")
     assert info["url"] == "https://cdn.x/z.flac"
     assert info["ext"] == "flac"
