@@ -1,6 +1,6 @@
 <template>
   <div class="lyric-panel">
-    <button class="lyric-spec-btn" title="指定歌词" @click="openLyricSpec()">
+    <button class="lyric-spec-btn" :title="t('spec.title')" @click="openLyricSpec()">
       <FileMusic :size="15" />
     </button>
 
@@ -65,7 +65,7 @@
             </div>
           </div>
         </template>
-        <div v-if="!lyric.length" class="lyr-empty">暂无歌词</div>
+        <div v-if="!lyric.length" class="lyr-empty">{{ t("lyric.empty") }}</div>
         <!-- 底部占位（高度 JS 设为视口一半）：让最后一句能滚到垂直居中 -->
         <div class="lyric-spacer" aria-hidden="true"></div>
       </div>
@@ -75,6 +75,7 @@
 
 <script setup>
 import { ref, watch, computed, nextTick, defineAsyncComponent } from "vue";
+import { useI18n } from "vue-i18n";
 import { Music2, FileMusic } from "@lucide/vue";
 import {
   seek,
@@ -84,6 +85,8 @@ import {
   LYRIC_SCHEMES,
 } from "../composables/usePlayer.js";
 import { useLyricScroll } from "../composables/useLyricScroll.js";
+
+const { t } = useI18n();
 
 // amll 组件异步加载（vite 自动分包，仅 amll 引擎时下载）
 const LyricPlayer = defineAsyncComponent(() =>

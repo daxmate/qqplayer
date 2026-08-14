@@ -1,2 +1,36 @@
-// 待抽离：spec 模块文案
-export default {};
+// 手动指定歌词弹窗（LyricSpecModal.vue）
+export default {
+  spec: {
+    title: "指定歌词",
+    manual: "已手动指定",
+    auto: "自动获取",
+    statusUsing: "当前使用手动指定歌词（{source} · {format}）",
+    clear: "清除指定",
+    tabUpload: "上传文件",
+    tabSearch: "在线搜索",
+    tabPaste: "粘贴文本",
+    clickToSelect: "点击选择歌词文件",
+    formatLabel: "格式：{format}",
+    unrecognized: "未识别",
+    supportedFormats: "支持 .lrc / .srt / .json（需包含时间戳）",
+    unrecognizedDetail:
+      "未识别到可用歌词格式：LRC 需 [mm:ss]，SRT 需序号+时间轴，JSON 需包含 lrc 字段",
+    placeholderTitle: "歌名",
+    placeholderArtist: "歌手（可留空）",
+    searching: "搜索中",
+    sourceNetease: "网易云",
+    sourceOnline: "在线·{source}·{title}{artist}",
+    hasZhTitle: "含中文翻译",
+    searchEmpty: "没有找到带时间戳的歌词，试试其他关键词，或改用「上传文件 / 粘贴文本」",
+    pastePlaceholder:
+      '粘贴 LRC / SRT / JSON 歌词…\n\nLRC 示例：\n[00:12.34]一行歌词\n\nSRT 示例：\n1\n00:00:12,340 --> 00:00:17,000\n一行歌词\n\nJSON 示例：\n{\'{\'}\n  "lrc": "[00:12.34]一行歌词",\n  "tlyric": "[00:12.34]中文翻译"\n{\'}\'}',
+    detectFormatLabel: "检测格式：",
+    pasteNeedTimeline: "需包含 [mm:ss]（LRC）或 序号+时间轴（SRT）",
+    footHint: "指定后优先使用该歌词（不受来源优先级影响），可随时清除恢复自动",
+    searchTitleRequired: "请输入歌名",
+    searchFailed: "搜索失败，请重试",
+    saveFailed: "保存失败",
+    sourceUpload: "上传·{name}",
+    sourcePaste: "粘贴",
+  },
+};
