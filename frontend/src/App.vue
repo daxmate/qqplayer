@@ -29,6 +29,9 @@
             {{ t("app.mode.karaoke") }}
           </button>
         </div>
+        <div class="topbar-search">
+          <OnlineSearch variant="desktop" />
+        </div>
         <div class="topbar-right">
           <button
             class="gear-btn mini-btn"
@@ -147,6 +150,7 @@ import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
 import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
+import OnlineSearch from "./components/OnlineSearch.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import {
@@ -347,6 +351,11 @@ onMounted(() => {
 }
 .gear-btn:hover svg {
   transform: rotate(60deg);
+}
+/* 顶栏在线搜索入口：位于 mode-tabs 与 topbar-right 之间 */
+.topbar-search {
+  width: 300px;
+  flex-shrink: 0;
 }
 /* 顶栏右侧按钮组：整体推到最右，悬浮窗在左、设置贴右边缘 */
 .topbar-right {

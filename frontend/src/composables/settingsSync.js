@@ -18,8 +18,11 @@ import {
   uiSettings,
   lyricSettings,
   desktopLyricSettings,
+  downloadSettings,
+  DOWNLOAD_SETTINGS_DEFAULTS,
   UI_SETTINGS_KEY,
   LYRIC_SETTINGS_KEY,
+  DOWNLOAD_SETTINGS_KEY,
 } from "./useSettings.js";
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -80,6 +83,7 @@ function buildPayload() {
     ui: { ...uiSettings },
     lyric: { ...lyricSettings },
     desktopLyric: { ...desktopLyricSettings },
+    download: { ...downloadSettings },
   };
   if (playerBridge) {
     const { state, playbackSettings, lastPlayedState } = playerBridge;
@@ -110,6 +114,11 @@ function writeLocalCache() {
   } catch {
     /* 忽略写入失败 */
   }
+  try {
+    localStorage.setItem(DOWNLOAD_SETTINGS_KEY, JSON.stringify(downloadSettings));
+  } catch {
+    /* 忽略写入失败 */
+  }
   playerBridge?.persistPlayerCache();
 }
 
@@ -135,6 +144,8 @@ async function loadSettings() {
     applyNamespace(s.ui, uiSettings);
     applyNamespace(s.lyric, lyricSettings);
     applyNamespace(s.desktopLyric, desktopLyricSettings);
+    applyNamespace(s.download, downloadSettings);
+    normalizeDownloadSettings();
     if (playerBridge) {
       applyNamespace(s.playback, playerBridge.playbackSettings);
       applyPlayer(s.player);
@@ -152,6 +163,14 @@ function applyNamespace(saved, target) {
   if (!saved || typeof saved !== "object") return;
   for (const k of Object.keys(target)) {
     if (k in saved) target[k] = saved[k];
+  }
+}
+
+// download namespace 取值容错：音质枚举非法值回落默认（契约字段缺失由 applyNamespace 兜底）
+const DOWNLOAD_QUALITY_VALUES = ["standard", "exhigh", "lossless", "hires"];
+function normalizeDownloadSettings() {
+  if (!DOWNLOAD_QUALITY_VALUES.includes(downloadSettings.defaultQuality)) {
+    downloadSettings.defaultQuality = DOWNLOAD_SETTINGS_DEFAULTS.defaultQuality;
   }
 }
 
@@ -186,6 +205,7 @@ function captureLocalSnapshots() {
   const entries = [
     ["ui", UI_SETTINGS_KEY],
     ["lyric", LYRIC_SETTINGS_KEY],
+    ["download", DOWNLOAD_SETTINGS_KEY],
   ];
   if (playerBridge) {
     entries.push(
@@ -214,6 +234,7 @@ async function importLocalDiffs(server, snaps) {
   const dirty = {};
   collectDirty(dirty, "ui", snaps.ui, server.ui, uiSettings);
   collectDirty(dirty, "lyric", snaps.lyric, server.lyric, lyricSettings);
+  collectDirty(dirty, "download", snaps.download, server.download, downloadSettings);
   if (playerBridge) {
     collectDirty(dirty, "playback", snaps.playback, server.playback, playerBridge.playbackSettings);
     const playerDirty = collectPlayerDirty(server.player, snaps);
@@ -303,6 +324,7 @@ function applyDirty(dirty) {
   const targets = {
     ui: uiSettings,
     lyric: lyricSettings,
+    download: downloadSettings,
     playback: playerBridge?.playbackSettings,
   };
   for (const [ns, fields] of Object.entries(dirty)) {
@@ -327,5 +349,7 @@ function applyDirty(dirty) {
   }
 }
 
-// 统一 watch：三个设置对象任意变化 → 防抖 PUT + 写透缓存
-watch([uiSettings, lyricSettings, desktopLyricSettings], () => scheduleSave(), { deep: true });
+// 统一 watch：四个设置对象任意变化 → 防抖 PUT + 写透缓存
+watch([uiSettings, lyricSettings, desktopLyricSettings, downloadSettings], () => scheduleSave(), {
+  deep: true,
+});

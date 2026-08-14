@@ -12,6 +12,7 @@ export default {
     category: {
       playback: "播放",
       library: "音乐库",
+      download: "下载",
       lyric: "歌词",
       ui: "界面",
       shortcuts: "快捷键",
@@ -62,6 +63,20 @@ export default {
     autoRefreshDesc: "监听文件夹变动，新增 / 删除歌曲自动更新列表",
     autoScanOnStart: "启动时自动扫描",
     autoScanOnStartDesc: "应用启动时立即扫描歌曲库，首屏秒开",
+
+    // ============ 下载 ============
+    download: "在线下载",
+    downloadDir: "下载目录",
+    downloadDirDesc: "在线歌曲下载后保存的位置；留空 = 下载到当前曲库",
+    downloadDirPlaceholder: "留空 = 当前曲库",
+    defaultQuality: "默认音质",
+    defaultQualityDesc: "下载在线歌曲时使用的音质",
+    downloadQuality: {
+      standard: "标准 128k",
+      exhigh: "极高 320k",
+      lossless: "无损 FLAC",
+      hires: "Hi-Res",
+    },
 
     // ============ 歌词（APP） ============
     lyricApp: "APP 歌词",
