@@ -230,20 +230,23 @@ describe("search anything 全屏搜索层", () => {
   it("设置行展开内联控件（互斥单开）+ 开关切换生效", async () => {
     mountOverlay();
     isSearchOpen.value = true;
+    // 真实 settingsIndex 按 type 查找（索引顺序与 stub 不同，不能假设 [0]/[1]）
+    const toggleEntry = settingsIndex.find((e) => e.type === "toggle");
+    const sliderEntry = settingsIndex.find((e) => e.type === "slider");
     results.value = [
       makeItem({
         kind: "setting",
         id: "st-v",
-        title: "频谱可视化",
+        title: toggleEntry.labelKey,
         badge: "设置",
-        payload: settingsIndex[0],
+        payload: toggleEntry,
       }),
       makeItem({
         kind: "setting",
         id: "st-f",
-        title: "切歌淡入淡出",
+        title: sliderEntry.labelKey,
         badge: "设置",
-        payload: settingsIndex[1],
+        payload: sliderEntry,
       }),
     ];
     query.value = "设置";
@@ -252,17 +255,18 @@ describe("search anything 全屏搜索层", () => {
     await wrapper.findAll(".sa-row")[0].trigger("click");
     await nextTick();
     expect(wrapper.find(".sa-inline").exists()).toBe(true);
-    expect(wrapper.find(".ic-toggle").exists()).toBe(true);
+    expect(wrapper.find(".ic-switch").exists()).toBe(true);
     // 开关切换生效（entry.set 被调用）
-    const before = settingsIndex[0].get();
-    await wrapper.find(".ic-toggle").trigger("click");
-    expect(settingsIndex[0].get()).toBe(!before);
+    const before = toggleEntry.get();
+    await wrapper.find(".ic-switch").trigger("click");
+    expect(toggleEntry.get()).toBe(!before);
+    toggleEntry.set(before); // 恢复原值，避免污染后续用例
     // 展开第二条 → 第一条收起（互斥）
     await wrapper.findAll(".sa-row")[1].trigger("click");
     await nextTick();
     const inlineRows = wrapper.findAll(".sa-inline");
     expect(inlineRows.length).toBe(1);
-    expect(inlineRows[0].find(".ic-toggle").exists()).toBe(false); // 第二条是 slider
+    expect(inlineRows[0].find(".ic-switch").exists()).toBe(false); // 第二条是 slider
     expect(inlineRows[0].find(".ic-slider").exists()).toBe(true);
     // 再点第二条 → 收起
     await wrapper.findAll(".sa-row")[1].trigger("click");

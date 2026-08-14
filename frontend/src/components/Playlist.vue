@@ -285,6 +285,13 @@ const browseMode = ref("songs");
 // 分组过滤：进入某歌手/专辑后的歌曲列表
 const browseFilter = ref(null); // { type: 'artist'|'album', value }
 
+// 供外部（search anything @pick）进入分组浏览：type='artists'|'albums'，value 为规范化名字
+function openBrowse(type, value) {
+  browseMode.value = type;
+  browseFilter.value = { type: type === "artists" ? "artist" : "album", value };
+}
+defineExpose({ openBrowse });
+
 const UNKNOWN_ARTIST = t("playlist.unknownArtist");
 const UNKNOWN_ALBUM = t("playlist.unknownAlbum");
 const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;

@@ -4,7 +4,7 @@ import { EQ_BANDS, EQ_PRESETS, _normalizeEqPreset } from "./useEq.js";
 import { loadLyric, reanchorKaraoke, currentLineIndex, nextLine, prevLine } from "./useLyric.js";
 import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
-import { useSearchAnything } from "./useSearchAnything.js";
+import { isSearchOpen } from "./searchState.js";
 import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
@@ -343,8 +343,7 @@ const HAS_MEDIA_SESSION = typeof navigator !== "undefined" && "mediaSession" in 
 const MEDIA_KEY_CODES = ["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious", "MediaStop"];
 
 // 输入框/文本域聚焦时不拦截（媒体键除外：即使输入框聚焦也应全局响应）
-// search anything 单例：搜索层打开时屏蔽播放快捷键
-const { isSearchOpen } = useSearchAnything();
+// search anything 搜索层打开时屏蔽播放快捷键（isSearchOpen 来自零依赖 searchState，避免循环依赖）
 const SHORTCUT_HANDLER = (e) => {
   // search anything 全屏搜索层打开时不响应播放快捷键（Space/←→/↑↓ 由搜索层消费）
   if (isSearchOpen.value) return;

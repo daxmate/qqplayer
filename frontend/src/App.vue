@@ -71,7 +71,7 @@
           <PanelLeftOpen :size="16" />
         </button>
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
-        <Playlist v-if="state.playlistOpen" class="panel playlist" />
+        <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
         <section class="center">
           <Cover :song="state.currentSong" />
           <Visualizer />
@@ -100,7 +100,7 @@
       <main v-else class="main karaoke" :class="panelClass">
         <ActivityBar v-if="panelsActive" class="activity-bar" />
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
-        <Playlist v-if="state.playlistOpen" class="panel playlist" />
+        <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
         <KaraokePanel
           class="panel karaoke-panel"
           :lyric="state.lyric"
@@ -124,12 +124,12 @@
     <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
     <LyricSpecModal />
     <!-- search anything 全屏搜索层本体（桌面/移动共用；v-if 由 isSearchOpen 单例控制） -->
-    <SearchAnything />
+    <SearchAnything @pick="onSearchPick" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Music2,
@@ -169,6 +169,7 @@ import {
   restoreLastPlayed,
   toggleControls,
   toggleMusicLib,
+  togglePlaylist,
   openLyricSpec,
   currentLineIndex,
   uiSettings,
@@ -234,6 +235,17 @@ function openMiniPlayer() {
     setTimeout(() => iframe.remove(), 1000);
   }
   refreshMiniStatus(); // 立即查一次，点亮更快
+}
+
+// search anything：歌手/专辑结果 → 打开 Playlist 分组浏览（@pick 由 App 根部实例触发）
+const playlistRef = ref(null);
+function onSearchPick(item) {
+  if (!state.playlistOpen) togglePlaylist();
+  nextTick(() => {
+    const type = item.kind === "artist" ? "artists" : "albums";
+    const value = item.kind === "artist" ? item.payload.artist : item.payload.album;
+    playlistRef.value?.openBrowse(type, value);
+  });
 }
 
 onMounted(() => {

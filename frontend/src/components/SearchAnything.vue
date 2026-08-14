@@ -289,7 +289,8 @@ function onRowClick(item) {
       break;
     case "artist":
     case "album":
-      // 分组浏览入口：留 onPick 桩，maintainer 集成时接（App 根部实例 @pick）
+      // 分组浏览：收起搜索层后交给 App 根部 @pick 处理（进入 Playlist 分组视图）
+      isSearchOpen.value = false;
       emit("pick", item);
       break;
   }

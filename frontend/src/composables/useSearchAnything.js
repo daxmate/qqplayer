@@ -4,6 +4,7 @@
 // 单例：模块顶层共享 ref，多次调用 useSearchAnything() 返回同一实例。
 import { ref, watch } from "vue";
 import { state } from "./usePlayer.js";
+import { isSearchOpen } from "./searchState.js";
 import { matchScore, kindRank } from "../utils/score.js";
 import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex.js";
 import i18n from "../locales/i18n.js";
@@ -21,7 +22,6 @@ const UNKNOWN_ALBUM = "未知专辑";
 const query = ref("");
 const results = ref([]);
 const loading = ref(false);
-const isSearchOpen = ref(false);
 
 let debounceTimer = null;
 let searchSeq = 0; // 请求序列号：过期响应丢弃（快速连续输入时，参照 OnlineSearch.vue）
