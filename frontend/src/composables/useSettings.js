@@ -86,6 +86,25 @@ export const DESKTOP_LYRIC_SCHEMES = [
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 
+// ============ 在线下载设置（后端存储：download namespace）============
+export const DOWNLOAD_SETTINGS_KEY = "qqplayer.downloadSettings.v1";
+
+// 音质选项（下载时使用的音质）：standard=标准 128k / exhigh=极高 320k / lossless=无损 FLAC / hires=Hi-Res
+// labelKey 文案在 settings.js（settings.downloadQuality.*）
+export const DOWNLOAD_QUALITY_OPTIONS = [
+  { key: "standard", labelKey: "settings.downloadQuality.standard" },
+  { key: "exhigh", labelKey: "settings.downloadQuality.exhigh" },
+  { key: "lossless", labelKey: "settings.downloadQuality.lossless" },
+  { key: "hires", labelKey: "settings.downloadQuality.hires" },
+];
+
+export const DOWNLOAD_SETTINGS_DEFAULTS = {
+  downloadDir: "", // 下载目录；空 = 下载到当前曲库
+  defaultQuality: "exhigh", // 默认音质：standard/exhigh/lossless/hires
+};
+
+export const downloadSettings = reactive({ ...DOWNLOAD_SETTINGS_DEFAULTS });
+
 // 桌面歌词设置并入统一 Settings 层（settingsSync.js）：load/save 走 GET/PUT /api/settings 的
 // desktopLyric namespace（主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享，localStorage 不通）
 // Swift 壳内歌词面板被原生关闭（✕/双击）时回写状态，主页面开关保持同步
@@ -166,6 +185,21 @@ applyAccent();
 applyCompact();
 applyCoverBlur();
 // 注：旧的 theme/miniTheme → /api/ui/settings 双写 watch（uiSyncTimer）已删除——统一 Settings 层全量管
+
+// 下载设置 localStorage 启动缓存（首屏不闪变；持久化由统一 Settings 层负责）
+function loadDownloadSettings() {
+  try {
+    const raw = localStorage.getItem(DOWNLOAD_SETTINGS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    for (const k of Object.keys(downloadSettings)) {
+      if (k in saved) downloadSettings[k] = saved[k];
+    }
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadDownloadSettings();
 
 function loadLyricSettings() {
   try {

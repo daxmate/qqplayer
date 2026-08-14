@@ -324,6 +324,43 @@
               </div>
             </section>
 
+            <!-- ============ 下载 ============ -->
+            <section v-else-if="tab === 'download'" class="settings-scroll">
+              <div class="group">
+                <div class="group-title">
+                  <Download :size="13" />
+                  {{ t("settings.download") }}
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.downloadDir") }}</div>
+                  <div class="setting-desc">{{ t("settings.downloadDirDesc") }}</div>
+                  <div class="setting-control">
+                    <input
+                      v-model="downloadSettings.downloadDir"
+                      class="lib-input"
+                      :placeholder="t('settings.downloadDirPlaceholder')"
+                      spellcheck="false"
+                    />
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.defaultQuality") }}</div>
+                  <div class="setting-desc">{{ t("settings.defaultQualityDesc") }}</div>
+                  <div class="ext-grid">
+                    <button
+                      v-for="q in DOWNLOAD_QUALITY_OPTIONS"
+                      :key="q.key"
+                      class="ext-chip"
+                      :class="{ on: downloadSettings.defaultQuality === q.key }"
+                      @click="downloadSettings.defaultQuality = q.key"
+                    >
+                      {{ t(q.labelKey) }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <!-- ============ 歌词 ============ -->
             <section v-else-if="tab === 'lyric'" class="settings-scroll">
               <!-- 子 tab：APP 歌词 / 桌面歌词 -->
@@ -1010,6 +1047,7 @@ import {
   FileAudio,
   Palette,
   Repeat2,
+  Download,
 } from "@lucide/vue";
 import {
   state,
@@ -1025,6 +1063,9 @@ import {
   setEqPreset,
   setEqGain,
   desktopLyricSettings,
+  downloadSettings,
+  DOWNLOAD_QUALITY_OPTIONS,
+  DOWNLOAD_SETTINGS_DEFAULTS,
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
   PLAYBACK_SETTINGS_DEFAULTS,
@@ -1136,6 +1177,7 @@ function toggleSetting(key) {
 const categories = [
   { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
   { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
+  { key: "download", labelKey: "settings.category.download", icon: Download },
   { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
   { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
   { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
@@ -1233,6 +1275,7 @@ function resetAll() {
   Object.assign(playbackSettings, PLAYBACK_SETTINGS_DEFAULTS);
   Object.assign(lyricSettings, LYRIC_SETTINGS_DEFAULTS);
   Object.assign(uiSettings, UI_SETTINGS_DEFAULTS);
+  Object.assign(downloadSettings, DOWNLOAD_SETTINGS_DEFAULTS);
   saveLib({
     audioExts: audioExtOptions,
     ignoreHidden: true,

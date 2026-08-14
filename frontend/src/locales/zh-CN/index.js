@@ -10,6 +10,7 @@ import karaoke from "./karaoke.js";
 import lyric from "./lyric.js";
 import spec from "./spec.js";
 import settings from "./settings.js";
+import online from "./online.js";
 import mobile from "./mobile.js";
 import smart from "./smart.js";
 import eq from "./eq.js";
@@ -25,6 +26,7 @@ export default {
   ...lyric,
   ...spec,
   ...settings,
+  ...online,
   ...mobile,
   ...smart,
   ...eq,

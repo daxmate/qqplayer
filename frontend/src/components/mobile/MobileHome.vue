@@ -22,6 +22,13 @@
     </header>
 
     <div class="mh-scroll">
+      <!-- 在线搜索入口（本地 + 在线分组，复用桌面搜索面板组件） -->
+      <OnlineSearch
+        class="mh-search"
+        variant="mobile"
+        @open-player="$emit('open', { name: 'player' })"
+      />
+
       <!-- 九张入口卡片 -->
       <div class="mh-grid">
         <button
@@ -194,6 +201,7 @@ import {
 import { state, isFavorite } from "../../composables/usePlayer.js";
 import { SMART_VIEW_LIMIT } from "../../composables/useSmartViews.js";
 import MobileSmartList from "./MobileSmartList.vue";
+import OnlineSearch from "../OnlineSearch.vue";
 
 defineEmits(["open", "open-settings"]);
 
@@ -319,6 +327,9 @@ function showToast(msg) {
   overflow-y: auto;
   padding: 8px 16px 16px;
   -webkit-overflow-scrolling: touch;
+}
+.mh-search {
+  margin-bottom: 12px;
 }
 .mh-grid {
   display: grid;
