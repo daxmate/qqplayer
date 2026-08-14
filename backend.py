@@ -52,7 +52,6 @@ DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
-DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
 # 播放记录滚动保留上限（超了删最旧）
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
@@ -98,69 +97,72 @@ DEFAULT_AUDIO_EXTS = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"]
 AUDIO_EXTS = set(DEFAULT_AUDIO_EXTS)
 LYRIC_EXTS = {".srt", ".lrc"}
 
-# 音乐库设置（持久化到用户数据目录 settings.json）
+# ============ 统一设置（单一 settings.json · 6 namespace）============
+# 存储结构: {"library": {...}, "ui": {...}, "lyric": {...}, "playback": {...},
+#            "desktopLyric": {...}, "player": {...}}
+# 注意：旧 library 设置文件也叫 settings.json（与新区文件同名）！
+# 迁移时旧文件先读入内存再写新结构，不能先覆盖后读（见 migrate_legacy_settings）。
+SETTINGS_FILE = DATA_DIR / "settings.json"
+# 遗留单文件设置（一次性迁移数据源；迁移后只读保留作备份，不再写入）
+UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
+DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
+# 内存缓存：完整 6 namespace 结构
+_settings: dict | None = None
+
+# ---- 各 namespace 默认值 ----
+# library：现有 LIBRARY_SETTINGS_DEFAULTS 4 字段
 LIBRARY_SETTINGS_DEFAULTS = {
     "audioExts": DEFAULT_AUDIO_EXTS,
     "ignoreHidden": True,  # 忽略隐藏文件/文件夹
     "autoRefresh": True,  # watchdog 自动刷新（库变动自动重扫）
     "autoScanOnStart": True,  # 启动时自动扫描歌曲库
 }
-SETTINGS_FILE = DATA_DIR / "settings.json"
-_settings: dict | None = None
-
-
-# ============ 音乐库设置 ============
-def load_settings() -> dict:
-    """读取音乐库设置（内存缓存；文件缺失/损坏时回落默认值）"""
-    global _settings
-    if _settings is not None:
-        return _settings
-    data = {}
-    try:
-        if SETTINGS_FILE.exists():
-            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                data = raw
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    _settings = dict(LIBRARY_SETTINGS_DEFAULTS)
-    for k in LIBRARY_SETTINGS_DEFAULTS:
-        if k in data:
-            _settings[k] = _normalize_setting(k, data[k])
-    return _settings
-
-
-def _normalize_setting(key: str, value):
-    """按字段类型规范化设置值，非法值回落默认"""
-    default = LIBRARY_SETTINGS_DEFAULTS[key]
-    if key == "audioExts":
-        if isinstance(value, list) and value:
-            exts = [str(e).lower() for e in value if isinstance(e, str) and e.startswith(".")]
-            if exts:
-                return exts
-        return default
-    if isinstance(value, bool):
-        return value
-    return default
-
-
-def save_settings(patch: dict) -> dict:
-    """合并保存设置到磁盘并更新内存缓存（返回规范化后的完整设置）"""
-    global _settings
-    merged = dict(load_settings())
-    for k in LIBRARY_SETTINGS_DEFAULTS:
-        if k in patch:
-            merged[k] = _normalize_setting(k, patch[k])
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        pass
-    _settings = merged
-    return merged
-
-
-# ============ 桌面歌词设置（后端存储：主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享）============
+# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 8 字段（只读拷贝）
+UI_SETTINGS_DEFAULTS = {
+    "showSongInfo": False,  # 跟唱模式歌词面板顶部显示当前歌曲信息
+    "karaokeShowTime": False,  # 跟唱模式每句显示起止时间戳
+    "karaokeShowNum": True,  # 跟唱模式每句左侧显示行号
+    "theme": "dark",  # 主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
+    "miniTheme": "theme",  # 迷你窗外观：'theme' 跟随主窗口 | 'dark' 深色 | 'light' 浅色
+    "accent": "orange",  # 强调色预设 key
+    "coverBlur": False,  # 封面模糊背景
+    "compact": False,  # 紧凑模式
+}
+# lyric：前端 useSettings.js LYRIC_SETTINGS_DEFAULTS 全部 15 字段
+LYRIC_SETTINGS_DEFAULTS = {
+    "fontFamily": "system",  # 'system' | 'serif' | 'rounded'
+    "fontSize": 20,  # 当前句基准字号（px）
+    "align": "left",  # 'left' | 'center' | 'right'
+    "engine": "amll",  # 歌词滚动引擎：'amll' | 'spring' | 'native'
+    "showRoma": True,  # 显示罗马音
+    "showZh": True,  # 显示中文翻译
+    "showSec": True,  # 显示段落标题
+    "focusPos": 0.5,  # 焦点句停靠位置（0~1）
+    "fadeMask": True,  # 上下渐隐遮罩
+    "autoScroll": True,  # 切句自动跟随滚动
+    "offset": 0,  # 歌词延迟校准（秒，-2~2）
+    "source": "local",  # 'local' 本地优先 | 'online' 在线优先
+    "colorScheme": "theme",  # 配色方案 key
+    "jpColor": "",  # 主行文字颜色（自定义）
+    "zhColor": "",  # 翻译行文字颜色（自定义）
+}
+# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 13 字段
+PLAYBACK_SETTINGS_DEFAULTS = {
+    "playMode": "order",  # 'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
+    "resumeLast": True,  # 启动时恢复上次播放的歌曲与进度
+    "rememberVolume": True,  # 记住音量
+    "fadeSec": 0,  # 切歌淡入淡出时长（秒）；0 = 关闭
+    "karaokeNextKey": "KeyN",  # 跟唱：下一句快捷键
+    "karaokePrevKey": "KeyP",  # 跟唱：上一句快捷键
+    "eqEnabled": False,  # 均衡器开关
+    "eqPreset": "flat",  # 均衡器预设 key（'custom' = 用户自定义）
+    "eqGains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 自定义增益（dB，-12~12，10 段）
+    "abVisual": True,  # AB 循环区间可视化
+    "abLoopCountOn": True,  # AB 循环计数（防走开安全阀）
+    "abLoopMaxCount": 10,  # AB 循环计数上限（1-20）
+    "visualizerEnabled": True,  # 频谱可视化开关
+}
+# desktopLyric：现有 DESKTOP_LYRIC_DEFAULTS 11 字段（不动）
 DESKTOP_LYRIC_DEFAULTS = {
     "enabled": False,
     "showZh": True,
@@ -174,98 +176,288 @@ DESKTOP_LYRIC_DEFAULTS = {
     "jpColor": "#ffffff",
     "zhColor": "#ffffff",
 }
-
-_desktop_lyric: dict | None = None
-
-
-# ============ 界面主题设置（主窗口与迷你窗跨引擎共享，存后端）============
-UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
-UI_SETTINGS_DEFAULTS = {
-    "theme": "dark",  # 主窗口主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
-    "miniTheme": "theme",  # 迷你窗外观：'theme' 跟随主窗口 | 'dark' 深色 | 'light' 浅色
+# player：播放器运行时状态（volume 数字 0~1；panel/controls 布尔；lastPlayed 对象或 null）
+PLAYER_SETTINGS_DEFAULTS = {
+    "volume": 1.0,
+    "panel": True,
+    "controls": False,
+    "lastPlayed": None,
 }
 
-_ui_settings: dict | None = None
+_SETTINGS_NAMESPACES = ("library", "ui", "lyric", "playback", "desktopLyric", "player")
+
+
+# ============ 字段校验器（合法值保留/规范化，非法值回落默认）============
+def _norm_bool(v, default):
+    """布尔：类型非法回落默认"""
+    return v if isinstance(v, bool) else default
+
+
+def _norm_str(v, default, allowed=None):
+    """字符串：类型非法回落默认；allowed 给定时必须是其中一员"""
+    if isinstance(v, str) and (allowed is None or v in allowed):
+        return v
+    return default
+
+
+def _norm_num(v, default, lo=None, hi=None, integer=False):
+    """数字：类型非法回落默认；越界 clamp（eqGains/volume 等明确要求 clamp 的字段用）"""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return default
+    if lo is not None and v < lo:
+        v = lo
+    if hi is not None and v > hi:
+        v = hi
+    return int(v) if integer else v
+
+
+def _norm_exts(v, default):
+    """audioExts：字符串扩展名列表（小写、带点）；过滤后非空才采纳，否则回落默认"""
+    if isinstance(v, list) and v:
+        exts = [str(e).lower() for e in v if isinstance(e, str) and e.startswith(".")]
+        if exts:
+            return exts
+    return default
+
+
+def _norm_eq_gains(v):
+    """eqGains：必须是长度 10 数字数组（clamp ±12）；非法回落全 0"""
+    default = list(PLAYBACK_SETTINGS_DEFAULTS["eqGains"])
+    if not isinstance(v, list) or len(v) != 10:
+        return default
+    gains = []
+    for g in v:
+        if isinstance(g, bool) or not isinstance(g, (int, float)):
+            return default
+        gains.append(min(12.0, max(-12.0, float(g))))
+    return gains
+
+
+def _norm_last_played(v):
+    """lastPlayed：{path: str, time: number} 或 null；非法结构回落 null"""
+    if isinstance(v, dict) and isinstance(v.get("path"), str):
+        t = v.get("time")
+        if isinstance(t, (int, float)) and not isinstance(t, bool):
+            return {"path": v["path"], "time": t}
+    return None
+
+
+# 每 namespace 字段规范: {字段: (默认值, 校验器)}；不在白名单的字段一律忽略
+_SETTINGS_SPEC = {
+    "library": {
+        "audioExts": (LIBRARY_SETTINGS_DEFAULTS["audioExts"], _norm_exts),
+        "ignoreHidden": (LIBRARY_SETTINGS_DEFAULTS["ignoreHidden"], _norm_bool),
+        "autoRefresh": (LIBRARY_SETTINGS_DEFAULTS["autoRefresh"], _norm_bool),
+        "autoScanOnStart": (LIBRARY_SETTINGS_DEFAULTS["autoScanOnStart"], _norm_bool),
+    },
+    "ui": {
+        "showSongInfo": (UI_SETTINGS_DEFAULTS["showSongInfo"], _norm_bool),
+        "karaokeShowTime": (UI_SETTINGS_DEFAULTS["karaokeShowTime"], _norm_bool),
+        "karaokeShowNum": (UI_SETTINGS_DEFAULTS["karaokeShowNum"], _norm_bool),
+        "theme": ("dark", lambda v, d: _norm_str(v, d, allowed={"dark", "light", "auto"})),
+        "miniTheme": ("theme", lambda v, d: _norm_str(v, d, allowed={"theme", "dark", "light"})),
+        "accent": (
+            "orange",
+            lambda v, d: _norm_str(v, d, allowed={"orange", "blue", "green", "purple", "pink", "teal"}),
+        ),
+        "coverBlur": (UI_SETTINGS_DEFAULTS["coverBlur"], _norm_bool),
+        "compact": (UI_SETTINGS_DEFAULTS["compact"], _norm_bool),
+    },
+    "lyric": {
+        "fontFamily": ("system", lambda v, d: _norm_str(v, d, allowed={"system", "serif", "rounded"})),
+        "fontSize": (20, lambda v, d: _norm_num(v, d, lo=14, hi=30)),
+        "align": ("left", lambda v, d: _norm_str(v, d, allowed={"left", "center", "right"})),
+        "engine": ("amll", lambda v, d: _norm_str(v, d, allowed={"amll", "spring", "native"})),
+        "showRoma": (True, _norm_bool),
+        "showZh": (True, _norm_bool),
+        "showSec": (True, _norm_bool),
+        "focusPos": (0.5, lambda v, d: _norm_num(v, d, lo=0.0, hi=1.0)),
+        "fadeMask": (True, _norm_bool),
+        "autoScroll": (True, _norm_bool),
+        "offset": (0, lambda v, d: _norm_num(v, d, lo=-2.0, hi=2.0)),
+        "source": ("local", lambda v, d: _norm_str(v, d, allowed={"local", "online"})),
+        "colorScheme": ("theme", _norm_str),
+        "jpColor": ("", _norm_str),
+        "zhColor": ("", _norm_str),
+    },
+    "playback": {
+        "playMode": ("order", lambda v, d: _norm_str(v, d, allowed={"order", "shuffle", "repeatOne"})),
+        "resumeLast": (True, _norm_bool),
+        "rememberVolume": (True, _norm_bool),
+        "fadeSec": (0, lambda v, d: _norm_num(v, d, lo=0.0, hi=5.0)),
+        "karaokeNextKey": ("KeyN", _norm_str),
+        "karaokePrevKey": ("KeyP", _norm_str),
+        "eqEnabled": (False, _norm_bool),
+        "eqPreset": (
+            "flat",
+            lambda v, d: _norm_str(v, d, allowed={"flat", "pop", "rock", "jazz", "classical", "bass", "vocal", "custom"}),
+        ),
+        "eqGains": (PLAYBACK_SETTINGS_DEFAULTS["eqGains"], lambda v, d: _norm_eq_gains(v)),
+        "abVisual": (True, _norm_bool),
+        "abLoopCountOn": (True, _norm_bool),
+        "abLoopMaxCount": (10, lambda v, d: _norm_num(v, d, lo=1, hi=20, integer=True)),
+        "visualizerEnabled": (True, _norm_bool),
+    },
+    "desktopLyric": {
+        "enabled": (False, _norm_bool),
+        "showZh": (True, _norm_bool),
+        "fontFamily": ("system", lambda v, d: _norm_str(v, d, allowed={"system", "serif", "rounded"})),
+        "fontSize": (26, lambda v, d: _norm_num(v, d, lo=18, hi=40)),
+        "zhSize": (16, lambda v, d: _norm_num(v, d, lo=12, hi=26)),
+        "align": ("center", lambda v, d: _norm_str(v, d, allowed={"left", "center", "right"})),
+        "width": (460, lambda v, d: _norm_num(v, d, lo=300, hi=800)),
+        "height": (140, lambda v, d: _norm_num(v, d, lo=80, hi=300)),
+        "colorScheme": ("white", _norm_str),
+        "jpColor": ("#ffffff", _norm_str),
+        "zhColor": ("#ffffff", _norm_str),
+    },
+    "player": {
+        "volume": (1.0, lambda v, d: _norm_num(v, d, lo=0.0, hi=1.0)),
+        "panel": (True, _norm_bool),
+        "controls": (False, _norm_bool),
+        "lastPlayed": (None, lambda v, d: _norm_last_played(v)),
+    },
+}
+
+
+def _norm_namespace(ns: str, data: dict) -> dict:
+    """按 spec 规范化单个 namespace：白名单字段 + 类型/取值校验，非法值回落默认"""
+    spec = _SETTINGS_SPEC[ns]
+    out = {}
+    for k, (default, norm) in spec.items():
+        out[k] = norm(data[k], default) if k in data else default
+    return out
+
+
+def load_all_settings() -> dict:
+    """读取统一设置（内存缓存；文件缺失/损坏时回落各 namespace 默认值）"""
+    global _settings
+    if _settings is not None:
+        return _settings
+    data = {}
+    try:
+        if SETTINGS_FILE.exists():
+            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    merged = {}
+    for ns in _SETTINGS_NAMESPACES:
+        raw_ns = data.get(ns) if isinstance(data.get(ns), dict) else {}
+        merged[ns] = _norm_namespace(ns, raw_ns)
+    _settings = merged
+    return merged
+
+
+def save_all_settings(patch: dict) -> dict:
+    """namespace→字段两级深合并保存并更新缓存（只合并传入字段，未传字段不动；未知 namespace 忽略）"""
+    global _settings
+    merged = dict(load_all_settings())
+    for ns in _SETTINGS_NAMESPACES:
+        if ns in patch and isinstance(patch[ns], dict):
+            merged[ns] = _norm_namespace(ns, {**merged[ns], **patch[ns]})
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    _settings = merged
+    return merged
+
+
+def migrate_legacy_settings() -> None:
+    """旧三文件一次性迁移 → 统一 settings.json（幂等；旧文件保留不删作备份）
+
+    旧 library 文件就叫 settings.json（与新区文件同名）！所以必须先把旧文件读进内存，
+    再写新结构（library 数据并入 library namespace），绝不能先覆盖后读。
+    新文件已是新格式（顶层含 namespace 键）→ 整体跳过（幂等）。
+    """
+    global _settings
+    # 1) 读旧 library 文件（若已是新格式则说明已迁移，跳过）
+    legacy_library: dict = {}
+    if SETTINGS_FILE.exists():
+        try:
+            existing = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = None
+        if isinstance(existing, dict) and any(k in existing for k in _SETTINGS_NAMESPACES):
+            return  # 已是统一格式
+        if isinstance(existing, dict):
+            legacy_library = existing
+    # 2) 旧 ui / 桌面歌词文件先读入内存（此时还没动新文件，安全）
+    legacy_ui: dict = {}
+    if UI_SETTINGS_FILE.exists():
+        try:
+            raw = json.loads(UI_SETTINGS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                legacy_ui = raw
+        except (OSError, json.JSONDecodeError):
+            pass
+    legacy_desktop: dict = {}
+    if DESKTOP_LYRIC_FILE.exists():
+        try:
+            raw = json.loads(DESKTOP_LYRIC_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                legacy_desktop = raw
+        except (OSError, json.JSONDecodeError):
+            pass
+    # 3) 无任何旧数据 → 不写文件（保持默认）
+    if not legacy_library and not legacy_ui and not legacy_desktop:
+        return
+    # 4) 组装新结构：默认值 + 旧数据（library 全量字段；ui 只迁 theme/miniTheme；desktopLyric 全量）
+    merged = {ns: _norm_namespace(ns, {}) for ns in _SETTINGS_NAMESPACES}
+    merged["library"] = _norm_namespace("library", legacy_library)
+    merged["ui"] = _norm_namespace(
+        "ui", {k: v for k, v in legacy_ui.items() if k in ("theme", "miniTheme")}
+    )
+    merged["desktopLyric"] = _norm_namespace("desktopLyric", legacy_desktop)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return
+    _settings = merged
+
+
+# ============ 兼容层（旧函数名保留，内部操作统一存储；现有调用方零改动）============
+def load_settings() -> dict:
+    """读取音乐库设置（library namespace；内存缓存 + 默认值合并）"""
+    return dict(load_all_settings()["library"])
+
+
+def _normalize_setting(key: str, value):
+    """按字段类型规范化设置值，非法值回落默认（library namespace 校验入口）"""
+    spec = _SETTINGS_SPEC["library"]
+    if key not in spec:
+        return value
+    default, norm = spec[key]
+    return norm(value, default)
+
+
+def save_settings(patch: dict) -> dict:
+    """合并保存音乐库设置到统一存储并更新内存缓存（返回规范化后的完整 library 设置）"""
+    return dict(save_all_settings({"library": patch})["library"])
 
 
 def load_ui_settings() -> dict:
-    """读取主题设置（内存缓存；文件缺失/损坏时回落默认值）"""
-    global _ui_settings
-    if _ui_settings is not None:
-        return _ui_settings
-    data = {}
-    try:
-        if UI_SETTINGS_FILE.exists():
-            raw = json.loads(UI_SETTINGS_FILE.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                data = raw
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    merged = dict(UI_SETTINGS_DEFAULTS)
-    for k in UI_SETTINGS_DEFAULTS:
-        if k in data and isinstance(data[k], str):
-            merged[k] = data[k]
-    _ui_settings = merged
-    return merged
+    """读取界面设置（ui namespace：前端 8 字段；主窗口与迷你窗跨引擎共享）"""
+    return dict(load_all_settings()["ui"])
 
 
 def save_ui_settings(patch: dict) -> dict:
-    """合并保存主题设置到磁盘并更新内存缓存"""
-    global _ui_settings
-    merged = dict(load_ui_settings())
-    for k in UI_SETTINGS_DEFAULTS:
-        if k in patch and isinstance(patch[k], str):
-            merged[k] = patch[k]
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        UI_SETTINGS_FILE.write_text(
-            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except OSError:
-        pass
-    _ui_settings = merged
-    return merged
+    """合并保存界面设置到统一存储（PUT 现在可接受全部 8 个 ui 字段）"""
+    return dict(save_all_settings({"ui": patch})["ui"])
 
 
 def load_desktop_lyric_settings() -> dict:
-    """读取桌面歌词设置（内存缓存；文件缺失/损坏时回落默认值）"""
-    global _desktop_lyric
-    if _desktop_lyric is not None:
-        return _desktop_lyric
-    data = {}
-    try:
-        if DESKTOP_LYRIC_FILE.exists():
-            raw = json.loads(DESKTOP_LYRIC_FILE.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                data = raw
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    merged = dict(DESKTOP_LYRIC_DEFAULTS)
-    for k in DESKTOP_LYRIC_DEFAULTS:
-        if k in data:
-            v = data[k]
-            if isinstance(v, (bool, str, int, float)):
-                merged[k] = v
-    _desktop_lyric = merged
-    return merged
+    """读取桌面歌词设置（desktopLyric namespace；主播放器与悬浮窗跨引擎共享）"""
+    return dict(load_all_settings()["desktopLyric"])
 
 
 def save_desktop_lyric_settings(patch: dict) -> dict:
-    """合并保存桌面歌词设置到磁盘并更新内存缓存"""
-    global _desktop_lyric
-    merged = dict(load_desktop_lyric_settings())
-    for k in DESKTOP_LYRIC_DEFAULTS:
-        if k in patch:
-            merged[k] = patch[k]
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        DESKTOP_LYRIC_FILE.write_text(
-            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except OSError:
-        pass
-    _desktop_lyric = merged
-    return merged
+    """合并保存桌面歌词设置到统一存储"""
+    return dict(save_all_settings({"desktopLyric": patch})["desktopLyric"])
 
 
 # ============ 歌曲库扫描 ============
@@ -402,7 +594,8 @@ def stop_watcher():
 
 
 def init_library():
-    """启动时按设置初始化：预热扫描（autoScanOnStart）+ 按需启动 watchdog（autoRefresh）"""
+    """启动时按设置初始化：旧三文件一次性迁移 + 预热扫描 + 按需启动 watchdog"""
+    migrate_legacy_settings()
     settings = load_settings()
     if settings["autoScanOnStart"]:
         scan_library()
@@ -745,6 +938,18 @@ def api_now_playing_get():
     """返回当前播放状态（悬浮窗 500ms 轮询）"""
     with _now_playing_lock:
         return dict(_now_playing)
+
+
+@app.get("/api/settings")
+def api_settings_get():
+    """返回统一设置：6 namespace 全量（每 namespace 合并默认值后返回）"""
+    return {"settings": load_all_settings()}
+
+
+@app.put("/api/settings")
+def api_settings_put(body: dict):
+    """部分更新统一设置（namespace→字段两级深合并，只改传入字段），返回合并后全量"""
+    return {"settings": save_all_settings(body or {})}
 
 
 @app.get("/api/desktop-lyric/settings")

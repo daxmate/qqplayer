@@ -74,8 +74,10 @@ def song_library(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _isolate_settings(tmp_path, monkeypatch):
-    """音乐库设置隔离：写临时文件不碰真实用户目录；每个测试后重置内存缓存"""
+    """设置存储隔离：统一 settings.json + 两个遗留文件都写临时目录，不碰真实用户数据；每测试后重置缓存"""
     monkeypatch.setattr(backend, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(backend, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
+    monkeypatch.setattr(backend, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
     backend._settings = None
     yield
 
@@ -795,6 +797,227 @@ def test_init_library_respects_settings(song_library, monkeypatch):
     assert calls == {"scan": 1, "watch": 1}  # 不再额外调用
 
 
+# ============ 统一设置（6 namespace Settings API）============
+def test_api_settings_get_all_namespaces():
+    """GET /api/settings 返回 6 namespace 全量，每 namespace 合并默认值"""
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    s = r.json()["settings"]
+    assert set(s) == {"library", "ui", "lyric", "playback", "desktopLyric", "player"}
+    # library 4 字段
+    assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
+    assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
+    # ui 8 字段
+    assert set(s["ui"]) == {
+        "showSongInfo", "karaokeShowTime", "karaokeShowNum", "theme",
+        "miniTheme", "accent", "coverBlur", "compact",
+    }
+    assert s["ui"]["theme"] == "dark" and s["ui"]["accent"] == "orange"
+    # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
+    assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
+    assert s["lyric"]["fontSize"] == 20 and s["lyric"]["focusPos"] == 0.5 and s["lyric"]["offset"] == 0
+    # playback 13 字段（与前端 PLAYBACK_SETTINGS_DEFAULTS 一致）
+    assert set(s["playback"]) == set(backend.PLAYBACK_SETTINGS_DEFAULTS)
+    assert s["playback"]["playMode"] == "order" and s["playback"]["eqGains"] == [0] * 10
+    # desktopLyric 11 字段
+    assert set(s["desktopLyric"]) == set(backend.DESKTOP_LYRIC_DEFAULTS)
+    assert s["desktopLyric"]["fontSize"] == 26
+    # player 4 字段
+    assert s["player"] == {"volume": 1.0, "panel": True, "controls": False, "lastPlayed": None}
+
+
+def test_api_settings_put_deep_merge():
+    """PUT 两级深合并：只改传入字段，未传字段不动；返回合并后全量"""
+    r = client.put(
+        "/api/settings", json={"lyric": {"fontSize": 24}, "player": {"volume": 0.5}}
+    )
+    assert r.status_code == 200
+    s = r.json()["settings"]
+    assert s["lyric"]["fontSize"] == 24
+    assert s["player"]["volume"] == 0.5
+    assert s["lyric"]["align"] == "left"  # 未传字段保持默认
+    assert s["player"]["panel"] is True
+    # 再改另一批，之前的改动保留
+    r = client.put("/api/settings", json={"lyric": {"offset": 1.2}})
+    s = r.json()["settings"]
+    assert s["lyric"]["fontSize"] == 24  # 保留
+    assert s["lyric"]["offset"] == 1.2
+    # 落盘后重置缓存（模拟重启）再读
+    backend._settings = None
+    s = client.get("/api/settings").json()["settings"]
+    assert s["lyric"]["fontSize"] == 24 and s["lyric"]["offset"] == 1.2
+    assert s["player"]["volume"] == 0.5
+
+
+def test_api_settings_put_validation():
+    """字段校验：非法值回落默认；eqGains clamp ±12；volume clamp 0~1；lastPlayed 非法回落 null"""
+    r = client.put(
+        "/api/settings",
+        json={
+            "lyric": {"fontSize": "big", "align": "diagonal", "colorScheme": "neon"},
+            "ui": {"theme": 123, "compact": "yes"},
+            "playback": {"eqGains": [99] * 10, "abLoopMaxCount": 0, "playMode": "weird"},
+            "player": {"volume": 5, "panel": "x", "lastPlayed": {"path": 1}},
+        },
+    )
+    s = r.json()["settings"]
+    assert s["lyric"]["fontSize"] == 20  # 非法类型回落默认
+    assert s["lyric"]["align"] == "left"
+    assert s["lyric"]["colorScheme"] == "neon"  # 合法字符串保留
+    assert s["ui"]["theme"] == "dark"
+    assert s["ui"]["compact"] is False
+    assert s["playback"]["eqGains"] == [12.0] * 10  # clamp 到 +12
+    assert s["playback"]["abLoopMaxCount"] == 1  # 越界 clamp 到 1~20（与前端一致）
+    assert s["playback"]["playMode"] == "order"
+    assert s["player"]["volume"] == 1.0  # clamp 0~1
+    assert s["player"]["panel"] is True
+    assert s["player"]["lastPlayed"] is None  # 非法结构回落 null
+
+    # eqGains 长度不对 / 含非数字 → 全 0；负值 clamp 到 -12
+    r = client.put("/api/settings", json={"playback": {"eqGains": [1, 2]}})
+    assert r.json()["settings"]["playback"]["eqGains"] == [0] * 10
+    r = client.put("/api/settings", json={"playback": {"eqGains": [1, "x"] * 5}})
+    assert r.json()["settings"]["playback"]["eqGains"] == [0] * 10
+    r = client.put("/api/settings", json={"playback": {"eqGains": [-99] * 10}})
+    assert r.json()["settings"]["playback"]["eqGains"] == [-12.0] * 10
+
+    # lastPlayed 合法结构保留
+    r = client.put(
+        "/api/settings", json={"player": {"lastPlayed": {"path": "/a/b.mp3", "time": 12.5}}}
+    )
+    assert r.json()["settings"]["player"]["lastPlayed"] == {"path": "/a/b.mp3", "time": 12.5}
+
+
+def test_api_settings_put_unknown_namespace_ignored():
+    """未知 namespace 忽略；namespace 值非对象忽略"""
+    r = client.put(
+        "/api/settings", json={"hack": {"x": 1}, "library": 123, "player": {"volume": 0.3}}
+    )
+    s = r.json()["settings"]
+    assert "hack" not in s
+    assert s["player"]["volume"] == 0.3
+    assert s["library"]["ignoreHidden"] is True  # 原值保留（默认）
+
+
+def test_migrate_legacy_settings():
+    """旧三文件一次性迁移：旧 settings.json(library) + ui_settings.json + desktop_lyric.json → 统一结构"""
+    # 造旧格式文件（autouse fixture 已把三个路径隔离到 tmp_path）
+    backend.SETTINGS_FILE.write_text(
+        json.dumps({"audioExts": [".mp3"], "ignoreHidden": False}), encoding="utf-8"
+    )
+    backend.UI_SETTINGS_FILE.write_text(
+        json.dumps({"theme": "light", "miniTheme": "dark", "extra": 1}), encoding="utf-8"
+    )
+    backend.DESKTOP_LYRIC_FILE.write_text(
+        json.dumps({"enabled": True, "fontSize": 30}), encoding="utf-8"
+    )
+    backend.migrate_legacy_settings()
+    s = backend.load_all_settings()
+    # library 数据并入 library namespace
+    assert s["library"]["audioExts"] == [".mp3"]
+    assert s["library"]["ignoreHidden"] is False
+    assert s["library"]["autoRefresh"] is True  # 默认保留
+    # ui 只迁 theme/miniTheme，未知字段丢弃
+    assert s["ui"]["theme"] == "light"
+    assert s["ui"]["miniTheme"] == "dark"
+    assert "extra" not in s["ui"]
+    assert s["ui"]["accent"] == "orange"  # 未迁移字段用默认
+    # desktopLyric 全量迁移
+    assert s["desktopLyric"]["enabled"] is True
+    assert s["desktopLyric"]["fontSize"] == 30
+    # 旧文件保留不删（备份）
+    assert backend.SETTINGS_FILE.exists()
+    assert backend.UI_SETTINGS_FILE.exists()
+    assert backend.DESKTOP_LYRIC_FILE.exists()
+
+
+def test_migrate_legacy_settings_idempotent():
+    """迁移幂等：重复执行结果不变；新格式文件已存在 → 整体跳过不再覆盖"""
+    backend.SETTINGS_FILE.write_text(json.dumps({"audioExts": [".mp3"]}), encoding="utf-8")
+    backend.migrate_legacy_settings()
+    first = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
+    assert set(first) == {"library", "ui", "lyric", "playback", "desktopLyric", "player"}
+    backend._settings = None
+    backend.migrate_legacy_settings()  # 再跑一次
+    second = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
+    assert first == second
+    # 已是新格式 → 跳过，后续改动不被覆盖
+    first["library"]["autoRefresh"] = False
+    backend.SETTINGS_FILE.write_text(json.dumps(first), encoding="utf-8")
+    backend._settings = None
+    backend.migrate_legacy_settings()
+    assert backend.load_all_settings()["library"]["autoRefresh"] is False
+
+
+def test_migrate_legacy_settings_no_data_noop():
+    """无任何旧数据 → 不写文件（保持默认）"""
+    backend.migrate_legacy_settings()
+    assert not backend.SETTINGS_FILE.exists()
+
+
+def test_migrate_legacy_settings_keeps_player_namespace():
+    """迁移时 player namespace 用默认值；迁移后写入新值不被旧文件覆盖"""
+    backend.SETTINGS_FILE.write_text(json.dumps({"audioExts": [".mp3"]}), encoding="utf-8")
+    backend.migrate_legacy_settings()
+    backend.save_all_settings({"player": {"volume": 0.7, "lastPlayed": {"path": "/x.mp3", "time": 3}}})
+    backend._settings = None
+    backend.migrate_legacy_settings()  # 新格式已存在 → 跳过
+    s = backend.load_all_settings()
+    assert s["player"]["volume"] == 0.7
+    assert s["player"]["lastPlayed"] == {"path": "/x.mp3", "time": 3}
+
+
+# ============ 兼容层：旧三端点读写统一存储 ============
+def test_compat_ui_settings_reads_unified_store():
+    """GET/PUT /api/ui/settings 读写统一 settings.json 的 ui namespace（现可接受全部 8 字段）"""
+    client.put(
+        "/api/settings", json={"ui": {"theme": "light", "accent": "blue", "compact": True}}
+    )
+    s = client.get("/api/ui/settings").json()["settings"]
+    assert s["theme"] == "light" and s["accent"] == "blue" and s["compact"] is True
+    # 兼容层写 → 新区读
+    client.put("/api/ui/settings", json={"miniTheme": "dark"})
+    s = client.get("/api/settings").json()["settings"]["ui"]
+    assert s["miniTheme"] == "dark" and s["theme"] == "light"
+    # 兼容层 PUT 接受全部 8 个 ui 字段
+    client.put(
+        "/api/ui/settings",
+        json={"showSongInfo": True, "karaokeShowTime": True, "karaokeShowNum": False, "coverBlur": True},
+    )
+    s = client.get("/api/ui/settings").json()["settings"]
+    assert s["showSongInfo"] is True
+    assert s["karaokeShowTime"] is True
+    assert s["karaokeShowNum"] is False
+    assert s["coverBlur"] is True
+    # 非法字段忽略（回落默认）
+    client.put("/api/ui/settings", json={"theme": 999})
+    assert client.get("/api/ui/settings").json()["settings"]["theme"] == "dark"
+
+
+def test_compat_desktop_lyric_settings_reads_unified_store():
+    """GET/PUT /api/desktop-lyric/settings 读写统一存储的 desktopLyric namespace"""
+    client.put("/api/settings", json={"desktopLyric": {"enabled": True, "fontSize": 30}})
+    s = client.get("/api/desktop-lyric/settings").json()["settings"]
+    assert s["enabled"] is True and s["fontSize"] == 30
+    # 兼容层写 → 新区读
+    client.put("/api/desktop-lyric/settings", json={"align": "right"})
+    s = client.get("/api/settings").json()["settings"]["desktopLyric"]
+    assert s["align"] == "right" and s["enabled"] is True
+
+
+def test_compat_library_settings_reads_unified_store(song_library):
+    """GET/PUT /api/library/settings 读写统一存储的 library namespace（扫描副作用保持）"""
+    client.put(
+        "/api/settings", json={"library": {"audioExts": [".flac"], "autoRefresh": False}}
+    )
+    s = client.get("/api/library/settings").json()["settings"]
+    assert s["audioExts"] == [".flac"] and s["autoRefresh"] is False
+    # 兼容层写 → 新区读
+    client.put("/api/library/settings", json={"ignoreHidden": False})
+    s = client.get("/api/settings").json()["settings"]["library"]
+    assert s["ignoreHidden"] is False and s["audioExts"] == [".flac"]
+
+
 # ============ 手动指定歌词 ============
 def test_manual_lyric_flow(song_library, tmp_path):
     """保存 → 查询 → 手动优先（盖过本地 srt）→ 清除恢复自动"""
@@ -997,11 +1220,8 @@ def test_api_mini_status_roundtrip():
     assert client.post("/api/mini/status", json={}).json()["ok"] is False
 
 
-def test_api_ui_settings_roundtrip(tmp_path, monkeypatch):
-    """主题设置：迷你窗读 / 主窗口写；非法值忽略；文件隔离不碰真实用户数据"""
-    monkeypatch.setattr(backend, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
-    monkeypatch.setattr(backend, "_ui_settings", None)
-
+def test_api_ui_settings_roundtrip():
+    """主题设置：迷你窗读 / 主窗口写；非法值回落默认；未知字段忽略；文件隔离不碰真实用户数据"""
     # 默认值
     s = client.get("/api/ui/settings").json()["settings"]
     assert s["theme"] == "dark"
@@ -1019,13 +1239,12 @@ def test_api_ui_settings_roundtrip(tmp_path, monkeypatch):
     # 未提交字段保留
     assert s["theme"] == "light"
 
-    # 非法类型/未知字段忽略
+    # 非法类型回落默认；未知字段忽略
     assert client.put("/api/ui/settings", json={"theme": 123, "hack": "x"}).status_code == 200
     s = client.get("/api/ui/settings").json()["settings"]
-    assert s["theme"] == "light"
+    assert s["theme"] == "dark"  # 统一校验：非法值回落默认
     assert "hack" not in s
 
-    # 文件已落盘
-    assert (
-        json.loads((tmp_path / "ui_settings.json").read_text(encoding="utf-8"))["theme"] == "light"
-    )
+    # 统一存储已落盘（settings.json 的 ui namespace）
+    on_disk = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
+    assert on_disk["ui"]["theme"] == "dark"
