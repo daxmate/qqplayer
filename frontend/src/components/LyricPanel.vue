@@ -429,6 +429,9 @@ function onAmllLineClick(e) {
 .amll-host[data-align="center"] :deep([class*="lyricLineWrapper"]) {
   align-items: center;
 }
+.amll-host[data-align="center"] :deep([class*="lyricSubLine"]) {
+  text-align: center;
+}
 .amll-host[data-align="right"] :deep([class*="lyricMainLine"]) {
   text-align: right;
 }
@@ -437,5 +440,8 @@ function onAmllLineClick(e) {
 }
 .amll-host[data-align="right"] :deep([class*="lyricLineWrapper"]) {
   align-items: flex-end;
+}
+.amll-host[data-align="right"] :deep([class*="lyricSubLine"]) {
+  text-align: right;
 }
 </style>
