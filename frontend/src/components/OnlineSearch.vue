@@ -224,7 +224,12 @@ async function download(item) {
     const res = await fetch("/api/online/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: item.id, level: downloadSettings.defaultQuality }),
+      body: JSON.stringify({
+        id: item.id,
+        level: downloadSettings.defaultQuality,
+        title: item.title,
+        artist: item.artist,
+      }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
