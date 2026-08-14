@@ -287,6 +287,8 @@ onMounted(() => {
   background: var(--topbar-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  /* 高于 .main(z-index 1)：顶栏内的悬浮面板（在线搜索下拉）才能盖住主内容区（封面等） */
+  z-index: 2;
 }
 .logo {
   font-size: 18px;
