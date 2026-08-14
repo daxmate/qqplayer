@@ -2,7 +2,13 @@
   <div class="mini-player" @click="$emit('open-player')">
     <!-- 封面 -->
     <div class="mp-cover">
-      <img v-if="coverUrl" :src="coverUrl" class="mp-cover-img" alt="" @error="coverError = true" />
+      <img
+        v-if="coverUrl && !coverError"
+        :src="coverUrl"
+        class="mp-cover-img"
+        alt=""
+        @error="coverError = true"
+      />
       <Music2 v-else :size="20" />
     </div>
     <!-- 歌名 / 歌手 -->
