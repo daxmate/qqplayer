@@ -138,3 +138,102 @@ describe("MobileHome 智能视图入口（移动端）", () => {
     expect(wrapper.find(".msv-page").exists()).toBe(false);
   });
 });
+
+describe("MobileHome 顶栏入口", () => {
+  it("搜索入口 → open 全部歌曲列表（focusSearch 自动聚焦）", async () => {
+    const wrapper = mount(MobileHome);
+    await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
+    const opens = wrapper.emitted("open");
+    expect(opens).toBeTruthy();
+    expect(opens[0][0]).toMatchObject({
+      name: "list",
+      kind: "songs",
+      payload: { focusSearch: true },
+    });
+  });
+
+  it("设置入口 → open-settings 事件（MobileShell 转发到 App）", async () => {
+    const wrapper = mount(MobileHome);
+    await wrapper.find('.mh-icon-btn[title="设置"]').trigger("click");
+    expect(wrapper.emitted("open-settings")).toBeTruthy();
+  });
+});
+
+describe("MobileHome 入口卡片", () => {
+  it("所有歌曲卡片：数量随曲库变化 + 点击 open songs 列表", async () => {
+    const wrapper = mount(MobileHome);
+    const card = cardByText(wrapper, "所有歌曲");
+    expect(card.text()).toContain("2 首");
+    await card.trigger("click");
+    const opens = wrapper.emitted("open");
+    expect(opens[0][0]).toMatchObject({ name: "list", kind: "songs", title: "所有歌曲" });
+  });
+
+  it("收藏卡片：数量随收藏变化（实际收藏计数）", async () => {
+    const wrapper = mount(MobileHome);
+    expect(cardByText(wrapper, "我喜欢的音乐").text()).toContain("0 首");
+    state.favorites = ["/lib/a.mp3"];
+    await flushPromises();
+    expect(cardByText(wrapper, "我喜欢的音乐").text()).toContain("1 首");
+  });
+
+  it("播放列表/艺术家/专辑卡片数量", () => {
+    state.playlists = [{ id: "p1", name: "我的歌单", songPaths: [] }];
+    const wrapper = mount(MobileHome);
+    expect(cardByText(wrapper, "播放列表").text()).toContain("1 个");
+    expect(cardByText(wrapper, "艺术家").text()).toContain("2 位");
+    expect(cardByText(wrapper, "专辑").text()).toContain("2 张");
+  });
+
+  it("艺术家/专辑分组与桌面一致：未知值归一化 + 排序", () => {
+    state.songs = [
+      { id: "x", path: "/lib/x.mp3", name: "X", artist: "", album: "" },
+      { id: "y", path: "/lib/y.mp3", name: "Y", artist: "五月天", album: "" },
+      { id: "z", path: "/lib/z.mp3", name: "Z", artist: "五月天", album: "" },
+    ];
+    const wrapper = mount(MobileHome);
+    expect(cardByText(wrapper, "艺术家").text()).toContain("2 位"); // 未知歌手 + 五月天
+    expect(cardByText(wrapper, "专辑").text()).toContain("1 张"); // 三首都归一化为未知专辑
+  });
+});
+
+describe("MobileHome 智能视图开关与打开文件", () => {
+  it("再点同一卡片：关闭已打开的智能视图", async () => {
+    const wrapper = mount(MobileHome);
+    const card = cardByText(wrapper, "最近添加");
+    await card.trigger("click");
+    expect(wrapper.find(".msv-page").exists()).toBe(true);
+    await card.trigger("click");
+    expect(wrapper.find(".msv-page").exists()).toBe(false);
+  });
+
+  it("打开文件：选择文件后显示导入提示 toast", async () => {
+    const wrapper = mount(MobileHome);
+    const input = wrapper.find(".mh-file-input");
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["x"], "a.mp3", { type: "audio/mpeg" }), new File(["x"], "b.mp3")],
+      configurable: true,
+    });
+    await input.trigger("change");
+    expect(wrapper.find(".mh-toast").text()).toBe("已选择 2 个文件，NAS 导入接口待后端支持");
+  });
+
+  it("toast 超时后自动消失（3.2s）", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(MobileHome);
+      const input = wrapper.find(".mh-file-input");
+      Object.defineProperty(input.element, "files", {
+        value: [new File(["x"], "a.mp3")],
+        configurable: true,
+      });
+      await input.trigger("change");
+      expect(wrapper.find(".mh-toast").exists()).toBe(true);
+      vi.advanceTimersByTime(3300);
+      await flushPromises();
+      expect(wrapper.find(".mh-toast").exists()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
