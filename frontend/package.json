@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "chinese-conv": "^4.0.0",
     "@applemusic-like-lyrics/core": "^0.5.2",
     "@applemusic-like-lyrics/vue": "^0.5.2",
     "@lucide/vue": "^1.31.0",
@@ -23,7 +22,8 @@
     "jss": "^10.10.0",
     "jss-preset-default": "^10.10.0",
     "sortablejs": "^1.15.7",
-    "vue": "^3.5.39"
+    "vue": "^3.5.39",
+    "vue-i18n": "^11.4.8"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

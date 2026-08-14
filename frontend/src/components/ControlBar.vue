@@ -1,6 +1,6 @@
 <template>
   <div class="controls" :class="{ karaoke }">
-    <button v-if="!hideCollapse" class="collapse-btn" title="收起控制区" @click="toggleControls()">
+    <button v-if="!hideCollapse" class="collapse-btn" :title="t('control.collapse')" @click="toggleControls()">
       <ChevronDown :size="16" />
     </button>
     <!-- 进度条 -->
@@ -34,33 +34,33 @@
           <Repeat v-else :size="15" />
         </button>
       </template>
-      <button class="btn" title="上一首" @click="prevSong">
+      <button class="btn" :title="t('control.prevSong')" @click="prevSong">
         <SkipBack :size="17" />
       </button>
 
       <template v-if="karaoke">
-        <button class="btn" title="上一句" @click="prevLine">
+        <button class="btn" :title="t('control.prevLine')" @click="prevLine">
           <StepBack :size="17" />
         </button>
-        <button class="btn play" title="播放/暂停" @click="togglePlay">
+        <button class="btn play" :title="t('control.playPause')" @click="togglePlay">
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
-        <button class="btn" title="下一句" @click="nextLine">
+        <button class="btn" :title="t('control.nextLine')" @click="nextLine">
           <StepForward :size="17" />
         </button>
-        <button class="btn" :class="{ on: state.speed !== 1.0 }" title="变速" @click="cycleSpeed">
+        <button class="btn" :class="{ on: state.speed !== 1.0 }" :title="t('control.speed')" @click="cycleSpeed">
           <Gauge :size="15" />
           {{ state.speed }}x
         </button>
         <button
           class="btn"
           :class="{ on: state.karaokeOn }"
-          title="跟唱开关"
+          :title="t('control.karaokeToggle')"
           @click="toggleKaraoke"
         >
           <Mic :size="15" />
-          跟唱
+          {{ t('control.karaoke') }}
         </button>
         <button
           class="btn"
@@ -74,29 +74,29 @@
         >
           <Repeat2 v-if="state.abLoop" :size="15" />
           <Repeat1 v-else :size="15" />
-          {{ state.abLoop ? "AB" : "单句" }}
+          {{ state.abLoop ? "AB" : t('control.singleLine') }}
         </button>
       </template>
       <template v-else>
-        <button class="btn play" title="播放/暂停" @click="togglePlay">
+        <button class="btn play" :title="t('control.playPause')" @click="togglePlay">
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
-        <button class="btn" title="下一首" @click="nextSong">
+        <button class="btn" :title="t('control.nextSong')" @click="nextSong">
           <SkipForward :size="17" />
         </button>
       </template>
 
-      <button class="btn" :class="{ on: state.zhVisible }" title="显示/隐藏中文" @click="toggleZh">
+      <button class="btn" :class="{ on: state.zhVisible }" :title="t('control.toggleZh')" @click="toggleZh">
         <Languages :size="15" />
-        译
+        {{ t('control.zh') }}
       </button>
 
       <!-- 音量 -->
       <div class="vol-group">
         <button
           class="btn vol-btn"
-          :title="state.muted || state.volume === 0 ? '取消静音' : '静音'"
+          :title="state.muted || state.volume === 0 ? t('control.unmute') : t('control.mute')"
           @click="toggleMute"
         >
           <VolumeX v-if="state.muted || state.volume === 0" :size="15" />
@@ -110,7 +110,7 @@
           max="1"
           step="0.05"
           :value="state.muted ? 0 : state.volume"
-          title="音量"
+          :title="t('control.volume')"
           @input="onVolume"
         />
       </div>
@@ -123,7 +123,7 @@
         <template v-if="state.currentSong.artist"> · {{ state.currentSong.artist }}</template>
         <span v-if="state.lyricFormat" class="fmt-badge">{{ state.lyricFormat }}</span>
       </span>
-      <span v-else class="song-line-text dim">未选择歌曲</span>
+      <span v-else class="song-line-text dim">{{ t('control.noSong') }}</span>
     </div>
 
     <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
@@ -133,6 +133,7 @@
 
 <script setup>
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Play,
   Pause,
@@ -175,6 +176,8 @@ defineProps({
   hideCollapse: { type: Boolean, default: false },
 });
 
+const { t } = useI18n();
+
 function onSeek(e) {
   seek(parseFloat(e.target.value));
 }
@@ -191,17 +194,17 @@ const loopTitle = computed(() => {
   const ab = state.abLoop;
   if (ab) {
     return ab.b === null
-      ? `AB 循环：起点第 ${ab.a + 1} 句，请点击歌词选终点（单击退出）`
-      : `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句（单击退出）`;
+      ? t("karaoke.abWaitEnd", { n: ab.a + 1 })
+      : t("karaoke.abSet", { a: ab.a + 1, b: ab.b + 1 });
   }
-  return "单击：单句循环；长按：AB 区间循环（需开启跟唱）";
+  return t("karaoke.abHint");
 });
 
 // 连播播放模式：三态循环切换（列表循环 → 随机 → 单曲循环）
 const playModeTitle = computed(() => {
-  if (state.playMode === "shuffle") return "随机播放（点击切换）";
-  if (state.playMode === "repeatOne") return "单曲循环（点击切换）";
-  return "列表循环（点击切换）";
+  if (state.playMode === "shuffle") return t("control.modeShuffle");
+  if (state.playMode === "repeatOne") return t("control.modeRepeatOne");
+  return t("control.modeOrder");
 });
 
 function onLoopPressStart() {
