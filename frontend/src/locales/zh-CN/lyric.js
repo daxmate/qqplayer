@@ -1,2 +1,6 @@
-// 待抽离：lyric 模块文案
-export default {};
+// 歌词面板（LyricPanel.vue）
+export default {
+  lyric: {
+    empty: "暂无歌词",
+  },
+};

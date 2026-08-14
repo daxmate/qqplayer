@@ -4,19 +4,19 @@
       <button
         v-if="expandBtn"
         class="kp-expand"
-        title="展开音乐库 / 播放列表"
+        :title="t('karaoke.expandLib')"
         @click="expandPanels()"
       >
         <PanelLeftOpen :size="14" />
       </button>
       <span class="kp-title">
         <Mic :size="13" />
-        逐句练习
+        {{ t("karaoke.title") }}
       </span>
       <span v-if="uiSettings.showSongInfo && state.currentSong" class="kp-song" :title="songTitle">
         {{ songTitle }}
       </span>
-      <button class="kp-spec-btn" title="指定歌词" @click="openLyricSpec()">
+      <button class="kp-spec-btn" :title="t('spec.title')" @click="openLyricSpec()">
         <FileMusic :size="14" />
       </button>
       <span class="kp-hint">{{ abHint }}</span>
@@ -26,9 +26,9 @@
       <div class="ab-progress-track">
         <i class="ab-progress-fill" :style="{ width: abProgress.pct + '%' }"></i>
       </div>
-      <span v-if="abProgress.inside" class="ab-progress-label"
-        >第 {{ abProgress.pos }}/{{ abProgress.total }} 句</span
-      >
+      <span v-if="abProgress.inside" class="ab-progress-label">{{
+        t("karaoke.abProgress", { pos: abProgress.pos, total: abProgress.total })
+      }}</span>
     </div>
     <div
       ref="scrollEl"
@@ -74,11 +74,11 @@
           <div class="kp-empty-icon">
             <Mic :size="44" />
           </div>
-          <div>这首歌没有歌词文件</div>
-          <div class="kp-empty-sub">可放置同名 .srt / .lrc，或在线搜索 / 上传指定</div>
+          <div>{{ t("karaoke.emptyTitle") }}</div>
+          <div class="kp-empty-sub">{{ t("karaoke.emptySub") }}</div>
           <button class="kp-empty-btn" @click="openLyricSpec()">
             <FileMusic :size="14" />
-            指定歌词
+            {{ t("spec.title") }}
           </button>
         </div>
         <!-- 底部占位（高度 JS 设为视口一半）：让最后一句能滚到垂直居中 -->
@@ -90,6 +90,7 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import { Mic, Music2, PanelLeftOpen, FileMusic } from "@lucide/vue";
 import {
   state,
@@ -102,6 +103,8 @@ import {
   LYRIC_SCHEMES,
 } from "../composables/usePlayer.js";
 import { useLyricScroll } from "../composables/useLyricScroll.js";
+
+const { t } = useI18n();
 
 const props = defineProps({
   lyric: { type: Array, default: () => [] },
@@ -167,7 +170,7 @@ function lineNumber(lyricIdx) {
 // 当前歌曲信息（设置开关控制）
 const songTitle = computed(() => {
   const s = state.currentSong;
-  if (!s) return "未选择歌曲";
+  if (!s) return t("control.noSong");
   return s.artist ? `${s.name} · ${s.artist}` : s.name;
 });
 
@@ -181,9 +184,9 @@ function fmt(t) {
 // ============ AB 循环：区间高亮 + 提示 ============
 const abHint = computed(() => {
   const ab = state.abLoop;
-  if (!ab) return "点击句子播放 · 播完自动停";
-  if (ab.b === null) return `AB 循环：起点第 ${ab.a + 1} 句，请点击终点句`;
-  return `AB 循环：第 ${ab.a + 1} ~ ${ab.b + 1} 句 · 单击退出`;
+  if (!ab) return t("karaoke.abHintIdle");
+  if (ab.b === null) return t("karaoke.abHintWaitEnd", { n: ab.a + 1 });
+  return t("karaoke.abHintSet", { a: ab.a + 1, b: ab.b + 1 });
 });
 
 function abLineNo(lyricIdx) {

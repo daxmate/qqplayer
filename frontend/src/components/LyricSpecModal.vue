@@ -3,12 +3,12 @@
     <div class="modal">
       <div class="modal-head">
         <FileMusic :size="16" />
-        <span class="spec-title">指定歌词</span>
+        <span class="spec-title">{{ t("spec.title") }}</span>
         <span class="head-sub">{{ songName }}</span>
         <span class="src-badge" :class="{ manual: manualSpecified }">
-          {{ manualSpecified ? "已手动指定" : "自动获取" }}
+          {{ manualSpecified ? t("spec.manual") : t("spec.auto") }}
         </span>
-        <button class="modal-close" title="关闭" @click="close">
+        <button class="modal-close" :title="t('common.close')" @click="close">
           <X :size="16" />
         </button>
       </div>
@@ -18,22 +18,24 @@
         <div v-if="manualSpecified" class="spec-status">
           <span class="status-dot" />
           <span class="status-text">
-            当前使用手动指定歌词（{{ manualSource }} · {{ manualFormat.toUpperCase() }}）
+            {{
+              t("spec.statusUsing", { source: manualSource, format: manualFormat.toUpperCase() })
+            }}
           </span>
-          <button class="clear-link" @click="clearSpec">清除指定</button>
+          <button class="clear-link" @click="clearSpec">{{ t("spec.clear") }}</button>
         </div>
 
         <!-- tab 切换 -->
         <div class="spec-tabs">
           <button
-            v-for="t in tabs"
-            :key="t.value"
+            v-for="tabItem in tabs"
+            :key="tabItem.value"
             class="spec-tab"
-            :class="{ on: tab === t.value }"
-            @click="tab = t.value"
+            :class="{ on: tab === tabItem.value }"
+            @click="tab = tabItem.value"
           >
-            <component :is="t.icon" :size="14" />
-            {{ t.label }}
+            <component :is="tabItem.icon" :size="14" />
+            {{ tabItem.label }}
           </button>
         </div>
 
@@ -42,17 +44,21 @@
           <label class="drop-zone" :class="{ has: file }">
             <input type="file" accept=".lrc,.srt,.json,.txt" @change="onFile" />
             <FileUp :size="26" />
-            <div class="dz-main">{{ file ? file.name : "点击选择歌词文件" }}</div>
+            <div class="dz-main">{{ file ? file.name : t("spec.clickToSelect") }}</div>
             <div class="dz-sub">
               {{
                 file
-                  ? "格式：" + (detectedFormat ? detectedFormat.toUpperCase() : "未识别")
-                  : "支持 .lrc / .srt / .json（需包含时间戳）"
+                  ? t("spec.formatLabel", {
+                      format: detectedFormat
+                        ? detectedFormat.toUpperCase()
+                        : t("spec.unrecognized"),
+                    })
+                  : t("spec.supportedFormats")
               }}
             </div>
           </label>
           <div v-if="file && !detectedFormat" class="spec-error">
-            未识别到可用歌词格式：LRC 需 [mm:ss]，SRT 需序号+时间轴，JSON 需包含 lrc 字段
+            {{ t("spec.unrecognizedDetail") }}
           </div>
           <pre v-if="file && detectedFormat" class="spec-preview">{{ preview }}</pre>
         </div>
@@ -63,18 +69,18 @@
             <input
               v-model="searchTitle"
               class="search-input"
-              placeholder="歌名"
+              :placeholder="t('spec.placeholderTitle')"
               @keyup.enter="doSearch"
             />
             <input
               v-model="searchArtist"
               class="search-input"
-              placeholder="歌手（可留空）"
+              :placeholder="t('spec.placeholderArtist')"
               @keyup.enter="doSearch"
             />
             <button class="search-btn" :disabled="searching" @click="doSearch">
               <Loader2 v-if="searching" :size="14" class="spin" />
-              {{ searching ? "搜索中" : "搜索" }}
+              {{ searching ? t("spec.searching") : t("common.search") }}
             </button>
           </div>
           <div v-if="searchError" class="spec-error">{{ searchError }}</div>
@@ -87,16 +93,18 @@
               @click="pickResult(r, i)"
             >
               <span class="src-tag" :class="r.source">
-                {{ r.source === "netease" ? "网易云" : "lrclib" }}
+                {{ r.source === "netease" ? t("spec.sourceNetease") : "lrclib" }}
               </span>
               <span class="ri-title">{{ r.title }}</span>
               <span v-if="r.artist" class="ri-artist">{{ r.artist }}</span>
-              <span v-if="r.tlyric" class="ri-zh" title="含中文翻译">译</span>
+              <span v-if="r.tlyric" class="ri-zh" :title="t('spec.hasZhTitle')">{{
+                t("control.zh")
+              }}</span>
               <Loader2 v-if="savingIdx === i" :size="13" class="spin" />
             </button>
           </div>
           <div v-else-if="searched && !searching" class="spec-empty">
-            没有找到带时间戳的歌词，试试其他关键词，或改用「上传文件 / 粘贴文本」
+            {{ t("spec.searchEmpty") }}
           </div>
         </div>
 
@@ -105,23 +113,24 @@
           <textarea
             v-model="pasteText"
             class="paste-area"
-            placeholder='粘贴 LRC / SRT / JSON 歌词…&#10;&#10;LRC 示例：&#10;[00:12.34]一行歌词&#10;&#10;SRT 示例：&#10;1&#10;00:00:12,340 --&gt; 00:00:17,000&#10;一行歌词&#10;&#10;JSON 示例：&#10;{&#10;  "lrc": "[00:12.34]一行歌词",&#10;  "tlyric": "[00:12.34]中文翻译"&#10;}'
+            :placeholder="t('spec.pastePlaceholder')"
             spellcheck="false"
           />
           <div v-if="pasteText.trim()" class="paste-meta">
-            检测格式：<b>{{ pasteFormat ? pasteFormat.toUpperCase() : "未识别" }}</b>
-            <span v-if="!pasteFormat" class="spec-error inline"
-              >需包含 [mm:ss]（LRC）或 序号+时间轴（SRT）</span
-            >
+            {{ t("spec.detectFormatLabel")
+            }}<b>{{ pasteFormat ? pasteFormat.toUpperCase() : t("spec.unrecognized") }}</b>
+            <span v-if="!pasteFormat" class="spec-error inline">{{
+              t("spec.pasteNeedTimeline")
+            }}</span>
           </div>
         </div>
       </div>
 
       <div class="modal-foot">
-        <div class="foot-hint">指定后优先使用该歌词（不受来源优先级影响），可随时清除恢复自动</div>
+        <div class="foot-hint">{{ t("spec.footHint") }}</div>
         <div class="foot-actions">
           <button v-if="manualSpecified" class="btn-danger" @click="clearSpec">
-            <Trash2 :size="13" />清除指定
+            <Trash2 :size="13" />{{ t("spec.clear") }}
           </button>
           <button
             v-if="tab !== 'search'"
@@ -130,7 +139,7 @@
             @click="save"
           >
             <Loader2 v-if="saving" :size="14" class="spin" />
-            保存
+            {{ t("common.save") }}
           </button>
         </div>
       </div>
@@ -140,6 +149,7 @@
 
 <script setup>
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { ClipboardPaste, FileMusic, FileUp, Loader2, Search, Trash2, X } from "@lucide/vue";
 import {
   deleteManualLyric,
@@ -150,10 +160,12 @@ import {
   state,
 } from "../composables/usePlayer.js";
 
+const { t } = useI18n();
+
 const tabs = [
-  { value: "upload", label: "上传文件", icon: FileUp },
-  { value: "search", label: "在线搜索", icon: Search },
-  { value: "paste", label: "粘贴文本", icon: ClipboardPaste },
+  { value: "upload", label: t("spec.tabUpload"), icon: FileUp },
+  { value: "search", label: t("spec.tabSearch"), icon: Search },
+  { value: "paste", label: t("spec.tabPaste"), icon: ClipboardPaste },
 ];
 
 const tab = ref("upload");
@@ -205,7 +217,7 @@ const savingIdx = ref(-1);
 
 async function doSearch() {
   if (!searchTitle.value.trim()) {
-    searchError.value = "请输入歌名";
+    searchError.value = t("spec.searchTitleRequired");
     return;
   }
   searching.value = true;
@@ -220,7 +232,7 @@ async function doSearch() {
     );
     searched.value = true;
   } catch (err) {
-    searchError.value = err.message || "搜索失败，请重试";
+    searchError.value = err.message || t("spec.searchFailed");
   } finally {
     searching.value = false;
   }
@@ -235,11 +247,15 @@ async function pickResult(r, i) {
       path: song.value.path,
       format: "lrc",
       text: r.text,
-      source: `在线·${r.source === "netease" ? "网易云" : "lrclib"}·${r.title}${r.artist ? " - " + r.artist : ""}`,
+      source: t("spec.sourceOnline", {
+        source: r.source === "netease" ? t("spec.sourceNetease") : "lrclib",
+        title: r.title,
+        artist: r.artist ? " - " + r.artist : "",
+      }),
     });
     await afterSaved();
   } catch (err) {
-    searchError.value = err.message || "保存失败";
+    searchError.value = err.message || t("spec.saveFailed");
     savingIdx.value = -1;
   }
 }
@@ -275,13 +291,16 @@ async function save() {
       path: song.value.path,
       format,
       text,
-      source: tab.value === "upload" ? `上传·${file.value?.name || ""}` : "粘贴",
+      source:
+        tab.value === "upload"
+          ? t("spec.sourceUpload", { name: file.value?.name || "" })
+          : t("spec.sourcePaste"),
       tlyric,
     });
     await afterSaved();
   } catch (err) {
     saving.value = false;
-    window.alert(err.message || "保存失败");
+    window.alert(err.message || t("spec.saveFailed"));
   }
 }
 
