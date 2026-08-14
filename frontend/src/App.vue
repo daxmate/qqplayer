@@ -287,7 +287,10 @@ onMounted(() => {
   background: var(--topbar-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  /* 高于 .main(z-index 1)：顶栏内的悬浮面板（在线搜索下拉）才能盖住主内容区（封面等） */
+}
+/* 顶栏悬浮层（在线搜索下拉面板）需盖过主内容区：
+   选择器优先级要高于 `.app > *:not(.bg-blur)`（0,2,0），否则 z-index 被覆盖为 1 */
+.app > header.topbar {
   z-index: 2;
 }
 .logo {
