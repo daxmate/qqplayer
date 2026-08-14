@@ -1,2 +1,60 @@
-// 待抽离：mobile 模块文案
-export default {};
+// 移动端组件（MobileHome / MobileList / MobilePlayer / MiniPlayerBar）
+export default {
+  mobile: {
+    home: {
+      title: "音乐库",
+      searchSong: "搜索歌曲",
+      settings: "设置",
+      allSongs: "所有歌曲",
+      favorites: "我喜欢的音乐",
+      playlists: "播放列表",
+      artists: "艺术家",
+      albums: "专辑",
+      openFile: "打开文件",
+      importMusic: "导入音乐",
+      recentAdded: "最近添加",
+      recentPlayed: "最近播放",
+      topPlayed: "常听排行",
+      topPlayedDesc: "播放次数排行",
+      foot: "从手机/NAS 浏览器直接播放音乐库",
+      importToast: "已选择 {n} 个文件，NAS 导入接口待后端支持",
+    },
+    count: {
+      song: "{n} 首",
+      playlist: "{n} 个",
+      artist: "{n} 位",
+      album: "{n} 张",
+      recentSongs: "最近 {n} 首",
+    },
+    unknown: {
+      artist: "未知歌手",
+      album: "未知专辑",
+    },
+    list: {
+      back: "返回",
+      clear: "清除",
+      reorder: "拖拽排序",
+      playing: "播放中",
+      favorite: "收藏",
+      unfavorite: "取消收藏",
+      scanning: "扫描中…",
+      noMatchSongs: "没有匹配的歌曲",
+      noMatchResults: "没有匹配的结果",
+      searchArtist: "搜索歌手",
+      searchAlbum: "搜索专辑",
+      searchSongArtist: "搜索歌名 / 歌手",
+      emptyPlaylists: "还没有歌单",
+      emptyFavorites: "还没有收藏的歌曲",
+      emptyArtist: "该歌手没有歌曲",
+      emptyAlbum: "该专辑没有歌曲",
+      emptyPlaylist: "歌单是空的",
+      emptySongs: "没有歌曲，请先导入音乐",
+      albumSubtitle: "{artist} · {n} 首",
+      moreArtists: "{names} 等",
+    },
+    player: {
+      collapse: "收起播放器",
+      continuous: "连播",
+    },
+  },
+};

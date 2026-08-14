@@ -2,12 +2,20 @@
   <div class="mh-page">
     <!-- 顶栏：标题 + 搜索/设置入口 -->
     <header class="mh-head">
-      <h1 class="mh-title">音乐库</h1>
+      <h1 class="mh-title">{{ t("mobile.home.title") }}</h1>
       <div class="mh-actions">
-        <button class="mh-icon-btn" title="搜索歌曲" @click="$emit('open', searchEntry)">
+        <button
+          class="mh-icon-btn"
+          :title="t('mobile.home.searchSong')"
+          @click="$emit('open', searchEntry)"
+        >
           <Search :size="20" />
         </button>
-        <button class="mh-icon-btn" title="设置" @click="$emit('open-settings')">
+        <button
+          class="mh-icon-btn"
+          :title="t('mobile.home.settings')"
+          @click="$emit('open-settings')"
+        >
           <Settings :size="20" />
         </button>
       </div>
@@ -18,66 +26,78 @@
       <div class="mh-grid">
         <button
           class="mh-card"
-          @click="$emit('open', { name: 'list', kind: 'songs', title: '所有歌曲' })"
+          @click="$emit('open', { name: 'list', kind: 'songs', title: t('mobile.home.allSongs') })"
         >
           <span class="mh-tile" style="--tile: var(--accent); --tile2: var(--accent2)">
             <Music2 :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">所有歌曲</span>
-            <span class="mh-card-count">{{ state.songs.length }} 首</span>
+            <span class="mh-card-name">{{ t("mobile.home.allSongs") }}</span>
+            <span class="mh-card-count">{{
+              t("mobile.count.song", { n: state.songs.length })
+            }}</span>
           </span>
         </button>
 
         <button
           class="mh-card"
-          @click="$emit('open', { name: 'list', kind: 'favorites', title: '我喜欢的音乐' })"
+          @click="
+            $emit('open', { name: 'list', kind: 'favorites', title: t('mobile.home.favorites') })
+          "
         >
           <span class="mh-tile" style="--tile: #ff6b81; --tile2: #ff9aa8">
             <Heart :size="22" fill="currentColor" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">我喜欢的音乐</span>
-            <span class="mh-card-count">{{ favoriteCount }} 首</span>
+            <span class="mh-card-name">{{ t("mobile.home.favorites") }}</span>
+            <span class="mh-card-count">{{ t("mobile.count.song", { n: favoriteCount }) }}</span>
           </span>
         </button>
 
         <button
           class="mh-card"
-          @click="$emit('open', { name: 'list', kind: 'playlists', title: '播放列表' })"
+          @click="
+            $emit('open', { name: 'list', kind: 'playlists', title: t('mobile.home.playlists') })
+          "
         >
           <span class="mh-tile" style="--tile: #34d399; --tile2: #6ee7b7">
             <ListMusic :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">播放列表</span>
-            <span class="mh-card-count">{{ state.playlists.length }} 个</span>
+            <span class="mh-card-name">{{ t("mobile.home.playlists") }}</span>
+            <span class="mh-card-count">{{
+              t("mobile.count.playlist", { n: state.playlists.length })
+            }}</span>
           </span>
         </button>
 
         <button
           class="mh-card"
-          @click="$emit('open', { name: 'list', kind: 'artists', title: '艺术家' })"
+          @click="$emit('open', { name: 'list', kind: 'artists', title: t('mobile.home.artists') })"
         >
           <span class="mh-tile" style="--tile: #5b9dff; --tile2: #8ab4ff">
             <Users :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">艺术家</span>
-            <span class="mh-card-count">{{ artistGroups.length }} 位</span>
+            <span class="mh-card-name">{{ t("mobile.home.artists") }}</span>
+            <span class="mh-card-count">{{
+              t("mobile.count.artist", { n: artistGroups.length })
+            }}</span>
           </span>
         </button>
 
         <button
           class="mh-card"
-          @click="$emit('open', { name: 'list', kind: 'albums', title: '专辑' })"
+          @click="$emit('open', { name: 'list', kind: 'albums', title: t('mobile.home.albums') })"
         >
           <span class="mh-tile" style="--tile: #a78bfa; --tile2: #c4b5fd">
             <Disc3 :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">专辑</span>
-            <span class="mh-card-count">{{ albumGroups.length }} 张</span>
+            <span class="mh-card-name">{{ t("mobile.home.albums") }}</span>
+            <span class="mh-card-count">{{
+              t("mobile.count.album", { n: albumGroups.length })
+            }}</span>
           </span>
         </button>
 
@@ -86,8 +106,8 @@
             <FolderInput :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">打开文件</span>
-            <span class="mh-card-count">导入音乐</span>
+            <span class="mh-card-name">{{ t("mobile.home.openFile") }}</span>
+            <span class="mh-card-count">{{ t("mobile.home.importMusic") }}</span>
           </span>
         </button>
 
@@ -97,10 +117,10 @@
             <Sparkles :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">最近添加</span>
-            <span class="mh-card-count"
-              >{{ Math.min(SMART_VIEW_LIMIT, state.songs.length) }} 首</span
-            >
+            <span class="mh-card-name">{{ t("mobile.home.recentAdded") }}</span>
+            <span class="mh-card-count">{{
+              t("mobile.count.song", { n: Math.min(SMART_VIEW_LIMIT, state.songs.length) })
+            }}</span>
           </span>
         </button>
 
@@ -109,8 +129,10 @@
             <History :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">最近播放</span>
-            <span class="mh-card-count">最近 {{ SMART_VIEW_LIMIT }} 首</span>
+            <span class="mh-card-name">{{ t("mobile.home.recentPlayed") }}</span>
+            <span class="mh-card-count">{{
+              t("mobile.count.recentSongs", { n: SMART_VIEW_LIMIT })
+            }}</span>
           </span>
         </button>
 
@@ -119,8 +141,8 @@
             <TrendingUp :size="22" />
           </span>
           <span class="mh-card-meta">
-            <span class="mh-card-name">常听排行</span>
-            <span class="mh-card-count">播放次数排行</span>
+            <span class="mh-card-name">{{ t("mobile.home.topPlayed") }}</span>
+            <span class="mh-card-count">{{ t("mobile.home.topPlayedDesc") }}</span>
           </span>
         </button>
       </div>
@@ -130,7 +152,7 @@
         <div v-if="toast" class="mh-toast">{{ toast }}</div>
       </Transition>
 
-      <p class="mh-foot">从手机/NAS 浏览器直接播放音乐库</p>
+      <p class="mh-foot">{{ t("mobile.home.foot") }}</p>
     </div>
 
     <!-- 打开文件：手机浏览器文件选择（NAS 场景导入入口） -->
@@ -155,6 +177,7 @@
 
 <script setup>
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Music2,
   Heart,
@@ -174,12 +197,14 @@ import MobileSmartList from "./MobileSmartList.vue";
 
 defineEmits(["open", "open-settings"]);
 
+const { t } = useI18n();
+
 // 首页顶栏搜索入口：进入全部歌曲列表并自动聚焦搜索框（复用列表内过滤）
-// 模块级常量保证同引用，连续点击可被页面栈去重
+// setup 内常量保证同引用，连续点击可被页面栈去重
 const searchEntry = {
   name: "list",
   kind: "songs",
-  title: "所有歌曲",
+  title: t("mobile.home.allSongs"),
   payload: { focusSearch: true },
 };
 
@@ -187,8 +212,8 @@ const searchEntry = {
 const favoriteCount = computed(() => state.songs.filter((s) => isFavorite(s.path)).length);
 
 // 艺术家/专辑分组（与 Playlist.vue 网格视图一致的分组逻辑）
-const UNKNOWN_ARTIST = "未知歌手";
-const UNKNOWN_ALBUM = "未知专辑";
+const UNKNOWN_ARTIST = t("mobile.unknown.artist");
+const UNKNOWN_ALBUM = t("mobile.unknown.album");
 const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
 
 const artistGroups = computed(() => {
@@ -233,7 +258,7 @@ function onFilePicked(e) {
   const files = [...(e.target.files || [])];
   e.target.value = ""; // 允许重复选择同一文件
   if (!files.length) return;
-  showToast(`已选择 ${files.length} 个文件，NAS 导入接口待后端支持`);
+  showToast(t("mobile.home.importToast", { n: files.length }));
   // TODO(backend): /api/import 上传接口实现后，在这里上传到音乐库目录
 }
 

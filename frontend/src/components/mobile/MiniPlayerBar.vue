@@ -7,7 +7,7 @@
     </div>
     <!-- 歌名 / 歌手 -->
     <div class="mp-info">
-      <div class="mp-name">{{ state.currentSong?.name || "未选择歌曲" }}</div>
+      <div class="mp-name">{{ state.currentSong?.name || t("control.noSong") }}</div>
       <div class="mp-artist">{{ state.currentSong?.artist || "" }}</div>
     </div>
     <!-- 控制：播放/暂停 + 下一首 -->
@@ -15,7 +15,7 @@
       <button
         class="mp-btn"
         :class="{ disabled: !state.currentSong }"
-        title="播放/暂停"
+        :title="t('control.playPause')"
         @click="togglePlay"
       >
         <Pause v-if="state.isPlaying" :size="22" />
@@ -24,7 +24,7 @@
       <button
         class="mp-btn"
         :class="{ disabled: !state.currentSong }"
-        title="下一首"
+        :title="t('control.nextSong')"
         @click="nextSong()"
       >
         <SkipForward :size="20" />
@@ -36,7 +36,10 @@
 <script setup>
 import { ref, watch } from "vue";
 import { Music2, Play, Pause, SkipForward } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import { state, togglePlay, nextSong } from "../../composables/usePlayer.js";
+
+const { t } = useI18n();
 
 defineEmits(["open-player"]);
 
