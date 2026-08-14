@@ -139,7 +139,19 @@
         <span v-if="state.lyricFormat" class="fmt-badge">{{ state.lyricFormat }}</span>
       </span>
       <span v-else class="song-line-text dim">{{ t("control.noSong") }}</span>
+      <button
+        v-if="state.currentSong"
+        class="song-edit-btn"
+        :title="t('tags.editTitle')"
+        data-testid="song-edit-btn"
+        @click="tagEditorOpen = true"
+      >
+        <Pencil :size="12" />
+      </button>
     </div>
+
+    <!-- 歌曲信息编辑弹窗（标签刮削器） -->
+    <TagEditorModal :open="tagEditorOpen" @close="tagEditorOpen = false" />
 
     <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
     <div v-if="!isMobile && sleepTimerText" class="sleep-timer">{{ sleepTimerText }}</div>
@@ -167,6 +179,7 @@ import {
 import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
 import { sleepTimerText } from "../composables/useSleepTimer.js";
 import { isMobile } from "../composables/useMobileViewport.js";
+import TagEditorModal from "./TagEditorModal.vue";
 import {
   togglePlay,
   nextSong,
@@ -184,6 +197,8 @@ import {
   toggleControls,
 } from "../composables/usePlayer.js";
 import { ChevronDown, Volume1, Volume2, VolumeX } from "@lucide/vue";
+import { Pencil } from "@lucide/vue";
+import { ref } from "vue";
 
 defineProps({
   karaoke: { type: Boolean, default: false },
@@ -192,6 +207,9 @@ defineProps({
 });
 
 const { t } = useI18n();
+
+// 歌曲信息编辑弹窗开关（仅当前播放歌曲存在时入口按钮可见）
+const tagEditorOpen = ref(false);
 
 function onSeek(e) {
   seek(parseFloat(e.target.value));
@@ -418,9 +436,38 @@ function fmt(t) {
   text-align: center;
   font-size: 12.5px;
   color: var(--text2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 .song-line-text.dim {
   color: var(--text3);
+}
+/* 歌曲信息编辑按钮（仅在播放歌曲时显示；迷你窗/移动端迷你条不渲染 ControlBar 故天然无此按钮） */
+.song-edit-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+@media (hover: hover) {
+  .song-edit-btn:hover {
+    color: var(--text);
+    background: var(--border);
+  }
+}
+/* 移动端：增大触摸目标 */
+@media (max-width: 1023.98px) {
+  .song-edit-btn {
+    width: 30px;
+    height: 30px;
+  }
 }
 /* 睡眠定时器倒计时：不显眼小字 */
 .sleep-timer {
