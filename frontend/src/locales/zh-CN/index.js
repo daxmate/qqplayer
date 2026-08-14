@@ -16,6 +16,7 @@ import smart from "./smart.js";
 import eq from "./eq.js";
 import errors from "./errors.js";
 import tags from "./tags.js";
+import search from "./search.js";
 
 export default {
   ...common,
@@ -33,4 +34,5 @@ export default {
   ...eq,
   ...errors,
   ...tags,
+  ...search,
 };
