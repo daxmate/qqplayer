@@ -4,6 +4,7 @@ import { EQ_BANDS, EQ_PRESETS, _normalizeEqPreset } from "./useEq.js";
 import { loadLyric, reanchorKaraoke, currentLineIndex, nextLine, prevLine } from "./useLyric.js";
 import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
+import { useSearchAnything } from "./useSearchAnything.js";
 import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
@@ -65,6 +66,7 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   fadeSec: 0, // 切歌淡入淡出时长（秒）；0 = 关闭
   karaokeNextKey: "KeyN", // 跟唱：下一句快捷键（设置可改）
   karaokePrevKey: "KeyP", // 跟唱：上一句快捷键（设置可改）
+  searchKey: "Meta+K", // 搜索：打开 search anything（Cmd+K；设置可改，存 e.code 风格）
   eqEnabled: false, // 均衡器开关（false = 全部 0dB 直通）
   eqPreset: "flat", // 均衡器预设：EQ_PRESETS 的 key；'custom' = 用户自定义
   eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 自定义增益（dB，-12~12，10 段，与 EQ_BANDS 对齐）
@@ -341,7 +343,11 @@ const HAS_MEDIA_SESSION = typeof navigator !== "undefined" && "mediaSession" in 
 const MEDIA_KEY_CODES = ["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious", "MediaStop"];
 
 // 输入框/文本域聚焦时不拦截（媒体键除外：即使输入框聚焦也应全局响应）
+// search anything 单例：搜索层打开时屏蔽播放快捷键
+const { isSearchOpen } = useSearchAnything();
 const SHORTCUT_HANDLER = (e) => {
+  // search anything 全屏搜索层打开时不响应播放快捷键（Space/←→/↑↓ 由搜索层消费）
+  if (isSearchOpen.value) return;
   const el = e.target;
   const isMediaKey = !HAS_MEDIA_SESSION && MEDIA_KEY_CODES.includes(e.code);
   if (

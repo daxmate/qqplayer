@@ -21,3 +21,4 @@ desktop-player/assets/icon.iconset/
 
 # 本地歌词缓存
 .cache/
+frontend/node_modules

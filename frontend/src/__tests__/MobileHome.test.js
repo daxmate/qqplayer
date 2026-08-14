@@ -30,6 +30,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const MobileHome = (await import("../components/mobile/MobileHome.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { useSearchAnything } = await import("../composables/useSearchAnything.js");
 const { closeSmartView } = await import("../composables/useSmartViews.js");
 
 const lib = [
@@ -47,6 +48,7 @@ beforeEach(() => {
     playlists: [],
     activePlaylistId: null,
   });
+  useSearchAnything().isSearchOpen.value = false;
   closeSmartView();
 });
 
@@ -140,16 +142,11 @@ describe("MobileHome 智能视图入口（移动端）", () => {
 });
 
 describe("MobileHome 顶栏入口", () => {
-  it("搜索入口 → open 全部歌曲列表（focusSearch 自动聚焦）", async () => {
+  it("搜索入口 → 打开全局 search anything 搜索层（isSearchOpen 置真，不再导航列表页）", async () => {
     const wrapper = mount(MobileHome);
     await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
-    const opens = wrapper.emitted("open");
-    expect(opens).toBeTruthy();
-    expect(opens[0][0]).toMatchObject({
-      name: "list",
-      kind: "songs",
-      payload: { focusSearch: true },
-    });
+    expect(useSearchAnything().isSearchOpen.value).toBe(true);
+    expect(wrapper.emitted("open")).toBeFalsy();
   });
 
   it("设置入口 → open-settings 事件（MobileShell 转发到 App）", async () => {

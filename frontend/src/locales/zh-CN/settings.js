@@ -213,6 +213,8 @@ export default {
     shortcutForward: "快进 10 秒",
     shortcutVolUp: "音量 +10%",
     shortcutVolDown: "音量 -10%",
+    shortcutSearch: "打开搜索（search anything）",
+    searchRecordHint: "全局生效（Cmd+K 默认）；按 Esc / Enter 保留原键。",
     mediaKeys: "系统媒体键",
     mediaKeysDesc: "Mac 键盘媒体键 / 控制中心 / 锁屏",
     mediaPlayPause: "播放/暂停",

@@ -30,7 +30,7 @@
           </button>
         </div>
         <div class="topbar-search">
-          <OnlineSearch variant="desktop" />
+          <SearchAnything entry />
         </div>
         <div class="topbar-right">
           <button
@@ -123,6 +123,8 @@
 
     <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
     <LyricSpecModal />
+    <!-- search anything 全屏搜索层本体（桌面/移动共用；v-if 由 isSearchOpen 单例控制） -->
+    <SearchAnything />
   </div>
 </template>
 
@@ -150,7 +152,7 @@ import KaraokePanel from "./components/KaraokePanel.vue";
 import ControlBar from "./components/ControlBar.vue";
 import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
-import OnlineSearch from "./components/OnlineSearch.vue";
+import SearchAnything from "./components/SearchAnything.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import {
@@ -357,9 +359,8 @@ onMounted(() => {
 .gear-btn:hover svg {
   transform: rotate(60deg);
 }
-/* 顶栏在线搜索入口：位于 mode-tabs 与 topbar-right 之间 */
+/* 顶栏 search anything 入口（放大镜；组件内自带样式，这里只占位） */
 .topbar-search {
-  width: 300px;
   flex-shrink: 0;
 }
 /* 顶栏右侧按钮组：整体推到最右，悬浮窗在左、设置贴右边缘 */

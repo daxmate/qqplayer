@@ -7,7 +7,7 @@
         <button
           class="mh-icon-btn"
           :title="t('mobile.home.searchSong')"
-          @click="$emit('open', searchEntry)"
+          @click="isSearchOpen = true"
         >
           <Search :size="20" />
         </button>
@@ -22,13 +22,6 @@
     </header>
 
     <div class="mh-scroll">
-      <!-- 在线搜索入口（本地 + 在线分组，复用桌面搜索面板组件） -->
-      <OnlineSearch
-        class="mh-search"
-        variant="mobile"
-        @open-player="$emit('open', { name: 'player' })"
-      />
-
       <!-- 九张入口卡片 -->
       <div class="mh-grid">
         <button
@@ -199,22 +192,14 @@ import {
   TrendingUp,
 } from "@lucide/vue";
 import { state, isFavorite } from "../../composables/usePlayer.js";
+import { useSearchAnything } from "../../composables/useSearchAnything.js";
 import { SMART_VIEW_LIMIT } from "../../composables/useSmartViews.js";
 import MobileSmartList from "./MobileSmartList.vue";
-import OnlineSearch from "../OnlineSearch.vue";
 
 defineEmits(["open", "open-settings"]);
 
 const { t } = useI18n();
-
-// 首页顶栏搜索入口：进入全部歌曲列表并自动聚焦搜索框（复用列表内过滤）
-// setup 内常量保证同引用，连续点击可被页面栈去重
-const searchEntry = {
-  name: "list",
-  kind: "songs",
-  title: t("mobile.home.allSongs"),
-  payload: { focusSearch: true },
-};
+const { isSearchOpen } = useSearchAnything();
 
 // 收藏数量：以曲库中实际收藏的歌曲计
 const favoriteCount = computed(() => state.songs.filter((s) => isFavorite(s.path)).length);
@@ -327,9 +312,6 @@ function showToast(msg) {
   overflow-y: auto;
   padding: 8px 16px 16px;
   -webkit-overflow-scrolling: touch;
-}
-.mh-search {
-  margin-bottom: 12px;
 }
 .mh-grid {
   display: grid;

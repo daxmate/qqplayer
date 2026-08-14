@@ -921,6 +921,21 @@
                     <kbd v-for="k in s.keys" :key="k">{{ k }}</kbd>
                   </span>
                 </div>
+                <div
+                  class="shortcut-item editable"
+                  :class="{ recording: recording === 'search' }"
+                  :title="t('settings.clickToSetKey')"
+                  @click="startRecord('search')"
+                >
+                  <span class="shortcut-desc">{{ t("settings.shortcutSearch") }}</span>
+                  <span class="shortcut-keys">
+                    <kbd v-if="recording === 'search'" class="recording-kbd">{{
+                      t("settings.pressNewKey")
+                    }}</kbd>
+                    <kbd v-else>{{ fmtSearchKey }}</kbd>
+                  </span>
+                </div>
+                <div class="setting-desc hint">{{ t("settings.searchRecordHint") }}</div>
                 <div class="group-title sub-title">
                   <Music2 :size="13" />
                   {{ t("settings.karaokeJump") }}
@@ -1229,8 +1244,8 @@ const shortcuts = [
   { keys: ["↓"], labelKey: "settings.shortcutVolDown" },
 ];
 
-// 跟唱句跳转快捷键录制（默认 N 下一句 / P 上一句，仅跟唱模式生效）
-const recording = ref(null); // null | 'next' | 'prev'
+// 跟唱句跳转 + search anything 快捷键录制（默认 N/P 下一句上一句；Cmd+K 打开搜索）
+const recording = ref(null); // null | 'next' | 'prev' | 'search'
 function startRecord(which) {
   recording.value = which;
 }
@@ -1243,6 +1258,12 @@ function fmtKey(code) {
   if (code.startsWith("Digit")) return code.slice(5);
   return code;
 }
+// search anything 快捷键显示：默认 Meta+K → ⌘K；录制单键 → 键名
+const fmtSearchKey = computed(() => {
+  const k = playbackSettings.searchKey || "Meta+K";
+  if (k === "Meta+K") return "⌘K";
+  return fmtKey(k);
+});
 // capture 阶段拦截：录制时按键不触发播放快捷键（stopImmediatePropagation 挡住 bubble 阶段的 SHORTCUT_HANDLER）
 function onRecordKeydown(e) {
   if (!recording.value) return;
@@ -1255,7 +1276,8 @@ function onRecordKeydown(e) {
   }
   if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab"].includes(e.code)) return; // 纯修饰键不绑定
   if (recording.value === "next") playbackSettings.karaokeNextKey = e.code;
-  else playbackSettings.karaokePrevKey = e.code;
+  else if (recording.value === "prev") playbackSettings.karaokePrevKey = e.code;
+  else if (recording.value === "search") playbackSettings.searchKey = e.code;
   recording.value = null;
 }
 
