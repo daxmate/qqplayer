@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import lyric_fetch
+import netease_provider
 
 
 # ============ fake HTTP ============
@@ -43,10 +44,35 @@ class FakeClient:
 
 @pytest.fixture
 def fake_http(monkeypatch):
-    """把 httpx.Client 换成 FakeClient，返回 routes 字典供测试填充"""
+    """把 httpx.Client 换成 FakeClient，返回 routes 字典供测试填充（lrclib 段用）"""
     routes = {}
     monkeypatch.setattr(lyric_fetch.httpx, "Client", lambda **kw: FakeClient(routes))
     return routes
+
+
+@pytest.fixture
+def fake_netease(monkeypatch):
+    """把 netease_provider.search/get_lyric 换成 stub（网易云段 eapi provider 用）
+
+    返回 (search_fn, get_lyric_fn) 两个可写槽位：
+    - search_fn(q, limit) 返回候选列表（同 provider.search 结构：id/title/artist/duration "mm:ss"/cover）
+    - get_lyric_fn(song_id) 返回 {lrc: {lyric}, tlyric: {lyric}, ...}
+    """
+    slots = {"search": None, "get_lyric": None}
+
+    def fake_search(query, limit=20):
+        if slots["search"] is None:
+            return []
+        return slots["search"](query, limit)
+
+    def fake_get_lyric(song_id):
+        if slots["get_lyric"] is None:
+            return {"lrc": {"lyric": ""}}
+        return slots["get_lyric"](song_id)
+
+    monkeypatch.setattr(netease_provider, "search", fake_search)
+    monkeypatch.setattr(netease_provider, "get_lyric", fake_get_lyric)
+    return slots
 
 
 @pytest.fixture
@@ -74,46 +100,74 @@ def test_cache_roundtrip(cache_dir):
     assert source == "netease"
 
 
-# ============ 网易云 ============
-def test_fetch_netease_success(fake_http):
-    fake_http["search/get/web"] = FakeResp(
-        {"result": {"songs": [{"id": 123, "name": "夜に駆ける", "artists": [{"name": "YOASOBI"}]}]}}
-    )
-    fake_http["song/lyric"] = FakeResp(
-        {"lrc": {"lyric": "[00:01.00]沈むように"}, "tlyric": {"lyric": "[00:01.00]像是沉溺"}}
-    )
+# ============ 网易云（netease_provider eapi，fake_netease stub）============
+def test_fetch_netease_success(fake_netease):
+    fake_netease["search"] = lambda q, limit=20: [
+        {
+            "id": "123",
+            "title": "夜に駆ける",
+            "artist": "YOASOBI",
+            "album": "",
+            "cover": "",
+            "duration": "04:18",
+            "level": "exhigh",
+        }
+    ]
+    fake_netease["get_lyric"] = lambda sid: {
+        "lrc": {"lyric": "[00:01.00]沈むように"},
+        "tlyric": {"lyric": "[00:01.00]像是沉溺"},
+        "yrc": None,
+        "romalrc": None,
+    }
     assert lyric_fetch.fetch_netease("夜に駆ける", "YOASOBI") == (
         "[00:01.00]沈むように",
         "[00:01.00]像是沉溺",
     )
 
 
-def test_fetch_netease_no_tlyric(fake_http):
+def test_fetch_netease_no_tlyric(fake_netease):
     """无翻译时 tlyric 为 None，不报错"""
-    fake_http["search/get/web"] = FakeResp(
-        {"result": {"songs": [{"id": 123, "name": "x", "artists": []}]}}
-    )
-    fake_http["song/lyric"] = FakeResp({"lrc": {"lyric": "[00:01.00]hi"}})
+    fake_netease["search"] = lambda q, limit=20: [
+        {"id": "123", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+    ]
+    fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": "[00:01.00]hi"}, "tlyric": None}
     assert lyric_fetch.fetch_netease("x", "") == ("[00:01.00]hi", None)
 
 
-def test_fetch_netease_no_result(fake_http):
-    fake_http["search/get/web"] = FakeResp({"result": {"songs": []}})
+def test_fetch_netease_no_result(fake_netease):
+    fake_netease["search"] = lambda q, limit=20: []
     assert lyric_fetch.fetch_netease("不存在", "无名") is None
 
 
-def test_fetch_netease_empty_lyric(fake_http):
+def test_fetch_netease_empty_lyric(fake_netease):
     """搜索命中但歌词为空（uncollected）→ 返回 None"""
-    fake_http["search/get/web"] = FakeResp(
-        {"result": {"songs": [{"id": 1, "name": "x", "artists": []}]}}
-    )
-    fake_http["song/lyric"] = FakeResp({"lrc": {"lyric": ""}, "uncollected": True})
+    fake_netease["search"] = lambda q, limit=20: [
+        {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+    ]
+    fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": ""}}
     assert lyric_fetch.fetch_netease("x", "") is None
 
 
-def test_fetch_netease_network_error(fake_http):
-    fake_http["search/get/web"] = FakeResp(error=httpx.TimeoutException("timeout"))
+def test_fetch_netease_network_error(fake_netease):
+    def boom(q, limit=20):
+        raise httpx.TimeoutException("timeout")
+
+    fake_netease["search"] = boom
     assert lyric_fetch.fetch_netease("x", "") is None
+
+
+def test_fetch_netease_word_json_lyric(fake_netease):
+    """新版逐字歌词（lrc.lyric 为 JSON-lines）→ 自动转普通 LRC"""
+    fake_netease["search"] = lambda q, limit=20: [
+        {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+    ]
+    fake_netease["get_lyric"] = lambda sid: {
+        "lrc": {"lyric": '{"t":0,"c":[{"tx":"作词: "},{"tx":"某人"}]}\n[00:10.00]正文'},
+        "tlyric": {"lyric": "[00:10.00]正文翻译"},
+    }
+    lrc, tlyric = lyric_fetch.fetch_netease("x", "")
+    assert lrc == "[00:00.00]作词: 某人\n[00:10.00]正文"
+    assert tlyric == "[00:10.00]正文翻译"
 
 
 # ============ lrclib ============
@@ -141,10 +195,18 @@ def test_fetch_lrclib_empty(fake_http):
     assert lyric_fetch.fetch_lrclib("x", "") is None
 
 
+def _boom(*a, **kw):
+    raise AssertionError("不该请求")
+
+
 # ============ 统一入口（fallback 链 + 缓存） ============
-def test_online_fallback_chain(fake_http, cache_dir, monkeypatch):
+def test_online_fallback_chain(fake_http, fake_netease, cache_dir):
     """网易云失败 → 自动走 lrclib"""
-    fake_http["search/get/web"] = FakeResp(error=httpx.TimeoutException("timeout"))
+
+    def boom(q, limit=20):
+        raise httpx.TimeoutException("timeout")
+
+    fake_netease["search"] = boom
     fake_http["lrclib.net"] = FakeResp([{"instrumental": False, "syncedLyrics": "[00:01.00]ok"}])
     lrc, tlyric, source = lyric_fetch.fetch_online_lyric("歌", "手")
     assert lrc == "[00:01.00]ok"
@@ -152,31 +214,44 @@ def test_online_fallback_chain(fake_http, cache_dir, monkeypatch):
     assert source == "lrclib"
 
 
-def test_online_cache_hit_no_request(fake_http, cache_dir):
-    """缓存命中后不再发网络请求"""
-    fake_http["search/get/web"] = FakeResp(
-        {"result": {"songs": [{"id": 1, "name": "x", "artists": []}]}}
-    )
-    fake_http["song/lyric"] = FakeResp(
-        {"lrc": {"lyric": "[00:01.00]first"}, "tlyric": {"lyric": "[00:01.00]第一"}}
-    )
+def test_online_cache_hit_no_request(fake_netease, cache_dir):
+    """缓存命中后不再请求网易云"""
+    calls = {"search": 0, "lyric": 0}
+
+    def fake_search(q, limit=20):
+        calls["search"] += 1
+        return [
+            {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "00:01", "level": "exhigh"}
+        ]
+
+    def fake_lyric(sid):
+        calls["lyric"] += 1
+        return {"lrc": {"lyric": "[00:01.00]first"}, "tlyric": {"lyric": "[00:01.00]第一"}}
+
+    fake_netease["search"] = fake_search
+    fake_netease["get_lyric"] = fake_lyric
     lrc, tlyric, source = lyric_fetch.fetch_online_lyric("x", "")
     assert lrc == "[00:01.00]first"
     assert tlyric == "[00:01.00]第一"
-    # 第二次：清空路由让任何请求都失败——但缓存命中不会发请求
-    fake_http.clear()
+    # 第二次：置空 stub 让任何调用都失败——但缓存命中不会发请求
+    calls["search"] = 0
+    calls["lyric"] = 0
+    fake_netease["search"] = _boom
+    fake_netease["get_lyric"] = _boom
     lrc, tlyric, source = lyric_fetch.fetch_online_lyric("x", "")
     assert lrc == "[00:01.00]first"
     assert tlyric == "[00:01.00]第一"
     assert source == "netease"
+    assert calls == {"search": 0, "lyric": 0}
 
 
-def test_online_no_result_cached(fake_http, cache_dir):
+def test_online_no_result_cached(fake_http, fake_netease, cache_dir):
     """无结果也会缓存，第二次不再请求"""
-    fake_http["search/get/web"] = FakeResp({"result": {"songs": []}})
+    fake_netease["search"] = lambda q, limit=20: []
     fake_http["lrclib.net"] = FakeResp([])
     assert lyric_fetch.fetch_online_lyric("无", "") == (None, None, None)
     fake_http.clear()
+    fake_netease["search"] = _boom
     assert lyric_fetch.fetch_online_lyric("无", "") == (None, None, None)
 
 
@@ -227,51 +302,58 @@ def test_manual_corrupt_file(cache_dir):
 
 
 # ============ 搜索候选 ============
-def test_search_netease_candidates(fake_http):
-    """网易云搜索返回多条候选，各带歌词全文+翻译"""
-    fake_http["search/get/web"] = FakeResp(
+def test_search_netease_candidates(fake_netease):
+    """网易云搜索返回多条候选，各带歌词全文+翻译；duration mm:ss → 秒数"""
+    fake_netease["search"] = lambda q, limit=20: [
         {
-            "result": {
-                "songs": [
-                    {
-                        "id": 1,
-                        "name": "夜に駆ける",
-                        "artists": [{"name": "YOASOBI"}],
-                        "duration": 1000,
-                    },
-                    {
-                        "id": 2,
-                        "name": "夜に駆ける",
-                        "artists": [{"name": "某人"}],
-                        "duration": 2000,
-                    },
-                ]
-            }
-        }
-    )
-    fake_http["song/lyric"] = FakeResp(
-        {"lrc": {"lyric": "[00:01.00]沈む"}, "tlyric": {"lyric": "[00:01.00]像是沉溺"}}
-    )
+            "id": "1",
+            "title": "夜に駆ける",
+            "artist": "YOASOBI",
+            "album": "THE BOOK",
+            "cover": "http://p1/1.jpg",
+            "duration": "00:01",
+            "level": "exhigh",
+        },
+        {
+            "id": "2",
+            "title": "夜に駆ける",
+            "artist": "某人",
+            "album": "",
+            "cover": None,
+            "duration": "00:02",
+            "level": "exhigh",
+        },
+    ]
+    fake_netease["get_lyric"] = lambda sid: {
+        "lrc": {"lyric": "[00:01.00]沈む"},
+        "tlyric": {"lyric": "[00:01.00]像是沉溺"},
+    }
     results = lyric_fetch.search_netease("夜に駆ける", "YOASOBI")
     assert len(results) == 2
     assert results[0]["source"] == "netease"
     assert results[0]["duration"] == 1.0
+    assert results[0]["cover"] == "http://p1/1.jpg"
     assert results[0]["text"] == "[00:01.00]沈む"
     assert results[0]["tlyric"] == "[00:01.00]像是沉溺"
+    assert results[1]["duration"] == 2.0
 
 
-def test_search_netease_skip_empty_lyric(fake_http):
+def test_search_netease_skip_empty_lyric(fake_netease):
     """无歌词的候选被过滤"""
-    fake_http["search/get/web"] = FakeResp(
-        {"result": {"songs": [{"id": 1, "name": "x", "artists": []}]}}
-    )
-    fake_http["song/lyric"] = FakeResp({"lrc": {"lyric": ""}})
+    fake_netease["search"] = lambda q, limit=20: [
+        {"id": "1", "title": "x", "artist": "", "album": "", "cover": "", "duration": "", "level": "exhigh"}
+    ]
+    fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": ""}}
     assert lyric_fetch.search_netease("x", "") == []
 
 
-def test_search_netease_error(fake_http):
+def test_search_netease_error(fake_netease):
     """网络错误 → 空列表，不抛异常"""
-    fake_http["search/get/web"] = FakeResp(error=httpx.TimeoutException("timeout"))
+
+    def boom(q, limit=20):
+        raise httpx.TimeoutException("timeout")
+
+    fake_netease["search"] = boom
     assert lyric_fetch.search_netease("x", "") == []
 
 

@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
+import netease_provider  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -799,11 +801,11 @@ def test_init_library_respects_settings(song_library, monkeypatch):
 
 # ============ 统一设置（6 namespace Settings API）============
 def test_api_settings_get_all_namespaces():
-    """GET /api/settings 返回 6 namespace 全量，每 namespace 合并默认值"""
+    """GET /api/settings 返回 7 namespace 全量，每 namespace 合并默认值"""
     r = client.get("/api/settings")
     assert r.status_code == 200
     s = r.json()["settings"]
-    assert set(s) == {"library", "ui", "lyric", "playback", "desktopLyric", "player"}
+    assert set(s) == {"library", "ui", "lyric", "playback", "desktopLyric", "player", "download"}
     # library 4 字段
     assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
@@ -825,6 +827,10 @@ def test_api_settings_get_all_namespaces():
     assert s["desktopLyric"]["fontSize"] == 26
     # player 4 字段
     assert s["player"] == {"volume": 1.0, "panel": True, "controls": False, "lastPlayed": None}
+    # download 2 字段
+    assert set(s["download"]) == {"downloadDir", "defaultQuality"}
+    assert s["download"]["downloadDir"] == ""
+    assert s["download"]["defaultQuality"] == "exhigh"
 
 
 def test_api_settings_put_deep_merge():
@@ -945,7 +951,7 @@ def test_migrate_legacy_settings_idempotent():
     backend.SETTINGS_FILE.write_text(json.dumps({"audioExts": [".mp3"]}), encoding="utf-8")
     backend.migrate_legacy_settings()
     first = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
-    assert set(first) == {"library", "ui", "lyric", "playback", "desktopLyric", "player"}
+    assert set(first) == {"library", "ui", "lyric", "playback", "desktopLyric", "player", "download"}
     backend._settings = None
     backend.migrate_legacy_settings()  # 再跑一次
     second = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -1257,3 +1263,224 @@ def test_api_ui_settings_roundtrip():
     # 统一存储已落盘（settings.json 的 ui namespace）
     on_disk = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
     assert on_disk["ui"]["theme"] == "dark"
+
+
+# ============ download settings namespace ============
+def test_settings_download_namespace():
+    """download namespace：默认值 / 合法值保留 / 非法值回落默认"""
+    assert backend.load_all_settings()["download"] == {
+        "downloadDir": "",
+        "defaultQuality": "exhigh",
+    }
+    # 合法值保留
+    s = backend.save_all_settings(
+        {"download": {"downloadDir": "/tmp/dl", "defaultQuality": "lossless"}}
+    )["download"]
+    assert s == {"downloadDir": "/tmp/dl", "defaultQuality": "lossless"}
+    # 非法值回落默认
+    s = backend.save_all_settings(
+        {"download": {"downloadDir": 123, "defaultQuality": "jymaster"}}
+    )["download"]
+    assert s["downloadDir"] == ""  # 非字符串回落默认
+    assert s["defaultQuality"] == "exhigh"  # 不在白名单回落默认
+    # 合法音质枚举保留
+    s = backend.save_all_settings({"download": {"defaultQuality": "hires"}})["download"]
+    assert s["defaultQuality"] == "hires"
+
+
+def test_api_settings_put_download_namespace():
+    """PUT /api/settings 可写入 download namespace"""
+    r = client.put(
+        "/api/settings", json={"download": {"downloadDir": "/x/y", "defaultQuality": "standard"}}
+    )
+    assert r.status_code == 200
+    d = r.json()["settings"]["download"]
+    assert d["downloadDir"] == "/x/y"
+    assert d["defaultQuality"] == "standard"
+
+
+# ============ 在线搜索/下载（网易云 eapi） ============
+class _FakeStreamResp:
+    """mock httpx.stream 的响应：chunk 迭代 + raise_for_status"""
+
+    def __init__(self, chunks):
+        self._chunks = chunks
+        self._error = None
+
+    def fail(self, error):
+        self._error = error
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        if self._error:
+            raise self._error
+
+    def iter_bytes(self):
+        yield from self._chunks
+
+
+@pytest.fixture
+def fake_stream(monkeypatch):
+    """mock backend.httpx.stream：记录 (method, url, kwargs)，返回可控 chunk 流"""
+    state = {"calls": [], "chunks": [b"ID3 fake audio bytes"]}
+
+    def stream_fn(method, url, **kw):
+        state["calls"].append((method, url, kw))
+        return _FakeStreamResp(state["chunks"])
+
+    monkeypatch.setattr(backend.httpx, "stream", stream_fn)
+    return state
+
+
+SEARCH_ITEM = {
+    "id": "186016",
+    "title": "晴天",
+    "artist": "周杰伦",
+    "album": "叶惠美",
+    "cover": "http://p1.music.126.net/cover.jpg",
+    "duration": "04:29",
+    "level": "exhigh",
+}
+
+
+def test_api_online_search_ok(monkeypatch):
+    """搜索返回 items；q/limit 透传给 provider"""
+    captured = {}
+
+    def fake_search(q, limit=20):
+        captured["q"] = q
+        captured["limit"] = limit
+        return [SEARCH_ITEM]
+
+    monkeypatch.setattr(netease_provider, "search", fake_search)
+    r = client.get("/api/online/search", params={"q": "晴天", "limit": 2})
+    assert r.status_code == 200
+    assert captured == {"q": "晴天", "limit": 2}
+    items = r.json()["items"]
+    assert items == [SEARCH_ITEM]
+
+
+def test_api_online_search_empty_q():
+    """q 为空/纯空白 → 400"""
+    assert client.get("/api/online/search").status_code == 400
+    assert client.get("/api/online/search", params={"q": "   "}).status_code == 400
+
+
+def test_api_online_search_limit_clamp(monkeypatch):
+    """limit clamp 到 1-50（默认 20）"""
+    limits = []
+
+    def fake_search(q, limit=20):
+        limits.append(limit)
+        return []
+
+    monkeypatch.setattr(netease_provider, "search", fake_search)
+    client.get("/api/online/search", params={"q": "x", "limit": 999})
+    client.get("/api/online/search", params={"q": "x", "limit": 0})
+    client.get("/api/online/search", params={"q": "x"})
+    assert limits == [50, 1, 20]
+
+
+def test_api_online_download_success(monkeypatch, fake_stream, tmp_path):
+    """下载落盘到 download.downloadDir；文件名清洗（去掉 : /）；响应结构"""
+    backend.save_all_settings({"download": {"downloadDir": str(tmp_path)}})
+    monkeypatch.setattr(
+        netease_provider,
+        "get_play_info",
+        lambda sid, level="exhigh": {
+            "url": "http://cdn.example.com/a.mp3",
+            "ext": "mp3",
+            "bitrate": "320",
+        },
+    )
+    r = client.post(
+        "/api/online/download",
+        json={"id": "123", "title": "歌:曲/测试", "artist": "歌手", "level": "exhigh"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["path"] == str(tmp_path / "歌曲测试-歌手.mp3")
+    assert (tmp_path / "歌曲测试-歌手.mp3").read_bytes() == b"ID3 fake audio bytes"
+    # 直链 + 浏览器 UA 透传
+    method, url, kw = fake_stream["calls"][0]
+    assert method == "GET"
+    assert url == "http://cdn.example.com/a.mp3"
+    assert "User-Agent" in kw["headers"]
+
+
+def test_api_online_download_dir_setting(monkeypatch, fake_stream, tmp_path):
+    """downloadDir 为空 → 落到当前 LIBRARY；无 title/artist 用 id 兜底"""
+    old = backend.LIBRARY
+    backend.LIBRARY = tmp_path / "lib"
+    (tmp_path / "lib").mkdir()
+    try:
+        monkeypatch.setattr(
+            netease_provider,
+            "get_play_info",
+            lambda sid, level="exhigh": {"url": "http://x/y.mp3", "ext": "mp3", "bitrate": "128"},
+        )
+        r = client.post("/api/online/download", json={"id": "1"})
+        assert r.status_code == 200
+        assert r.json()["path"] == str(tmp_path / "lib" / "1.mp3")
+        assert (tmp_path / "lib" / "1.mp3").exists()
+    finally:
+        backend.LIBRARY = old
+
+
+def test_api_online_download_no_url(monkeypatch):
+    """provider 无直链 → 404 error"""
+    monkeypatch.setattr(netease_provider, "get_play_info", lambda sid, level="exhigh": {})
+    r = client.post("/api/online/download", json={"id": "1"})
+    assert r.status_code == 404
+    assert "error" in r.json()
+
+
+def test_api_online_download_provider_error(monkeypatch):
+    """provider 抛异常 → 404 error"""
+
+    def boom(sid, level="exhigh"):
+        raise RuntimeError("no url")
+
+    monkeypatch.setattr(netease_provider, "get_play_info", boom)
+    r = client.post("/api/online/download", json={"id": "1"})
+    assert r.status_code == 404
+    assert "error" in r.json()
+
+
+def test_api_online_download_missing_id():
+    """缺 id / id 为空白 → 400"""
+    assert client.post("/api/online/download", json={}).status_code == 400
+    assert client.post("/api/online/download", json={"id": "  "}).status_code == 400
+
+
+def test_api_online_download_stream_failure(monkeypatch, fake_stream, tmp_path):
+    """流式下载失败 → 404；不留下半成品文件"""
+    backend.save_all_settings({"download": {"downloadDir": str(tmp_path)}})
+    monkeypatch.setattr(
+        netease_provider,
+        "get_play_info",
+        lambda sid, level="exhigh": {"url": "http://x/a.mp3", "ext": "mp3", "bitrate": "320"},
+    )
+
+    def fail(method, url, **kw):
+        return _FakeStreamResp([]).fail(httpx.HTTPError("403 forbidden"))
+
+    monkeypatch.setattr(backend.httpx, "stream", fail)
+    r = client.post("/api/online/download", json={"id": "1", "title": "t"})
+    assert r.status_code == 404
+    assert not (tmp_path / "t.mp3").exists()
+
+
+def test_sanitize_filename():
+    """文件名清洗：去掉 / \\ : * ? " < > | 与首尾空白"""
+    assert backend._sanitize_filename('a/b\\c:d*e?f"g<h>i|j  ') == "abcdefghij"
+    assert backend._sanitize_filename("  正常 名字 ") == "正常 名字"
+    assert backend._sanitize_filename(None) == ""
+    assert backend._sanitize_filename("///") == ""

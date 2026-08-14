@@ -19,13 +19,15 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+import netease_provider
 from lyric_fetch import (
     delete_manual_lyric,
     fetch_online_lyric,
@@ -97,16 +99,16 @@ DEFAULT_AUDIO_EXTS = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"]
 AUDIO_EXTS = set(DEFAULT_AUDIO_EXTS)
 LYRIC_EXTS = {".srt", ".lrc"}
 
-# ============ 统一设置（单一 settings.json · 6 namespace）============
+# ============ 统一设置（单一 settings.json · 7 namespace）============
 # 存储结构: {"library": {...}, "ui": {...}, "lyric": {...}, "playback": {...},
-#            "desktopLyric": {...}, "player": {...}}
+#            "desktopLyric": {...}, "player": {...}, "download": {...}}
 # 注意：旧 library 设置文件也叫 settings.json（与新区文件同名）！
 # 迁移时旧文件先读入内存再写新结构，不能先覆盖后读（见 migrate_legacy_settings）。
 SETTINGS_FILE = DATA_DIR / "settings.json"
 # 遗留单文件设置（一次性迁移数据源；迁移后只读保留作备份，不再写入）
 UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
 DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
-# 内存缓存：完整 6 namespace 结构
+# 内存缓存：完整 7 namespace 结构
 _settings: dict | None = None
 
 # ---- 各 namespace 默认值 ----
@@ -186,7 +188,7 @@ PLAYER_SETTINGS_DEFAULTS = {
     "lastPlayed": None,
 }
 
-_SETTINGS_NAMESPACES = ("library", "ui", "lyric", "playback", "desktopLyric", "player")
+_SETTINGS_NAMESPACES = ("library", "ui", "lyric", "playback", "desktopLyric", "player", "download")
 
 
 # ============ 字段校验器（合法值保留/规范化，非法值回落默认）============
@@ -320,6 +322,14 @@ _SETTINGS_SPEC = {
         "panel": (True, _norm_bool),
         "controls": (False, _norm_bool),
         "lastPlayed": (None, lambda v, d: _norm_last_played(v)),
+    },
+    "download": {
+        # 在线下载目录：非空用该路径，空 = 当前歌曲库
+        "downloadDir": ("", _norm_str),
+        "defaultQuality": (
+            "exhigh",
+            lambda v, d: _norm_str(v, d, allowed={"standard", "exhigh", "lossless", "hires"}),
+        ),
     },
 }
 
@@ -946,7 +956,7 @@ def api_now_playing_get():
 
 @app.get("/api/settings")
 def api_settings_get():
-    """返回统一设置：6 namespace 全量（每 namespace 合并默认值后返回）"""
+    """返回统一设置：7 namespace 全量（每 namespace 合并默认值后返回）"""
     return {"settings": load_all_settings()}
 
 
@@ -954,6 +964,80 @@ def api_settings_get():
 def api_settings_put(body: dict):
     """部分更新统一设置（namespace→字段两级深合并，只改传入字段），返回合并后全量"""
     return {"settings": save_all_settings(body or {})}
+
+
+# ============ 在线搜索/下载（网易云 eapi，netease_provider）============
+# 下载文件名中不允许出现的字符（跨平台安全）：/ \ : * ? " < > |
+_INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+# 流式下载时用的浏览器 UA（部分 CDN 拒绝空 UA/非浏览器 UA）
+DOWNLOAD_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
+DOWNLOAD_TIMEOUT = 90.0
+
+
+def _sanitize_filename(name: str) -> str:
+    """文件名清洗：去掉 / \\ : * ? " < > | 与首尾空白"""
+    return _INVALID_FILENAME_CHARS.sub("", str(name or "")).strip()
+
+
+def _stream_download(url: str, dest: Path, timeout: float = DOWNLOAD_TIMEOUT) -> None:
+    """流式下载 url 到 dest（同名覆盖）；失败抛异常（由路由转 404）"""
+    with httpx.stream(
+        "GET",
+        url,
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": DOWNLOAD_UA},
+    ) as resp:
+        resp.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in resp.iter_bytes():
+                f.write(chunk)
+
+
+@app.get("/api/online/search")
+def api_online_search(q: str = "", limit: int = 20):
+    """在线搜索歌曲（网易云）；q 必填，limit 1-50 默认 20"""
+    q = (q or "").strip()
+    if not q:
+        raise HTTPException(400, "缺少搜索关键词")
+    limit = max(1, min(50, limit))
+    return {"items": netease_provider.search(q, limit=limit)}
+
+
+@app.post("/api/online/download")
+def api_online_download(body: dict):
+    """在线下载歌曲到下载目录（后端落盘）；body {id, level?, title?, artist?}
+
+    下载目录 = 设置 download.downloadDir（非空用该路径，空 = 当前歌曲库）。
+    成功返回 {"ok": true, "path": ...}；无直链/下载失败返回 404 {"error": ...}。
+    """
+    song_id = str(body.get("id") or "").strip()
+    if not song_id:
+        raise HTTPException(400, "缺少 id")
+    level = str(body.get("level") or "").strip() or "exhigh"
+    try:
+        info = netease_provider.get_play_info(song_id, level)
+    except Exception:
+        info = None
+    if not info or not info.get("url"):
+        return JSONResponse(status_code=404, content={"error": "无法获取下载链接"})
+    url = info["url"]
+    ext = str(info.get("ext") or "mp3").lstrip(".")
+    # 文件名：{title}-{artist}.{ext}；title/artist 为空（或清洗后为空）用 id 兜底
+    title = _sanitize_filename(body.get("title")) or song_id
+    artist = _sanitize_filename(body.get("artist"))
+    filename = f"{title}-{artist}.{ext}" if artist else f"{title}.{ext}"
+    download_dir = Path(load_all_settings()["download"]["downloadDir"] or LIBRARY)
+    try:
+        download_dir.mkdir(parents=True, exist_ok=True)
+        dest = download_dir / filename
+        _stream_download(url, dest)
+    except Exception as e:
+        return JSONResponse(status_code=404, content={"error": f"下载失败: {e}"})
+    return {"ok": True, "path": str(dest)}
 
 
 @app.get("/api/desktop-lyric/settings")

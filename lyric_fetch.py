@@ -13,13 +13,10 @@ from pathlib import Path
 
 import httpx
 
+import netease_provider
+
 CACHE_DIR = Path(os.path.expanduser("~")) / ".cache" / "qqplayer" / "lyric"
 CACHE_TTL = 30 * 24 * 3600  # 30 天
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Referer": "https://music.163.com/",
-}
 
 TIMEOUT = httpx.Timeout(8.0)
 
@@ -116,33 +113,36 @@ def _save_cache(key: str, lrc: str, source: str, tlyric: str | None = None):
         pass  # 缓存失败不影响功能
 
 
-# ============ 网易云音乐 ============
-def _netease_candidates(client: httpx.Client, title: str, artist: str, limit: int = 8):
-    """搜索歌曲，返回候选列表 [{id, title, artist, duration}]（未过滤歌词可用性）"""
+# ============ 网易云音乐（eapi 官方接口，netease_provider）============
+def _netease_candidates(title: str, artist: str, limit: int = 8):
+    """搜索歌曲，返回候选列表 [{id, title, artist, duration, cover}]（未过滤歌词可用性）"""
     q = f"{title} {artist}".strip()
-    r = client.get(
-        "https://music.163.com/api/search/get/web",
-        params={"csrf_token": "", "s": q, "type": 1, "offset": 0, "total": "true", "limit": limit},
-        headers=HEADERS,
-    )
-    r.raise_for_status()
-    songs = r.json().get("result", {}).get("songs", [])
+    items = netease_provider.search(q, limit=limit)
     out = []
-    for s in songs:
+    for it in items:
+        dur = 0.0
+        d = it.get("duration")  # provider 返回 "mm:ss"
+        if d and ":" in d:
+            try:
+                mm, ss = d.split(":", 1)
+                dur = float(int(mm) * 60 + int(ss))
+            except ValueError:
+                dur = 0.0
         out.append(
             {
-                "id": s.get("id"),
-                "title": s.get("name", ""),
-                "artist": " / ".join(a.get("name", "") for a in s.get("artists", [])),
-                "duration": (s.get("duration") or 0) / 1000,
+                "id": it.get("id"),
+                "title": it.get("title", ""),
+                "artist": it.get("artist", ""),
+                "duration": dur,
+                "cover": it.get("cover"),
             }
         )
     return out
 
 
-def _netease_search(client: httpx.Client, title: str, artist: str):
+def _netease_search(title: str, artist: str):
     """搜索歌曲，返回最匹配的歌曲 id（兼容旧调用）"""
-    cands = _netease_candidates(client, title, artist)
+    cands = _netease_candidates(title, artist)
     if not cands:
         return None
     for c in cands:
@@ -151,33 +151,34 @@ def _netease_search(client: httpx.Client, title: str, artist: str):
     return cands[0]["id"]
 
 
-def _netease_lyric(client: httpx.Client, song_id: int):
-    """按歌曲 id 获取 (原文 LRC, 中文翻译 LRC)；无歌词返回 (None, None)"""
-    r = client.get(
-        "https://music.163.com/api/song/lyric",
-        params={"id": song_id, "lv": 1, "kv": 1, "tv": -1},
-        headers=HEADERS,
-    )
-    r.raise_for_status()
-    data = r.json()
-    lrc = data.get("lrc", {}).get("lyric", "")
+def _netease_lyric(song_id: int):
+    """按歌曲 id 获取 (原文 LRC, 中文翻译 LRC)；无歌词返回 (None, None)
+
+    新版逐字歌词（lrc.lyric 为 JSON-lines 格式）自动转成普通 LRC，
+    老歌普通 LRC 原样透传。
+    """
+    data = netease_provider.get_lyric(song_id)
+    lrc = ""
+    if data and isinstance(data.get("lrc"), dict):
+        lrc = netease_provider.word_json_to_lrc(data["lrc"].get("lyric", ""))
     if not lrc.strip():
         return None, None
-    tlyric = data.get("tlyric", {}).get("lyric", "") or None
+    tlyric = None
+    if data and isinstance(data.get("tlyric"), dict):
+        tlyric = netease_provider.word_json_to_lrc(data["tlyric"].get("lyric", "")) or None
     return lrc, tlyric
 
 
 def fetch_netease(title: str, artist: str) -> tuple[str, str | None] | None:
     """网易云获取歌词，返回 (原文, 翻译)；失败/无结果返回 None"""
     try:
-        with httpx.Client(timeout=TIMEOUT) as client:
-            song_id = _netease_search(client, title, artist)
-            if song_id is None:
-                return None
-            lrc, tlyric = _netease_lyric(client, song_id)
-            if lrc is None:
-                return None
-            return lrc, tlyric
+        song_id = _netease_search(title, artist)
+        if song_id is None:
+            return None
+        lrc, tlyric = _netease_lyric(song_id)
+        if lrc is None:
+            return None
+        return lrc, tlyric
     except (httpx.HTTPError, OSError, ValueError, KeyError):
         return None
 
@@ -185,15 +186,14 @@ def fetch_netease(title: str, artist: str) -> tuple[str, str | None] | None:
 def search_netease(title: str, artist: str):
     """搜索网易云候选（带歌词全文+翻译），返回 [{source, title, artist, duration, text, tlyric}]"""
     try:
-        with httpx.Client(timeout=TIMEOUT) as client:
-            cands = _netease_candidates(client, title, artist)
-            out = []
-            for c in cands[:5]:
-                lrc, tlyric = _netease_lyric(client, c["id"])
-                if not lrc:
-                    continue
-                out.append({"source": "netease", **c, "text": lrc, "tlyric": tlyric})
-            return out
+        cands = _netease_candidates(title, artist)
+        out = []
+        for c in cands[:5]:
+            lrc, tlyric = _netease_lyric(c["id"])
+            if not lrc:
+                continue
+            out.append({"source": "netease", **c, "text": lrc, "tlyric": tlyric})
+        return out
     except (httpx.HTTPError, OSError, ValueError, KeyError):
         return []
 
