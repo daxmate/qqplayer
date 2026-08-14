@@ -5,7 +5,7 @@
 import { ref, watch } from "vue";
 import { state } from "./usePlayer.js";
 import { matchScore, kindRank } from "../utils/score.js";
-import { settingsIndex } from "../settingsIndex.js";
+import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex.js";
 import i18n from "../locales/i18n.js";
 
 const DEBOUNCE_MS = 250;
@@ -185,7 +185,7 @@ function collectSettings(q) {
       kind: "setting",
       id: entry.key || entry.labelKey,
       title,
-      subtitle: entry.categoryLabelKey ? i18n.global.t(entry.categoryLabelKey) : "",
+      subtitle: settingsCategoryLabel(entry.category),
       badge: "设置",
       score,
       payload: entry, // SettingEntry 原样透传
@@ -193,6 +193,12 @@ function collectSettings(q) {
   }
   out.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "zh"));
   return out.slice(0, LIMITS.setting);
+}
+
+// 设置项分类名（subtitle）：category key → SETTING_CATEGORIES 的 labelKey 翻译
+function settingsCategoryLabel(category) {
+  const cat = (SETTING_CATEGORIES || []).find((c) => c.key === category);
+  return cat ? i18n.global.t(cat.labelKey) : "";
 }
 
 // ---------- 汇总排序 ----------

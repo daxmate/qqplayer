@@ -52,7 +52,18 @@ const localStorageStub = {
 };
 
 // settingsIndex mock：beforeEach 重建为 BASE_SETTINGS（上限/别名测试可自行增删）
-vi.mock("../settingsIndex.js", () => ({ settingsIndex: [] }));
+vi.mock("../settingsIndex.js", () => ({
+  settingsIndex: [],
+  SETTING_CATEGORIES: [
+    { key: "playback", labelKey: "settings.category.playback" },
+    { key: "library", labelKey: "settings.category.library" },
+    { key: "download", labelKey: "settings.category.download" },
+    { key: "lyric", labelKey: "settings.category.lyric", subTabs: ["app", "desktop"] },
+    { key: "ui", labelKey: "settings.category.ui" },
+    { key: "shortcuts", labelKey: "settings.category.shortcuts" },
+    { key: "about", labelKey: "settings.category.about" },
+  ],
+}));
 
 // 测试用固定歌曲池
 const S1 = { id: 1, path: "/s/1.mp3", name: "晴天", artist: "晴天乐队", album: "晴空" };
@@ -64,13 +75,13 @@ const BASE_SETTINGS = [
     key: "playMode",
     labelKey: "settings.playMode",
     keywords: ["播放模式", "循环"],
-    categoryLabelKey: "settings.category.playback",
+    category: "playback",
   },
   {
     key: "custom",
     labelKey: "settings.eq",
     keywords: ["晴天设置"],
-    categoryLabelKey: "settings.category.playback",
+    category: "playback",
   },
 ];
 
@@ -351,7 +362,7 @@ describe("每类上限", () => {
         key: `k${i}`,
         labelKey: "settings.playMode",
         keywords: [`q设置${i}`],
-        categoryLabelKey: "settings.category.playback",
+        category: "playback",
       });
     }
     query.value = "q";
