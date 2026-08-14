@@ -816,9 +816,10 @@ def test_api_settings_get_all_namespaces():
     # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
     assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
     assert s["lyric"]["fontSize"] == 20 and s["lyric"]["focusPos"] == 0.5 and s["lyric"]["offset"] == 0
-    # playback 13 字段（与前端 PLAYBACK_SETTINGS_DEFAULTS 一致）
+    # playback 15 字段（含睡眠定时器，与前端 PLAYBACK_SETTINGS_DEFAULTS 一致）
     assert set(s["playback"]) == set(backend.PLAYBACK_SETTINGS_DEFAULTS)
     assert s["playback"]["playMode"] == "order" and s["playback"]["eqGains"] == [0] * 10
+    assert s["playback"]["sleepTimerOn"] is False and s["playback"]["sleepTimerMinutes"] == 30
     # desktopLyric 11 字段
     assert set(s["desktopLyric"]) == set(backend.DESKTOP_LYRIC_DEFAULTS)
     assert s["desktopLyric"]["fontSize"] == 26
@@ -872,6 +873,14 @@ def test_api_settings_put_validation():
     assert s["player"]["volume"] == 1.0  # clamp 0~1
     assert s["player"]["panel"] is True
     assert s["player"]["lastPlayed"] is None  # 非法结构回落 null
+
+    # sleepTimer：合法值保留、非法值回落默认
+    r = client.put("/api/settings", json={"playback": {"sleepTimerOn": True, "sleepTimerMinutes": 45}})
+    assert r.json()["settings"]["playback"]["sleepTimerOn"] is True
+    assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 45
+    r = client.put("/api/settings", json={"playback": {"sleepTimerOn": "x", "sleepTimerMinutes": 20}})
+    assert r.json()["settings"]["playback"]["sleepTimerOn"] is False
+    assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 30  # 不在选项内回落 30
 
     # eqGains 长度不对 / 含非数字 → 全 0；负值 clamp 到 -12
     r = client.put("/api/settings", json={"playback": {"eqGains": [1, 2]}})

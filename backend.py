@@ -161,6 +161,8 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "abLoopCountOn": True,  # AB 循环计数（防走开安全阀）
     "abLoopMaxCount": 10,  # AB 循环计数上限（1-20）
     "visualizerEnabled": True,  # 频谱可视化开关
+    "sleepTimerOn": False,  # 睡眠定时器开关（运行中的倒计时不持久化，刷新即取消）
+    "sleepTimerMinutes": 30,  # 睡眠定时器时长（分钟，chip 单选 15/30/45/60/90）
 }
 # desktopLyric：现有 DESKTOP_LYRIC_DEFAULTS 11 字段（不动）
 DESKTOP_LYRIC_DEFAULTS = {
@@ -297,6 +299,8 @@ _SETTINGS_SPEC = {
         "abLoopCountOn": (True, _norm_bool),
         "abLoopMaxCount": (10, lambda v, d: _norm_num(v, d, lo=1, hi=20, integer=True)),
         "visualizerEnabled": (True, _norm_bool),
+        "sleepTimerOn": (False, _norm_bool),
+        "sleepTimerMinutes": (30, lambda v, d: v if v in {15, 30, 45, 60, 90} else d),
     },
     "desktopLyric": {
         "enabled": (False, _norm_bool),
