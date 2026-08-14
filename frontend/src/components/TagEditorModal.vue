@@ -516,11 +516,20 @@ onBeforeUnmount(() => {
   color: #ff6b6b;
 }
 
-/* ============ 候选区（限高滚动） ============ */
+/* ============ 候选区（限高滚动） ============
+   候选可能很多（网易云 20 + MusicBrainz 5），整块限高 + 内部滚动，
+   保证最后一条候选始终可通过滚动看到，不会超出弹窗底部被裁切。
+   高度：桌面弹窗 max 680px 时正文可视约 534px，去掉封面/表单/刮削行后候选区约 340px；
+   矮视口（<740px）跟随弹窗收缩（弹窗 max-height = 100dvh - 60px），
+   因此取 min(340px, 100dvh - 400px) 恰好不触发外层 .tag-body 滚动。
+   移动端（<1024px 弹窗全屏 100dvh）同样限高可滚动，外层 .tag-body 兜底。 */
 .candidates {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  max-height: min(340px, calc(100dvh - 400px));
+  overflow-y: auto;
 }
 .cand-group {
   display: flex;
