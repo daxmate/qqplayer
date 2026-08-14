@@ -68,6 +68,17 @@
   - 新增「快捷键」「关于」分类：全局快捷键一览（只读）、版本号 / 数据目录 / 本地访问地址 / 项目主页
 - 跟唱模式行号显示可开关：设置 → 界面 →「跟唱显示行号」（默认显示，关闭后行号圆点与 AB 徽标隐藏，AB 区间高亮保留）
 
+### 🔧 重构
+
+- **设置持久化迁移：localStorage → 后端统一存储**（浏览器与 Swift 壳跨引擎设定同步）
+  - 后端新增统一 `settings.json`（6 namespace：library / ui / lyric / playback / desktopLyric / player），`GET/PUT /api/settings`（namespace→字段两级深合并，字段白名单 + 校验非法值回落默认）
+  - 旧三文件（settings.json / ui_settings.json / desktop_lyric.json）启动时一次性幂等迁移并入，旧文件保留作备份
+  - 旧端点 `/api/ui/settings`、`/api/library/settings`、`/api/desktop-lyric/settings` 保留兼容层，壳（迷你窗/桌面歌词）零改动
+  - 前端统一 Settings 层（settingsSync.js）：localStorage 降级为启动缓存 + 写透缓存，后端为唯一真源；启动同步读缓存渲染首屏（不闪变）→ 异步 GET 覆盖 → 变更防抖 300ms PUT；loaded 标志防拉取结果回写
+  - 一次性导入：本地旧 localStorage 与后端做字段级 diff，脏字段自动上传（幂等，之后以后端为准）
+  - player 状态（音量/侧栏开关/控制区收起/上次播放位置）迁入后端 player namespace，保留 rememberVolume / resumeLast 开关语义（关闭时不跨引擎同步）
+  - 睡眠定时器设置（开关/时长）纳入 playback 持久化，跨引擎同步
+
 ### 🐛 修复
 
 - 跟唱模式歌词对齐不随连播设置生效：`.kline-body` 缺 `flex: 1` 导致宽度收缩到文本内容，`text-align` 无居中空间；补 `flex: 1` + `min-width: 0`，行号仍固定最左，时间戳仍贴最右

@@ -36,7 +36,7 @@
 - [x] 响应式布局（为 NAS 部署/手机访问做准备）✅ 2026-08-13 完成（移动端页面栈 + 迷你条，桌面零回归）
 
 ## 大象想做的功能
-- [ ] 持久化不放在localStorage中，localstorage对多个终端不友好
+- [x] 持久化不放在localStorage中，localstorage对多个终端不友好 ✅ 2026-08-14 完成（后端统一 settings.json + /api/settings，localStorage 降级为缓存，跨引擎同步，详见 CHANGELOG）
 - [x] 多语种支持 ✅ 2026-08-14 完成（i18n 基建：vue-i18n + 语言包按模块拆分 + 3053 字符全部抽离；按拍板只做基建不加语言切换）
 - [ ] 音乐标签编辑（ID3/MP4：歌名/歌手/专辑/封面）, 做一个音乐文件信息刮削器
 - [ ] 借鉴coco-downloader，实现歌曲下载功能
