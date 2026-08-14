@@ -150,7 +150,7 @@ LYRIC_SETTINGS_DEFAULTS = {
     "jpColor": "",  # 主行文字颜色（自定义）
     "zhColor": "",  # 翻译行文字颜色（自定义）
 }
-# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 13 字段
+# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 16 字段
 PLAYBACK_SETTINGS_DEFAULTS = {
     "playMode": "order",  # 'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
     "resumeLast": True,  # 启动时恢复上次播放的歌曲与进度
@@ -158,6 +158,7 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "fadeSec": 0,  # 切歌淡入淡出时长（秒）；0 = 关闭
     "karaokeNextKey": "KeyN",  # 跟唱：下一句快捷键
     "karaokePrevKey": "KeyP",  # 跟唱：上一句快捷键
+    "searchKey": "Meta+K",  # 搜索：打开 search anything（Cmd+K；存 e.code 风格）
     "eqEnabled": False,  # 均衡器开关
     "eqPreset": "flat",  # 均衡器预设 key（'custom' = 用户自定义）
     "eqGains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 自定义增益（dB，-12~12，10 段）
@@ -301,6 +302,7 @@ _SETTINGS_SPEC = {
         "fadeSec": (0, lambda v, d: _norm_num(v, d, lo=0.0, hi=5.0)),
         "karaokeNextKey": ("KeyN", _norm_str),
         "karaokePrevKey": ("KeyP", _norm_str),
+        "searchKey": ("Meta+K", _norm_str),
         "eqEnabled": (False, _norm_bool),
         "eqPreset": (
             "flat",
