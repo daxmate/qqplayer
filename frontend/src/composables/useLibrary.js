@@ -1,5 +1,6 @@
 import { computed } from "vue";
 import { state } from "./playerCore.js";
+import i18n from "../locales/i18n.js";
 
 // ============ 收藏（后端持久化 ~/Library/Application Support/qqplayer）============
 export async function loadFavorites() {
@@ -80,7 +81,7 @@ export async function createPlaylist(name) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || "创建歌单失败");
+    throw new Error(data.detail || i18n.global.t("errors.createPlaylist"));
   }
   const p = await res.json();
   state.playlists.push(p);
@@ -101,7 +102,7 @@ export async function renamePlaylist(pid, name) {
     if (!res.ok) throw new Error();
   } catch {
     p.name = old; // 回滚
-    throw new Error("改名失败");
+    throw new Error(i18n.global.t("errors.renamePlaylist"));
   }
 }
 
@@ -115,7 +116,7 @@ export async function deletePlaylist(pid) {
     if (!res.ok) throw new Error();
   } catch {
     state.playlists.splice(idx, 0, removed); // 回滚
-    throw new Error("删除失败");
+    throw new Error(i18n.global.t("errors.deletePlaylist"));
   }
 }
 
@@ -132,7 +133,7 @@ export async function addToPlaylist(pid, path) {
     if (!res.ok) throw new Error();
   } catch {
     p.songPaths = p.songPaths.filter((x) => x !== path); // 回滚
-    throw new Error("加入歌单失败");
+    throw new Error(i18n.global.t("errors.addToPlaylist"));
   }
 }
 
@@ -148,7 +149,7 @@ export async function removeFromPlaylist(pid, path) {
     if (!res.ok) throw new Error();
   } catch {
     p.songPaths.push(...removed); // 回滚
-    throw new Error("移出歌单失败");
+    throw new Error(i18n.global.t("errors.removeFromPlaylist"));
   }
 }
 
@@ -166,6 +167,6 @@ export async function setPlaylistOrder(pid, paths) {
     if (!res.ok) throw new Error();
   } catch {
     p.songPaths = old; // 回滚
-    throw new Error("排序保存失败");
+    throw new Error(i18n.global.t("errors.reorderPlaylist"));
   }
 }

@@ -2,16 +2,16 @@
   <div class="msv-page">
     <!-- 顶栏：返回 + 标题 + 数量 -->
     <header class="msv-head">
-      <button class="msv-back" title="返回" @click="$emit('close')">
+      <button class="msv-back" :title="t('smart.back')" @click="$emit('close')">
         <ChevronLeft :size="24" />
       </button>
-      <h1 class="msv-title">{{ meta.title }}</h1>
-      <span class="msv-count">{{ rows.length }} 首</span>
+      <h1 class="msv-title">{{ t(meta.titleKey) }}</h1>
+      <span class="msv-count">{{ t("smart.count", { n: rows.length }) }}</span>
     </header>
 
     <!-- 列表 -->
     <div class="msv-list">
-      <div v-if="loading" class="msv-empty">加载中…</div>
+      <div v-if="loading" class="msv-empty">{{ t("smart.loading") }}</div>
       <div v-else-if="error" class="msv-empty">{{ error }}</div>
       <template v-else>
         <div
@@ -35,7 +35,11 @@
           <div class="msv-info">
             <div class="msv-name">
               {{ row.song.name }}
-              <span v-if="isCurrent(row) && state.isPlaying" class="msv-eq" title="播放中">
+              <span
+                v-if="isCurrent(row) && state.isPlaying"
+                class="msv-eq"
+                :title="t('smart.playing')"
+              >
                 <span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span>
               </span>
             </div>
@@ -44,7 +48,7 @@
             </div>
           </div>
         </div>
-        <div v-if="!rows.length" class="msv-empty">{{ meta.empty }}</div>
+        <div v-if="!rows.length" class="msv-empty">{{ t(meta.emptyKey) }}</div>
       </template>
     </div>
   </div>
@@ -52,6 +56,7 @@
 
 <script setup>
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { ChevronLeft, Music2 } from "@lucide/vue";
 import { state } from "../../composables/usePlayer.js";
 import {
@@ -61,6 +66,8 @@ import {
   playSmartRow,
   fmtSmartSub,
 } from "../../composables/useSmartViews.js";
+
+const { t } = useI18n();
 
 const props = defineProps({
   kind: { type: String, required: true }, // recentAdded | recentPlayed | topPlayed

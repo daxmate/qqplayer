@@ -20,5 +20,7 @@ export default {
     modeOrder: "列表循环（点击切换）",
     modeShuffle: "随机播放（点击切换）",
     modeRepeatOne: "单曲循环（点击切换）",
+    sleepTimerFired: "睡眠定时器已到点",
+    sleepTimerRunning: "睡眠定时器 {time}",
   },
 };

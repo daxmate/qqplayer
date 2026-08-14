@@ -1,6 +1,7 @@
 import { computed, watch } from "vue";
 import { audio, state } from "./playerCore.js";
 import { lyricSettings } from "./useSettings.js";
+import i18n from "../locales/i18n.js";
 
 // ============ 歌词加载（默认当前歌）；来源优先级按 lyricSettings.source：============
 // 'local' 本地优先 | 'online' 在线优先（在线失败后端自动回退本地）
@@ -72,7 +73,7 @@ export async function saveManualLyric({ path, format, text, source, tlyric }) {
     body: JSON.stringify({ path, format, text, source, tlyric: tlyric || undefined }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || "保存失败");
+  if (!res.ok) throw new Error(data.detail || i18n.global.t("errors.saveLyric"));
   return data;
 }
 
@@ -92,7 +93,7 @@ export async function deleteManualLyric(path) {
 export async function searchLyricCandidates(title, artist) {
   const q = new URLSearchParams({ title: title || "", artist: artist || "" });
   const res = await fetch("/api/lyric/search?" + q.toString(), { cache: "no-store" });
-  if (!res.ok) throw new Error("搜索失败");
+  if (!res.ok) throw new Error(i18n.global.t("errors.searchLyric"));
   return (await res.json()).results || [];
 }
 

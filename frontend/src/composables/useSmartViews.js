@@ -6,14 +6,15 @@
 // 视图进入时拉取一次，不常驻轮询。行点击走全局 selectSong + play 播放链路。
 import { reactive } from "vue";
 import { state, selectSong, play } from "./usePlayer.js";
+import i18n from "../locales/i18n.js";
 
 export const SMART_VIEW_LIMIT = 50;
 
-// 视图定义：kind → 标题 / 空态文案（UI 文案集中在组件内，明天 i18n 抽离）
+// 视图定义：kind → 标题 / 空态文案 key（文案在 smart.js，组件内 t(titleKey) 渲染）
 export const SMART_VIEWS = {
-  recentAdded: { title: "最近添加", empty: "暂无歌曲" },
-  recentPlayed: { title: "最近播放", empty: "暂无播放记录" },
-  topPlayed: { title: "常听排行", empty: "暂无播放记录" },
+  recentAdded: { titleKey: "smart.recentAdded.title", emptyKey: "smart.recentAdded.empty" },
+  recentPlayed: { titleKey: "smart.recentPlayed.title", emptyKey: "smart.recentPlayed.empty" },
+  topPlayed: { titleKey: "smart.topPlayed.title", emptyKey: "smart.topPlayed.empty" },
 };
 
 export const smartViewState = reactive({
@@ -73,17 +74,17 @@ export async function loadSmartView(kind) {
       smartViewState.rows = mapRecentAdded(state.songs);
     } else if (kind === "recentPlayed") {
       const res = await fetch("/api/playback", { cache: "no-store" });
-      if (!res.ok) throw new Error("加载播放记录失败");
+      if (!res.ok) throw new Error(i18n.global.t("errors.loadPlayback"));
       const data = await res.json();
       smartViewState.rows = mapRecentPlayed(data && data.records, libById);
     } else if (kind === "topPlayed") {
       const res = await fetch("/api/playback/stats", { cache: "no-store" });
-      if (!res.ok) throw new Error("加载播放统计失败");
+      if (!res.ok) throw new Error(i18n.global.t("errors.loadPlaybackStats"));
       const data = await res.json();
       smartViewState.rows = mapTopPlayed(data && data.songs, libById);
     }
   } catch (e) {
-    smartViewState.error = (e && e.message) || "加载失败";
+    smartViewState.error = (e && e.message) || i18n.global.t("errors.loadFailed");
   } finally {
     smartViewState.loading = false;
   }
@@ -114,7 +115,7 @@ export function fmtSmartSub(row) {
   if (!song) return "";
   const parts = [];
   if (row.stat) {
-    parts.push(`播放 ${row.stat.plays} 次`);
+    parts.push(i18n.global.t("smart.playedTimes", { n: row.stat.plays }));
     const dur = fmtDuration(row.stat.totalPlayed);
     if (dur) parts.push(dur);
   } else if (row.record) {
@@ -137,7 +138,7 @@ export function fmtTs(ts) {
 export function fmtDuration(sec) {
   const s = Number(sec) || 0;
   if (s <= 0) return "";
-  if (s < 60) return `${Math.round(s)} 秒`;
-  if (s < 3600) return `${Math.round(s / 60)} 分钟`;
-  return `${(s / 3600).toFixed(1)} 小时`;
+  if (s < 60) return i18n.global.t("smart.seconds", { n: Math.round(s) });
+  if (s < 3600) return i18n.global.t("smart.minutes", { n: Math.round(s / 60) });
+  return i18n.global.t("smart.hours", { n: (s / 3600).toFixed(1) });
 }

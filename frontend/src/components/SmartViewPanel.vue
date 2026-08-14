@@ -2,14 +2,14 @@
   <Teleport to="body">
     <div v-if="panelStyle" class="sv-panel" :style="panelStyle">
       <div class="sv-head">
-        <button class="sv-back" title="返回" @click="close">
+        <button class="sv-back" :title="t('smart.back')" @click="close">
           <ArrowLeft :size="15" />
         </button>
-        <span class="sv-title">{{ meta.title }}</span>
-        <span class="sv-count">{{ rows.length }} 首</span>
+        <span class="sv-title">{{ t(meta.titleKey) }}</span>
+        <span class="sv-count">{{ t("smart.count", { n: rows.length }) }}</span>
       </div>
       <div class="sv-list">
-        <div v-if="loading" class="sv-empty">加载中…</div>
+        <div v-if="loading" class="sv-empty">{{ t("smart.loading") }}</div>
         <div v-else-if="error" class="sv-empty">{{ error }}</div>
         <template v-else>
           <div
@@ -37,11 +37,11 @@
                 <template v-if="sub(row)"> · {{ sub(row) }}</template>
               </span>
             </span>
-            <span v-if="isCurrent(row)" class="sv-eq" title="播放中">
+            <span v-if="isCurrent(row)" class="sv-eq" :title="t('smart.playing')">
               <span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span>
             </span>
           </div>
-          <div v-if="!rows.length" class="sv-empty">{{ meta.empty }}</div>
+          <div v-if="!rows.length" class="sv-empty">{{ t(meta.emptyKey) }}</div>
         </template>
       </div>
     </div>
@@ -50,6 +50,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { useI18n } from "vue-i18n";
 import { ArrowLeft, Music2 } from "@lucide/vue";
 import { state } from "../composables/usePlayer.js";
 import {
@@ -59,6 +60,8 @@ import {
   playSmartRow,
   fmtSmartSub,
 } from "../composables/useSmartViews.js";
+
+const { t } = useI18n();
 
 const props = defineProps({
   kind: { type: String, required: true },

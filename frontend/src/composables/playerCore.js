@@ -3,6 +3,7 @@ import { uiSettings, ACCENT_OPTIONS } from "./useSettings.js";
 import { EQ_BANDS, EQ_PRESETS, _normalizeEqPreset } from "./useEq.js";
 import { loadLyric, reanchorKaraoke, currentLineIndex, nextLine, prevLine } from "./useLyric.js";
 import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
+import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -449,7 +450,7 @@ function updateMediaMetadata() {
       ]
     : [];
   ms.metadata = new MediaMetadata({
-    title: song.name || "未知歌曲",
+    title: song.name || i18n.global.t("errors.unknownSong"),
     artist: song.artist || "",
     album: song.album || "",
     artwork,
@@ -688,7 +689,7 @@ export async function saveLibrarySettings(patch) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || "保存音乐库设置失败");
+    throw new Error(data.detail || i18n.global.t("errors.saveLibrarySettings"));
   }
   const data = await res.json();
   state.librarySettings = data.settings;
@@ -703,7 +704,7 @@ export async function setLibrary(path) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || "设置失败");
+    throw new Error(data.detail || i18n.global.t("errors.setLibrary"));
   }
   await loadSongs();
 }
@@ -724,7 +725,7 @@ export async function loadSongs() {
       if (idx >= 0) state.currentIndex = idx;
     }
   } catch (e) {
-    state.error = "加载歌曲列表失败：" + e.message;
+    state.error = i18n.global.t("errors.loadSongs", { msg: e.message });
   } finally {
     state.loading = false;
   }

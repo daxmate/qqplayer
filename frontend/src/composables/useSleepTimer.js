@@ -5,6 +5,7 @@
 // pause 事件监听同步 state.isPlaying，与手动暂停完全一致），不修改 playerCore.js。
 import { reactive, computed } from "vue";
 import { audio, state, playbackSettings, PLAYBACK_SETTINGS_KEY } from "./playerCore.js";
+import i18n from "../locales/i18n.js";
 
 // 时长选项（分钟，chip 单选）
 export const SLEEP_TIMER_OPTIONS = [15, 30, 45, 60, 90];
@@ -125,8 +126,9 @@ export const sleepTimerLabel = computed(() => {
 
 // 控制栏/移动端播放器统一展示文案：倒计时中 / 已到点 / 空
 export const sleepTimerText = computed(() => {
-  if (sleepTimer.status === "fired") return "睡眠定时器已到点";
-  if (sleepTimer.active) return `睡眠定时器 ${sleepTimerLabel.value}`;
+  if (sleepTimer.status === "fired") return i18n.global.t("control.sleepTimerFired");
+  if (sleepTimer.active)
+    return i18n.global.t("control.sleepTimerRunning", { time: sleepTimerLabel.value });
   return "";
 });
 

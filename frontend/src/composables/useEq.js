@@ -8,14 +8,14 @@ import { playbackSettings, applyEqToGraph } from "./playerCore.js";
 export const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
 export const EQ_PRESETS = {
-  flat: { name: "平直", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-  pop: { name: "流行", gains: [-1, 0, 1.5, 2.5, 3, 2.5, 1.5, 0, -0.5, -1] },
-  rock: { name: "摇滚", gains: [4, 3, 1.5, 0, -1, 0, 1.5, 3, 3.5, 4] },
-  jazz: { name: "爵士", gains: [3, 2, 1, 1, -0.5, -1, 0, 1, 2, 3] },
-  classical: { name: "古典", gains: [3, 2, 1, -0.5, -1, -1, -0.5, 1, 2, 3] },
-  bass: { name: "低音增强", gains: [6, 4.5, 3, 1.5, 0, 0, 0, 0, 0, 0] },
-  vocal: { name: "人声", gains: [-1.5, -1, 0, 1, 2.5, 3.5, 3, 1.5, 0, -1] },
-  custom: { name: "自定义", gains: null }, // gains 由 eqGains 决定
+  flat: { labelKey: "eq.preset.flat", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  pop: { labelKey: "eq.preset.pop", gains: [-1, 0, 1.5, 2.5, 3, 2.5, 1.5, 0, -0.5, -1] },
+  rock: { labelKey: "eq.preset.rock", gains: [4, 3, 1.5, 0, -1, 0, 1.5, 3, 3.5, 4] },
+  jazz: { labelKey: "eq.preset.jazz", gains: [3, 2, 1, 1, -0.5, -1, 0, 1, 2, 3] },
+  classical: { labelKey: "eq.preset.classical", gains: [3, 2, 1, -0.5, -1, -1, -0.5, 1, 2, 3] },
+  bass: { labelKey: "eq.preset.bass", gains: [6, 4.5, 3, 1.5, 0, 0, 0, 0, 0, 0] },
+  vocal: { labelKey: "eq.preset.vocal", gains: [-1.5, -1, 0, 1, 2.5, 3.5, 3, 1.5, 0, -1] },
+  custom: { labelKey: "eq.preset.custom", gains: null }, // gains 由 eqGains 决定
 };
 
 // 应用预设（值同步进 eqGains，作为切回自定义的基点）
