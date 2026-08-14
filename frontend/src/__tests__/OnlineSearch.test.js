@@ -293,7 +293,12 @@ describe("OnlineSearch 下载交互", () => {
     resolveDownload({ ok: true, json: async () => ({ ok: true, path: "/dl/1001.mp3" }) });
     await flushPromises();
     expect(downloadBodies.length).toBe(1);
-    expect(downloadBodies[0]).toEqual({ id: "1001", level: "exhigh" });
+    expect(downloadBodies[0]).toEqual({
+      id: "1001",
+      level: "exhigh",
+      title: "晴天",
+      artist: "周杰伦",
+    });
     expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
     expect(wrapper.findAll(".os-download")[0].attributes("disabled")).toBeUndefined();
     wrapper.unmount();
@@ -305,7 +310,12 @@ describe("OnlineSearch 下载交互", () => {
     await typeAndSearch(wrapper, "周杰伦");
     await wrapper.findAll(".os-download")[0].trigger("click");
     await flushPromises();
-    expect(downloadBodies[0]).toEqual({ id: "1001", level: "lossless" });
+    expect(downloadBodies[0]).toEqual({
+      id: "1001",
+      level: "lossless",
+      title: "晴天",
+      artist: "周杰伦",
+    });
     expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
     wrapper.unmount();
   });
