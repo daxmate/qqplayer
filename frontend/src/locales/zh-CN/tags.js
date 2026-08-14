@@ -1,0 +1,21 @@
+// 歌曲信息编辑弹窗（TagEditorModal.vue）
+export default {
+  tags: {
+    editTitle: "编辑歌曲信息",
+    coverAlt: "封面预览",
+    fieldTitle: "歌名",
+    fieldArtist: "歌手",
+    fieldAlbum: "专辑",
+    scrapeBtn: "自动刮削",
+    scraping: "刮削中…",
+    scrapeHint: "从网易云 / MusicBrainz 自动获取候选，点选填充",
+    scrapeQuery: "查询：{query}",
+    scrapeFailed: "刮削失败，请重试",
+    groupNetease: "网易云",
+    groupMusicBrainz: "MusicBrainz",
+    emptyResult: "未找到匹配结果",
+    emptyAll: "歌名/歌手/专辑不能全为空",
+    saveSuccess: "歌曲信息已保存",
+    saveFailed: "保存失败：{msg}",
+  },
+};

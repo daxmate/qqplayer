@@ -15,6 +15,7 @@ import mobile from "./mobile.js";
 import smart from "./smart.js";
 import eq from "./eq.js";
 import errors from "./errors.js";
+import tags from "./tags.js";
 
 export default {
   ...common,
@@ -31,4 +32,5 @@ export default {
   ...smart,
   ...eq,
   ...errors,
+  ...tags,
 };
