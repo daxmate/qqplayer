@@ -78,6 +78,7 @@ const {
   restoreLastPlayed,
   saveLastPlayed,
   LAST_PLAYED_KEY,
+  lastPlayedState,
   _resetKaraokeAnchor,
   _resetPlayMode,
   setVolume,
@@ -2153,18 +2154,19 @@ describe("恢复上次播放 restoreLastPlayed", () => {
   let saved;
   beforeEach(() => {
     saved = { ...playbackSettings };
+    Object.assign(lastPlayedState, { path: null, position: 0, ts: 0 }); // 跨测试隔离
   });
   afterEach(() => {
     Object.assign(playbackSettings, saved);
   });
 
-  it("歌曲在库中：恢复歌曲并 seek 到断点", async () => {
+  it("歌曲在库中：恢复歌曲并 seek 到断点（数据源为统一层 lastPlayedState）", async () => {
     playbackSettings.resumeLast = true;
     state.songs = [
       { path: "/a.mp3", name: "A" },
       { path: "/b.mp3", name: "B" },
     ];
-    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/b.mp3", position: 42 }));
+    Object.assign(lastPlayedState, { path: "/b.mp3", position: 42, ts: 1 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: false, json: async () => ({}) })),
@@ -2182,7 +2184,7 @@ describe("恢复上次播放 restoreLastPlayed", () => {
   it("进度超出歌曲时长：clamp 到末尾附近", async () => {
     playbackSettings.resumeLast = true;
     state.songs = [{ path: "/a.mp3", name: "A" }];
-    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/a.mp3", position: 999 }));
+    Object.assign(lastPlayedState, { path: "/a.mp3", position: 999, ts: 1 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: false, json: async () => ({}) })),
@@ -2197,7 +2199,7 @@ describe("恢复上次播放 restoreLastPlayed", () => {
   it("歌曲已不在库中：不恢复（保持当前状态）", async () => {
     playbackSettings.resumeLast = true;
     state.songs = [{ path: "/a.mp3", name: "A" }];
-    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/gone.mp3", position: 10 }));
+    Object.assign(lastPlayedState, { path: "/gone.mp3", position: 10, ts: 1 });
     await restoreLastPlayed();
     expect(state.currentSong).toBeNull();
   });
@@ -2205,7 +2207,7 @@ describe("恢复上次播放 restoreLastPlayed", () => {
   it("开关关闭时不恢复", async () => {
     playbackSettings.resumeLast = false;
     state.songs = [{ path: "/a.mp3", name: "A" }];
-    localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify({ path: "/a.mp3", position: 10 }));
+    Object.assign(lastPlayedState, { path: "/a.mp3", position: 10, ts: 1 });
     await restoreLastPlayed();
     expect(state.currentSong).toBeNull();
   });

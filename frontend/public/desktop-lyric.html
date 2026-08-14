@@ -93,7 +93,7 @@
     <script>
       // 桌面歌词悬浮窗页面
       // 轮询后端 /api/now-playing 拿 {path, lineIndex}；歌词全文拉一次缓存，切歌重拉
-      // 设置读取同源 localStorage（主播放器设置弹窗写入）：{ showZh }
+      // 设置走后端统一 GET /api/settings 的 desktopLyric namespace（主播放器与悬浮窗跨引擎共享）：{ showZh, ... }
       const $jp = document.getElementById("jp");
       const $zh = document.getElementById("zh");
 
@@ -108,13 +108,13 @@
         return cachedSettings;
       }
 
-      // 从后端拉桌面歌词设置（含初始与轮询刷新；失败时保留旧值）
+      // 从后端拉桌面歌词设置（统一 GET /api/settings 取 desktopLyric namespace；含初始与轮询刷新；失败时保留旧值）
       async function refreshSettings() {
         try {
-          const res = await fetch("/api/desktop-lyric/settings", { cache: "no-store" });
+          const res = await fetch("/api/settings", { cache: "no-store" });
           if (!res.ok) return;
           const data = await res.json();
-          const s = data.settings || {};
+          const s = (data.settings || {}).desktopLyric || {};
           const changed =
             s.fontFamily !== cachedSettings.fontFamily ||
             s.align !== cachedSettings.align ||

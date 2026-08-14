@@ -395,9 +395,9 @@
 
       async function fetchUiSettings() {
         try {
-          const res = await fetch("/api/ui/settings", { cache: "no-store" });
+          const res = await fetch("/api/settings", { cache: "no-store" });
           const d = await res.json();
-          applyMiniTheme(d.settings || {});
+          applyMiniTheme((d.settings || {}).ui || {});
         } catch {
           /* 后端暂不可达：保持现状 */
         }
