@@ -9,6 +9,15 @@
 
 ### ✨ 新功能
 
+- **search anything 全屏搜索层**（Spotlight 式，升级原顶栏搜索框）
+  - 常态只显示小放大镜图标，点击或 **Cmd+K**（可在设置→快捷键录制更改）唤起全屏搜索层：播放界面背景模糊、音乐继续播，搜索框与结果成为页面主体
+  - 混合结果五类：**本地歌曲 / 在线歌曲（网易云）/ 歌手 / 专辑 / 设置项**，每行带类别 badge
+  - **匹配度排序**：前缀 > 包含；歌名 > 歌手 > 专辑字段权重；同分优先级 本地 > 在线 > 歌手 > 专辑 > 设置；简繁/声调互通（复用 searchNormalize）
+  - **设置项结果行内直接操作**（开关/滑杆/选择/文本输入），实时持久化（settingsSync）；空态显示全部设置项目录（按分类分组）
+  - 本地歌曲点击播放、在线歌曲点击下载、歌手/专辑点击直达分组浏览；Esc / 点空白收起
+  - 技术实现：`SearchAnything.vue` 全屏遮罩层 + `useSearchAnything.js` 单例数据源（防抖 250ms）+ `score.js` 打分纯函数 + `settingsIndex.js` 设置项索引（50 项，中英别名）+ `InlineControl.vue` 内联控件；搜索层打开时播放快捷键屏蔽（playerCore 守卫）
+  - 测试：前端 +66（521 全绿）、后端 +3（177 全绿，searchKey 字段）
+
 - 音乐标签编辑 + 刮削（mutagen 写标签 + 网易云/MusicBrainz 双源刮削）
   - 歌曲信息编辑弹窗（TagEditorModal）：播放页/列表歌曲信息处 Pencil 按钮打开，编辑歌名/歌手/专辑 + 封面预览；移动端弹窗全宽全屏化 + 表单堆叠 + 候选区限高滚动
   - 标签刮削：输入歌名/歌手 → 网易云 + MusicBrainz recording 两组候选列表，点选即填表单；封面 fallback 链（网易云 cover → iTunes → Cover Art Archive）在返回前自动补齐
