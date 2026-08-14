@@ -37,28 +37,28 @@ def test_search_key_default():
 def test_search_key_invalid_falls_back():
     """非法类型回落默认 'Meta+K'"""
     for bad in (123, None, ["Meta+K"], True):
-        s = client.put("/api/settings", json={"playback": {"searchKey": bad}}).json()[
-            "settings"
-        ]["playback"]
+        s = client.put("/api/settings", json={"playback": {"searchKey": bad}}).json()["settings"][
+            "playback"
+        ]
         assert s["searchKey"] == "Meta+K", f"searchKey={bad!r} 应回落默认"
 
 
 def test_search_key_valid_preserved():
     """合法字符串保留（用户录制单键，e.code 风格），并落盘持久化"""
-    s = client.put("/api/settings", json={"playback": {"searchKey": "KeyK"}}).json()[
-        "settings"
-    ]["playback"]
+    s = client.put("/api/settings", json={"playback": {"searchKey": "KeyK"}}).json()["settings"][
+        "playback"
+    ]
     assert s["searchKey"] == "KeyK"
-    s = client.put("/api/settings", json={"playback": {"searchKey": "F3"}}).json()[
-        "settings"
-    ]["playback"]
+    s = client.put("/api/settings", json={"playback": {"searchKey": "F3"}}).json()["settings"][
+        "playback"
+    ]
     assert s["searchKey"] == "F3"
     # 模拟重启：重置缓存后仍读到持久化值
     backend._settings = None
     s = client.get("/api/settings").json()["settings"]["playback"]
     assert s["searchKey"] == "F3"
     # 空字符串视为合法字符串保留（_norm_str 只校验类型）
-    s = client.put("/api/settings", json={"playback": {"searchKey": ""}}).json()[
-        "settings"
-    ]["playback"]
+    s = client.put("/api/settings", json={"playback": {"searchKey": ""}}).json()["settings"][
+        "playback"
+    ]
     assert s["searchKey"] == ""

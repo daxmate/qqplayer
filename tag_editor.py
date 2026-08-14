@@ -92,6 +92,7 @@ def _dedupe_target(dirpath: Path, new_name: str) -> Path:
 
 # ---- 各格式写标签 ----
 
+
 def _write_mp3(f: Path, title: str, artist: str, album: str, cover: bytes | None):
     try:
         tags = ID3(str(f))

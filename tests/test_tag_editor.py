@@ -107,7 +107,9 @@ def test_save_tags_mp3_text_and_cover(tmp_path, monkeypatch):
     f = tmp_path / "song.mp3"
     make_mp3(f, title="旧名", artist="旧歌手")
     monkeypatch.setattr(tag_editor, "fetch_cover", lambda url: FAKE_JPEG)
-    result = save_tags(f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg")
+    result = save_tags(
+        f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg"
+    )
     new = tmp_path / "周杰伦 - 安静.mp3"
     assert result["path"] == str(new)
     assert result["newPath"] == str(new)
@@ -126,7 +128,9 @@ def test_save_tags_m4a_text_and_cover(tmp_path, monkeypatch):
     f = tmp_path / "song.m4a"
     make_m4a(f)
     monkeypatch.setattr(tag_editor, "fetch_cover", lambda url: FAKE_JPEG)
-    result = save_tags(f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg")
+    result = save_tags(
+        f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg"
+    )
     new = tmp_path / "周杰伦 - 安静.m4a"
     assert result["renamed"] is True
     assert new.exists()
@@ -143,7 +147,9 @@ def test_save_tags_flac_text_and_cover(tmp_path, monkeypatch):
     f = tmp_path / "song.flac"
     make_flac(f)
     monkeypatch.setattr(tag_editor, "fetch_cover", lambda url: FAKE_JPEG)
-    result = save_tags(f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg")
+    result = save_tags(
+        f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg"
+    )
     new = tmp_path / "周杰伦 - 安静.flac"
     assert result["renamed"] is True
     assert new.exists()
@@ -160,7 +166,9 @@ def test_save_tags_ogg_text_only_cover_skipped(tmp_path, monkeypatch):
     f = tmp_path / "song.ogg"
     make_ogg(f)
     monkeypatch.setattr(tag_editor, "fetch_cover", lambda url: FAKE_JPEG)
-    result = save_tags(f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg")
+    result = save_tags(
+        f, title="安静", artist="周杰伦", album="范特西", cover_url="https://x/c.jpg"
+    )
     new = tmp_path / "周杰伦 - 安静.ogg"
     assert result["renamed"] is True
     assert new.exists()
@@ -257,7 +265,9 @@ def test_fetch_cover_ok_and_fail(monkeypatch):
     assert tag_editor.fetch_cover("https://x/c.jpg") == FAKE_JPEG
     monkeypatch.setattr(tag_editor.httpx, "get", lambda url, **kw: Resp(b"not an image"))
     assert tag_editor.fetch_cover("https://x/c.jpg") is None
-    monkeypatch.setattr(tag_editor.httpx, "get", lambda url, **kw: (_ for _ in ()).throw(httpx.HTTPError("down")))
+    monkeypatch.setattr(
+        tag_editor.httpx, "get", lambda url, **kw: (_ for _ in ()).throw(httpx.HTTPError("down"))
+    )
     assert tag_editor.fetch_cover("https://x/c.jpg") is None
     assert tag_editor.fetch_cover(None) is None
     assert tag_editor.fetch_cover("") is None
@@ -376,7 +386,12 @@ def test_api_tags_cover_download_failure_ignored(tmp_path, monkeypatch):
     monkeypatch.setattr(tag_editor, "fetch_cover", lambda url: None)
     r = client.post(
         "/api/tags",
-        json={"path": str(f), "title": "安静", "artist": "周杰伦", "cover_url": "https://bad/cover.jpg"},
+        json={
+            "path": str(f),
+            "title": "安静",
+            "artist": "周杰伦",
+            "cover_url": "https://bad/cover.jpg",
+        },
     )
     assert r.status_code == 200
     new = tmp_path / "周杰伦 - 安静.mp3"

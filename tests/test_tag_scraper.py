@@ -233,7 +233,9 @@ def test_join_artist_credit_joinphrase():
 
 def test_module_scrape_function(monkeypatch):
     """模块级 scrape() 委托默认实例（路由入口）"""
-    fake = TagScraper(client=FakeClient(), netease_search=lambda q, limit=20: [], sleep_fn=lambda s: None)
+    fake = TagScraper(
+        client=FakeClient(), netease_search=lambda q, limit=20: [], sleep_fn=lambda s: None
+    )
     monkeypatch.setattr(tag_scraper, "scraper", fake)
     result = tag_scraper.scrape("安静")
     assert set(result) == {"netease", "musicbrainz"}
