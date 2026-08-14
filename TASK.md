@@ -129,3 +129,42 @@ QQPlayer 外语学习媒体播放器（Vue 3 + Vite + vue-i18n 11 + lucide 图�
 
 - commit：`785a336 feat(frontend): 歌曲信息编辑弹窗 + 标签刮削候选（tag editor）`
 - 已 push 到 `origin feat/tag-editor-frontend`（主仓库 refs）
+
+---
+## 完成状态（2026-08-14）
+
+### 改动清单
+- 新增 `tag_scraper.py`：多源刮削（网易云复用 `netease_provider.search` + 新写 MusicBrainz ws/2 recording 搜索），封面 fallback 链（网易云 cover → iTunes Search API → Cover Art Archive）在 scrape 返回前补好；任何单源失败返回空数组不 500
+- 新增 `tag_editor.py`：mutagen 写标签（MP3 ID3v2.3 / M4A·MP4（MP4 tags+covr）/ FLAC（VorbisComment+Picture），OGG/OPUS 只写文本标签跳过封面）；原子写 `copy2` 临时文件 → 改临时文件 → `os.replace` 落位，失败回滚原文件完好；统一改名 `{artist} - {title}.{ext}`（artist 空 → `{title}.{ext}`，title 也空 → `{artist}.{ext}`，都空不改名），重名加 ` (2)/(3)` 序号绝不覆盖
+- `backend.py`：
+  - `POST /api/tags/scrape`：query = 当前标签 title 优先（空则文件名 stem），返回 `{query, netease[], musicbrainz[]}`
+  - `POST /api/tags`：写标签+改名+迁移；400 全空/格式不支持、404 文件不存在、409 写失败
+  - `_migrate_path_refs`：改名成功后迁移 favorites.json / playlists.json(songPaths) / playback.json(path) 三处旧路径（命中才写文件）
+  - 顺带修复 `extract_tags` 对 MP4/FLAC/OGG 的 list 标签值解析（原会返回 `['周杰伦']` 这种带括号的脏值，且 FLAC/OGG 迭代出 (key,value) 元组导致原逻辑直接异常返回 None）
+- 新增 `tests/test_tag_scraper.py`（12 例）、`tests/test_tag_editor.py`（20 例）
+
+### 设计决策
+- 模块划分：刮削 provider 独立 `tag_scraper.py`（类 + 依赖注入 client/netease_search/sleep_fn，测试全 mock 网络，与 netease_provider 测试风格一致）；写标签/原子写/改名独立 `tag_editor.py`；backend.py 只加路由 + 引用迁移（迁移复用现有 `_load/_save_*` 避免循环依赖，改名成功通过 `migrate` 回调触发）
+- 原子写实现：目标名去重后 `copy2 → mutagen 改 tmp → os.replace(tmp, target)`；target 为原路径时原地替换，为新名时原子改名后 `unlink` 旧路径；任何一步失败 tmp 清理、原文件保持完好（409）
+- 封面 fallback 频率控制：MusicBrainz ws/2 每次调用前 sleep 1s（测试注入 sleep_fn 跳过）；Cover Art Archive 与 iTunes 是独立服务不 sleep，CAA 同 release MBID 做结果缓存去重（一次查询多个候选共享）
+- CAA 判定：302/307 重定向都算有封面（实测 archive.org 返回 307），404 → cover=null 不报错
+- 网易云候选只暴露契约 6 字段（去掉内部 level 等）；MB 候选 5 字段（title/artist/album/cover/mbid）
+- 写标签只写请求提供的非空字段，不删除既有标签；cover_url 空/下载失败 → 不碰封面（不影响文本标签）
+
+### 测试结果（真实数字）
+- 新增 pytest：**32 例全绿**（写标签 MP3/M4A/FLAC 文本+封面、OGG 只文本、原子写失败保护、改名+序号冲突、改名目标同名不重复改名、仅 artist 改名、仅 album 不改名 name 回退 stem、引用迁移三文件、格式不支持 400、全空 400、404、409 回滚、cover 下载失败忽略、scrape 返回形状、封面 fallback 链 iTunes→CAA、CAA 404 不报错、单源失败隔离、MB 自定义 UA + sleep 1s、CAA 同 MBID 去重、artist-credit joinphrase）
+- 全量回归：**174 passed**（原有 142 + 新增 32），`~/codes/qqplayer/venv/bin/python -m pytest`（cwd 在 fork）
+- ruff：`ruff check backend.py tag_scraper.py tag_editor.py tests/` 全过
+- 真实文件端到端（uvicorn 127.0.0.1:17628，隔离 DATA_DIR 不碰真实用户数据）：
+  - scrape 真实网络：网易云 20 条（query 取 ID3 title）、MusicBrainz 20 条（Thriller/Michael Jackson，12 条带 CAA 封面）；中文歌 MB 无结果返回空数组属正常
+  - tags 写标签：`老歌.mp3 → 周杰伦 - 安静.mp3`，extract_tags 读回 `(周杰伦, 安静, 范特西)`，内嵌封面 329KB JPEG（真实下载），favorites.json 旧路径自动迁移为新路径
+  - 错误：全空 400 / .wav 400 / 不存在 404 全部符合契约
+
+### 遗留项
+- 改名与旧路径迁移的极端竞态未处理：若改名瞬间另一个进程在写同一数据文件，迁移可能丢一次写（与现有 `_save_*` 的非原子写一致，低频场景可接受）
+- OGG/OPUS 只写文本标签按需求实现；.opus 与 .ogg 共用同一代码路径（`_write_ogg` 按 ext 选 OggVorbis/OggOpus），但 pytest 只覆盖了 .ogg 真实文件，.opus 未单独建真实文件用例
+- `os.replace(tmp, target)` 成功后 `unlink` 旧路径若失败会返回 409（罕见：权限/占用），此时新旧文件并存，原文件内容未损坏
+- extract_tags 修复改变了 M4A/FLAC/OGG 标签的返回格式（去掉 list 括号），对现有功能是修正；全量回归已确认无影响
+
+### push
+- commit `67c6339`（feat(backend): 标签刮削/写入 + 改名引用迁移）→ 已 push `origin feat/tag-scraper-backend`

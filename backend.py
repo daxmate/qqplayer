@@ -28,6 +28,8 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 import netease_provider
+import tag_editor
+import tag_scraper
 from lyric_fetch import (
     delete_manual_lyric,
     fetch_online_lyric,
@@ -1174,8 +1176,84 @@ async def api_set_library(body: dict):
     return {"path": str(LIBRARY), "count": len(scan_library())}
 
 
+def _migrate_path_refs(old: str, new: str):
+    """改名后迁移数据文件里的旧路径引用：favorites / playlists(songPaths) / playback(path)
+
+    只在实际命中旧路径时才写文件（避免无谓写入）。
+    """
+    favs = _load_favorites()
+    if old in favs:
+        _save_favorites([new if p == old else p for p in favs])
+    playlists = _load_playlists()
+    changed = False
+    for pl in playlists:
+        song_paths = pl.get("songPaths")
+        if isinstance(song_paths, list) and old in song_paths:
+            pl["songPaths"] = [new if p == old else p for p in song_paths]
+            changed = True
+    if changed:
+        _save_playlists(playlists)
+    records = _load_playback()
+    changed = False
+    for rec in records:
+        if isinstance(rec, dict) and rec.get("path") == old:
+            rec["path"] = new
+            changed = True
+    if changed:
+        _save_playback(records)
+
+
+# ============ 标签刮削与写入（tag scraper）============
+@app.post("/api/tags/scrape")
+def api_tags_scrape(body: dict):
+    """多源刮削候选：网易云 + MusicBrainz；封面 fallback 链在返回前补好"""
+    f = Path(str(body.get("path") or ""))
+    if not f.is_file():
+        raise HTTPException(404, "文件不存在")
+    artist, title, _album = extract_tags(f)
+    query = title or f.stem
+    result = tag_scraper.scrape(query, artist or "")
+    return {"query": query, **result}
+
+
+@app.post("/api/tags")
+def api_tags_save(body: dict):
+    """写标签（原子写）+ 统一改名 + 引用迁移"""
+    path = str(body.get("path") or "")
+    title = str(body.get("title") or "").strip()
+    artist = str(body.get("artist") or "").strip()
+    album = str(body.get("album") or "").strip()
+    cover_url = str(body.get("cover_url") or "") or None
+    f = Path(path)
+    if not path or not f.is_file():
+        raise HTTPException(404, "文件不存在")
+    if not (title or artist or album):
+        raise HTTPException(400, "title/artist/album 至少一个非空")
+    try:
+        result = tag_editor.save_tags(
+            f,
+            title=title,
+            artist=artist,
+            album=album,
+            cover_url=cover_url,
+            migrate=_migrate_path_refs,
+        )
+    except tag_editor.UnsupportedFormatError as e:
+        raise HTTPException(400, str(e)) from None
+    except Exception as e:
+        raise HTTPException(409, f"写标签失败: {e}") from None
+    return result
+
+
+def _tag_value_str(value) -> str:
+    """mutagen 标签值 → 显示字符串：MP4/FLAC/OGG 是 list，ID3 是 TextFrame"""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return str(value).split("\x00")[0].strip()
+
+
 def extract_tags(f: Path):
-    """提取音频文件的标题/歌手/专辑（ID3 / MP4 元数据）"""
+    """提取音频文件的标题/歌手/专辑（ID3 / MP4 / FLAC / OGG 元数据）"""
     if MutagenFile is None:
         return None, None, None
     try:
@@ -1186,14 +1264,17 @@ def extract_tags(f: Path):
         title = artist = album = None
         if tags is not None:
             for key in tags:
-                k = key.lower()
+                # ID3/MP4 是 dict 风格（key 为 str）；FLAC/OGG 的 VComment 迭代出 (key, value) 元组
+                name = key if isinstance(key, str) else key[0]
+                k = str(name).lower()
+                value = tags[key] if isinstance(key, str) else tags[name]
                 if k in ("tpe1", "©art", "aart", "artist") and artist is None:
-                    artist = str(tags[key]).split("\x00")[0].strip()
+                    artist = _tag_value_str(value) or None
                 elif k in ("tit2", "©nam", "title") and title is None:
-                    title = str(tags[key]).split("\x00")[0].strip()
+                    title = _tag_value_str(value) or None
                 elif k in ("talb", "©alb", "album") and album is None:
-                    album = str(tags[key]).split("\x00")[0].strip()
-        return artist or None, title or None, album or None
+                    album = _tag_value_str(value) or None
+        return artist, title, album
     except Exception:
         return None, None, None
 
