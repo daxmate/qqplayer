@@ -6,7 +6,7 @@
       <button
         class="pl-refresh"
         :class="{ spinning: state.loading }"
-        title="重新扫描"
+        :title="t('playlist.rescan')"
         @click="loadSongs()"
       >
         <RefreshCw :size="17" />
@@ -20,32 +20,32 @@
         :class="{ on: browseMode === 'songs' && !browseFilter }"
         @click="enterBrowse('songs')"
       >
-        全部歌曲
+        {{ t("playlist.browse.allSongs") }}
       </button>
       <button
         class="pb-tab"
         :class="{ on: browseMode === 'artists' && !browseFilter }"
         @click="enterBrowse('artists')"
       >
-        歌手
+        {{ t("playlist.browse.artists") }}
       </button>
       <button
         class="pb-tab"
         :class="{ on: browseMode === 'albums' && !browseFilter }"
         @click="enterBrowse('albums')"
       >
-        专辑
+        {{ t("playlist.browse.albums") }}
       </button>
     </div>
 
     <!-- 分组详情：返回 + 分组名 -->
     <div v-if="browseFilter" class="pl-filter-bar">
-      <button class="pl-back" title="返回全部" @click="browseFilter = null">
+      <button class="pl-back" :title="t('playlist.backTitle')" @click="browseFilter = null">
         <ArrowLeft :size="12" />
-        全部
+        {{ t("playlist.back") }}
       </button>
       <span class="pl-filter-title">{{ browseFilterTitle }}</span>
-      <span class="pl-filter-count">{{ viewSongs.length }} 首</span>
+      <span class="pl-filter-count">{{ t("playlist.songsCount", { n: viewSongs.length }) }}</span>
     </div>
 
     <!-- 工具条：搜索 / 排序 / 只看收藏（网格视图只留搜索） -->
@@ -56,22 +56,26 @@
           v-model="query"
           type="text"
           :placeholder="
-            gridMode ? (browseMode === 'artists' ? '搜索歌手' : '搜索专辑') : '搜索歌名 / 歌手'
+            gridMode
+              ? browseMode === 'artists'
+                ? t('playlist.searchPlaceholder.artist')
+                : t('playlist.searchPlaceholder.album')
+              : t('playlist.searchPlaceholder.song')
           "
           spellcheck="false"
         />
       </div>
       <template v-if="!gridMode">
-        <select v-model="sortKey" class="pl-sort" title="排序方式">
-          <option value="default">默认顺序</option>
-          <option value="name">按标题</option>
-          <option value="artist">按歌手</option>
-          <option value="duration">按时长</option>
+        <select v-model="sortKey" class="pl-sort" :title="t('playlist.sort.title')">
+          <option value="default">{{ t("playlist.sort.default") }}</option>
+          <option value="name">{{ t("playlist.sort.name") }}</option>
+          <option value="artist">{{ t("playlist.sort.artist") }}</option>
+          <option value="duration">{{ t("playlist.sort.duration") }}</option>
         </select>
         <button
           class="pl-fav-btn"
           :class="{ on: favOnly }"
-          :title="favOnly ? '显示全部' : '只看收藏'"
+          :title="favOnly ? t('playlist.fav.all') : t('playlist.fav.only')"
           @click="favOnly = !favOnly"
         >
           <Heart :size="13" :fill="favOnly ? 'currentColor' : 'none'" />
@@ -92,7 +96,7 @@
           <span class="gr-avatar" :style="{ background: hashBg(g.name) }">{{ g.name[0] }}</span>
           <span class="gr-meta">
             <span class="gr-name">{{ g.name }}</span>
-            <span class="gr-count">{{ g.count }} 首</span>
+            <span class="gr-count">{{ t("playlist.songsCount", { n: g.count }) }}</span>
           </span>
         </template>
         <template v-else>
@@ -108,13 +112,19 @@
           </span>
           <span class="gr-meta">
             <span class="gr-name">{{ g.album }}</span>
-            <span class="gr-count">{{ g.artist }} · {{ g.count }} 首</span>
+            <span class="gr-count"
+              >{{ g.artist }} · {{ t("playlist.songsCount", { n: g.count }) }}</span
+            >
           </span>
         </template>
       </button>
       <div v-if="!gridGroups.length" class="pl-empty">
         {{
-          state.loading ? "扫描中…" : "没有匹配的" + (browseMode === "artists" ? "歌手" : "专辑")
+          state.loading
+            ? t("playlist.empty.scanning")
+            : browseMode === "artists"
+              ? t("playlist.empty.noMatchArtist")
+              : t("playlist.empty.noMatchAlbum")
         }}
       </div>
     </div>
@@ -128,26 +138,26 @@
         :data-path="song.path"
         @click="pick(i)"
       >
-        <span v-if="canDrag" class="pl-drag" title="拖拽排序">
+        <span v-if="canDrag" class="pl-drag" :title="t('playlist.dragSort')">
           <GripVertical :size="14" />
         </span>
         <span class="pl-idx">{{ vi + 1 }}</span>
         <div class="pl-info">
           <div class="pl-name">
             {{ song.name }}
-            <span v-if="isFavorite(song.path)" class="pl-fav-mark" title="已收藏">
+            <span v-if="isFavorite(song.path)" class="pl-fav-mark" :title="t('playlist.fav.faved')">
               <Heart :size="10" fill="currentColor" />
             </span>
           </div>
           <div class="pl-artist">
             {{ song.artist }}
             <span v-if="song.duration" class="pl-dur">{{ fmtDur(song.duration) }}</span>
-            <span v-if="song.has_lyric" class="pl-lyric" title="有歌词">
+            <span v-if="song.has_lyric" class="pl-lyric" :title="t('playlist.hasLyric')">
               <Mic :size="11" />
             </span>
           </div>
         </div>
-        <span v-if="i === state.currentIndex" class="pl-eq" title="播放中">
+        <span v-if="i === state.currentIndex" class="pl-eq" :title="t('playlist.playing')">
           <span class="eq-bar"></span>
           <span class="eq-bar"></span>
           <span class="eq-bar"></span>
@@ -155,17 +165,21 @@
         <button
           class="pl-action heart"
           :class="{ on: isFavorite(song.path) }"
-          :title="isFavorite(song.path) ? '取消收藏' : '收藏'"
+          :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
           @click.stop="toggleFavorite(song.path)"
         >
           <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
         </button>
-        <button class="pl-action" title="加入歌单" @click.stop="openAddMenu(song.path)">
+        <button
+          class="pl-action"
+          :title="t('playlist.addMenu.title')"
+          @click.stop="openAddMenu(song.path)"
+        >
           <ListPlus :size="14" />
         </button>
         <button
           class="pl-action remove"
-          :title="inPlaylistView ? '从歌单移除' : '从队列移除'"
+          :title="inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')"
           @click.stop="removeItem(i)"
         >
           <X :size="14" />
@@ -174,16 +188,16 @@
       <div v-if="!visible.length" class="pl-empty">
         {{
           state.loading
-            ? "扫描中…"
+            ? t("playlist.empty.scanning")
             : viewSongs.length
               ? favOnly
-                ? "没有收藏的歌曲"
-                : "没有匹配的歌曲"
+                ? t("playlist.empty.noFav")
+                : t("playlist.empty.noMatch")
               : browseFilter
-                ? "该分组没有歌曲"
+                ? t("playlist.empty.noGroupSongs")
                 : inPlaylistView
-                  ? "歌单是空的，点击行上的 ＋ 加歌"
-                  : "没有歌曲，请设置歌曲库"
+                  ? t("playlist.empty.emptyPlaylist")
+                  : t("playlist.empty.noSongs")
         }}
       </div>
     </div>
@@ -194,7 +208,7 @@
       <div v-if="addMenuOpen" class="add-menu">
         <div class="am-title">
           <ListPlus :size="13" />
-          加入歌单
+          {{ t("playlist.addMenu.title") }}
         </div>
         <div
           v-for="p in state.playlists"
@@ -210,7 +224,9 @@
             <Plus v-else :size="13" />
           </span>
         </div>
-        <div v-if="!state.playlists.length" class="am-empty">还没有歌单，点左侧「新建歌单」</div>
+        <div v-if="!state.playlists.length" class="am-empty">
+          {{ t("playlist.addMenu.noPlaylists") }}
+        </div>
       </div>
     </Teleport>
   </div>
@@ -218,6 +234,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import Sortable from "sortablejs";
 import {
   Music,
@@ -253,10 +270,14 @@ defineProps({
   compact: { type: Boolean, default: false },
 });
 
+const { t } = useI18n();
+
 // ============ 视图：全部歌曲 / 歌单（独立视图）/ 分组浏览 ============
 const inPlaylistView = computed(() => !!state.activePlaylistId);
 const viewTitle = computed(() =>
-  inPlaylistView.value ? activePlaylist.value?.name || "歌单" : "播放列表",
+  inPlaylistView.value
+    ? activePlaylist.value?.name || t("playlist.title.playlist")
+    : t("playlist.title.queue"),
 );
 
 // 浏览模式：songs（列表）/ artists（歌手网格）/ albums（专辑网格）
@@ -264,8 +285,8 @@ const browseMode = ref("songs");
 // 分组过滤：进入某歌手/专辑后的歌曲列表
 const browseFilter = ref(null); // { type: 'artist'|'album', value }
 
-const UNKNOWN_ARTIST = "未知歌手";
-const UNKNOWN_ALBUM = "未知专辑";
+const UNKNOWN_ARTIST = t("playlist.unknownArtist");
+const UNKNOWN_ALBUM = t("playlist.unknownAlbum");
 const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
 
 // 当前视图的歌曲列表：歌单视图按歌单顺序（songPaths）展开，i 为曲库索引；分组过滤后只留该组
@@ -329,7 +350,8 @@ const albumGroups = computed(() => {
       const list = [...g.artists];
       return {
         ...g,
-        artist: list.length > 2 ? list.slice(0, 2).join(" / ") + " 等" : list.join(" / "),
+        artist:
+          list.length > 2 ? list.slice(0, 2).join(" / ") + t("playlist.etc") : list.join(" / "),
       };
     })
     .sort((a, b) => a.album.localeCompare(b.album, "zh"));

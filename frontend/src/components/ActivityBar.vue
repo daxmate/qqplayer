@@ -1,9 +1,13 @@
 <template>
-  <nav class="activity-bar" aria-label="面板切换">
+  <nav class="activity-bar" :aria-label="t('app.activityBar.label')">
     <button
       class="ab-btn"
       :class="{ on: state.musicLibOpen }"
-      :title="state.musicLibOpen ? '收起音乐库' : '展开音乐库'"
+      :title="
+        state.musicLibOpen
+          ? t('app.activityBar.collapseMusicLib')
+          : t('app.activityBar.expandMusicLib')
+      "
       @click="toggleMusicLib()"
     >
       <Music2 :size="18" />
@@ -11,7 +15,11 @@
     <button
       class="ab-btn"
       :class="{ on: state.playlistOpen }"
-      :title="state.playlistOpen ? '收起播放列表' : '展开播放列表'"
+      :title="
+        state.playlistOpen
+          ? t('app.activityBar.collapsePlaylist')
+          : t('app.activityBar.expandPlaylist')
+      "
       @click="togglePlaylist()"
     >
       <ListMusic :size="18" />
@@ -21,7 +29,10 @@
 
 <script setup>
 import { Music2, ListMusic } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import { state, toggleMusicLib, togglePlaylist } from "../composables/usePlayer.js";
+
+const { t } = useI18n();
 </script>
 
 <style scoped>

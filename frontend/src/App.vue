@@ -18,7 +18,7 @@
             @click="switchMode('continuous')"
           >
             <Play :size="13" />
-            连播
+            {{ t("app.mode.continuous") }}
           </button>
           <button
             class="tab"
@@ -26,14 +26,14 @@
             @click="switchMode('karaoke')"
           >
             <Mic :size="13" />
-            跟唱
+            {{ t("app.mode.karaoke") }}
           </button>
         </div>
         <div class="topbar-right">
           <button
             class="gear-btn mini-btn"
             :class="{ on: miniRunning }"
-            :title="miniRunning ? '迷你模式（运行中，点击置前）' : '迷你模式（独立小窗）'"
+            :title="miniRunning ? t('app.miniMode.running') : t('app.miniMode.standalone')"
             @click="openMiniPlayer()"
           >
             <PictureInPicture2 :size="18" />
@@ -41,12 +41,16 @@
           <button
             class="gear-btn lyric-float-btn"
             :class="{ on: desktopLyricSettings.enabled }"
-            :title="desktopLyricSettings.enabled ? '关闭桌面歌词' : '打开桌面歌词'"
+            :title="
+              desktopLyricSettings.enabled
+                ? t('app.desktopLyric.close')
+                : t('app.desktopLyric.open')
+            "
             @click="toggleDesktopLyric()"
           >
             <MonitorPlay :size="18" />
           </button>
-          <button class="gear-btn" title="设置" @click="settingsOpen = true">
+          <button class="gear-btn" :title="t('app.settings')" @click="settingsOpen = true">
             <Settings :size="18" />
           </button>
         </div>
@@ -58,7 +62,7 @@
         <button
           v-if="!panelsActive"
           class="floating-panel-btn"
-          title="展开面板"
+          :title="t('app.expandPanels')"
           @click="toggleMusicLib()"
         >
           <PanelLeftOpen :size="16" />
@@ -71,10 +75,10 @@
           <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
           <div v-else class="no-lyric">
             <Music2 :size="40" class="no-lyric-icon" />
-            <span>暂无歌词</span>
+            <span>{{ t("app.noLyric") }}</span>
             <button class="no-lyric-btn" @click="openLyricSpec()">
               <FileMusic :size="14" />
-              指定歌词
+              {{ t("app.specifyLyric") }}
             </button>
           </div>
         </section>
@@ -82,7 +86,7 @@
         <button
           v-if="state.controlsHidden"
           class="expand-controls-btn"
-          title="展开控制区"
+          :title="t('app.expandControls')"
           @click="toggleControls()"
         >
           <ChevronUp :size="18" />
@@ -104,7 +108,7 @@
         <button
           v-if="state.controlsHidden"
           class="expand-controls-btn"
-          title="展开控制区"
+          :title="t('app.expandControls')"
           @click="toggleControls()"
         >
           <ChevronUp :size="18" />
@@ -121,6 +125,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Music2,
   Mic,
@@ -165,6 +170,8 @@ import {
   miniRunning,
   refreshMiniStatus,
 } from "./composables/usePlayer.js";
+
+const { t } = useI18n();
 
 const settingsOpen = ref(false);
 

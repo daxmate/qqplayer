@@ -2,7 +2,7 @@
   <aside class="sidebar">
     <div class="sb-head">
       <Library :size="14" />
-      音乐库
+      {{ t("sidebar.musicLib") }}
     </div>
 
     <div class="sb-list">
@@ -10,25 +10,25 @@
       <div
         class="sb-item"
         :class="{ on: !state.activePlaylistId && !smartViewState.active }"
-        title="全部歌曲"
+        :title="t('sidebar.allSongs')"
         @click="activate(null)"
       >
         <Music2 :size="15" />
-        <span class="sb-name">全部歌曲</span>
+        <span class="sb-name">{{ t("sidebar.allSongs") }}</span>
         <span class="sb-count">{{ state.songs.length }}</span>
       </div>
 
       <!-- 智能视图：最近添加 / 最近播放 / 常听排行 -->
-      <div class="sb-group">智能视图</div>
+      <div class="sb-group">{{ t("sidebar.smartViews") }}</div>
       <template v-for="v in smartViewEntries" :key="v.kind">
         <div
           class="sb-item"
           :class="{ on: smartViewState.active === v.kind }"
-          :title="v.title"
+          :title="t(v.titleKey)"
           @click="openSmartView(v.kind)"
         >
           <component :is="v.icon" :size="15" />
-          <span class="sb-name">{{ v.title }}</span>
+          <span class="sb-name">{{ t(v.titleKey) }}</span>
         </div>
       </template>
 
@@ -45,10 +45,14 @@
           <span class="sb-name">{{ p.name }}</span>
           <span class="sb-count">{{ (p.songPaths || []).length }}</span>
           <span class="sb-actions" @click.stop>
-            <button class="sb-act" title="重命名" @click="startRename(p)">
+            <button class="sb-act" :title="t('sidebar.rename')" @click="startRename(p)">
               <Pencil :size="12" />
             </button>
-            <button class="sb-act danger" title="删除歌单" @click="askDelete(p)">
+            <button
+              class="sb-act danger"
+              :title="t('sidebar.deletePlaylist')"
+              @click="askDelete(p)"
+            >
               <Trash2 :size="12" />
             </button>
           </span>
@@ -62,7 +66,7 @@
             type="text"
             maxlength="40"
             spellcheck="false"
-            placeholder="歌单名称"
+            :placeholder="t('sidebar.playlistName')"
             @keydown.enter="commitEdit"
             @keydown.esc="cancelEdit"
             @blur="commitEdit"
@@ -79,19 +83,21 @@
           type="text"
           maxlength="40"
           spellcheck="false"
-          placeholder="输入歌单名称，回车创建"
+          :placeholder="t('sidebar.createPlaceholder')"
           @keydown.enter="commitCreate"
           @keydown.esc="creating = false"
           @blur="commitCreate"
         />
       </div>
 
-      <div v-if="!state.playlists.length && !creating" class="sb-empty">还没有歌单</div>
+      <div v-if="!state.playlists.length && !creating" class="sb-empty">
+        {{ t("sidebar.noPlaylists") }}
+      </div>
     </div>
 
     <button class="sb-new" @click="startCreate">
       <Plus :size="14" />
-      新建歌单
+      {{ t("sidebar.newPlaylist") }}
     </button>
 
     <!-- 智能视图面板：覆盖播放列表列 -->
@@ -116,6 +122,7 @@ import {
   History,
   TrendingUp,
 } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import { state, createPlaylist, renamePlaylist, deletePlaylist } from "../composables/usePlayer.js";
 import {
   SMART_VIEWS,
@@ -125,11 +132,13 @@ import {
 } from "../composables/useSmartViews.js";
 import SmartViewPanel from "./SmartViewPanel.vue";
 
+const { t } = useI18n();
+
 // 智能视图入口定义（图标组件在模板里用 <component :is> 渲染）
 const smartViewEntries = [
-  { kind: "recentAdded", title: SMART_VIEWS.recentAdded.title, icon: Sparkles },
-  { kind: "recentPlayed", title: SMART_VIEWS.recentPlayed.title, icon: History },
-  { kind: "topPlayed", title: SMART_VIEWS.topPlayed.title, icon: TrendingUp },
+  { kind: "recentAdded", titleKey: SMART_VIEWS.recentAdded.titleKey, icon: Sparkles },
+  { kind: "recentPlayed", titleKey: SMART_VIEWS.recentPlayed.titleKey, icon: History },
+  { kind: "topPlayed", titleKey: SMART_VIEWS.topPlayed.titleKey, icon: TrendingUp },
 ];
 
 function activate(pid) {
@@ -223,7 +232,7 @@ function cancelEdit() {
 
 // ============ 删除 ============
 function askDelete(p) {
-  if (window.confirm(`删除歌单「${p.name}」？歌曲本身不会删除。`)) {
+  if (window.confirm(t("sidebar.confirmDelete", { name: p.name }))) {
     deletePlaylist(p.id).catch((e) => alert(e.message));
   }
 }
