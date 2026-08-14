@@ -15,6 +15,7 @@
 - **系统媒体键（MediaSession）**：键盘媒体键 / 控制中心 / 锁屏控制播放、切歌
 - **播放统计**：完整播放历史 + 统计 API（喂每日三首推荐）
 - **在线搜索 + 下载**：顶栏搜索框在线搜网易云（本地/在线分组），下载直接落盘曲库（默认音质 320k，可设置下载目录/音质），watchdog 自动刷新
+- **音乐标签编辑 + 刮削**：歌曲信息弹窗（Pencil 按钮）编辑歌名/歌手/专辑/封面；输入关键词自动刮削候选（网易云 + MusicBrainz，封面 fallback 链），点选即填；保存写 ID3v2 / MP4 / FLAC 标签（OGG/OPUS 只文本，原子写盘不损坏原文件）；自动统一改名 `{artist} - {title}.{ext}`（重名加序号不覆盖），收藏/歌单/播放统计路径自动迁移
 - **手动指定歌词**：上传 `.lrc` / `.srt` / JSON、在线搜索挑选（网易云 + lrclib 多源候选）、粘贴文本，优先级最高
 - **专业设置**：左侧分类导航（播放 / 音乐库 / 歌词 / 界面 / 快捷键 / 关于）——播放模式、启动恢复上次播放、记住音量、切歌淡入淡出、歌词延迟校准、歌词来源优先级、文件类型多选（7 种格式）、忽略隐藏文件、自动刷新开关、启动自动扫描
 - **主题**：深色 / 浅色 / 跟随系统；强调色 6 种预设（橙红/蓝/绿/紫/粉/青）
@@ -156,3 +157,5 @@ kimi ga mae ni tsuki atte ita hito no koto
 | `PUT /api/playlists/{id}/order` | 歌单整体重排 |
 | `POST /api/now-playing` / `GET /api/now-playing` | 当前播放状态上报（桌面歌词）/ 轮询 |
 | `GET/PUT /api/desktop-lyric/settings` | 桌面歌词设置 |
+| `POST /api/tags/scrape` | 标签刮削候选（网易云 + MusicBrainz recording，封面 fallback 链） |
+| `POST /api/tags` | 写入歌曲标签 + 统一改名（mutagen，原子写盘） |

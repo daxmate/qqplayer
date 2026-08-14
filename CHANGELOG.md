@@ -9,6 +9,16 @@
 
 ### ✨ 新功能
 
+- 音乐标签编辑 + 刮削（mutagen 写标签 + 网易云/MusicBrainz 双源刮削）
+  - 歌曲信息编辑弹窗（TagEditorModal）：播放页/列表歌曲信息处 Pencil 按钮打开，编辑歌名/歌手/专辑 + 封面预览；移动端弹窗全宽全屏化 + 表单堆叠 + 候选区限高滚动
+  - 标签刮削：输入歌名/歌手 → 网易云 + MusicBrainz recording 两组候选列表，点选即填表单；封面 fallback 链（网易云 cover → iTunes → Cover Art Archive）在返回前自动补齐
+  - 保存写标签：mutagen 写 MP3 ID3v2 / M4A·MP4 / FLAC（VorbisComment + Picture），OGG·OPUS 只写文本标签；原子写盘（copy2 + os.replace），写失败原文件完好
+  - 统一改名 `{artist} - {title}.{ext}`：重名自动加 (2)/(3) 序号，绝不覆盖已有文件
+  - 改名后自动迁移 favorites / playlists（songPaths）/ playback 三处旧路径引用，收藏与播放统计不丢；前端按 newPath 更新 currentSong，播放不中断
+  - 修复 extract_tags 对 MP4/FLAC/OGG list 标签值（原返回 `['xxx']` 数组格式）的解析
+  - 后端新增 API：`POST /api/tags/scrape`（刮削候选）、`POST /api/tags`（写标签 + 改名）
+  - 测试：后端 +32（174 全绿）、前端 +10（465 全绿）
+
 - 在线搜索 + 歌曲下载（网易云源，后端内嵌无外部依赖）
   - 顶栏搜索框集成「在线搜索」：输入关键词 → 下拉面板分「本地歌曲 / 在线（网易云）」两组，防抖 400ms
   - 在线结果行：封面 / 标题 / 歌手 / 专辑 / 时长 + 音质标签 + 下载按钮；下载成功后端直接落盘到下载目录（默认当前曲库），watchdog 自动刷新进播放器
