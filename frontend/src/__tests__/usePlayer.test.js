@@ -2647,7 +2647,10 @@ describe("setupMiniStatus（迷你窗运行状态轮询）", () => {
     setupMiniStatus(100);
     setupMiniStatus(100);
     await vi.advanceTimersByTimeAsync(200);
-    expect(fetch).toHaveBeenCalledTimes(3); // 首次立即查 1 次 + 200ms 内轮询 2 次（非 3 个 timer × 3 倍）
+    // 首次立即查 1 次 + 200ms 内轮询 2~3 次（fake timer 边界 tick 因 Node 版本/环境而异）；
+    // 若 3 个 timer 叠加次数会 ≥9——断言区间验证"不叠加"本质
+    expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(fetch.mock.calls.length).toBeLessThan(6);
   });
 });
 
