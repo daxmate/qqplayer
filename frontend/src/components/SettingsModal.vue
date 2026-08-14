@@ -4,13 +4,13 @@
       <div class="modal">
         <!-- 头部 -->
         <div class="modal-head">
-          <button v-if="isMobile" class="modal-back" title="返回" @click="close">
+          <button v-if="isMobile" class="modal-back" :title="t('settings.back')" @click="close">
             <ChevronDown :size="18" />
           </button>
           <Settings :size="16" />
-          设置
+          {{ t("settings.title") }}
           <span class="head-sub">QQ Player v{{ version }}</span>
-          <button class="modal-close" title="关闭" @click="close">
+          <button class="modal-close" :title="t('common.close')" @click="close">
             <X :size="16" />
           </button>
         </div>
@@ -26,7 +26,7 @@
               @click="tab = c.key"
             >
               <component :is="c.icon" :size="15" />
-              {{ c.label }}
+              {{ t(c.labelKey) }}
             </button>
           </nav>
 
@@ -35,8 +35,8 @@
             <section v-if="tab === 'playback'" class="settings-scroll">
               <div class="group">
                 <div class="setting-item">
-                  <div class="setting-label">播放模式</div>
-                  <div class="setting-desc">启动时恢复上次选择的模式</div>
+                  <div class="setting-label">{{ t("settings.playMode") }}</div>
+                  <div class="setting-desc">{{ t("settings.playModeDesc") }}</div>
                   <div class="seg">
                     <button
                       v-for="m in playModeOptions"
@@ -45,7 +45,7 @@
                       :class="{ on: playbackSettings.playMode === m.value }"
                       @click="playbackSettings.playMode = m.value"
                     >
-                      {{ m.label }}
+                      {{ t(m.labelKey) }}
                     </button>
                   </div>
                 </div>
@@ -55,8 +55,8 @@
                     @click="playbackSettings.resumeLast = !playbackSettings.resumeLast"
                   >
                     <div>
-                      <div class="setting-label">启动时恢复上次播放</div>
-                      <div class="setting-desc">恢复上次的歌曲与进度</div>
+                      <div class="setting-label">{{ t("settings.resumeLast") }}</div>
+                      <div class="setting-desc">{{ t("settings.resumeLastDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.resumeLast }"><i /></span>
                   </div>
@@ -67,8 +67,8 @@
                     @click="playbackSettings.rememberVolume = !playbackSettings.rememberVolume"
                   >
                     <div>
-                      <div class="setting-label">记住音量</div>
-                      <div class="setting-desc">关闭后每次启动回到默认音量</div>
+                      <div class="setting-label">{{ t("settings.rememberVolume") }}</div>
+                      <div class="setting-desc">{{ t("settings.rememberVolumeDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.rememberVolume }"
                       ><i
@@ -78,13 +78,13 @@
                 <div class="setting-item">
                   <div class="toggle-row" @click="toggleFade">
                     <div>
-                      <div class="setting-label">切歌淡入淡出</div>
-                      <div class="setting-desc">切歌时旧歌渐弱、新歌渐强</div>
+                      <div class="setting-label">{{ t("settings.fade") }}</div>
+                      <div class="setting-desc">{{ t("settings.fadeDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.fadeSec > 0 }"><i /></span>
                   </div>
                   <div v-if="playbackSettings.fadeSec > 0" class="fade-row">
-                    <span class="setting-desc">时长</span>
+                    <span class="setting-desc">{{ t("settings.duration") }}</span>
                     <input
                       v-model.number="playbackSettings.fadeSec"
                       class="slider"
@@ -102,8 +102,8 @@
                     @click="playbackSettings.eqEnabled = !playbackSettings.eqEnabled"
                   >
                     <div>
-                      <div class="setting-label">均衡器</div>
-                      <div class="setting-desc">10 段均衡（31Hz~16kHz，±12dB），实时生效</div>
+                      <div class="setting-label">{{ t("settings.eq") }}</div>
+                      <div class="setting-desc">{{ t("settings.eqDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.eqEnabled }"><i /></span>
                   </div>
@@ -116,7 +116,7 @@
                         :class="{ on: playbackSettings.eqPreset === key }"
                         @click="setEqPreset(key)"
                       >
-                        {{ p.name }}
+                        {{ t(p.labelKey) }}
                       </button>
                     </div>
                     <div class="eq-grid">
@@ -147,8 +147,8 @@
                     "
                   >
                     <div>
-                      <div class="setting-label">频谱可视化</div>
-                      <div class="setting-desc">播放时封面下方显示动态频谱条（暂停时静止）</div>
+                      <div class="setting-label">{{ t("settings.visualizer") }}</div>
+                      <div class="setting-desc">{{ t("settings.visualizerDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.visualizerEnabled }"
                       ><i
@@ -160,7 +160,7 @@
               <div class="group">
                 <div class="group-title">
                   <Repeat2 :size="13" />
-                  AB 循环
+                  {{ t("settings.abLoop") }}
                 </div>
                 <div class="setting-item">
                   <div
@@ -168,8 +168,8 @@
                     @click="playbackSettings.abVisual = !playbackSettings.abVisual"
                   >
                     <div>
-                      <div class="setting-label">区间可视化</div>
-                      <div class="setting-desc">起点句 A / 终点句 B 徽标与区间进度显示</div>
+                      <div class="setting-label">{{ t("settings.abVisual") }}</div>
+                      <div class="setting-desc">{{ t("settings.abVisualDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.abVisual }"><i /></span>
                   </div>
@@ -180,15 +180,15 @@
                     @click="playbackSettings.abLoopCountOn = !playbackSettings.abLoopCountOn"
                   >
                     <div>
-                      <div class="setting-label">循环计数（防走开安全阀）</div>
-                      <div class="setting-desc">B 句播完算一遍，满次数后停回 A 句首暂停</div>
+                      <div class="setting-label">{{ t("settings.abLoopCount") }}</div>
+                      <div class="setting-desc">{{ t("settings.abLoopCountDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.abLoopCountOn }"
                       ><i
                     /></span>
                   </div>
                   <div v-if="playbackSettings.abLoopCountOn" class="fade-row">
-                    <span class="setting-desc">次数</span>
+                    <span class="setting-desc">{{ t("settings.count") }}</span>
                     <input
                       v-model.number="playbackSettings.abLoopMaxCount"
                       class="slider"
@@ -198,9 +198,19 @@
                       step="1"
                     />
                     <div class="stepper">
-                      <button class="step-btn" title="减 1" @click="stepAbMax(-1)">−</button>
-                      <span class="val-badge">{{ playbackSettings.abLoopMaxCount }} 遍</span>
-                      <button class="step-btn" title="加 1" @click="stepAbMax(1)">＋</button>
+                      <button
+                        class="step-btn"
+                        :title="t('settings.minusOne')"
+                        @click="stepAbMax(-1)"
+                      >
+                        −
+                      </button>
+                      <span class="val-badge">{{
+                        t("settings.loopTimes", { n: playbackSettings.abLoopMaxCount })
+                      }}</span>
+                      <button class="step-btn" :title="t('settings.plusOne')" @click="stepAbMax(1)">
+                        ＋
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -209,19 +219,19 @@
               <div class="group">
                 <div class="group-title">
                   <Timer :size="13" />
-                  睡眠定时器
+                  {{ t("settings.sleepTimer") }}
                 </div>
                 <div class="setting-item">
                   <div class="toggle-row" @click="toggleSleepTimer">
                     <div>
-                      <div class="setting-label">睡眠定时器</div>
-                      <div class="setting-desc">到点自动暂停播放</div>
+                      <div class="setting-label">{{ t("settings.sleepTimer") }}</div>
+                      <div class="setting-desc">{{ t("settings.sleepTimerDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: playbackSettings.sleepTimerOn }"><i /></span>
                   </div>
                 </div>
                 <div v-if="playbackSettings.sleepTimerOn" class="setting-item">
-                  <div class="setting-label">时长</div>
+                  <div class="setting-label">{{ t("settings.duration") }}</div>
                   <div class="ext-grid">
                     <button
                       v-for="m in SLEEP_TIMER_OPTIONS"
@@ -230,7 +240,7 @@
                       :class="{ on: playbackSettings.sleepTimerMinutes === m }"
                       @click="setSleepTimerMinutes(m)"
                     >
-                      {{ m }} 分钟
+                      {{ t("settings.minutes", { n: m }) }}
                     </button>
                   </div>
                 </div>
@@ -242,11 +252,11 @@
               <div class="group">
                 <div class="group-title">
                   <FolderOpen :size="13" />
-                  音乐库
+                  {{ t("settings.library") }}
                 </div>
                 <div class="setting-item">
-                  <div class="setting-label">歌曲库文件夹</div>
-                  <div class="setting-desc">本地文件夹路径（扫描勾选的音频格式）</div>
+                  <div class="setting-label">{{ t("settings.libraryFolder") }}</div>
+                  <div class="setting-desc">{{ t("settings.libraryFolderDesc") }}</div>
                   <div class="setting-control">
                     <input
                       v-model="libInput"
@@ -254,9 +264,11 @@
                       placeholder="/Users/xxx/Music"
                       @keyup.enter="save"
                     />
-                    <button v-if="isNative" class="btn" @click="browseLibrary">浏览…</button>
+                    <button v-if="isNative" class="btn" @click="browseLibrary">
+                      {{ t("settings.browse") }}
+                    </button>
                     <button class="btn primary" :disabled="saving" @click="save">
-                      {{ saving ? "保存中…" : "保存" }}
+                      {{ saving ? t("settings.saving") : t("common.save") }}
                     </button>
                   </div>
                   <div v-if="error" class="setting-error">{{ error }}</div>
@@ -266,10 +278,10 @@
               <div class="group">
                 <div class="group-title">
                   <FileAudio :size="13" />
-                  文件类型
+                  {{ t("settings.fileTypes") }}
                 </div>
                 <div class="setting-item">
-                  <div class="setting-desc">只扫描勾选的音频格式（至少保留一种）</div>
+                  <div class="setting-desc">{{ t("settings.fileTypesDesc") }}</div>
                   <div v-if="librarySettings" class="ext-grid">
                     <button
                       v-for="ext in audioExtOptions"
@@ -285,8 +297,8 @@
                 <div class="setting-item">
                   <div class="toggle-row" @click="toggleSetting('ignoreHidden')">
                     <div>
-                      <div class="setting-label">忽略隐藏文件 / 文件夹</div>
-                      <div class="setting-desc">跳过以 . 开头的目录与文件（如 .DS_Store）</div>
+                      <div class="setting-label">{{ t("settings.ignoreHidden") }}</div>
+                      <div class="setting-desc">{{ t("settings.ignoreHiddenDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: libBool('ignoreHidden') }"><i /></span>
                   </div>
@@ -294,8 +306,8 @@
                 <div class="setting-item">
                   <div class="toggle-row" @click="toggleSetting('autoRefresh')">
                     <div>
-                      <div class="setting-label">自动刷新歌曲库</div>
-                      <div class="setting-desc">监听文件夹变动，新增 / 删除歌曲自动更新列表</div>
+                      <div class="setting-label">{{ t("settings.autoRefresh") }}</div>
+                      <div class="setting-desc">{{ t("settings.autoRefreshDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: libBool('autoRefresh') }"><i /></span>
                   </div>
@@ -303,8 +315,8 @@
                 <div class="setting-item">
                   <div class="toggle-row" @click="toggleSetting('autoScanOnStart')">
                     <div>
-                      <div class="setting-label">启动时自动扫描</div>
-                      <div class="setting-desc">应用启动时立即扫描歌曲库，首屏秒开</div>
+                      <div class="setting-label">{{ t("settings.autoScanOnStart") }}</div>
+                      <div class="setting-desc">{{ t("settings.autoScanOnStartDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: libBool('autoScanOnStart') }"><i /></span>
                   </div>
@@ -321,14 +333,14 @@
                   :class="{ on: lyricSubTab === 'app' }"
                   @click="lyricSubTab = 'app'"
                 >
-                  APP 歌词
+                  {{ t("settings.lyricApp") }}
                 </button>
                 <button
                   class="seg-btn"
                   :class="{ on: lyricSubTab === 'desktop' }"
                   @click="lyricSubTab = 'desktop'"
                 >
-                  桌面歌词
+                  {{ t("settings.lyricDesktop") }}
                 </button>
               </div>
 
@@ -337,13 +349,12 @@
                 <div class="group">
                   <div class="group-title">
                     <Type :size="13" />
-                    外观排版
+                    {{ t("settings.lyricAppearance") }}
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">滚动引擎</div>
+                    <div class="setting-label">{{ t("settings.scrollEngine") }}</div>
                     <div class="setting-desc">
-                      amll = Apple Music 风格逐词高亮（默认）；弹簧 = 自研物理滚动；原生 =
-                      浏览器平滑滚动
+                      {{ t("settings.scrollEngineDesc") }}
                     </div>
                     <div class="seg">
                       <button
@@ -353,12 +364,12 @@
                         :class="{ on: lyricSettings.engine === e.value }"
                         @click="lyricSettings.engine = e.value"
                       >
-                        {{ e.label }}
+                        {{ t(e.labelKey) }}
                       </button>
                     </div>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">歌词字体</div>
+                    <div class="setting-label">{{ t("settings.lyricFont") }}</div>
                     <div class="seg">
                       <button
                         v-for="f in fontOptions"
@@ -368,16 +379,16 @@
                         :style="{ fontFamily: f.css }"
                         @click="lyricSettings.fontFamily = f.value"
                       >
-                        {{ f.label }}
+                        {{ t(f.labelKey) }}
                       </button>
                     </div>
                   </div>
                   <div class="setting-item">
                     <div class="setting-label">
-                      字号
+                      {{ t("settings.fontSize") }}
                       <span class="val-badge">{{ lyricSettings.fontSize }}px</span>
                     </div>
-                    <div class="setting-desc">当前句基准大小，其他层级按比例缩放</div>
+                    <div class="setting-desc">{{ t("settings.fontSizeDesc") }}</div>
                     <input
                       v-model.number="lyricSettings.fontSize"
                       class="slider"
@@ -388,7 +399,7 @@
                     />
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">对齐方式</div>
+                    <div class="setting-label">{{ t("settings.align") }}</div>
                     <div class="seg">
                       <button
                         v-for="a in alignOptions"
@@ -397,7 +408,7 @@
                         :class="{ on: lyricSettings.align === a.value }"
                         @click="lyricSettings.align = a.value"
                       >
-                        {{ a.label }}
+                        {{ t(a.labelKey) }}
                       </button>
                     </div>
                   </div>
@@ -407,7 +418,7 @@
                 <div class="group">
                   <div class="group-title">
                     <Eye :size="13" />
-                    显示内容
+                    {{ t("settings.lyricDisplay") }}
                   </div>
                   <div class="setting-item">
                     <div
@@ -415,8 +426,8 @@
                       @click="lyricSettings.showRoma = !lyricSettings.showRoma"
                     >
                       <div>
-                        <div class="setting-label">显示罗马音</div>
-                        <div class="setting-desc">原文下方的罗马音标注行</div>
+                        <div class="setting-label">{{ t("settings.showRoma") }}</div>
+                        <div class="setting-desc">{{ t("settings.showRomaDesc") }}</div>
                       </div>
                       <span class="switch" :class="{ on: lyricSettings.showRoma }"><i /></span>
                     </div>
@@ -424,8 +435,8 @@
                   <div class="setting-item">
                     <div class="toggle-row" @click="lyricSettings.showZh = !lyricSettings.showZh">
                       <div>
-                        <div class="setting-label">显示中文翻译</div>
-                        <div class="setting-desc">连播与跟唱面板同时生效</div>
+                        <div class="setting-label">{{ t("settings.showZh") }}</div>
+                        <div class="setting-desc">{{ t("settings.showZhDesc") }}</div>
                       </div>
                       <span class="switch" :class="{ on: lyricSettings.showZh }"><i /></span>
                     </div>
@@ -433,8 +444,8 @@
                   <div class="setting-item">
                     <div class="toggle-row" @click="lyricSettings.showSec = !lyricSettings.showSec">
                       <div>
-                        <div class="setting-label">显示段落标题</div>
-                        <div class="setting-desc">副歌 / 主歌等小节标题</div>
+                        <div class="setting-label">{{ t("settings.showSection") }}</div>
+                        <div class="setting-desc">{{ t("settings.showSectionDesc") }}</div>
                       </div>
                       <span class="switch" :class="{ on: lyricSettings.showSec }"><i /></span>
                     </div>
@@ -445,10 +456,10 @@
                 <div class="group">
                   <div class="group-title">
                     <Sparkles :size="13" />
-                    效果行为
+                    {{ t("settings.lyricEffects") }}
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">焦点句停靠位置</div>
+                    <div class="setting-label">{{ t("settings.focusPos") }}</div>
                     <div class="seg">
                       <button
                         v-for="p in focusOptions"
@@ -457,7 +468,7 @@
                         :class="{ on: lyricSettings.focusPos === p.value }"
                         @click="lyricSettings.focusPos = p.value"
                       >
-                        {{ p.label }}
+                        {{ t(p.labelKey) }}
                       </button>
                     </div>
                   </div>
@@ -467,8 +478,8 @@
                       @click="lyricSettings.fadeMask = !lyricSettings.fadeMask"
                     >
                       <div>
-                        <div class="setting-label">上下渐隐</div>
-                        <div class="setting-desc">歌词列表顶部/底部淡出过渡</div>
+                        <div class="setting-label">{{ t("settings.fadeMask") }}</div>
+                        <div class="setting-desc">{{ t("settings.fadeMaskDesc") }}</div>
                       </div>
                       <span class="switch" :class="{ on: lyricSettings.fadeMask }"><i /></span>
                     </div>
@@ -479,8 +490,8 @@
                       @click="lyricSettings.autoScroll = !lyricSettings.autoScroll"
                     >
                       <div>
-                        <div class="setting-label">自动跟随滚动</div>
-                        <div class="setting-desc">切句时自动滚动到焦点句</div>
+                        <div class="setting-label">{{ t("settings.autoScroll") }}</div>
+                        <div class="setting-desc">{{ t("settings.autoScrollDesc") }}</div>
                       </div>
                       <span class="switch" :class="{ on: lyricSettings.autoScroll }"><i /></span>
                     </div>
@@ -491,22 +502,22 @@
                 <div class="group">
                   <div class="group-title">
                     <Timer :size="13" />
-                    时间校准
+                    {{ t("settings.lyricCalib") }}
                   </div>
                   <div class="setting-item">
                     <div class="setting-label">
-                      歌词延迟
+                      {{ t("settings.lyricOffset") }}
                       <span class="val-badge">{{ fmtOffset }}</span>
                       <button
                         v-if="lyricSettings.offset !== 0"
                         class="mini-btn"
                         @click="lyricSettings.offset = 0"
                       >
-                        重置
+                        {{ t("settings.reset") }}
                       </button>
                     </div>
                     <div class="setting-desc">
-                      歌词与声音不同步时微调：正值为歌词延后显示，负值为提前
+                      {{ t("settings.lyricOffsetDesc") }}
                     </div>
                     <input
                       v-model.number="lyricSettings.offset"
@@ -523,10 +534,10 @@
                 <div class="group">
                   <div class="group-title">
                     <Database :size="13" />
-                    歌词来源
+                    {{ t("settings.lyricSource") }}
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">来源优先级</div>
+                    <div class="setting-label">{{ t("settings.sourcePriority") }}</div>
                     <div class="seg">
                       <button
                         v-for="s in sourceOptions"
@@ -535,10 +546,10 @@
                         :class="{ on: lyricSettings.source === s.value }"
                         @click="lyricSettings.source = s.value"
                       >
-                        {{ s.label }}
+                        {{ t(s.labelKey) }}
                       </button>
                     </div>
-                    <div class="setting-desc">在线优先：使用在线歌词，本地歌词文件作兜底</div>
+                    <div class="setting-desc">{{ t("settings.sourcePriorityDesc") }}</div>
                   </div>
                 </div>
 
@@ -546,17 +557,17 @@
                 <div class="group">
                   <div class="group-title">
                     <Palette :size="13" />
-                    配色
+                    {{ t("settings.colorSchemeGroup") }}
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">配色方案</div>
+                    <div class="setting-label">{{ t("settings.colorScheme") }}</div>
                     <div class="desktop-schemes">
                       <button
                         v-for="sc in LYRIC_SCHEMES"
                         :key="sc.key"
                         class="scheme-swatch"
                         :class="{ on: lyricSettings.colorScheme === sc.key }"
-                        :title="sc.label"
+                        :title="t(sc.labelKey)"
                         @click="applyLyricScheme(sc)"
                       >
                         <span
@@ -564,19 +575,19 @@
                           :style="{ background: sc.jp || 'var(--accent)' }"
                         />
                         <span class="scheme-dot" :style="{ background: sc.zh || 'var(--text2)' }" />
-                        <span class="scheme-name">{{ sc.label }}</span>
+                        <span class="scheme-name">{{ t(sc.labelKey) }}</span>
                       </button>
                     </div>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">字体颜色</div>
+                    <div class="setting-label">{{ t("settings.fontColor") }}</div>
                     <div class="desktop-colors">
                       <label class="color-field">
-                        <span>主行</span>
+                        <span>{{ t("settings.mainLine") }}</span>
                         <input v-model="lyricSettings.jpColor" type="color" class="color-input" />
                       </label>
                       <label class="color-field">
-                        <span>翻译</span>
+                        <span>{{ t("settings.translation") }}</span>
                         <input v-model="lyricSettings.zhColor" type="color" class="color-input" />
                       </label>
                       <button
@@ -587,11 +598,11 @@
                           lyricSettings.zhColor = '';
                         "
                       >
-                        清除自定义
+                        {{ t("settings.clearCustom") }}
                       </button>
                     </div>
                     <div class="setting-desc">
-                      主行/翻译颜色自定义；「跟随主题」配色下留空使用主题强调色
+                      {{ t("settings.fontColorDesc") }}
                     </div>
                   </div>
                 </div>
@@ -602,7 +613,7 @@
                 <div class="group">
                   <div class="group-title">
                     <MonitorPlay :size="13" />
-                    桌面歌词
+                    {{ t("settings.lyricDesktop") }}
                   </div>
                   <div class="setting-item">
                     <div
@@ -610,14 +621,14 @@
                       @click="desktopLyricSettings.showZh = !desktopLyricSettings.showZh"
                     >
                       <div>
-                        <div class="setting-label">显示中文翻译</div>
-                        <div class="setting-desc">桌面歌词悬浮窗当前句下方显示中文翻译</div>
+                        <div class="setting-label">{{ t("settings.showZh") }}</div>
+                        <div class="setting-desc">{{ t("settings.desktopShowZhDesc") }}</div>
                       </div>
                       <span class="switch" :class="{ on: desktopLyricSettings.showZh }"><i /></span>
                     </div>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">字体</div>
+                    <div class="setting-label">{{ t("settings.font") }}</div>
                     <div class="seg">
                       <button
                         v-for="f in fontOptions"
@@ -626,12 +637,12 @@
                         :class="{ on: desktopLyricSettings.fontFamily === f.value }"
                         @click="desktopLyricSettings.fontFamily = f.value"
                       >
-                        {{ f.label }}
+                        {{ t(f.labelKey) }}
                       </button>
                     </div>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">主行字号</div>
+                    <div class="setting-label">{{ t("settings.mainFontSize") }}</div>
                     <div class="val-badge">{{ desktopLyricSettings.fontSize }}px</div>
                     <input
                       v-model.number="desktopLyricSettings.fontSize"
@@ -643,7 +654,7 @@
                     />
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">翻译字号</div>
+                    <div class="setting-label">{{ t("settings.translationFontSize") }}</div>
                     <div class="val-badge">{{ desktopLyricSettings.zhSize }}px</div>
                     <input
                       v-model.number="desktopLyricSettings.zhSize"
@@ -655,7 +666,7 @@
                     />
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">对齐</div>
+                    <div class="setting-label">{{ t("settings.alignShort") }}</div>
                     <div class="seg">
                       <button
                         v-for="a in alignOptions"
@@ -664,12 +675,12 @@
                         :class="{ on: desktopLyricSettings.align === a.value }"
                         @click="desktopLyricSettings.align = a.value"
                       >
-                        {{ a.label }}
+                        {{ t(a.labelKey) }}
                       </button>
                     </div>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">窗体宽度</div>
+                    <div class="setting-label">{{ t("settings.windowWidth") }}</div>
                     <div class="val-badge">{{ desktopLyricSettings.width }}px</div>
                     <input
                       v-model.number="desktopLyricSettings.width"
@@ -681,7 +692,7 @@
                     />
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">窗体高度</div>
+                    <div class="setting-label">{{ t("settings.windowHeight") }}</div>
                     <div class="val-badge">{{ desktopLyricSettings.height }}px</div>
                     <input
                       v-model.number="desktopLyricSettings.height"
@@ -693,27 +704,27 @@
                     />
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">配色方案</div>
+                    <div class="setting-label">{{ t("settings.colorScheme") }}</div>
                     <div class="desktop-schemes">
                       <button
                         v-for="sc in DESKTOP_LYRIC_SCHEMES"
                         :key="sc.key"
                         class="scheme-swatch"
                         :class="{ on: desktopLyricSettings.colorScheme === sc.key }"
-                        :title="sc.label"
+                        :title="t(sc.labelKey)"
                         @click="applyScheme(sc)"
                       >
                         <span class="scheme-dot" :style="{ background: sc.jp }" />
                         <span class="scheme-dot" :style="{ background: sc.zh }" />
-                        <span class="scheme-name">{{ sc.label }}</span>
+                        <span class="scheme-name">{{ t(sc.labelKey) }}</span>
                       </button>
                     </div>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">字体颜色</div>
+                    <div class="setting-label">{{ t("settings.fontColor") }}</div>
                     <div class="desktop-colors">
                       <label class="color-field">
-                        <span>主行</span>
+                        <span>{{ t("settings.mainLine") }}</span>
                         <input
                           v-model="desktopLyricSettings.jpColor"
                           type="color"
@@ -721,7 +732,7 @@
                         />
                       </label>
                       <label class="color-field">
-                        <span>翻译</span>
+                        <span>{{ t("settings.translation") }}</span>
                         <input
                           v-model="desktopLyricSettings.zhColor"
                           type="color"
@@ -733,13 +744,13 @@
                   <div class="setting-item">
                     <button class="desktop-reset-btn" @click="resetDesktopLyric">
                       <RotateCcw :size="13" />
-                      恢复桌面歌词默认
+                      {{ t("settings.resetDesktopLyric") }}
                     </button>
                   </div>
                   <div class="setting-item">
-                    <div class="setting-label">打开方式</div>
+                    <div class="setting-label">{{ t("settings.openMethod") }}</div>
                     <div class="setting-desc">
-                      播放器顶栏 🎵 悬浮窗按钮可随时开关；状态自动记住。 双击悬浮窗可关闭。
+                      {{ t("settings.openMethodDesc") }}
                     </div>
                   </div>
                 </div>
@@ -751,7 +762,7 @@
               <div class="group">
                 <div class="group-title">
                   <LayoutGrid :size="13" />
-                  界面偏好
+                  {{ t("settings.uiPrefs") }}
                 </div>
                 <div class="setting-item">
                   <div
@@ -759,8 +770,8 @@
                     @click="uiSettings.showSongInfo = !uiSettings.showSongInfo"
                   >
                     <div>
-                      <div class="setting-label">显示当前歌曲信息</div>
-                      <div class="setting-desc">跟唱模式歌词面板顶部显示歌名 / 歌手</div>
+                      <div class="setting-label">{{ t("settings.showSongInfo") }}</div>
+                      <div class="setting-desc">{{ t("settings.showSongInfoDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: uiSettings.showSongInfo }"><i /></span>
                   </div>
@@ -771,8 +782,8 @@
                     @click="uiSettings.karaokeShowTime = !uiSettings.karaokeShowTime"
                   >
                     <div>
-                      <div class="setting-label">跟唱显示每句时间戳</div>
-                      <div class="setting-desc">跟唱模式每句歌词右侧显示起止时间</div>
+                      <div class="setting-label">{{ t("settings.karaokeShowTime") }}</div>
+                      <div class="setting-desc">{{ t("settings.karaokeShowTimeDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: uiSettings.karaokeShowTime }"><i /></span>
                   </div>
@@ -783,8 +794,8 @@
                     @click="uiSettings.karaokeShowNum = !uiSettings.karaokeShowNum"
                   >
                     <div>
-                      <div class="setting-label">跟唱显示行号</div>
-                      <div class="setting-desc">跟唱模式每句歌词左侧显示句子序号</div>
+                      <div class="setting-label">{{ t("settings.karaokeShowNum") }}</div>
+                      <div class="setting-desc">{{ t("settings.karaokeShowNumDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: uiSettings.karaokeShowNum }"><i /></span>
                   </div>
@@ -792,8 +803,8 @@
                 <div class="setting-item">
                   <div class="toggle-row" @click="uiSettings.coverBlur = !uiSettings.coverBlur">
                     <div>
-                      <div class="setting-label">封面模糊背景</div>
-                      <div class="setting-desc">背景铺当前歌曲封面模糊图，面板呈毛玻璃效果</div>
+                      <div class="setting-label">{{ t("settings.coverBlur") }}</div>
+                      <div class="setting-desc">{{ t("settings.coverBlurDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: uiSettings.coverBlur }"><i /></span>
                   </div>
@@ -801,8 +812,8 @@
                 <div class="setting-item">
                   <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
                     <div>
-                      <div class="setting-label">紧凑模式</div>
-                      <div class="setting-desc">减小间距与封面尺寸，提高信息密度</div>
+                      <div class="setting-label">{{ t("settings.compact") }}</div>
+                      <div class="setting-desc">{{ t("settings.compactDesc") }}</div>
                     </div>
                     <span class="switch" :class="{ on: uiSettings.compact }"><i /></span>
                   </div>
@@ -813,24 +824,24 @@
               <div class="group">
                 <div class="group-title">
                   <Palette :size="13" />
-                  主题与强调色
+                  {{ t("settings.themeAccent") }}
                 </div>
                 <div class="setting-item">
-                  <div class="setting-label">外观</div>
+                  <div class="setting-label">{{ t("settings.appearance") }}</div>
                   <div class="seg" style="margin-top: 8px">
                     <button
-                      v-for="t in themeOptions"
-                      :key="t.value"
+                      v-for="th in themeOptions"
+                      :key="th.value"
                       class="seg-btn"
-                      :class="{ on: uiSettings.theme === t.value }"
-                      @click="uiSettings.theme = t.value"
+                      :class="{ on: uiSettings.theme === th.value }"
+                      @click="uiSettings.theme = th.value"
                     >
-                      {{ t.label }}
+                      {{ t(th.labelKey) }}
                     </button>
                   </div>
                 </div>
                 <div class="setting-item">
-                  <div class="setting-label">迷你窗外观</div>
+                  <div class="setting-label">{{ t("settings.miniTheme") }}</div>
                   <div class="seg" style="margin-top: 8px">
                     <button
                       v-for="m in miniThemeOptions"
@@ -839,12 +850,12 @@
                       :class="{ on: uiSettings.miniTheme === m.value }"
                       @click="uiSettings.miniTheme = m.value"
                     >
-                      {{ m.label }}
+                      {{ t(m.labelKey) }}
                     </button>
                   </div>
                 </div>
                 <div class="setting-item">
-                  <div class="setting-label">强调色</div>
+                  <div class="setting-label">{{ t("settings.accent") }}</div>
                   <div class="accent-grid">
                     <button
                       v-for="a in ACCENT_OPTIONS"
@@ -865,61 +876,65 @@
               <div class="group">
                 <div class="group-title">
                   <Keyboard :size="13" />
-                  键盘快捷键
+                  {{ t("settings.keyboardShortcuts") }}
                 </div>
-                <div v-for="s in shortcuts" :key="s.desc" class="shortcut-item">
-                  <span class="shortcut-desc">{{ s.desc }}</span>
+                <div v-for="s in shortcuts" :key="s.labelKey" class="shortcut-item">
+                  <span class="shortcut-desc">{{ t(s.labelKey) }}</span>
                   <span class="shortcut-keys">
                     <kbd v-for="k in s.keys" :key="k">{{ k }}</kbd>
                   </span>
                 </div>
                 <div class="group-title sub-title">
                   <Music2 :size="13" />
-                  跟唱句跳转
-                  <span class="sub-note">点击键位可重新录制</span>
+                  {{ t("settings.karaokeJump") }}
+                  <span class="sub-note">{{ t("settings.clickToRecord") }}</span>
                 </div>
                 <div
                   class="shortcut-item editable"
                   :class="{ recording: recording === 'next' }"
-                  title="点击后按新按键"
+                  :title="t('settings.clickToSetKey')"
                   @click="startRecord('next')"
                 >
-                  <span class="shortcut-desc">跟唱：下一句</span>
+                  <span class="shortcut-desc">{{ t("settings.karaokeNext") }}</span>
                   <span class="shortcut-keys">
-                    <kbd v-if="recording === 'next'" class="recording-kbd">按新键…</kbd>
+                    <kbd v-if="recording === 'next'" class="recording-kbd">{{
+                      t("settings.pressNewKey")
+                    }}</kbd>
                     <kbd v-else>{{ fmtKey(playbackSettings.karaokeNextKey) }}</kbd>
                   </span>
                 </div>
                 <div
                   class="shortcut-item editable"
                   :class="{ recording: recording === 'prev' }"
-                  title="点击后按新按键"
+                  :title="t('settings.clickToSetKey')"
                   @click="startRecord('prev')"
                 >
-                  <span class="shortcut-desc">跟唱：上一句</span>
+                  <span class="shortcut-desc">{{ t("settings.karaokePrev") }}</span>
                   <span class="shortcut-keys">
-                    <kbd v-if="recording === 'prev'" class="recording-kbd">按新键…</kbd>
+                    <kbd v-if="recording === 'prev'" class="recording-kbd">{{
+                      t("settings.pressNewKey")
+                    }}</kbd>
                     <kbd v-else>{{ fmtKey(playbackSettings.karaokePrevKey) }}</kbd>
                   </span>
                 </div>
-                <div class="setting-desc hint">仅跟唱模式生效；按 Esc / Enter 保留原键。</div>
+                <div class="setting-desc hint">{{ t("settings.recordHint") }}</div>
               </div>
               <div class="group">
                 <div class="group-title">
                   <MonitorPlay :size="13" />
-                  系统媒体键
+                  {{ t("settings.mediaKeys") }}
                 </div>
                 <div class="shortcut-item">
-                  <span class="shortcut-desc">Mac 键盘媒体键 / 控制中心 / 锁屏</span>
+                  <span class="shortcut-desc">{{ t("settings.mediaKeysDesc") }}</span>
                   <span class="shortcut-keys">
-                    <kbd>播放/暂停</kbd>
-                    <kbd>上一首</kbd>
-                    <kbd>下一首</kbd>
-                    <kbd>停止</kbd>
+                    <kbd>{{ t("settings.mediaPlayPause") }}</kbd>
+                    <kbd>{{ t("settings.mediaPrev") }}</kbd>
+                    <kbd>{{ t("settings.mediaNext") }}</kbd>
+                    <kbd>{{ t("settings.mediaStop") }}</kbd>
                   </span>
                 </div>
                 <div class="setting-desc hint">
-                  媒体键同时驱动系统控制中心与锁屏的播放信息（歌名/歌手/封面/进度）。
+                  {{ t("settings.mediaKeysHint") }}
                 </div>
               </div>
             </section>
@@ -929,30 +944,30 @@
               <div class="group">
                 <div class="group-title">
                   <Info :size="13" />
-                  关于 QQ Player
+                  {{ t("settings.about") }}
                 </div>
                 <div class="about-item">
-                  <span class="about-label">版本</span>
+                  <span class="about-label">{{ t("settings.version") }}</span>
                   <span class="about-value">v{{ version }}</span>
                 </div>
                 <div class="about-item">
-                  <span class="about-label">数据目录</span>
+                  <span class="about-label">{{ t("settings.dataDir") }}</span>
                   <span class="about-value mono">{{ dataDir }}</span>
                 </div>
                 <div class="about-item">
-                  <span class="about-label">本地访问</span>
+                  <span class="about-label">{{ t("settings.localAccess") }}</span>
                   <a class="about-value mono link" :href="localUrl" target="_blank">{{
                     localUrl
                   }}</a>
                 </div>
                 <div class="about-item">
-                  <span class="about-label">项目主页</span>
+                  <span class="about-label">{{ t("settings.repoHome") }}</span>
                   <a class="about-value mono link" :href="repoUrl" target="_blank"
                     >github.com/daxmate/qqplayer</a
                   >
                 </div>
                 <p class="about-desc">
-                  QQ Player —— 本地音乐播放器 · AB 循环复读机 · 有声书同步阅读器。
+                  {{ t("settings.aboutDesc") }}
                 </p>
               </div>
             </section>
@@ -961,11 +976,11 @@
 
         <!-- 底部操作栏 -->
         <div class="modal-foot">
-          <button class="reset-btn" title="重置所有设置为默认值" @click="resetAll">
+          <button class="reset-btn" :title="t('settings.resetAllTitle')" @click="resetAll">
             <RotateCcw :size="13" />
-            恢复默认
+            {{ t("settings.resetAll") }}
           </button>
-          <button class="btn primary" @click="close">完成</button>
+          <button class="btn primary" @click="close">{{ t("settings.done") }}</button>
         </div>
       </div>
     </div>
@@ -974,6 +989,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Settings,
   X,
@@ -1030,6 +1046,8 @@ const props = defineProps({
 });
 const emit = defineEmits(["close"]);
 
+const { t } = useI18n();
+
 const version = pkg.version;
 const dataDir = "~/Library/Application Support/qqplayer";
 const localUrl = "http://localhost:17627";
@@ -1060,9 +1078,9 @@ function onNativeLibrary(e) {
 }
 
 const themeOptions = [
-  { value: "dark", label: "深色" },
-  { value: "light", label: "浅色" },
-  { value: "auto", label: "跟随系统" },
+  { value: "dark", labelKey: "settings.themeDark" },
+  { value: "light", labelKey: "settings.themeLight" },
+  { value: "auto", labelKey: "settings.themeAuto" },
 ];
 
 // 频点显示：1000 及以上缩写为 K（31/62/125/250/500/1K/2K/4K/8K/16K）
@@ -1071,9 +1089,9 @@ function fmtBand(f) {
 }
 
 const miniThemeOptions = [
-  { value: "theme", label: "跟随主题" },
-  { value: "dark", label: "深色" },
-  { value: "light", label: "浅色" },
+  { value: "theme", labelKey: "settings.miniThemeTheme" },
+  { value: "dark", labelKey: "settings.miniThemeDark" },
+  { value: "light", labelKey: "settings.miniThemeLight" },
 ];
 
 // 音乐库设置（后端持久化）：模板里用 computed 解包，null=还没加载
@@ -1116,41 +1134,45 @@ function toggleSetting(key) {
 }
 
 const categories = [
-  { key: "playback", label: "播放", icon: ListMusic },
-  { key: "library", label: "音乐库", icon: FolderOpen },
-  { key: "lyric", label: "歌词", icon: Music2 },
-  { key: "ui", label: "界面", icon: LayoutGrid },
-  { key: "shortcuts", label: "快捷键", icon: Keyboard },
-  { key: "about", label: "关于", icon: Info },
+  { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
+  { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
+  { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
+  { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
+  { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
+  { key: "about", labelKey: "settings.category.about", icon: Info },
 ];
 
 const playModeOptions = [
-  { value: "order", label: "列表循环" },
-  { value: "shuffle", label: "随机" },
-  { value: "repeatOne", label: "单曲循环" },
+  { value: "order", labelKey: "settings.playModeOrder" },
+  { value: "shuffle", labelKey: "settings.playModeShuffle" },
+  { value: "repeatOne", labelKey: "settings.playModeRepeatOne" },
 ];
 const fontOptions = [
-  { value: "system", label: "系统默认", css: "" },
-  { value: "serif", label: "衬线", css: '"Songti SC", "SimSun", serif' },
-  { value: "rounded", label: "圆体", css: '"Yuanti SC", "PingFang SC", sans-serif' },
+  { value: "system", labelKey: "settings.fontSystem", css: "" },
+  { value: "serif", labelKey: "settings.fontSerif", css: '"Songti SC", "SimSun", serif' },
+  {
+    value: "rounded",
+    labelKey: "settings.fontRounded",
+    css: '"Yuanti SC", "PingFang SC", sans-serif',
+  },
 ];
 const engineOptions = [
-  { value: "amll", label: "amll" },
-  { value: "spring", label: "弹簧" },
-  { value: "native", label: "原生" },
+  { value: "amll", labelKey: "settings.engineAmll" },
+  { value: "spring", labelKey: "settings.engineSpring" },
+  { value: "native", labelKey: "settings.engineNative" },
 ];
 const alignOptions = [
-  { value: "left", label: "左对齐" },
-  { value: "center", label: "居中" },
-  { value: "right", label: "右对齐" },
+  { value: "left", labelKey: "settings.alignLeft" },
+  { value: "center", labelKey: "settings.alignCenter" },
+  { value: "right", labelKey: "settings.alignRight" },
 ];
 const focusOptions = [
-  { value: 0.33, label: "偏上 1/3" },
-  { value: 0.5, label: "正中" },
+  { value: 0.33, labelKey: "settings.focusUpperThird" },
+  { value: 0.5, labelKey: "settings.focusCenter" },
 ];
 const sourceOptions = [
-  { value: "local", label: "本地优先" },
-  { value: "online", label: "在线优先" },
+  { value: "local", labelKey: "settings.sourceLocal" },
+  { value: "online", labelKey: "settings.sourceOnline" },
 ];
 // 歌词延迟徽标：+0.5s / -1.2s / 0.0s（正 = 歌词延后显示）
 const fmtOffset = computed(() => {
@@ -1158,11 +1180,11 @@ const fmtOffset = computed(() => {
   return (v > 0 ? "+" : "") + v.toFixed(1) + "s";
 });
 const shortcuts = [
-  { keys: ["Space"], desc: "播放 / 暂停" },
-  { keys: ["←"], desc: "快退 10 秒" },
-  { keys: ["→"], desc: "快进 10 秒" },
-  { keys: ["↑"], desc: "音量 +10%" },
-  { keys: ["↓"], desc: "音量 -10%" },
+  { keys: ["Space"], labelKey: "settings.shortcutPlayPause" },
+  { keys: ["←"], labelKey: "settings.shortcutRewind" },
+  { keys: ["→"], labelKey: "settings.shortcutForward" },
+  { keys: ["↑"], labelKey: "settings.shortcutVolUp" },
+  { keys: ["↓"], labelKey: "settings.shortcutVolDown" },
 ];
 
 // 跟唱句跳转快捷键录制（默认 N 下一句 / P 上一句，仅跟唱模式生效）
