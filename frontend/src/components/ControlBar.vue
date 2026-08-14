@@ -1,6 +1,11 @@
 <template>
   <div class="controls" :class="{ karaoke }">
-    <button v-if="!hideCollapse" class="collapse-btn" :title="t('control.collapse')" @click="toggleControls()">
+    <button
+      v-if="!hideCollapse"
+      class="collapse-btn"
+      :title="t('control.collapse')"
+      @click="toggleControls()"
+    >
       <ChevronDown :size="16" />
     </button>
     <!-- 进度条 -->
@@ -49,7 +54,12 @@
         <button class="btn" :title="t('control.nextLine')" @click="nextLine">
           <StepForward :size="17" />
         </button>
-        <button class="btn" :class="{ on: state.speed !== 1.0 }" :title="t('control.speed')" @click="cycleSpeed">
+        <button
+          class="btn"
+          :class="{ on: state.speed !== 1.0 }"
+          :title="t('control.speed')"
+          @click="cycleSpeed"
+        >
           <Gauge :size="15" />
           {{ state.speed }}x
         </button>
@@ -60,7 +70,7 @@
           @click="toggleKaraoke"
         >
           <Mic :size="15" />
-          {{ t('control.karaoke') }}
+          {{ t("control.karaoke") }}
         </button>
         <button
           class="btn"
@@ -74,7 +84,7 @@
         >
           <Repeat2 v-if="state.abLoop" :size="15" />
           <Repeat1 v-else :size="15" />
-          {{ state.abLoop ? "AB" : t('control.singleLine') }}
+          {{ state.abLoop ? "AB" : t("control.singleLine") }}
         </button>
       </template>
       <template v-else>
@@ -87,9 +97,14 @@
         </button>
       </template>
 
-      <button class="btn" :class="{ on: state.zhVisible }" :title="t('control.toggleZh')" @click="toggleZh">
+      <button
+        class="btn"
+        :class="{ on: state.zhVisible }"
+        :title="t('control.toggleZh')"
+        @click="toggleZh"
+      >
         <Languages :size="15" />
-        {{ t('control.zh') }}
+        {{ t("control.zh") }}
       </button>
 
       <!-- 音量 -->
@@ -123,7 +138,7 @@
         <template v-if="state.currentSong.artist"> · {{ state.currentSong.artist }}</template>
         <span v-if="state.lyricFormat" class="fmt-badge">{{ state.lyricFormat }}</span>
       </span>
-      <span v-else class="song-line-text dim">{{ t('control.noSong') }}</span>
+      <span v-else class="song-line-text dim">{{ t("control.noSong") }}</span>
     </div>
 
     <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
