@@ -2,11 +2,13 @@
   <div class="ml-page">
     <!-- 顶栏：返回 + 标题 -->
     <header class="ml-head">
-      <button class="ml-back" title="返回" @click="$emit('back')">
+      <button class="ml-back" :title="t('mobile.list.back')" @click="$emit('back')">
         <ChevronLeft :size="24" />
       </button>
       <h1 class="ml-title">{{ title }}</h1>
-      <span class="ml-count">{{ display === "songs" ? songRows.length + " 首" : "" }}</span>
+      <span class="ml-count">{{
+        display === "songs" ? t("mobile.count.song", { n: songRows.length }) : ""
+      }}</span>
     </header>
 
     <!-- 搜索框 -->
@@ -19,7 +21,7 @@
         :placeholder="searchPlaceholder"
         spellcheck="false"
       />
-      <button v-if="query" class="ml-clear" title="清除" @click="query = ''">
+      <button v-if="query" class="ml-clear" :title="t('mobile.list.clear')" @click="query = ''">
         <X :size="14" />
       </button>
     </div>
@@ -36,7 +38,7 @@
           :data-path="song.path"
           @click="onPlay(song)"
         >
-          <span v-if="canReorder" class="ml-drag" title="拖拽排序">
+          <span v-if="canReorder" class="ml-drag" :title="t('mobile.list.reorder')">
             <GripVertical :size="15" />
           </span>
           <div class="ml-row-cover">
@@ -52,7 +54,11 @@
           <div class="ml-row-info">
             <div class="ml-row-name">
               {{ song.name }}
-              <span v-if="i === state.currentIndex && state.isPlaying" class="ml-eq" title="播放中">
+              <span
+                v-if="i === state.currentIndex && state.isPlaying"
+                class="ml-eq"
+                :title="t('mobile.list.playing')"
+              >
                 <span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span>
               </span>
             </div>
@@ -63,14 +69,20 @@
           <button
             class="ml-heart"
             :class="{ on: isFavorite(song.path) }"
-            :title="isFavorite(song.path) ? '取消收藏' : '收藏'"
+            :title="isFavorite(song.path) ? t('mobile.list.unfavorite') : t('mobile.list.favorite')"
             @click.stop="toggleFavorite(song.path)"
           >
             <Heart :size="17" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
           </button>
         </div>
         <div v-if="!filteredSongs.length" class="ml-empty">
-          {{ state.loading ? "扫描中…" : query ? "没有匹配的歌曲" : emptyText }}
+          {{
+            state.loading
+              ? t("mobile.list.scanning")
+              : query
+                ? t("mobile.list.noMatchSongs")
+                : emptyText
+          }}
         </div>
       </template>
 
@@ -102,7 +114,7 @@
           <ChevronRight :size="18" class="ml-chevron" />
         </div>
         <div v-if="!filteredGroups.length" class="ml-empty">
-          {{ query ? "没有匹配的结果" : emptyText }}
+          {{ query ? t("mobile.list.noMatchResults") : emptyText }}
         </div>
       </template>
     </div>
@@ -111,6 +123,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { useI18n } from "vue-i18n";
 import Sortable from "sortablejs";
 import {
   ChevronLeft,
@@ -137,11 +150,13 @@ const props = defineProps({
 
 const emit = defineEmits(["back", "play", "open"]);
 
+const { t } = useI18n();
+
 const query = ref("");
 
 // 未知值归一化（与 Playlist.vue 一致）
-const UNKNOWN_ARTIST = "未知歌手";
-const UNKNOWN_ALBUM = "未知专辑";
+const UNKNOWN_ARTIST = t("mobile.unknown.artist");
+const UNKNOWN_ALBUM = t("mobile.unknown.album");
 const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
 
 // 分组入口数据（playlists/artists/albums 三类的下一层入口）
@@ -149,19 +164,19 @@ const groupEntries = {
   playlists: (p) => ({
     key: "p:" + p.id,
     name: p.name,
-    subtitle: `${(p.songPaths || []).length} 首`,
+    subtitle: t("mobile.count.song", { n: (p.songPaths || []).length }),
     entry: { name: "list", kind: "playlist", title: p.name, payload: { playlist: p } },
   }),
   artists: (name, count) => ({
     key: "a:" + name,
     name,
-    subtitle: `${count} 首`,
+    subtitle: t("mobile.count.song", { n: count }),
     entry: { name: "list", kind: "artist", title: name, payload: { artist: name } },
   }),
   albums: (g) => ({
     key: "l:" + g.album + ":" + g.artist,
     name: g.album,
-    subtitle: `${g.artist} · ${g.count} 首`,
+    subtitle: t("mobile.list.albumSubtitle", { artist: g.artist, n: g.count }),
     coverUrl: g.coverUrl,
     coverKey: "l:" + g.album,
     entry: { name: "list", kind: "album", title: g.album, payload: { album: g.album } },
@@ -238,7 +253,10 @@ const groupRows = computed(() => {
         const list = [...g.artists];
         return groupEntries.albums({
           ...g,
-          artist: list.length > 2 ? list.slice(0, 2).join(" / ") + " 等" : list.join(" / "),
+          artist:
+            list.length > 2
+              ? t("mobile.list.moreArtists", { names: list.slice(0, 2).join(" / ") })
+              : list.join(" / "),
         });
       })
       .sort((a, b) => a.name.localeCompare(b.name, "zh"));
@@ -253,16 +271,20 @@ const display = computed(() =>
 );
 
 const searchPlaceholder = computed(() =>
-  props.kind === "artists" ? "搜索歌手" : props.kind === "albums" ? "搜索专辑" : "搜索歌名 / 歌手",
+  props.kind === "artists"
+    ? t("mobile.list.searchArtist")
+    : props.kind === "albums"
+      ? t("mobile.list.searchAlbum")
+      : t("mobile.list.searchSongArtist"),
 );
 
 const emptyText = computed(() => {
-  if (props.kind === "playlists") return "还没有歌单";
-  if (props.kind === "favorites") return "还没有收藏的歌曲";
-  if (props.kind === "artist") return "该歌手没有歌曲";
-  if (props.kind === "album") return "该专辑没有歌曲";
-  if (props.kind === "playlist") return "歌单是空的";
-  return "没有歌曲，请先导入音乐";
+  if (props.kind === "playlists") return t("mobile.list.emptyPlaylists");
+  if (props.kind === "favorites") return t("mobile.list.emptyFavorites");
+  if (props.kind === "artist") return t("mobile.list.emptyArtist");
+  if (props.kind === "album") return t("mobile.list.emptyAlbum");
+  if (props.kind === "playlist") return t("mobile.list.emptyPlaylist");
+  return t("mobile.list.emptySongs");
 });
 
 // 搜索过滤

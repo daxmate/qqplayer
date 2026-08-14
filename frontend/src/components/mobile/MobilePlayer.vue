@@ -2,7 +2,7 @@
   <div class="mobile-player">
     <!-- 顶栏：收起 + 连播/跟唱切换 + 收藏 -->
     <header class="mp-head">
-      <button class="mp-btn-round" title="收起播放器" @click="$emit('back')">
+      <button class="mp-btn-round" :title="t('mobile.player.collapse')" @click="$emit('back')">
         <ChevronDown :size="22" />
       </button>
 
@@ -13,7 +13,7 @@
           @click="switchMode('continuous')"
         >
           <Play :size="13" />
-          连播
+          {{ t("mobile.player.continuous") }}
         </button>
         <button
           class="mp-tab"
@@ -21,7 +21,7 @@
           @click="switchMode('karaoke')"
         >
           <Mic :size="13" />
-          跟唱
+          {{ t("control.karaoke") }}
         </button>
       </div>
 
@@ -29,7 +29,11 @@
         v-if="state.currentSong"
         class="mp-btn-round"
         :class="{ on: isFavorite(state.currentSong.path) }"
-        :title="isFavorite(state.currentSong.path) ? '取消收藏' : '收藏'"
+        :title="
+          isFavorite(state.currentSong.path)
+            ? t('mobile.list.unfavorite')
+            : t('mobile.list.favorite')
+        "
         @click="toggleFavorite(state.currentSong.path)"
       >
         <Heart :size="20" :fill="isFavorite(state.currentSong.path) ? 'currentColor' : 'none'" />
@@ -46,7 +50,7 @@
         </div>
         <Visualizer small />
         <div class="mp-song-info">
-          <div class="mp-song-name">{{ state.currentSong?.name || "未选择歌曲" }}</div>
+          <div class="mp-song-name">{{ state.currentSong?.name || t("control.noSong") }}</div>
           <div class="mp-song-artist">
             {{ state.currentSong?.artist || "" }}
             <template v-if="state.currentSong?.album"> · {{ state.currentSong.album }}</template>
@@ -69,6 +73,7 @@
 
 <script setup>
 import { Play, Mic, Heart, ChevronDown } from "@lucide/vue";
+import { useI18n } from "vue-i18n";
 import {
   state,
   isFavorite,
@@ -82,6 +87,8 @@ import ControlBar from "../ControlBar.vue";
 import { sleepTimerText } from "../../composables/useSleepTimer.js";
 
 defineEmits(["back"]);
+
+const { t } = useI18n();
 
 function switchMode(m) {
   state.mode = m;
