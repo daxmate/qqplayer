@@ -58,6 +58,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// 搜索按钮已改为打开全局搜索层（不导航），列表页入口改用「所有歌曲」卡片
+async function openSongList(wrapper) {
+  const cards = wrapper.findAll(".mh-card");
+  await cards.find((c) => c.text().includes("所有歌曲")).trigger("click");
+}
+
 describe("MobileShell 页面栈导航", () => {
   it("初始状态：首页 + 底部迷你播放条，无播放器", () => {
     const wrapper = mount(MobileShell);
@@ -67,9 +73,9 @@ describe("MobileShell 页面栈导航", () => {
     expect(wrapper.find(".mobile-player").exists()).toBe(false); // MobilePlayer
   });
 
-  it("首页入口（搜索按钮）→ 进入列表页，迷你条仍在", async () => {
+  it("首页入口（所有歌曲卡片）→ 进入列表页，迷你条仍在", async () => {
     const wrapper = mount(MobileShell);
-    await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
+    await openSongList(wrapper);
     expect(wrapper.find(".ml-page").exists()).toBe(true); // MobileList
     expect(wrapper.find(".mh-page").exists()).toBe(false); // home 已推出
     expect(wrapper.find(".mini-player").exists()).toBe(true);
@@ -78,7 +84,7 @@ describe("MobileShell 页面栈导航", () => {
 
   it("列表返回 → 回到首页", async () => {
     const wrapper = mount(MobileShell);
-    await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
+    await openSongList(wrapper);
     expect(wrapper.find(".ml-page").exists()).toBe(true);
     await wrapper.find(".ml-back").trigger("click");
     expect(wrapper.find(".mh-page").exists()).toBe(true);
@@ -103,7 +109,7 @@ describe("MobileShell 页面栈导航", () => {
 
   it("列表点击歌曲 → 开始播放 + 打开全屏播放器", async () => {
     const wrapper = mount(MobileShell);
-    await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
+    await openSongList(wrapper);
     await wrapper.findAll(".ml-item")[1].trigger("click");
     await flushPromises(); // playFromList 是 async（selectSong → loadLyric）
     expect(state.currentIndex).toBe(1);
@@ -116,12 +122,12 @@ describe("MobileShell 页面栈导航", () => {
 
   it("进列表 → 返回 → 再进列表 → 返回，栈始终可回退到首页", async () => {
     const wrapper = mount(MobileShell);
-    await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
+    await openSongList(wrapper);
     expect(wrapper.find(".ml-page").exists()).toBe(true);
     await wrapper.find(".ml-back").trigger("click");
     expect(wrapper.find(".mh-page").exists()).toBe(true);
     // 再次进入（重新查找按钮，home 重挂载后旧引用已失效）
-    await wrapper.find('.mh-icon-btn[title="搜索歌曲"]').trigger("click");
+    await openSongList(wrapper);
     expect(wrapper.find(".ml-page").exists()).toBe(true);
     await wrapper.find(".ml-back").trigger("click");
     expect(wrapper.find(".mh-page").exists()).toBe(true);
