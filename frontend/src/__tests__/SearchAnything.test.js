@@ -38,7 +38,7 @@ const { settingsIndex } = await import("../settingsIndex.js");
 const { state, playbackSettings, setupKeyboardShortcuts } =
   await import("../composables/usePlayer.js");
 
-const { query, results, loading, isSearchOpen } = useSearchAnything();
+const { query, results, loading, isSearchOpen, onlineSource } = useSearchAnything();
 
 const SONGS = [
   { id: "a", path: "/lib/a.mp3", name: "知足", artist: "五月天", album: "知足" },
@@ -76,6 +76,7 @@ beforeEach(() => {
   results.value = [];
   loading.value = false;
   isSearchOpen.value = false;
+  onlineSource.value = "netease"; // 源切换状态重置，防用例间污染
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ({ ok: true, json: async () => ({ items: [] }) })),
@@ -340,5 +341,125 @@ describe("playerCore 快捷键守卫", () => {
     isSearchOpen.value = false;
     fire(h, "Space");
     expect(a.paused).toBe(false);
+  });
+});
+
+describe("在线源切换（网易云 / 歌曲海）", () => {
+  it("切到歌曲海后搜索请求带 source=gequhai，结果 badge 显示歌曲海", async () => {
+    const calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        calls.push(String(url));
+        if (String(url).includes("source=gequhai")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [
+                {
+                  id: "326",
+                  title: "晴天",
+                  artist: "周杰伦",
+                  album: null,
+                  cover: null,
+                  duration: null,
+                  level: "320",
+                },
+              ],
+            }),
+          };
+        }
+        return { ok: true, json: async () => ({ items: [] }) };
+      }),
+    );
+    mountOverlay();
+    isSearchOpen.value = true;
+    query.value = "晴天";
+    await new Promise((r) => setTimeout(r, 300)); // debounce 250ms
+    await flushPromises();
+    // 切到歌曲海（setOnlineSource 立即重搜，不走 debounce）
+    const srcBtn = [...document.querySelectorAll(".sa-source")].find((b) =>
+      b.textContent.includes("歌曲海"),
+    );
+    expect(srcBtn).toBeTruthy();
+    srcBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+    expect(calls.some((c) => c.includes("source=gequhai"))).toBe(true);
+    const badges = [...document.querySelectorAll(".sa-badge")].map((b) => b.textContent.trim());
+    expect(badges).toContain("歌曲海");
+  });
+
+  it("歌曲海下载未登录 → 弹扫码登录 → 登录成功自动重试下载", async () => {
+    let dlCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        const u = String(url);
+        if (u.includes("source=gequhai")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [{ id: "326", title: "晴天", artist: "周杰伦" }],
+            }),
+          };
+        }
+        if (u === "/api/gequhai/download") {
+          dlCalls++;
+          if (dlCalls === 1) {
+            return {
+              status: 401,
+              ok: false,
+              json: async () => ({ error: "quark_login_required" }),
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, path: "/lib/晴天-周杰伦.mp3" }),
+          };
+        }
+        if (u === "/api/quark/login/qrcode") {
+          return {
+            ok: true,
+            json: async () => ({
+              qr_image: "data:image/png;base64,AAAA",
+              qr_id: "q1",
+              expires_in: 170,
+            }),
+          };
+        }
+        if (u.startsWith("/api/quark/login/status")) {
+          return { ok: true, json: async () => ({ status: "ok", nickname: "夸克用户" }) };
+        }
+        return { ok: true, json: async () => ({ items: [] }) };
+      }),
+    );
+    vi.useFakeTimers();
+    try {
+      mountOverlay();
+      isSearchOpen.value = true;
+      query.value = "晴天";
+      await vi.advanceTimersByTimeAsync(300); // debounce → 首次搜索
+      await flushPromises();
+      // 切到歌曲海
+      [...document.querySelectorAll(".sa-source")]
+        .find((b) => b.textContent.includes("歌曲海"))
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushPromises();
+      // 点在线结果行 → 401 → 弹扫码登录
+      const row = [...document.querySelectorAll(".sa-row")].find((r) =>
+        r.textContent.includes("晴天"),
+      );
+      row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushPromises();
+      expect(document.querySelector(".qlm")).toBeTruthy(); // 登录弹窗出现
+      // 轮询 2s → status ok → emit success → 自动重试下载
+      await vi.advanceTimersByTimeAsync(2000);
+      await flushPromises();
+      expect(dlCalls).toBe(2); // 401 一次 + 登录后重试一次
+      expect(document.querySelector(".qlm")).toBeFalsy(); // 弹窗已关
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

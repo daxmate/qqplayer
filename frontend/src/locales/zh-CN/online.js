@@ -20,6 +20,7 @@ export default {
     close: "关闭",
     // 夸克扫码登录（QuarkLoginModal）
     quarkLoginRequired: "需要登录夸克网盘",
+    quarkLoginOk: "夸克登录成功",
     quarkLoginTitle: "登录夸克网盘",
     quarkScanHint: "打开夸克 App，扫一扫完成登录",
     quarkCountdown: "二维码有效期 {s}s",

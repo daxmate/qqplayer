@@ -22,6 +22,8 @@ const UNKNOWN_ALBUM = "未知专辑";
 const query = ref("");
 const results = ref([]);
 const loading = ref(false);
+// 在线歌曲源：'netease' 网易云（默认，现有行为不变）| 'gequhai' 歌曲海（夸克网盘直链下载）
+const onlineSource = ref("netease");
 
 let debounceTimer = null;
 let searchSeq = 0; // 请求序列号：过期响应丢弃（快速连续输入时，参照 OnlineSearch.vue）
@@ -56,12 +58,14 @@ function collectSongs(q) {
   return out.slice(0, LIMITS.song);
 }
 
-// ---------- 在线歌曲（网易云）----------
+// ---------- 在线歌曲（网易云 / 歌曲海）----------
 async function fetchOnline(q, seq) {
   try {
-    const res = await fetch(`/api/online/search?q=${encodeURIComponent(q)}&limit=${ONLINE_LIMIT}`, {
-      cache: "no-store",
-    });
+    const src = onlineSource.value === "gequhai" ? "gequhai" : "netease";
+    const res = await fetch(
+      `/api/online/search?q=${encodeURIComponent(q)}&limit=${ONLINE_LIMIT}&source=${src}`,
+      { cache: "no-store" },
+    );
     if (seq !== searchSeq) return []; // 过期响应丢弃
     if (!res.ok) return [];
     const data = await res.json();
@@ -74,7 +78,7 @@ async function fetchOnline(q, seq) {
         id: "online-" + item.id,
         title: item.title ?? "",
         subtitle: [item.artist, item.album].filter(Boolean).join(" · "),
-        badge: "在线",
+        badge: src === "gequhai" ? "歌曲海" : "在线",
         score: matchScore(q, item.title),
         payload: {
           id: item.id,
@@ -250,6 +254,15 @@ watch(query, () => {
   debounceTimer = setTimeout(() => runSearch(q), DEBOUNCE_MS);
 });
 
+/** 切换在线歌曲源；已输入关键词时立即重新搜索 */
+function setOnlineSource(src) {
+  const next = src === "gequhai" ? "gequhai" : "netease";
+  if (next === onlineSource.value) return;
+  onlineSource.value = next;
+  const q = String(query.value).trim();
+  if (q) runSearch(q);
+}
+
 /** 清空搜索状态（关闭搜索层时调用） */
 function clear() {
   searchSeq++;
@@ -264,5 +277,5 @@ function clear() {
 }
 
 export function useSearchAnything() {
-  return { query, results, loading, isSearchOpen, clear };
+  return { query, results, loading, isSearchOpen, onlineSource, setOnlineSource, clear };
 }

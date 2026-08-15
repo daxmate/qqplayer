@@ -146,7 +146,7 @@ describe("防抖", () => {
     await nextTick();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `/api/online/search?q=${encodeURIComponent("晴天")}&limit=20`,
+      `/api/online/search?q=${encodeURIComponent("晴天")}&limit=20&source=netease`,
     );
     expect(loading.value).toBe(false);
   });

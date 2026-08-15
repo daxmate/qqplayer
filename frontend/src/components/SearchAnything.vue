@@ -58,6 +58,25 @@
         <!-- 结果区：混合结果列表 / 空态设置目录 -->
         <div class="sa-body">
           <template v-if="query.trim()">
+            <!-- 在线源切换（网易云 / 歌曲海）：仅输入时显示，切源立即重搜 -->
+            <div class="sa-sources">
+              <button
+                type="button"
+                class="sa-source"
+                :class="{ on: onlineSource === 'netease' }"
+                @click="setOnlineSource('netease')"
+              >
+                {{ t("online.sourceNetease") }}
+              </button>
+              <button
+                type="button"
+                class="sa-source"
+                :class="{ on: onlineSource === 'gequhai' }"
+                @click="setOnlineSource('gequhai')"
+              >
+                {{ t("online.sourceGequhai") }}
+              </button>
+            </div>
             <template v-if="results.length">
               <template v-for="(item, i) in results" :key="item.id">
                 <button
@@ -157,6 +176,9 @@
       </Transition>
     </div>
   </Transition>
+
+  <!-- 夸克扫码登录弹窗（歌曲海下载 401 时触发；Teleport 到 body） -->
+  <QuarkLoginModal :open="loginOpen" @success="onQuarkLoginSuccess" @close="loginOpen = false" />
 </template>
 
 <script setup>
@@ -168,6 +190,7 @@ import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
 import { SETTING_CATEGORIES, settingsIndex } from "../settingsIndex.js";
 import InlineControl from "./InlineControl.vue";
+import QuarkLoginModal from "./QuarkLoginModal.vue";
 
 const props = defineProps({
   // true = 顶栏入口（只渲染放大镜按钮）；false = 全屏搜索层本体
@@ -177,7 +200,8 @@ const emit = defineEmits(["pick"]); // 歌手/专辑点击 → 分组浏览（st
 
 const { t } = useI18n();
 
-const { query, results, loading, isSearchOpen, clear } = useSearchAnything();
+const { query, results, loading, isSearchOpen, onlineSource, setOnlineSource, clear } =
+  useSearchAnything();
 
 const inputEl = ref(null);
 const activeIndex = ref(-1); // 结果高亮行索引
@@ -306,25 +330,36 @@ function playLocal(item) {
   close();
 }
 
-// 在线歌曲点击 = 下载（复用 OnlineSearch 的下载实现：POST /api/online/download）
+// 在线歌曲点击 = 下载：网易云走 /api/online/download（level=默认音质）；
+// 歌曲海走 /api/gequhai/download（夸克 HQ），401 未登录 → 弹扫码登录，成功后自动重试
 async function downloadOnline(item) {
   if (downloading[item.id]) return;
   const p = item.payload || {};
   downloading[item.id] = true;
   try {
-    const res = await fetch("/api/online/download", {
+    const isGequhai = onlineSource.value === "gequhai";
+    const res = await fetch(isGequhai ? "/api/gequhai/download" : "/api/online/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: p.id,
-        level: downloadSettings.defaultQuality,
-        title: p.title || item.title,
-        artist: p.artist || "",
-      }),
+      body: JSON.stringify(
+        isGequhai
+          ? { id: p.id, title: p.title || item.title, artist: p.artist || "" }
+          : {
+              id: p.id,
+              level: downloadSettings.defaultQuality,
+              title: p.title || item.title,
+              artist: p.artist || "",
+            },
+      ),
     });
+    if (res.status === 401 && isGequhai) {
+      pendingDownload.value = item; // 登录成功后自动重试
+      loginOpen.value = true;
+      return;
+    }
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || "");
+      throw new Error(data.error || data.message || "");
     }
     showToast(t("search.downloadSuccess", { title: item.title }), false);
   } catch (err) {
@@ -332,6 +367,18 @@ async function downloadOnline(item) {
   } finally {
     downloading[item.id] = false;
   }
+}
+
+// ============ 夸克扫码登录（歌曲海下载 401 时触发）============
+const loginOpen = ref(false);
+const pendingDownload = ref(null); // 登录成功后要自动重试的在线条目
+
+function onQuarkLoginSuccess() {
+  loginOpen.value = false;
+  showToast(t("online.quarkLoginOk"), false);
+  const item = pendingDownload.value;
+  pendingDownload.value = null;
+  if (item) downloadOnline(item); // 自动重试刚才的下载
 }
 
 // 设置行展开内联控件：再点收起；同一时间只展开一个
@@ -471,6 +518,33 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
+}
+/* 在线源切换条（网易云 / 歌曲海）：轻量 segmented，随结果区滚动 */
+.sa-sources {
+  display: flex;
+  gap: 6px;
+  padding: 2px 4px 8px;
+  justify-content: center;
+}
+.sa-source {
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.35));
+  color: var(--text-secondary, #999);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sa-source:hover {
+  border-color: var(--accent, #f97316);
+  color: var(--text-primary, #eee);
+}
+.sa-source.on {
+  background: var(--accent, #f97316);
+  border-color: var(--accent, #f97316);
+  color: #fff;
 }
 .sa-row {
   display: flex;
