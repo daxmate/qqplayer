@@ -74,7 +74,7 @@ async function fetchQr() {
   qrImage.value = "";
   active = true;
   try {
-    const res = await fetch("/api/quark/login/qrcode", { cache: "no-store" });
+    const res = await fetch("/api/quark/login/qrcode", { method: "POST", cache: "no-store" });
     if (!active) return;
     if (!res.ok) throw new Error();
     const data = await res.json();

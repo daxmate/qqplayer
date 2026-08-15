@@ -5,15 +5,17 @@ import { mount, flushPromises } from "@vue/test-utils";
 const QuarkLoginModal = (await import("../components/QuarkLoginModal.vue")).default;
 
 let qrCalls = 0;
+let qrMethods = []; // 拉码请求的 method（防 GET 打 POST 端点的回归）
 let statusCalls = 0;
 let statuses = []; // 轮询返回队列，取尽后一直 waiting
 
 function stubFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url) => {
+    vi.fn(async (url, init) => {
       if (url === "/api/quark/login/qrcode") {
         qrCalls++;
+        qrMethods.push(init?.method || "GET");
         return {
           ok: true,
           json: async () => ({
@@ -35,6 +37,7 @@ function stubFetch() {
 
 beforeEach(() => {
   qrCalls = 0;
+  qrMethods = [];
   statusCalls = 0;
   statuses = [];
   stubFetch();
@@ -52,6 +55,7 @@ describe("QuarkLoginModal 打开与倒计时", () => {
     const wrapper = mount(QuarkLoginModal, { props: { open: true } });
     await flushPromises();
     expect(qrCalls).toBe(1);
+    expect(qrMethods).toEqual(["POST"]); // 拉码必须 POST（GET 打 POST 端点会 405）
     const modal = document.body.querySelector(".qlm");
     expect(modal).toBeTruthy();
     expect(modal.querySelector("img").getAttribute("src")).toBe("data:image/png;base64,AAAA");
