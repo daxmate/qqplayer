@@ -92,6 +92,30 @@ export default {
       hires: "Hi-Res",
     },
 
+    // ============ 歌曲海（夸克网盘）下载 ============
+    quarkQuality: "歌曲海下载品质",
+    quarkQualityDesc: "歌曲海（夸克网盘直链）下载的音质；需登录夸克网盘",
+    quarkQualityOptions: {
+      mp3: "MP3 320k",
+      flac: "FLAC 无损",
+    },
+    downloadEngine: "下载引擎",
+    downloadEngineDesc: "歌曲海下载引擎：内置 = 后端直接下载；aria2 = 交给 aria2 下载",
+    downloadEngineOptions: {
+      httpx: "内置",
+      aria2: "aria2",
+    },
+    aria2Rpc: "aria2 RPC 地址",
+    aria2RpcPlaceholder: "http://localhost:6800/jsonrpc",
+    aria2Secret: "aria2 RPC 密钥",
+    aria2SecretPlaceholder: "如 dax",
+    quarkAccount: "夸克网盘账号",
+    quarkAccountDesc: "歌曲海下载需登录夸克网盘",
+    quarkNotLoggedIn: "未登录",
+    quarkLogin: "登录夸克",
+    quarkLogout: "退出登录",
+    quarkLoggedInAs: "已登录：{nickname}",
+
     // ============ 歌词（APP） ============
     lyricApp: "APP 歌词",
     lyricDesktop: "桌面歌词",

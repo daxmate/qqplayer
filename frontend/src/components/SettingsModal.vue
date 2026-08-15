@@ -358,6 +358,89 @@
                     </button>
                   </div>
                 </div>
+
+                <!-- 歌曲海：下载品质 + 下载引擎 + aria2 参数 + 夸克账号 -->
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.quarkQuality") }}</div>
+                  <div class="setting-desc">{{ t("settings.quarkQualityDesc") }}</div>
+                  <div class="seg" style="margin-top: 4px">
+                    <button
+                      v-for="q in QUARK_QUALITY_OPTIONS"
+                      :key="q.key"
+                      class="seg-btn"
+                      :class="{ on: downloadSettings.quarkQuality === q.key }"
+                      @click="downloadSettings.quarkQuality = q.key"
+                    >
+                      {{ t(q.labelKey) }}
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.downloadEngine") }}</div>
+                  <div class="setting-desc">{{ t("settings.downloadEngineDesc") }}</div>
+                  <div class="seg" style="margin-top: 4px">
+                    <button
+                      v-for="e in DOWNLOAD_ENGINE_OPTIONS"
+                      :key="e.key"
+                      class="seg-btn"
+                      :class="{ on: downloadSettings.engine === e.key }"
+                      @click="downloadSettings.engine = e.key"
+                    >
+                      {{ t(e.labelKey) }}
+                    </button>
+                  </div>
+                </div>
+                <template v-if="downloadSettings.engine === 'aria2'">
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.aria2Rpc") }}</div>
+                    <div class="setting-control">
+                      <input
+                        v-model="downloadSettings.aria2Rpc"
+                        class="lib-input"
+                        :placeholder="t('settings.aria2RpcPlaceholder')"
+                        spellcheck="false"
+                      />
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.aria2Secret") }}</div>
+                    <div class="setting-control">
+                      <input
+                        v-model="downloadSettings.aria2Secret"
+                        class="lib-input"
+                        type="password"
+                        :placeholder="t('settings.aria2SecretPlaceholder')"
+                        spellcheck="false"
+                      />
+                    </div>
+                  </div>
+                </template>
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.quarkAccount") }}</div>
+                  <div class="setting-desc">{{ t("settings.quarkAccountDesc") }}</div>
+                  <div class="setting-control quark-account-row">
+                    <template v-if="quarkState && quarkState.logged_in">
+                      <span class="quark-account-name">{{
+                        t("settings.quarkLoggedInAs", {
+                          nickname: quarkState.nickname || "",
+                        })
+                      }}</span>
+                      <button class="btn" :disabled="quarkBusy" @click="quarkLogout">
+                        {{ t("settings.quarkLogout") }}
+                      </button>
+                    </template>
+                    <template v-else>
+                      <span class="quark-account-name">{{ t("settings.quarkNotLoggedIn") }}</span>
+                      <button
+                        class="btn primary"
+                        :disabled="quarkBusy"
+                        @click="quarkLoginOpen = true"
+                      >
+                        {{ t("settings.quarkLogin") }}
+                      </button>
+                    </template>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -1035,6 +1118,13 @@
           <button class="btn primary" @click="close">{{ t("settings.done") }}</button>
         </div>
       </div>
+
+      <!-- 夸克扫码登录（设置页登录入口；成功后刷新账号状态） -->
+      <QuarkLoginModal
+        :open="quarkLoginOpen"
+        @success="onQuarkLoginSuccess"
+        @close="quarkLoginOpen = false"
+      />
     </div>
   </Teleport>
 </template>
@@ -1080,6 +1170,8 @@ import {
   desktopLyricSettings,
   downloadSettings,
   DOWNLOAD_QUALITY_OPTIONS,
+  QUARK_QUALITY_OPTIONS,
+  DOWNLOAD_ENGINE_OPTIONS,
   DOWNLOAD_SETTINGS_DEFAULTS,
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
@@ -1095,6 +1187,7 @@ import {
   toggleSleepTimer,
   setSleepTimerMinutes,
 } from "../composables/useSleepTimer.js";
+import QuarkLoginModal from "./QuarkLoginModal.vue";
 import pkg from "../../package.json";
 
 const props = defineProps({
@@ -1114,6 +1207,42 @@ const lyricSubTab = ref("app"); // 歌词 tab 子页：'app' APP 歌词 | 'deskt
 const libInput = ref("");
 const saving = ref(false);
 const error = ref("");
+
+// 夸克账号状态（下载分类展示）：null=未加载 | {logged_in, nickname?}
+const quarkState = ref(null);
+const quarkBusy = ref(false);
+const quarkLoginOpen = ref(false);
+
+// 进入下载分类时拉取夸克登录状态（登录/退出后也会刷新）
+async function refreshQuarkState() {
+  quarkBusy.value = true;
+  try {
+    const res = await fetch("/api/quark/login/state", { cache: "no-store" });
+    quarkState.value = res.ok ? await res.json() : { logged_in: false };
+  } catch {
+    quarkState.value = { logged_in: false };
+  } finally {
+    quarkBusy.value = false;
+  }
+}
+
+// 退出登录：POST logout + 刷新状态
+async function quarkLogout() {
+  quarkBusy.value = true;
+  try {
+    await fetch("/api/quark/login/logout", { method: "POST" });
+  } catch {
+    /* 后端不可达：本地照常置为未登录 */
+  }
+  quarkState.value = { logged_in: false };
+  quarkBusy.value = false;
+}
+
+// 扫码登录成功：关弹窗 + 刷新状态
+function onQuarkLoginSuccess() {
+  quarkLoginOpen.value = false;
+  refreshQuarkState();
+}
 
 // 原生壳环境（Swift 主窗口 WKWebView 注入 window.qqplayerNative）：切库走 NSOpenPanel 桥
 // （WKWebView 沙箱不支持 <input webkitdirectory>，浏览按钮只在桌面版显示）
@@ -1334,7 +1463,7 @@ function resetDesktopLyric() {
   Object.assign(desktopLyricSettings, DESKTOP_LYRIC_DEFAULTS);
 }
 
-// 每次打开时同步当前歌曲库路径 + 音乐库设置
+// 每次打开时同步当前歌曲库路径 + 音乐库设置；进入下载分类时拉取夸克账号状态
 watch(
   () => props.open,
   (o) => {
@@ -1348,6 +1477,9 @@ watch(
     }
   },
 );
+watch(tab, (v) => {
+  if (v === "download") refreshQuarkState();
+});
 
 async function save() {
   const p = libInput.value.trim();
@@ -1725,6 +1857,15 @@ onBeforeUnmount(() => {
 .lyric-subtabs .seg-btn.on {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
+}
+
+/* 夸克账号行 */
+.quark-account-row {
+  align-items: center;
+}
+.quark-account-name {
+  font-size: 13px;
+  color: var(--text2);
 }
 
 /* 桌面歌词配色方案（双色块 + 名称） */

@@ -101,7 +101,23 @@ export const DOWNLOAD_QUALITY_OPTIONS = [
 export const DOWNLOAD_SETTINGS_DEFAULTS = {
   downloadDir: "", // 下载目录；空 = 下载到当前曲库
   defaultQuality: "exhigh", // 默认音质：standard/exhigh/lossless/hires
+  quarkQuality: "mp3", // 歌曲海下载品质：'mp3' MP3 320k | 'flac' FLAC（夸克网盘直链）
+  engine: "httpx", // 歌曲海下载引擎：'httpx' 内置 | 'aria2' aria2
+  aria2Rpc: "", // aria2 RPC 地址（engine=aria2 时生效）
+  aria2Secret: "", // aria2 RPC 密钥（engine=aria2 时生效）
 };
+
+// 歌曲海下载品质选项（labelKey 文案在 settings.js：settings.quarkQualityOptions.*）
+export const QUARK_QUALITY_OPTIONS = [
+  { key: "mp3", labelKey: "settings.quarkQualityOptions.mp3" },
+  { key: "flac", labelKey: "settings.quarkQualityOptions.flac" },
+];
+
+// 歌曲海下载引擎选项（labelKey 文案在 settings.js：settings.downloadEngineOptions.*）
+export const DOWNLOAD_ENGINE_OPTIONS = [
+  { key: "httpx", labelKey: "settings.downloadEngineOptions.httpx" },
+  { key: "aria2", labelKey: "settings.downloadEngineOptions.aria2" },
+];
 
 export const downloadSettings = reactive({ ...DOWNLOAD_SETTINGS_DEFAULTS });
 
