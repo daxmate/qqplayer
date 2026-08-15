@@ -52,7 +52,27 @@
       </div>
 
       <div class="os-group">
-        <div class="os-group-title">{{ t("online.groupOnline") }}</div>
+        <div class="os-group-title-row">
+          <span class="os-group-title">{{
+            source === "gequhai" ? t("online.groupOnlineGequhai") : t("online.groupOnline")
+          }}</span>
+          <div class="src-seg">
+            <button
+              class="src-btn"
+              :class="{ on: source === 'netease' }"
+              @click="switchSource('netease')"
+            >
+              {{ t("online.sourceNetease") }}
+            </button>
+            <button
+              class="src-btn"
+              :class="{ on: source === 'gequhai' }"
+              @click="switchSource('gequhai')"
+            >
+              {{ t("online.sourceGequhai") }}
+            </button>
+          </div>
+        </div>
         <div v-if="loading" class="os-loading">
           <Loader2 :size="14" class="spin" />
           {{ t("online.loading") }}
@@ -99,6 +119,13 @@
     <Transition name="os-toast">
       <div v-if="toast" class="os-toast" :class="{ err: toastErr }">{{ toast }}</div>
     </Transition>
+
+    <!-- 夸克扫码登录（歌曲海下载 401 时弹出；登录成功自动重试下载） -->
+    <QuarkLoginModal
+      :open="quarkLoginOpen"
+      @success="onQuarkLoginSuccess"
+      @close="quarkLoginOpen = false"
+    />
   </div>
 </template>
 
@@ -107,8 +134,13 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue"
 import { useI18n } from "vue-i18n";
 import { Search, X, Music, Play, Download, Loader2 } from "@lucide/vue";
 import { state, selectSong, play } from "../composables/usePlayer.js";
-import { downloadSettings, DOWNLOAD_QUALITY_OPTIONS } from "../composables/useSettings.js";
+import {
+  downloadSettings,
+  DOWNLOAD_QUALITY_OPTIONS,
+  QUARK_QUALITY_OPTIONS,
+} from "../composables/useSettings.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
+import QuarkLoginModal from "./QuarkLoginModal.vue";
 
 // 在线搜索防抖时长（输入停止后才请求）
 const DEBOUNCE_MS = 400;
@@ -136,6 +168,11 @@ const downloading = reactive({}); // 在线条目 id → 下载中
 const toast = ref("");
 const toastErr = ref(false);
 
+// 在线源：'netease' 网易云（默认，现有行为不变）| 'gequhai' 歌曲海（夸克网盘直链下载）
+const source = ref("netease");
+const quarkLoginOpen = ref(false); // 夸克扫码登录弹窗
+let pendingDownload = null; // 401 触发登录时待重试的歌曲海条目
+
 let debounceTimer = null;
 let toastTimer = null;
 let searchSeq = 0; // 请求序列号：过期响应丢弃（快速连续输入时）
@@ -152,11 +189,32 @@ const localMatches = computed(() => {
     .slice(0, LOCAL_LIMIT);
 });
 
-// 音质标签：设置里的默认音质（下载时实际使用的音质）
+// 音质标签：网易云 = 设置里的默认音质；歌曲海 = 夸克下载品质（quarkQuality）
 const qualityLabel = computed(() => {
-  const q = DOWNLOAD_QUALITY_OPTIONS.find((o) => o.key === downloadSettings.defaultQuality);
-  return q ? t(q.labelKey) : t("settings.downloadQuality.exhigh");
+  const options = source.value === "gequhai" ? QUARK_QUALITY_OPTIONS : DOWNLOAD_QUALITY_OPTIONS;
+  const key =
+    source.value === "gequhai" ? downloadSettings.quarkQuality : downloadSettings.defaultQuality;
+  const q = options.find((o) => o.key === key);
+  return q
+    ? t(q.labelKey)
+    : t(
+        source.value === "gequhai"
+          ? "settings.quarkQualityOptions.mp3"
+          : "settings.downloadQuality.exhigh",
+      );
 });
+
+// 源切换：切源 → 重新搜索（保留输入；若已有在途/待发请求则作废）
+function switchSource(next) {
+  if (next === source.value) return;
+  source.value = next;
+  searchSeq++;
+  clearTimeout(debounceTimer);
+  const val = query.value.trim();
+  if (!val) return;
+  loading.value = true;
+  runSearch();
+}
 
 // 输入变化 → 打开面板 + 防抖 400ms 触发在线搜索；清空 → 取消在途请求
 watch(query, () => {
@@ -183,9 +241,12 @@ function onInputKeydown(e) {
 async function runSearch() {
   const val = query.value.trim();
   const seq = searchSeq;
+  const src = source.value;
+  // source 省略 = netease（现有行为不变）；歌曲海显式传 source=gequhai
+  const srcParam = src === "gequhai" ? `&source=${src}` : "";
   try {
     const res = await fetch(
-      `/api/online/search?q=${encodeURIComponent(val)}&limit=${ONLINE_LIMIT}`,
+      `/api/online/search?q=${encodeURIComponent(val)}&limit=${ONLINE_LIMIT}${srcParam}`,
       { cache: "no-store" },
     );
     if (seq !== searchSeq) return; // 过期响应丢弃
@@ -215,12 +276,40 @@ function playLocal(song) {
   closePanel();
 }
 
-// 下载：POST /api/online/download，后端直接落盘到下载目录
+// 下载：网易云走 /api/online/download（level=默认音质）；歌曲海走 /api/gequhai/download
+// （走夸克直链，品质由 quarkQuality 设置决定；401 = 未登录 → 弹扫码登录，成功后自动重试）
 // 按钮转圈禁用（单条目粒度），成功/失败 toast 提示
-async function download(item) {
+async function download(item, opts = {}) {
+  const { noLoginPrompt = false } = opts;
   if (downloading[item.id]) return;
   downloading[item.id] = true;
   try {
+    if (source.value === "gequhai") {
+      const res = await fetch("/api/gequhai/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: item.id,
+          title: item.title,
+          artist: item.artist,
+        }),
+      });
+      if (res.status === 401) {
+        const data = await res.json().catch(() => ({}));
+        // 登录成功后重试：不再弹框，失败直接提示
+        if (noLoginPrompt) throw new Error(data.message || t("online.quarkLoginRequired"));
+        pendingDownload = item;
+        quarkLoginOpen.value = true;
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "");
+      }
+      showToast(t("online.downloadSuccess", { title: item.title }), false);
+      return;
+    }
+    // 网易云：现有逻辑不变
     const res = await fetch("/api/online/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -241,6 +330,14 @@ async function download(item) {
   } finally {
     downloading[item.id] = false;
   }
+}
+
+// 扫码登录成功：关闭弹窗并重试刚才被 401 拦下的下载
+function onQuarkLoginSuccess() {
+  quarkLoginOpen.value = false;
+  const item = pendingDownload;
+  pendingDownload = null;
+  if (item) download(item, { noLoginPrompt: true });
 }
 
 function showToast(msg, isErr) {
@@ -366,6 +463,39 @@ onBeforeUnmount(() => {
   color: var(--accent2);
   letter-spacing: 1.2px;
   padding: 6px 8px 4px;
+}
+.os-group-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+/* 源切换 segmented（网易云 / 歌曲海） */
+.src-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.src-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .src-btn:hover {
+    color: var(--text);
+  }
+}
+.src-btn.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
 }
 .os-item {
   display: flex;

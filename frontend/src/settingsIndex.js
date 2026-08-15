@@ -34,6 +34,8 @@ import {
   DESKTOP_LYRIC_SCHEMES,
   ACCENT_OPTIONS,
   DOWNLOAD_QUALITY_OPTIONS,
+  QUARK_QUALITY_OPTIONS,
+  DOWNLOAD_ENGINE_OPTIONS,
 } from "./composables/usePlayer.js";
 import { sleepTimer, toggleSleepTimer, cancelSleepTimer } from "./composables/useSleepTimer.js";
 
@@ -341,6 +343,58 @@ export const settingsIndex = [
     get: () => downloadSettings.defaultQuality,
     set: (v) => {
       downloadSettings.defaultQuality = v;
+    },
+  },
+  {
+    id: "quarkQuality",
+    category: "download",
+    subTab: null,
+    labelKey: "settings.quarkQuality",
+    keywords: ["歌曲海", "夸克", "下载品质", "mp3", "flac", "无损"],
+    type: "select",
+    options: QUARK_QUALITY_OPTIONS.map((q) => ({ value: q.key, labelKey: q.labelKey })),
+    get: () => downloadSettings.quarkQuality,
+    set: (v) => {
+      downloadSettings.quarkQuality = v;
+    },
+  },
+  {
+    id: "downloadEngine",
+    category: "download",
+    subTab: null,
+    labelKey: "settings.downloadEngine",
+    keywords: ["下载引擎", "aria2", "内置", "引擎", "下载方式"],
+    type: "select",
+    options: DOWNLOAD_ENGINE_OPTIONS.map((e) => ({ value: e.key, labelKey: e.labelKey })),
+    get: () => downloadSettings.engine,
+    set: (v) => {
+      downloadSettings.engine = v;
+    },
+  },
+  {
+    id: "aria2Rpc",
+    category: "download",
+    subTab: null,
+    labelKey: "settings.aria2Rpc",
+    keywords: ["aria2", "rpc", "下载服务器", "地址"],
+    type: "text",
+    placeholder: "settings.aria2RpcPlaceholder",
+    get: () => downloadSettings.aria2Rpc,
+    set: (v) => {
+      downloadSettings.aria2Rpc = v;
+    },
+  },
+  {
+    id: "aria2Secret",
+    category: "download",
+    subTab: null,
+    labelKey: "settings.aria2Secret",
+    keywords: ["aria2", "密钥", "token", "secret", "密码"],
+    type: "text",
+    placeholder: "settings.aria2SecretPlaceholder",
+    get: () => downloadSettings.aria2Secret,
+    set: (v) => {
+      downloadSettings.aria2Secret = v;
     },
   },
 

@@ -168,9 +168,17 @@ function applyNamespace(saved, target) {
 
 // download namespace 取值容错：音质枚举非法值回落默认（契约字段缺失由 applyNamespace 兜底）
 const DOWNLOAD_QUALITY_VALUES = ["standard", "exhigh", "lossless", "hires"];
+const QUARK_QUALITY_VALUES = ["mp3", "flac"];
+const DOWNLOAD_ENGINE_VALUES = ["httpx", "aria2"];
 function normalizeDownloadSettings() {
   if (!DOWNLOAD_QUALITY_VALUES.includes(downloadSettings.defaultQuality)) {
     downloadSettings.defaultQuality = DOWNLOAD_SETTINGS_DEFAULTS.defaultQuality;
+  }
+  if (!QUARK_QUALITY_VALUES.includes(downloadSettings.quarkQuality)) {
+    downloadSettings.quarkQuality = DOWNLOAD_SETTINGS_DEFAULTS.quarkQuality;
+  }
+  if (!DOWNLOAD_ENGINE_VALUES.includes(downloadSettings.engine)) {
+    downloadSettings.engine = DOWNLOAD_SETTINGS_DEFAULTS.engine;
   }
 }
 

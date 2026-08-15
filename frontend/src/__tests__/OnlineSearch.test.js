@@ -59,10 +59,36 @@ const onlineItems = [
   },
 ];
 
-let searchCalls = []; // { q, limit }
+let searchCalls = []; // { q, limit, source? }（source 仅歌曲海时记录，网易云省略 = 契约）
 let downloadBodies = [];
+let gequhaiBodies = []; // /api/gequhai/download 请求体
+let gequhaiDownloadCalls = 0; // 歌曲海下载调用次数（401 → 登录后重试）
 let failSearch = false;
 let failDownload = false;
+
+// 歌曲海条目（契约：cover/album/duration 为 null，level='320'）
+const gequhaiItems = [
+  {
+    id: "gh1",
+    title: "晴天",
+    artist: "周杰伦",
+    album: null,
+    cover: null,
+    duration: null,
+    level: "320",
+  },
+  {
+    id: "gh2",
+    title: "七里香",
+    artist: "周杰伦",
+    album: null,
+    cover: null,
+    duration: null,
+    level: "320",
+  },
+];
+
+let loginFlow = null; // { failDownloadFirst: boolean } 控制夸克登录后重试
 
 function stubFetch() {
   vi.stubGlobal(
@@ -70,14 +96,49 @@ function stubFetch() {
     vi.fn(async (url, opts = {}) => {
       if (String(url).startsWith("/api/online/search")) {
         const u = new URL(url, "http://localhost");
-        searchCalls.push({ q: u.searchParams.get("q"), limit: u.searchParams.get("limit") });
+        const rec = { q: u.searchParams.get("q"), limit: u.searchParams.get("limit") };
+        const src = u.searchParams.get("source");
+        if (src) rec.source = src; // 网易云省略 source，歌曲海显式传
+        searchCalls.push(rec);
         if (failSearch) return { ok: false, json: async () => ({}) };
-        return { ok: true, json: async () => ({ items: onlineItems }) };
+        const items = src === "gequhai" ? gequhaiItems : onlineItems;
+        return { ok: true, json: async () => ({ items }) };
       }
       if (url === "/api/online/download") {
         downloadBodies.push(JSON.parse(opts.body));
         if (failDownload) return { ok: false, json: async () => ({ error: "网络错误" }) };
         return { ok: true, json: async () => ({ ok: true, path: "/dl/1001.mp3" }) };
+      }
+      if (url === "/api/gequhai/download") {
+        gequhaiBodies.push(JSON.parse(opts.body));
+        gequhaiDownloadCalls++;
+        // 首次 401（未登录）→ 后续成功；登录后重试仍失败 → 404
+        if (loginFlow?.failDownloadFirst && gequhaiDownloadCalls === 1) {
+          return {
+            status: 401,
+            ok: false,
+            json: async () => ({ error: "quark_login_required", message: "需要登录夸克网盘" }),
+          };
+        }
+        if (loginFlow?.failAfterLogin)
+          return { status: 404, ok: false, json: async () => ({ error: "no direct link" }) };
+        return { ok: true, json: async () => ({ ok: true, path: "/dl/gh.mp3" }) };
+      }
+      if (url === "/api/quark/login/qrcode") {
+        loginFlow.qrCalls++;
+        return {
+          ok: true,
+          json: async () => ({
+            qr_image: "data:image/png;base64,AAAA",
+            qr_id: "qr-1",
+            expires_in: 170,
+          }),
+        };
+      }
+      if (String(url).startsWith("/api/quark/login/status")) {
+        loginFlow.statusCalls++;
+        const st = loginFlow.statuses.shift() ?? "waiting";
+        return { ok: true, json: async () => ({ status: st, nickname: "夸克用户" }) };
       }
       return { ok: false, json: async () => ({}) };
     }),
@@ -99,8 +160,11 @@ beforeEach(() => {
   downloadSettings.defaultQuality = "exhigh";
   searchCalls = [];
   downloadBodies = [];
+  gequhaiBodies = [];
+  gequhaiDownloadCalls = 0;
   failSearch = false;
   failDownload = false;
+  loginFlow = { qrCalls: 0, statusCalls: 0, statuses: [] };
   stubFetch();
   vi.useFakeTimers();
 });
@@ -341,6 +405,140 @@ describe("OnlineSearch 下载交互", () => {
     expect(wrapper.find(".os-toast").exists()).toBe(true);
     await vi.advanceTimersByTimeAsync(3300);
     await flushPromises();
+    expect(wrapper.find(".os-toast").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("OnlineSearch 源切换（网易云 / 歌曲海）", () => {
+  // 切到歌曲海：输入 + 点击 seg 按钮（防抖待发请求被作废，立即按新源搜索）
+  async function switchToGequhai(wrapper, keyword) {
+    await wrapper.find(".os-input").setValue(keyword);
+    await wrapper.findAll(".src-btn")[1].trigger("click");
+    await flushPromises();
+  }
+
+  it("切到歌曲海 → 请求带 source=gequhai，结果渲染歌曲海条目（无封面降级 icon + 无时长）", async () => {
+    const wrapper = mount(OnlineSearch);
+    await switchToGequhai(wrapper, "周杰伦");
+    await vi.advanceTimersByTimeAsync(420);
+    await flushPromises();
+    expect(searchCalls.length).toBe(1); // 防抖待发的网易云请求被切源作废，只发一次
+    expect(searchCalls[0]).toEqual({ q: "周杰伦", limit: "20", source: "gequhai" });
+    expect(wrapper.text()).toContain("在线（歌曲海）");
+    // 歌曲海条目：cover=null → 降级 icon；album/duration=null → subtitle 只有歌手
+    const items = wrapper.findAll(".os-online");
+    expect(items.length).toBe(2);
+    expect(items[0].find("img").exists()).toBe(false);
+    expect(items[0].find(".os-cover").exists()).toBe(true);
+    expect(items[0].text()).not.toContain("4:29");
+    // 音质标签 = quarkQuality（默认 mp3）
+    expect(wrapper.text()).toContain("MP3 320k");
+    wrapper.unmount();
+  });
+
+  it("切回网易云 → 请求不带 source（契约：省略 = netease），恢复网易云结果", async () => {
+    const wrapper = mount(OnlineSearch);
+    await switchToGequhai(wrapper, "周杰伦");
+    await wrapper.findAll(".src-btn")[0].trigger("click"); // 切回网易云
+    await flushPromises();
+    expect(searchCalls.length).toBe(2);
+    expect(searchCalls[1]).toEqual({ q: "周杰伦", limit: "20" });
+    expect(wrapper.text()).toContain("在线（网易云）");
+    expect(wrapper.text()).toContain("4:29"); // 网易云条目带 duration
+    expect(wrapper.text()).toContain("极高 320k"); // 网易云音质标签 = defaultQuality
+    wrapper.unmount();
+  });
+
+  it("歌曲海音质标签跟随 quarkQuality 设置（改 FLAC 后显示 FLAC 无损）", async () => {
+    downloadSettings.quarkQuality = "flac";
+    const wrapper = mount(OnlineSearch);
+    await switchToGequhai(wrapper, "周杰伦");
+    expect(wrapper.text()).toContain("FLAC 无损");
+    expect(wrapper.text()).not.toContain("MP3 320k");
+    wrapper.unmount();
+    downloadSettings.quarkQuality = "mp3";
+  });
+});
+
+describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
+  // 切到歌曲海并搜索出结果
+  async function setupGequhai(wrapper) {
+    await wrapper.find(".os-input").setValue("周杰伦");
+    await wrapper.findAll(".src-btn")[1].trigger("click");
+    await flushPromises();
+  }
+
+  it("已登录：点下载 → POST /api/gequhai/download {id,title,artist} → 成功 toast，不弹登录框", async () => {
+    const wrapper = mount(OnlineSearch);
+    await setupGequhai(wrapper);
+    await wrapper.findAll(".os-download")[0].trigger("click");
+    await flushPromises();
+    expect(gequhaiBodies.length).toBe(1);
+    expect(gequhaiBodies[0]).toEqual({ id: "gh1", title: "晴天", artist: "周杰伦" });
+    expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
+    expect(document.body.querySelector(".qlm")).toBeFalsy();
+    wrapper.unmount();
+  });
+
+  it("下载 401 → 弹夸克扫码登录 → 轮询 ok → 自动重试下载成功 → toast", async () => {
+    loginFlow.failDownloadFirst = true;
+    loginFlow.statuses = ["waiting", "ok"];
+    const wrapper = mount(OnlineSearch);
+    await setupGequhai(wrapper);
+    await wrapper.findAll(".os-download")[0].trigger("click");
+    await flushPromises();
+    // 401 → 弹窗打开：二维码图片 + 倒计时
+    expect(gequhaiBodies.length).toBe(1);
+    const modal = document.body.querySelector(".qlm");
+    expect(modal).toBeTruthy();
+    expect(modal.querySelector("img").getAttribute("src")).toBe("data:image/png;base64,AAAA");
+    expect(modal.textContent).toContain("二维码有效期");
+    // 第一轮 2s 轮询：status=waiting → 弹窗保持
+    await vi.advanceTimersByTimeAsync(2100);
+    await flushPromises();
+    expect(document.body.querySelector(".qlm")).toBeTruthy();
+    expect(loginFlow.statusCalls).toBeGreaterThanOrEqual(1);
+    // 第二轮 2s 轮询：status=ok → 自动关闭 + 重试下载（不再弹框）
+    await vi.advanceTimersByTimeAsync(2100);
+    await flushPromises();
+    expect(document.body.querySelector(".qlm")).toBeFalsy();
+    expect(gequhaiBodies.length).toBe(2);
+    expect(gequhaiBodies[1]).toEqual({ id: "gh1", title: "晴天", artist: "周杰伦" });
+    expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
+    wrapper.unmount();
+  });
+
+  it("登录成功重试仍 404 → 错误 toast（不再弹登录框）", async () => {
+    loginFlow.failDownloadFirst = true;
+    loginFlow.failAfterLogin = true;
+    loginFlow.statuses = ["ok"];
+    const wrapper = mount(OnlineSearch);
+    await setupGequhai(wrapper);
+    await wrapper.findAll(".os-download")[0].trigger("click");
+    await flushPromises();
+    expect(document.body.querySelector(".qlm")).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(2100); // 轮询 ok → 重试
+    await flushPromises();
+    expect(document.body.querySelector(".qlm")).toBeFalsy();
+    expect(gequhaiBodies.length).toBe(2);
+    const toast = wrapper.find(".os-toast");
+    expect(toast.classes()).toContain("err");
+    expect(toast.text()).toContain("下载失败");
+    wrapper.unmount();
+  });
+
+  it("登录弹窗可手动关闭（✕）→ 不重试下载", async () => {
+    loginFlow.failDownloadFirst = true;
+    const wrapper = mount(OnlineSearch);
+    await setupGequhai(wrapper);
+    await wrapper.findAll(".os-download")[0].trigger("click");
+    await flushPromises();
+    expect(document.body.querySelector(".qlm")).toBeTruthy();
+    document.body.querySelector(".qlm-close").click();
+    await nextTick();
+    expect(document.body.querySelector(".qlm")).toBeFalsy();
+    expect(gequhaiBodies.length).toBe(1); // 未重试
     expect(wrapper.find(".os-toast").exists()).toBe(false);
     wrapper.unmount();
   });
