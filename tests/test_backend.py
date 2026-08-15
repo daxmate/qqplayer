@@ -836,9 +836,17 @@ def test_api_settings_get_all_namespaces():
     # player 4 字段
     assert s["player"] == {"volume": 1.0, "panel": True, "controls": False, "lastPlayed": None}
     # download 2 字段
-    assert set(s["download"]) == {"downloadDir", "defaultQuality"}
+    assert set(s["download"]) == {
+        "downloadDir",
+        "defaultQuality",
+        "quarkQuality",
+        "engine",
+        "aria2Rpc",
+        "aria2Secret",
+    }
     assert s["download"]["downloadDir"] == ""
     assert s["download"]["defaultQuality"] == "exhigh"
+    assert s["download"]["quarkQuality"] == "mp3"
 
 
 def test_api_settings_put_deep_merge():
@@ -1292,18 +1300,35 @@ def test_settings_download_namespace():
     assert backend.load_all_settings()["download"] == {
         "downloadDir": "",
         "defaultQuality": "exhigh",
+        "quarkQuality": "mp3",
+        "engine": "httpx",
+        "aria2Rpc": "http://localhost:6800/jsonrpc",
+        "aria2Secret": "dax",
     }
     # 合法值保留
     s = backend.save_all_settings(
         {"download": {"downloadDir": "/tmp/dl", "defaultQuality": "lossless"}}
     )["download"]
-    assert s == {"downloadDir": "/tmp/dl", "defaultQuality": "lossless"}
+    assert s["downloadDir"] == "/tmp/dl"
+    assert s["defaultQuality"] == "lossless"
+    # 新增字段（歌曲海/下载引擎）合法值保留
+    s = backend.save_all_settings({"download": {"quarkQuality": "flac", "engine": "aria2"}})[
+        "download"
+    ]
+    assert s["quarkQuality"] == "flac"
+    assert s["engine"] == "aria2"
     # 非法值回落默认
     s = backend.save_all_settings({"download": {"downloadDir": 123, "defaultQuality": "jymaster"}})[
         "download"
     ]
     assert s["downloadDir"] == ""  # 非字符串回落默认
     assert s["defaultQuality"] == "exhigh"  # 不在白名单回落默认
+    # 非法音质/引擎枚举回落默认
+    s = backend.save_all_settings({"download": {"quarkQuality": "wav", "engine": "wget"}})[
+        "download"
+    ]
+    assert s["quarkQuality"] == "mp3"
+    assert s["engine"] == "httpx"
     # 合法音质枚举保留
     s = backend.save_all_settings({"download": {"defaultQuality": "hires"}})["download"]
     assert s["defaultQuality"] == "hires"

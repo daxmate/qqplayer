@@ -27,7 +27,9 @@ from fastapi.staticfiles import StaticFiles
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+import gequhai_provider
 import netease_provider
+import quark_provider
 import tag_editor
 import tag_scraper
 from lyric_fetch import (
@@ -349,6 +351,12 @@ _SETTINGS_SPEC = {
             "exhigh",
             lambda v, d: _norm_str(v, d, allowed={"standard", "exhigh", "lossless", "hires"}),
         ),
+        # 歌曲海下载品质：夸克分享里同歌通常有 mp3(320k)/flac 两个版本，按偏好挑，缺则降级
+        "quarkQuality": ("mp3", lambda v, d: _norm_str(v, d, allowed={"mp3", "flac"})),
+        # 下载引擎：httpx = 内置流式下载；aria2 = 本机 aria2 daemon（RPC），未配置/不可用自动降级 httpx
+        "engine": ("httpx", lambda v, d: _norm_str(v, d, allowed={"httpx", "aria2"})),
+        "aria2Rpc": ("http://localhost:6800/jsonrpc", _norm_str),
+        "aria2Secret": ("dax", _norm_str),
     },
 }
 
@@ -994,6 +1002,8 @@ DOWNLOAD_UA = (
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 )
 DOWNLOAD_TIMEOUT = 90.0
+# 夸克网盘下载超时（非会员限速 + 大文件 FLAC）：放宽到 10 分钟
+QUARK_DOWNLOAD_TIMEOUT = 600.0
 
 
 def _sanitize_filename(name: str) -> str:
@@ -1017,12 +1027,31 @@ def _stream_download(url: str, dest: Path, timeout: float = DOWNLOAD_TIMEOUT) ->
 
 
 @app.get("/api/online/search")
-def api_online_search(q: str = "", limit: int = 20):
-    """在线搜索歌曲（网易云）；q 必填，limit 1-50 默认 20"""
+def api_online_search(q: str = "", limit: int = 20, source: str = "netease"):
+    """在线搜索歌曲；q 必填，limit 1-50 默认 20；source=netease（默认）/gequhai
+
+    gequhai 源 items 结构与 netease 一致：{id, title, artist, album, cover, duration, level}
+    （歌曲海无专辑/封面/时长字段，置 None；level 固定 "320"）
+    """
     q = (q or "").strip()
     if not q:
         raise HTTPException(400, "缺少搜索关键词")
     limit = max(1, min(50, limit))
+    if source == "gequhai":
+        items = []
+        for it in gequhai_provider.search(q, limit=limit):
+            items.append(
+                {
+                    "id": it["id"],
+                    "title": it["title"],
+                    "artist": it["artist"],
+                    "album": None,
+                    "cover": None,
+                    "duration": None,
+                    "level": "320",
+                }
+            )
+        return {"items": items}
     return {"items": netease_provider.search(q, limit=limit)}
 
 
@@ -1057,6 +1086,141 @@ def api_online_download(body: dict):
     except Exception as e:
         return JSONResponse(status_code=404, content={"error": f"下载失败: {e}"})
     return {"ok": True, "path": str(dest)}
+
+
+# ============ 歌曲海下载（gequhai_provider + quark_provider + 下载引擎）============
+
+
+def _unique_path(p: Path) -> Path:
+    """重名文件加序号：name.ext → name (1).ext"""
+    if not p.exists():
+        return p
+    stem, ext = p.stem, p.suffix
+    for i in range(1, 1000):
+        cand = p.with_name(f"{stem} ({i}){ext}")
+        if not cand.exists():
+            return cand
+    return p
+
+
+def _aria2_rpc_call(rpc: str, secret: str, method: str, params: list) -> dict:
+    """调本机 aria2 JSON-RPC；返回 result，错误抛 RuntimeError"""
+    resp = httpx.post(
+        rpc,
+        json={
+            "jsonrpc": "2.0",
+            "id": "qqplayer",
+            "method": method,
+            "params": [f"token:{secret}", *params],
+        },
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(data["error"].get("message", "aria2 error"))
+    return data.get("result")
+
+
+def _download_with_engine(url: str, dest: Path, settings: dict) -> Path:
+    """按设置下载引擎下载：engine=aria2 且 RPC 可用走 aria2（多线程+断点续传），
+    否则（未配置/连不上/超时）自动降级内置 httpx 流式下载"""
+    dl = settings.get("download") or {}
+    if (dl.get("engine") or "httpx") == "aria2":
+        rpc = (dl.get("aria2Rpc") or "").strip() or "http://localhost:6800/jsonrpc"
+        secret = (dl.get("aria2Secret") or "").strip()
+        try:
+            gid = _aria2_rpc_call(
+                rpc, secret, "aria2.addUri", [[url], {"dir": str(dest.parent), "out": dest.name}]
+            )
+            deadline = time.time() + QUARK_DOWNLOAD_TIMEOUT
+            while time.time() < deadline:
+                st = _aria2_rpc_call(rpc, secret, "aria2.tellStatus", [gid]) or {}
+                status = st.get("status") if isinstance(st, dict) else ""
+                if status == "complete":
+                    return dest
+                if status == "error":
+                    raise RuntimeError(
+                        f"aria2 下载失败: {st.get('errorMessage') or st.get('errorCode') or status}"
+                    )
+                time.sleep(1.0)
+            raise RuntimeError("aria2 下载超时")
+        except Exception:
+            pass  # aria2 不可用 → 降级内置 httpx
+    _stream_download(url, dest, timeout=QUARK_DOWNLOAD_TIMEOUT)
+    return dest
+
+
+@app.post("/api/gequhai/download")
+def api_gequhai_download(body: dict):
+    """歌曲海下载：夸克分享解析 → 按音质偏好选文件 → 登录换直链 → 下载引擎落盘
+
+    body {id, title, artist}；成功 200 {"ok": true, "path"}；
+    未登录 401 {"error": "quark_login_required", "message"}；无直链/下载失败 404。
+    """
+    song_id = str(body.get("id") or "").strip()
+    if not song_id:
+        raise HTTPException(400, "缺少 id")
+    share = gequhai_provider.get_share_url(song_id)
+    share_url = (share or {}).get("share_url")
+    if not share_url:
+        return JSONResponse(status_code=404, content={"error": "该歌曲没有夸克网盘分享链接"})
+    files = quark_provider.resolve_share(share_url)
+    if not files:
+        return JSONResponse(status_code=404, content={"error": "夸克分享链接为空或已失效"})
+    settings = load_all_settings()
+    quality = settings["download"].get("quarkQuality") or "mp3"
+    chosen = quark_provider.pick_file(files, quality)
+    if not chosen:
+        return JSONResponse(status_code=404, content={"error": "分享中没有可下载的音频文件"})
+    try:
+        url = quark_provider.get_download_url(share_url, chosen["fid"], chosen["share_fid_token"])
+    except RuntimeError:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "quark_login_required", "message": "需要登录夸克网盘"},
+        )
+    download_dir = Path(settings["download"]["downloadDir"] or LIBRARY)
+    try:
+        download_dir.mkdir(parents=True, exist_ok=True)
+        dest = download_dir / _unique_path(download_dir / _sanitize_filename(chosen["file_name"]))
+        _download_with_engine(url, dest, settings)
+    except Exception as e:
+        return JSONResponse(status_code=404, content={"error": f"下载失败: {e}"})
+    return {"ok": True, "path": str(dest)}
+
+
+# ============ 夸克网盘扫码登录（quark_provider）============
+
+
+@app.post("/api/quark/login/qrcode")
+def api_quark_login_qrcode():
+    """生成夸克扫码登录二维码；返回 {qr_image(data uri), qr_id, expires_in}"""
+    try:
+        return quark_provider.login_qrcode()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"生成二维码失败: {e}"})
+
+
+@app.get("/api/quark/login/status")
+def api_quark_login_status(qr_id: str = ""):
+    """轮询扫码状态；qr_id 来自 /api/quark/login/qrcode"""
+    if not qr_id:
+        raise HTTPException(400, "缺少 qr_id")
+    return quark_provider.login_status(qr_id)
+
+
+@app.get("/api/quark/login/state")
+def api_quark_login_state():
+    """当前夸克登录状态：{logged_in, nickname?}"""
+    return quark_provider.login_state()
+
+
+@app.post("/api/quark/login/logout")
+def api_quark_login_logout():
+    """退出夸克登录：删除本地 Cookie"""
+    quark_provider.logout()
+    return {"ok": True}
 
 
 @app.get("/api/desktop-lyric/settings")
