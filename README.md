@@ -106,6 +106,16 @@ pnpm build
 
 CI（GitHub Actions）会在每次 push/PR 自动跑以上全部检查。
 
+### Git 提交钩子（推荐）
+
+提交前自动检查格式，防 CI 连红：
+
+```bash
+git config core.hooksPath scripts/git-hooks   # 一次性配置，hook 脚本在仓库内
+```
+
+配置后 `git commit` 会自动对暂存的改动跑：后端 `ruff format --check` + `ruff check`、前端 `prettier --check`，不过就拒绝提交。工具未安装时警告放行（CI 兜底）。
+
 ## SRT 歌词格式（跟唱模式）
 
 - 段落标题独立成块：`# 主歌1`（前后空行）
