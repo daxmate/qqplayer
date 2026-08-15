@@ -1011,14 +1011,18 @@ def _sanitize_filename(name: str) -> str:
     return _INVALID_FILENAME_CHARS.sub("", str(name or "")).strip()
 
 
-def _stream_download(url: str, dest: Path, timeout: float = DOWNLOAD_TIMEOUT) -> None:
+def _stream_download(
+    url: str, dest: Path, timeout: float = DOWNLOAD_TIMEOUT, headers: dict | None = None
+) -> None:
     """流式下载 url 到 dest（同名覆盖）；失败抛异常（由路由转 404）"""
+    dl_headers = dict(headers or {})
+    dl_headers.setdefault("User-Agent", DOWNLOAD_UA)
     with httpx.stream(
         "GET",
         url,
         timeout=timeout,
         follow_redirects=True,
-        headers={"User-Agent": DOWNLOAD_UA},
+        headers=dl_headers,
     ) as resp:
         resp.raise_for_status()
         with open(dest, "wb") as f:
@@ -1122,17 +1126,21 @@ def _aria2_rpc_call(rpc: str, secret: str, method: str, params: list) -> dict:
     return data.get("result")
 
 
-def _download_with_engine(url: str, dest: Path, settings: dict) -> Path:
+def _download_with_engine(
+    url: str, dest: Path, settings: dict, headers: dict | None = None
+) -> Path:
     """按设置下载引擎下载：engine=aria2 且 RPC 可用走 aria2（多线程+断点续传），
-    否则（未配置/连不上/超时）自动降级内置 httpx 流式下载"""
+    否则（未配置/连不上/超时）自动降级内置 httpx 流式下载。
+    headers：直链签名绑定的请求头（夸克 Cookie/UA/Referer），下载必须一致。"""
     dl = settings.get("download") or {}
     if (dl.get("engine") or "httpx") == "aria2":
         rpc = (dl.get("aria2Rpc") or "").strip() or "http://localhost:6800/jsonrpc"
         secret = (dl.get("aria2Secret") or "").strip()
         try:
-            gid = _aria2_rpc_call(
-                rpc, secret, "aria2.addUri", [[url], {"dir": str(dest.parent), "out": dest.name}]
-            )
+            opts = {"dir": str(dest.parent), "out": dest.name}
+            if headers:
+                opts["header"] = [f"{k}: {v}" for k, v in headers.items()]
+            gid = _aria2_rpc_call(rpc, secret, "aria2.addUri", [[url], opts])
             deadline = time.time() + QUARK_DOWNLOAD_TIMEOUT
             while time.time() < deadline:
                 st = _aria2_rpc_call(rpc, secret, "aria2.tellStatus", [gid]) or {}
@@ -1147,7 +1155,7 @@ def _download_with_engine(url: str, dest: Path, settings: dict) -> Path:
             raise RuntimeError("aria2 下载超时")
         except Exception:
             pass  # aria2 不可用 → 降级内置 httpx
-    _stream_download(url, dest, timeout=QUARK_DOWNLOAD_TIMEOUT)
+    _stream_download(url, dest, timeout=QUARK_DOWNLOAD_TIMEOUT, headers=headers)
     return dest
 
 
@@ -1165,7 +1173,7 @@ def api_gequhai_download(body: dict):
     share_url = (share or {}).get("share_url")
     if not share_url:
         return JSONResponse(status_code=404, content={"error": "该歌曲没有夸克网盘分享链接"})
-    files = quark_provider.resolve_share(share_url)
+    files, stoken = quark_provider.resolve_share_verbose(share_url)
     if not files:
         return JSONResponse(status_code=404, content={"error": "夸克分享链接为空或已失效"})
     settings = load_all_settings()
@@ -1174,7 +1182,9 @@ def api_gequhai_download(body: dict):
     if not chosen:
         return JSONResponse(status_code=404, content={"error": "分享中没有可下载的音频文件"})
     try:
-        url = quark_provider.get_download_url(share_url, chosen["fid"], chosen["share_fid_token"])
+        url, dl_headers = quark_provider.get_download_url(
+            share_url, chosen["fid"], chosen["share_fid_token"], stoken
+        )
     except RuntimeError:
         return JSONResponse(
             status_code=401,
@@ -1184,7 +1194,7 @@ def api_gequhai_download(body: dict):
     try:
         download_dir.mkdir(parents=True, exist_ok=True)
         dest = download_dir / _unique_path(download_dir / _sanitize_filename(chosen["file_name"]))
-        _download_with_engine(url, dest, settings)
+        _download_with_engine(url, dest, settings, headers=dl_headers)
     except Exception as e:
         return JSONResponse(status_code=404, content={"error": f"下载失败: {e}"})
     return {"ok": True, "path": str(dest)}

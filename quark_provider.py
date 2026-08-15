@@ -46,7 +46,7 @@ BROWSER_UA = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-DRIVE_API_BASE = "https://drive.quark.cn/1/clouddrive"
+DRIVE_API_BASE = "https://drive-pc.quark.cn/1/clouddrive"
 PAN_BASE = "https://pan.quark.cn"
 UOP_BASE = "https://uop.quark.cn"
 QR_SCAN_PAGE = "https://su.quark.cn/4_eMHBJ"
@@ -128,6 +128,10 @@ def _persist_cookies(client: httpx.Client) -> None:
     tmp.write_text(payload, encoding="utf-8")
     os.chmod(tmp, 0o600)
     os.replace(tmp, COOKIE_FILE)
+    print(
+        f"[quark] persist {len(dict(client.cookies))} cookies -> {COOKIE_FILE} (exists={COOKIE_FILE.exists()})",
+        flush=True,
+    )
 
 
 def _clear_cookie_file() -> None:
@@ -225,6 +229,11 @@ def _exchange_ticket(service_ticket: str) -> dict:
         )
         resp.raise_for_status()
         payload = resp.json()
+    print(
+        f"[quark] exchange_ticket success={payload.get('success')} "
+        f"resp_cookies={list(resp.cookies.keys())} client_cookies={list(client.cookies.keys())}",
+        flush=True,
+    )
     if not payload.get("success"):
         return {"status": "error", "message": payload.get("message") or "扫码登录失败"}
     _persist_cookies(client)
@@ -337,11 +346,22 @@ def _list_share_dir(pwd_id: str, stoken: str, pdir_fid: str) -> tuple[list[dict]
 
 
 def _is_dir_item(item: dict) -> bool:
-    return (
-        item.get("dir") is True
-        or (item.get("file_type") or "").lower() == "dir"
-        or (item.get("format_type") or "").lower() in ("folder", "dir")
-    )
+    """判断分享列表项是否为目录。
+
+    真实夸克接口有 dir 布尔字段（社区 quark-share-downloader 只认它）；
+    旧 mock/其他来源可能只有 format_type 字符串（"folder"/"dir"），兜底兼容。
+    file_type 数字语义不稳定（实测文件=1），不作为判据。
+    """
+    if not isinstance(item, dict):
+        return False
+    d = item.get("dir")
+    if isinstance(d, bool):
+        return d
+    fmt = item.get("format_type")
+    if isinstance(fmt, str) and fmt.strip().lower() in ("folder", "dir"):
+        return True
+    ft = item.get("file_type")
+    return isinstance(ft, str) and ft.strip().lower() in ("dir", "folder")
 
 
 def _ext_of(file_name: str) -> str:
@@ -386,14 +406,24 @@ def resolve_share(share_url: str) -> list[dict]:
     返回文件列表 [{fid, file_name, size, format_type, share_fid_token, ext}]，
     目录型分享递归进入（深度 ≤3）；无文件/失败返回 []。
     """
+    files, _stoken = resolve_share_verbose(share_url)
+    return files
+
+
+def resolve_share_verbose(share_url: str) -> tuple[list[dict], str]:
+    """resolve_share + 返回本次解析使用的 stoken。
+
+    ⚠️ share_fid_token 绑定本次 stoken：下载直链必须用同一个 stoken
+    （新 stoken + 旧 fid_token → 41020 转存文件token校验异常）。
+    """
     try:
         pwd_id = _pwd_id_from_url(share_url)
         stoken = _get_share_stoken(pwd_id)
         files: list[dict] = []
         _walk_share(pwd_id, stoken, "0", 1, files, set())
-        return files
+        return files, stoken
     except (ValueError, httpx.HTTPError, RuntimeError, KeyError):
-        return []
+        return [], ""
 
 
 # ---------------- 音质挑选 ----------------
@@ -427,41 +457,56 @@ def pick_file(files: list[dict], quality: str) -> dict | None:
 # ---------------- 下载直链（登录后） ----------------
 
 
-def get_download_url(share_url: str, fid: str, share_fid_token: str) -> str:
-    """登录后把分享文件换成下载直链（签名 ~10min 有效）。
+def get_download_url(
+    share_url: str, fid: str, share_fid_token: str, stoken: str
+) -> tuple[str, dict]:
+    """登录后把分享文件换成下载直链。
 
+    返回 (download_url, download_headers)——直链签名绑定获取时的 cookie/UA，
+    下载请求头必须与之一致（否则 412 Precondition Failed）。
+    stoken 必须与 share_fid_token 同源（来自同一次 resolve_share_verbose），
+    否则 41020 转存文件token校验异常。
+    实现对齐社区 quark-share-downloader（POST /file/download，fids/fids_token）。
     未登录（cookie 文件不存在/已失效）抛 RuntimeError("quark login required")。
-    ⚠️ 未真实联调：实现按 alist quark_uc 驱动的请求约定
-    （POST /1/clouddrive/download/list，pr=ucpro&fr=pc，UA/Referer/Cookie 头）
-    + 社区侦察的 body 字段（include_fids/include_fids_token/pwd_id/stoken）。
     """
     if not COOKIE_FILE.exists():
         raise RuntimeError("quark login required")
     pwd_id = _pwd_id_from_url(share_url)
-    stoken = _get_share_stoken(pwd_id)
     client = _get_drive_client()
     resp = client.post(
-        f"{DRIVE_API_BASE}/download/list",
-        params={"pr": "ucpro", "fr": "pc"},
+        f"{DRIVE_API_BASE}/file/download",
+        params={"entry": "ft", "fr": "pc", "pr": "ucpro"},
         json={
-            "include_fids": [fid],
-            "include_fids_token": [share_fid_token],
+            "fids": [fid],
+            "fids_token": [share_fid_token],
             "pwd_id": pwd_id,
             "stoken": stoken,
         },
     )
     if resp.status_code in (401, 403):
-        # cookie 失效：清掉本地文件，让调用方走重新扫码流程
-        _clear_cookie_file()
+        # ⚠️ 不删 cookie 文件（保留现场便于诊断）：401/403 可能是凭证不全或参数问题，
+        # 未必是登录失效；删文件会导致扫码-下载-重扫死循环。
+        print(
+            f"[quark] download/list HTTP {resp.status_code} body={resp.text[:300]} cookies={list(client.cookies.keys())}",
+            flush=True,
+        )
         raise RuntimeError("quark login required")
     resp.raise_for_status()
     payload = resp.json()
-    if payload.get("code") != 0:
+    if payload.get("status") != 200 and payload.get("code") != 0:
         raise RuntimeError(f"获取下载直链失败: {payload.get('message')}")
     data = payload.get("data") or []
     if not data or not data[0].get("download_url"):
         raise RuntimeError("下载直链响应缺少 download_url")
-    return data[0]["download_url"]
+    # 下载头快照：与获取直链的请求一致（UA/Cookie/Referer），直链签名绑定它们
+    cookie_str = "; ".join(f"{k}={v}" for k, v in client.cookies.items())
+    headers = {
+        "User-Agent": QUARK_CLIENT_UA,
+        "Referer": REFERER,
+        "Origin": "https://pan.quark.cn",
+        "Cookie": cookie_str,
+    }
+    return data[0]["download_url"], headers
 
 
 # ---------------- 会话 cookie 刷新 ----------------

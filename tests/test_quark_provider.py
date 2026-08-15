@@ -185,6 +185,45 @@ def test_resolve_share_flat_and_recursive(monkeypatch):
     assert by_fid["f2"]["format_type"] == "flac"
 
 
+def test_resolve_share_real_shape_int_file_type(monkeypatch):
+    """真实夸克接口形状：file_type 是数字（0=文件，1=目录），必须正确识别并递归"""
+    dirs = {
+        "0": [
+            {
+                "fid": "f1",
+                "file_name": "晴天-周杰伦.mp3",
+                "size": 10792943,
+                "format_type": "mp3",
+                "file_type": 0,
+                "share_fid_token": "t1",
+            },
+            {
+                "fid": "d1",
+                "file_name": "专辑",
+                "size": 0,
+                "format_type": "folder",
+                "file_type": 1,
+                "share_fid_token": "td1",
+            },
+        ],
+        "d1": [
+            {
+                "fid": "f2",
+                "file_name": "晴天-周杰伦.flac",
+                "size": 30000000,
+                "format_type": "flac",
+                "file_type": 0,
+                "share_fid_token": "t2",
+            },
+        ],
+    }
+    install_transport(monkeypatch, _share_handler(dirs))
+    files = qp.resolve_share("https://pan.quark.cn/s/abc123")
+    fids = [f["fid"] for f in files]
+    # file_type=1 的目录项被识别并递归进去取到 f2；不因 int 报错
+    assert "f1" in fids and "f2" in fids
+
+
 def test_resolve_share_pagination(monkeypatch):
     detail_calls = {"n": 0}
 
@@ -311,7 +350,7 @@ def _login_cookie_file(tmp_path):
 def test_get_download_url_requires_login(monkeypatch, tmp_path):
     install_transport(monkeypatch, lambda r: httpx.Response(200, json={}))
     with pytest.raises(RuntimeError, match="quark login required"):
-        qp.get_download_url("https://pan.quark.cn/s/abc123", "fid1", "tok1")
+        qp.get_download_url("https://pan.quark.cn/s/abc123", "fid1", "tok1", "stk-1")
 
 
 def test_get_download_url_ok(monkeypatch, tmp_path):
@@ -319,7 +358,7 @@ def test_get_download_url_ok(monkeypatch, tmp_path):
     captured = {}
 
     def handler(request):
-        if request.method == "POST" and request.url.path.endswith("/download/list"):
+        if request.method == "POST" and request.url.path.endswith("/file/download"):
             captured["url"] = str(request.url)
             captured["body"] = json.loads(request.content)
             captured["ua"] = request.headers.get("user-agent")
@@ -341,27 +380,33 @@ def test_get_download_url_ok(monkeypatch, tmp_path):
         return httpx.Response(404, json={})
 
     install_transport(monkeypatch, handler)
-    url = qp.get_download_url("https://pan.quark.cn/s/abc123", "fid1", "tok1")
+    url, headers = qp.get_download_url("https://pan.quark.cn/s/abc123", "fid1", "tok1", "stk-1")
     assert url == "https://down.example/x.mp3?sign=abc"
+    # 下载头快照：签名绑定获取直链时的 UA/Cookie/Referer（下载必须一致，否则 412）
+    assert headers["User-Agent"] == qp.QUARK_CLIENT_UA
+    assert headers["Referer"] == qp.REFERER
+    assert headers["Origin"] == "https://pan.quark.cn"
+    assert "kps=abc" in headers["Cookie"]
     # 请求头
     assert captured["ua"] == qp.QUARK_CLIENT_UA
     assert captured["referer"] == qp.REFERER
     assert captured["cookie"] == "kps=abc"
-    # 请求参数与 body
+    # 请求参数与 body：stoken 必须与 share_fid_token 同源（外部传入，非重新获取）
     assert "pr=ucpro" in captured["url"] and "fr=pc" in captured["url"]
     assert captured["body"] == {
-        "include_fids": ["fid1"],
-        "include_fids_token": ["tok1"],
+        "fids": ["fid1"],
+        "fids_token": ["tok1"],
         "pwd_id": "abc123",
-        "stoken": "stk-9",
+        "stoken": "stk-1",
     }
 
 
-def test_get_download_url_401_clears_cookie(monkeypatch, tmp_path):
+def test_get_download_url_401_keeps_cookie(monkeypatch, tmp_path):
+    """401/403 不删 cookie 文件（保留现场诊断；登录失效由 login_state 冒烟判定）"""
     cookie_file = _login_cookie_file(tmp_path)
 
     def handler(request):
-        if request.method == "POST" and request.url.path.endswith("/download/list"):
+        if request.method == "POST" and request.url.path.endswith("/file/download"):
             return httpx.Response(401, json={"code": 40100, "message": "unauthenticated"})
         if request.method == "POST" and request.url.path.endswith("/share/sharepage/token"):
             return httpx.Response(200, json={"code": 0, "data": {"stoken": "s"}})
@@ -369,8 +414,8 @@ def test_get_download_url_401_clears_cookie(monkeypatch, tmp_path):
 
     install_transport(monkeypatch, handler)
     with pytest.raises(RuntimeError, match="quark login required"):
-        qp.get_download_url("https://pan.quark.cn/s/abc123", "fid1", "t")
-    assert not cookie_file.exists()
+        qp.get_download_url("https://pan.quark.cn/s/abc123", "fid1", "t", "stk-1")
+    assert cookie_file.exists()  # 不删文件，避免扫码-下载-重扫死循环
 
 
 # ---------------- 扫码登录 ----------------
