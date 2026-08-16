@@ -116,6 +116,8 @@
 
 ### 🐛 修复
 
+- **aria2 RPC 被 macOS 系统代理劫持**：Python urllib 在 macOS 上会读取系统网络代理（127.0.0.1），httpx 默认 trust_env 把它套到 localhost:6800 的 RPC 请求上 → 返回 503 → aria2 引擎静默降级 httpx（选了 aria2 实际不生效的第二个根因）；`_aria2_rpc_call` 加 `trust_env=False`，回环 RPC 永不走代理
+
 - **网易云下载接入 aria2 引擎**：设置里选「下载引擎 = aria2」后，网易云源（search anything / 在线搜索）下载仍走内置 httpx（只有歌曲海接入了引擎）；`/api/online/download` 改用 `_download_with_engine`，与歌曲海一致——aria2 不可用/超时自动降级 httpx
 - **最近添加视图按添加时间排序**：原实现取库数组前 N 首（= 路径字典序，语义错误）；后端 `scan_library` 新增 `mtime` 字段（macOS birthtime / 跨平台 mtime，网络曲库条目 = 添加时刻），前端按 mtime 降序「最新在最上」，缺失字段兼容旧数据
 - **最近添加自动刷新**：停留在该视图时曲库变化（下载/导入/删除）→ 自动重算，新添加的歌实时排到最上

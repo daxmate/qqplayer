@@ -1282,6 +1282,8 @@ def _unique_path(p: Path) -> Path:
 
 def _aria2_rpc_call(rpc: str, secret: str, method: str, params: list) -> dict:
     """调本机 aria2 JSON-RPC；返回 result，错误抛 RuntimeError"""
+    # trust_env=False：aria2 RPC 是本机回环地址，绝不能被环境代理（HTTP(S)_PROXY）劫持
+    # （2026-08-16 实测：走代理时 localhost:6800 返回 503 → aria2 引擎静默降级 httpx）
     resp = httpx.post(
         rpc,
         json={
@@ -1291,6 +1293,7 @@ def _aria2_rpc_call(rpc: str, secret: str, method: str, params: list) -> dict:
             "params": [f"token:{secret}", *params],
         },
         timeout=10.0,
+        trust_env=False,
     )
     resp.raise_for_status()
     data = resp.json()
