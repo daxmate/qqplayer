@@ -147,11 +147,6 @@
         </button>
       </div>
 
-      <!-- 文件选择提示 -->
-      <Transition name="mh-toast">
-        <div v-if="toast" class="mh-toast">{{ toast }}</div>
-      </Transition>
-
       <p class="mh-foot">{{ t("mobile.home.foot") }}</p>
     </div>
 
@@ -194,6 +189,8 @@ import {
 import { state, isFavorite } from "../../composables/usePlayer.js";
 import { useSearchAnything } from "../../composables/useSearchAnything.js";
 import { SMART_VIEW_LIMIT } from "../../composables/useSmartViews.js";
+import { toastError } from "../../composables/useToast.js";
+import { isAudioFile, importFiles } from "../../composables/useDragImport.js";
 import MobileSmartList from "./MobileSmartList.vue";
 
 defineEmits(["open", "open-settings"]);
@@ -238,10 +235,8 @@ function openSmartView(kind) {
   smartKind.value = smartKind.value === kind ? null : kind; // 再点同一卡片 = 关闭
 }
 
-// ============ 打开文件 ============
+// ============ 打开文件（NAS 导入入口） ============
 const fileInput = ref(null);
-const toast = ref("");
-let toastTimer = null;
 
 function openFilePicker() {
   fileInput.value?.click();
@@ -251,14 +246,14 @@ function onFilePicked(e) {
   const files = [...(e.target.files || [])];
   e.target.value = ""; // 允许重复选择同一文件
   if (!files.length) return;
-  showToast(t("mobile.home.importToast", { n: files.length }));
-  // TODO(backend): /api/import 上传接口实现后，在这里上传到音乐库目录
-}
-
-function showToast(msg) {
-  toast.value = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toast.value = ""), 3200);
+  const audioFiles = files.filter((f) => isAudioFile(f));
+  if (!audioFiles.length) {
+    toastError(t("import.noAudio"));
+    return;
+  }
+  // FormData 多值 files → POST /api/import → 成功 toast 实际导入数 / 失败 toastError
+  // 曲库自动刷新依赖 3s 轮询（后端 version+1）
+  importFiles(audioFiles);
 }
 </script>
 
@@ -370,24 +365,6 @@ function showToast(msg) {
   font-size: 12px;
   color: var(--text3);
   margin-top: 3px;
-}
-.mh-toast {
-  margin-top: 14px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--card2);
-  border: 1px solid var(--border);
-  color: var(--text2);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.mh-toast-enter-active,
-.mh-toast-leave-active {
-  transition: opacity 0.25s;
-}
-.mh-toast-enter-from,
-.mh-toast-leave-to {
-  opacity: 0;
 }
 .mh-foot {
   margin-top: 18px;

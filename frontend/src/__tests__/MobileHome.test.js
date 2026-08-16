@@ -32,6 +32,8 @@ const MobileHome = (await import("../components/mobile/MobileHome.vue")).default
 const { state } = await import("../composables/usePlayer.js");
 const { useSearchAnything } = await import("../composables/useSearchAnything.js");
 const { closeSmartView } = await import("../composables/useSmartViews.js");
+const { clearToasts, useToast } = await import("../composables/useToast.js");
+const { resetDragState } = await import("../composables/useDragImport.js");
 
 const lib = [
   { id: "a", path: "/lib/a.mp3", name: "雪の華", artist: "中島美嘉", album: "雪の華" },
@@ -50,6 +52,8 @@ beforeEach(() => {
   });
   useSearchAnything().isSearchOpen.value = false;
   closeSmartView();
+  clearToasts();
+  resetDragState();
 });
 
 afterEach(() => {
@@ -204,7 +208,14 @@ describe("MobileHome 智能视图开关与打开文件", () => {
     expect(wrapper.find(".msv-page").exists()).toBe(false);
   });
 
-  it("打开文件：选择文件后显示导入提示 toast", async () => {
+  it("打开文件：选择音频 → POST /api/import（FormData files）→ toast 实际导入数（skipped 合并）", async () => {
+    const fetchMock = vi.fn(async (url) => {
+      if (url === "/api/import") {
+        return { ok: true, json: async () => ({ imported: 2, skipped: 1, errors: 0 }) };
+      }
+      return { ok: true, json: async () => ({ records: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const wrapper = mount(MobileHome);
     const input = wrapper.find(".mh-file-input");
     Object.defineProperty(input.element, "files", {
@@ -212,25 +223,45 @@ describe("MobileHome 智能视图开关与打开文件", () => {
       configurable: true,
     });
     await input.trigger("change");
-    expect(wrapper.find(".mh-toast").text()).toBe("已选择 2 个文件，NAS 导入接口待后端支持");
+    await flushPromises();
+    const importCall = fetchMock.mock.calls.find(([url]) => url === "/api/import");
+    expect(importCall).toBeTruthy();
+    expect(importCall[1].method).toBe("POST");
+    expect(importCall[1].body).toBeInstanceOf(FormData);
+    expect(importCall[1].body.getAll("files").map((f) => f.name)).toEqual(["a.mp3", "b.mp3"]);
+    expect(useToast().items[0].text).toBe("已导入 2 首；跳过 1 首");
   });
 
-  it("toast 超时后自动消失（3.2s）", async () => {
-    vi.useFakeTimers();
-    try {
-      const wrapper = mount(MobileHome);
-      const input = wrapper.find(".mh-file-input");
-      Object.defineProperty(input.element, "files", {
-        value: [new File(["x"], "a.mp3")],
-        configurable: true,
-      });
-      await input.trigger("change");
-      expect(wrapper.find(".mh-toast").exists()).toBe(true);
-      vi.advanceTimersByTime(3300);
-      await flushPromises();
-      expect(wrapper.find(".mh-toast").exists()).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("上传失败 → toastError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500 })),
+    );
+    const wrapper = mount(MobileHome);
+    const input = wrapper.find(".mh-file-input");
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["x"], "a.mp3")],
+      configurable: true,
+    });
+    await input.trigger("change");
+    await flushPromises();
+    expect(useToast().items[0].type).toBe("error");
+    expect(useToast().items[0].text).toBe("导入失败，请重试");
+  });
+
+  it("选择全非音频文件：toastError，不发请求", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(MobileHome);
+    const input = wrapper.find(".mh-file-input");
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["x"], "a.txt")],
+      configurable: true,
+    });
+    await input.trigger("change");
+    await flushPromises();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useToast().items[0].type).toBe("error");
+    expect(useToast().items[0].text).toBe("没有可导入的音频文件");
   });
 });

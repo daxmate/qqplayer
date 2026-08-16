@@ -132,11 +132,21 @@
     <LyricSpecModal />
     <!-- search anything 全屏搜索层本体（桌面/移动共用；v-if 由 isSearchOpen 单例控制） -->
     <SearchAnything @pick="onSearchPick" />
+
+    <!-- 拖拽导入遮罩（全局；pointer-events none 不拦截交互，z-index 低于 toast 300） -->
+    <Transition name="drag-overlay">
+      <div v-if="dragVisible || dragUploading" class="drag-overlay">
+        <Upload :size="52" class="drag-overlay-icon" />
+        <span class="drag-overlay-text">{{
+          dragUploading ? t("import.uploading") : t("import.dropHint")
+        }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Music2,
@@ -148,6 +158,7 @@ import {
   FileMusic,
   MonitorPlay,
   PictureInPicture2,
+  Upload,
 } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
@@ -162,6 +173,7 @@ import SettingsModal from "./components/SettingsModal.vue";
 import SearchAnything from "./components/SearchAnything.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
+import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import {
   state,
   loadSongs,
@@ -259,6 +271,8 @@ function onSearchPick(item) {
   });
 }
 
+let cleanupDragImport = null;
+
 onMounted(() => {
   loadSongs().then(() => restoreLastPlayed());
   loadFavorites();
@@ -269,6 +283,13 @@ onMounted(() => {
   setupAutoRefresh();
   setupPlayerActions();
   setupMiniStatus();
+  // 桌面全局拖拽导入：window 级监听，卸载时清理
+  cleanupDragImport = setupDragImport();
+});
+
+onUnmounted(() => {
+  cleanupDragImport?.();
+  cleanupDragImport = null;
 });
 </script>
 
@@ -627,5 +648,39 @@ onMounted(() => {
 .player-toast-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(8px);
+}
+/* 拖拽导入遮罩：全屏半透明跟随主题变量，中间大字提示 + 图标；
+   pointer-events: none 不拦截交互；z-index 高于内容/搜索层(200)、低于 toast(300) */
+.drag-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  border: 3px dashed var(--accent);
+  color: var(--accent-text);
+}
+.drag-overlay-icon {
+  opacity: 0.92;
+  filter: drop-shadow(0 4px 12px var(--shadow-sm));
+}
+.drag-overlay-text {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.drag-overlay-enter-active,
+.drag-overlay-leave-active {
+  transition: opacity 0.18s;
+}
+.drag-overlay-enter-from,
+.drag-overlay-leave-to {
+  opacity: 0;
 }
 </style>

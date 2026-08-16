@@ -17,7 +17,6 @@ export default {
       topPlayed: "常听排行",
       topPlayedDesc: "播放次数排行",
       foot: "从手机/NAS 浏览器直接播放音乐库",
-      importToast: "已选择 {n} 个文件，NAS 导入接口待后端支持",
     },
     count: {
       song: "{n} 首",
