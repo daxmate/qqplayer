@@ -815,7 +815,7 @@ def test_api_settings_get_all_namespaces():
     # library 4 字段
     assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
-    # ui 9 字段
+    # ui 10 字段（含任务 D searchHistory）
     assert set(s["ui"]) == {
         "showSongInfo",
         "karaokeShowTime",
@@ -826,9 +826,11 @@ def test_api_settings_get_all_namespaces():
         "coverBlur",
         "compact",
         "showCover",
+        "searchHistory",
     }
     assert s["ui"]["theme"] == "dark" and s["ui"]["accent"] == "orange"
     assert s["ui"]["showCover"] is True
+    assert s["ui"]["searchHistory"] == []
     # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
     assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
     assert (
@@ -963,6 +965,44 @@ def test_api_settings_put_unknown_namespace_ignored():
     assert "hack" not in s
     assert s["player"]["volume"] == 0.3
     assert s["library"]["ignoreHidden"] is True  # 原值保留（默认）
+
+
+def test_api_settings_search_history_validation():
+    """searchHistory：字符串数组校验——过滤非字符串/空白、截断 10 条、非列表回落默认、落盘保留"""
+    # 合法字符串数组：保留顺序（最新在前），落盘后可读回
+    r = client.put("/api/settings", json={"ui": {"searchHistory": ["晴天", "五月天", "周杰伦"]}})
+    s = r.json()["settings"]
+    assert s["ui"]["searchHistory"] == ["晴天", "五月天", "周杰伦"]
+    backend._settings = None  # 模拟重启
+    assert client.get("/api/settings").json()["settings"]["ui"]["searchHistory"] == [
+        "晴天",
+        "五月天",
+        "周杰伦",
+    ]
+    # 过滤非字符串/空白 + trim
+    r = client.put(
+        "/api/settings",
+        json={"ui": {"searchHistory": [" 晴天 ", 42, None, "", "   ", "好歌"]}},
+    )
+    assert r.json()["settings"]["ui"]["searchHistory"] == ["晴天", "好歌"]
+    # 超过 10 条截断（保留前 10 = 最新）
+    r = client.put("/api/settings", json={"ui": {"searchHistory": [f"词{i}" for i in range(12)]}})
+    assert r.json()["settings"]["ui"]["searchHistory"] == [f"词{i}" for i in range(10)]
+    # 空列表合法（用户清空历史）
+    r = client.put("/api/settings", json={"ui": {"searchHistory": []}})
+    assert r.json()["settings"]["ui"]["searchHistory"] == []
+    # 非列表（字符串/数字/对象）→ 回落默认 []
+    r = client.put("/api/settings", json={"ui": {"searchHistory": "晴天,五月天"}})
+    assert r.json()["settings"]["ui"]["searchHistory"] == []
+    r = client.put("/api/settings", json={"ui": {"searchHistory": 123}})
+    assert r.json()["settings"]["ui"]["searchHistory"] == []
+    r = client.put("/api/settings", json={"ui": {"searchHistory": {"a": 1}}})
+    assert r.json()["settings"]["ui"]["searchHistory"] == []
+    # 未传该字段 → 不动（深合并语义）
+    r = client.put("/api/settings", json={"ui": {"theme": "light"}})
+    s = r.json()["settings"]
+    assert s["ui"]["theme"] == "light"
+    assert s["ui"]["searchHistory"] == []
 
 
 def test_migrate_legacy_settings():
