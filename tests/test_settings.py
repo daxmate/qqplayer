@@ -153,3 +153,32 @@ def test_player_mode_valid_preserved():
     state._settings = None
     s = client.get("/api/settings").json()["settings"]["player"]
     assert s["mode"] == "karaoke"
+
+
+def test_books_last_read_id_default():
+    """books.lastReadId 默认空字符串（未读过任何书），随 GET /api/settings 返回"""
+    s = client.get("/api/settings").json()["settings"]["books"]
+    assert s["lastReadId"] == ""
+
+
+def test_books_last_read_id_invalid_falls_back():
+    """非法值（非字符串）回落默认空字符串"""
+    for bad in (123, None, ["b1"], True, {"id": "b1"}):
+        s = client.put("/api/settings", json={"books": {"lastReadId": bad}}).json()["settings"][
+            "books"
+        ]
+        assert s["lastReadId"] == "", f"lastReadId={bad!r} 应回落默认"
+
+
+def test_books_last_read_id_valid_preserved():
+    """合法值保留，并落盘持久化（模拟重启后仍读到）"""
+    s = client.put("/api/settings", json={"books": {"lastReadId": "abc123"}}).json()["settings"][
+        "books"
+    ]
+    assert s["lastReadId"] == "abc123"
+    # 模拟重启：重置缓存后仍读到持久化值
+    state._settings = None
+    s = client.get("/api/settings").json()["settings"]["books"]
+    assert s["lastReadId"] == "abc123"
+    # 清理：恢复空值，避免影响其他用例
+    client.put("/api/settings", json={"books": {"lastReadId": ""}})

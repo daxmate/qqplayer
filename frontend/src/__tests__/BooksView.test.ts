@@ -7,6 +7,8 @@ vi.mock("../books/api", () => ({
   importBook: vi.fn(),
   deleteBook: vi.fn(),
   saveBookProgress: vi.fn(),
+  getLastReadBookId: vi.fn(),
+  setLastReadBookId: vi.fn(),
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +26,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("epubjs", () => ({ default: mocks.ePub }));
 
-import { fetchBooks } from "../books/api";
+import { fetchBooks, getLastReadBookId, setLastReadBookId } from "../books/api";
 import BooksView from "../books/BooksView.vue";
 
 const book = {
@@ -47,6 +49,7 @@ beforeEach(() => {
     ),
   );
   (fetchBooks as ReturnType<typeof vi.fn>).mockResolvedValue([book]);
+  (getLastReadBookId as ReturnType<typeof vi.fn>).mockResolvedValue("");
   mocks.ePub.mockReturnValue({
     ready: Promise.resolve(),
     renderTo: vi.fn(() => mocks.rendition),
@@ -100,6 +103,39 @@ describe("BooksView", () => {
     await wrapper.findAll(".bs-card")[0].trigger("click");
     await flushPromises();
     expect(wrapper.find(".reader-title").text()).toBe("三体");
+
+    wrapper.unmount();
+  });
+
+  it("有 lastReadId → 自动打开上次的书（Reader 按 progress.cfi 恢复）", async () => {
+    (getLastReadBookId as ReturnType<typeof vi.fn>).mockResolvedValue("b1");
+    const wrapper = mount(BooksView);
+    await flushPromises();
+
+    expect(wrapper.find(".reader").exists()).toBe(true);
+    expect(wrapper.find(".reader-title").text()).toBe("三体");
+
+    wrapper.unmount();
+  });
+
+  it("lastReadId 对应书不存在（已删）→ 回落书架", async () => {
+    (getLastReadBookId as ReturnType<typeof vi.fn>).mockResolvedValue("ghost-id");
+    const wrapper = mount(BooksView);
+    await flushPromises();
+
+    expect(wrapper.find(".reader").exists()).toBe(false);
+    expect(wrapper.find(".bs-card").exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("打开书时记录 lastReadId（统一 Settings 层）", async () => {
+    const wrapper = mount(BooksView);
+    await flushPromises();
+
+    await wrapper.find(".bs-card").trigger("click");
+    await flushPromises();
+    expect(setLastReadBookId).toHaveBeenCalledWith("b1");
 
     wrapper.unmount();
   });

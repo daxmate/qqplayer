@@ -812,11 +812,20 @@ def test_init_library_respects_settings(song_library, monkeypatch):
 
 # ============ 统一设置（6 namespace Settings API）============
 def test_api_settings_get_all_namespaces():
-    """GET /api/settings 返回 7 namespace 全量，每 namespace 合并默认值"""
+    """GET /api/settings 返回 8 namespace 全量，每 namespace 合并默认值"""
     r = client.get("/api/settings")
     assert r.status_code == 200
     s = r.json()["settings"]
-    assert set(s) == {"library", "ui", "lyric", "playback", "desktopLyric", "player", "download"}
+    assert set(s) == {
+        "library",
+        "ui",
+        "lyric",
+        "playback",
+        "desktopLyric",
+        "player",
+        "download",
+        "books",
+    }
     # library 4 字段
     assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
@@ -1061,6 +1070,7 @@ def test_migrate_legacy_settings_idempotent():
         "desktopLyric",
         "player",
         "download",
+        "books",
     }
     state._settings = None
     backend.migrate_legacy_settings()  # 再跑一次

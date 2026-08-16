@@ -16,6 +16,7 @@ _SETTINGS_NAMESPACES = (
     "desktopLyric",
     "player",
     "download",
+    "books",
 )
 
 
@@ -209,6 +210,10 @@ _SETTINGS_SPEC = {
             "continuous",
             lambda v, d: _norm_str(v, d, allowed={"continuous", "karaoke", "books"}),
         ),
+    },
+    "books": {
+        # 阅读模式：上次打开的书 id（重进阅读模式自动打开并恢复进度）；空 = 未读过
+        "lastReadId": ("", _norm_str),
     },
     "download": {
         # 在线下载目录：非空用该路径，空 = 当前歌曲库

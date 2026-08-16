@@ -57,3 +57,22 @@ export function saveBookProgress(id: string, progress: BookProgress): Promise<vo
 export function deleteBook(id: string): Promise<void> {
   return request<void>(`/api/books/${id}`, { method: "DELETE" });
 }
+
+/** 读取上次打开的书 id（统一 Settings 层 books.lastReadId；无/异常返回空串） */
+export async function getLastReadBookId(): Promise<string> {
+  try {
+    const data = await request<{ settings: { books?: { lastReadId?: string } } }>("/api/settings");
+    return data.settings?.books?.lastReadId ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 记录上次打开的书 id（统一 Settings 层，跨引擎同步；失败静默不影响阅读） */
+export function setLastReadBookId(id: string): Promise<void> {
+  return request<void>("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ books: { lastReadId: id } }),
+  }).catch(() => undefined);
+}
