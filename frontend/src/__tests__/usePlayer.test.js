@@ -113,6 +113,10 @@ const {
   loadLibrarySettings,
   saveLibrarySettings,
   _resetPlaybackSession,
+  reorderQueue,
+  persistQueueOrder,
+  loadQueueOrder,
+  _resetQueueOrder,
 } = await import("../composables/usePlayer.js");
 
 const {
@@ -176,6 +180,7 @@ beforeEach(() => {
   _resetKaraokeAnchor();
   _resetPlayMode();
   _resetPlaybackSession();
+  _resetQueueOrder();
   vi.restoreAllMocks();
   vi.stubGlobal("localStorage", localStorageStub);
   for (const k of Object.keys(lsStore)) delete lsStore[k];
@@ -3287,5 +3292,192 @@ describe("均衡器 EQ", () => {
       setEqGain(0, 3);
       playbackSettings.eqEnabled = true;
     }).not.toThrow();
+  });
+});
+
+describe("队列拖拽排序 reorderQueue / persistQueueOrder（任务 A 第三项）", () => {
+  const Q = [
+    { id: "a", name: "A歌", path: "/a.mp3" },
+    { id: "b", name: "B歌", path: "/b.mp3" },
+    { id: "c", name: "C歌", path: "/c.mp3" },
+    { id: "d", name: "D歌", path: "/d.mp3" },
+  ];
+
+  it("reorderQueue：把 from 位置的歌挪到 to（当前歌在移动歌之后 → 索引前移）", () => {
+    state.songs = Q.map((s) => ({ ...s }));
+    state.currentIndex = 2; // 播 C
+    reorderQueue(0, 2); // A 挪到 C 之后
+    expect(state.songs.map((s) => s.name)).toEqual(["B歌", "C歌", "A歌", "D歌"]);
+    expect(state.currentIndex).toBe(1); // C 2 → 1
+  });
+
+  it("reorderQueue：移动的就是当前歌 → 当前索引跟随新位置", () => {
+    state.songs = Q.map((s) => ({ ...s }));
+    state.currentIndex = 1;
+    reorderQueue(1, 0); // B 挪到开头
+    expect(state.songs.map((s) => s.name)).toEqual(["B歌", "A歌", "C歌", "D歌"]);
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("reorderQueue：向后挪且跨过当前歌 → 当前索引前移", () => {
+    state.songs = Q.map((s) => ({ ...s }));
+    state.currentIndex = 2; // C
+    reorderQueue(0, 3); // A 挪到末尾（跨过 C）
+    expect(state.songs.map((s) => s.name)).toEqual(["B歌", "C歌", "D歌", "A歌"]);
+    expect(state.currentIndex).toBe(1);
+  });
+
+  it("reorderQueue：向前挪且跨过当前歌 → 当前索引后移", () => {
+    state.songs = Q.map((s) => ({ ...s }));
+    state.currentIndex = 1; // B
+    reorderQueue(3, 0); // D 挪到开头（跨过 B）
+    expect(state.songs.map((s) => s.name)).toEqual(["D歌", "A歌", "B歌", "C歌"]);
+    expect(state.currentIndex).toBe(2);
+  });
+
+  it("reorderQueue：越界 / 相同位置 → 无操作", () => {
+    state.songs = Q.map((s) => ({ ...s }));
+    state.currentIndex = 0;
+    reorderQueue(0, 0);
+    reorderQueue(-1, 2);
+    reorderQueue(0, 99);
+    reorderQueue(99, 0);
+    expect(state.songs.map((s) => s.name)).toEqual(["A歌", "B歌", "C歌", "D歌"]);
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("reorderQueue：shuffle 模式下不冲突（洗牌队列失效，下次自动重建，不崩）", () => {
+    state.songs = Q.map((s) => ({ ...s }));
+    state.currentIndex = 0;
+    cyclePlayMode(); // order → shuffle
+    expect(state.playMode).toBe("shuffle");
+    reorderQueue(0, 2);
+    expect(state.songs.map((s) => s.name)).toEqual(["B歌", "C歌", "A歌", "D歌"]);
+    // 洗牌队列已失效：切歌仍能正常推进（内部 ensureShuffleQueue 重建）
+    expect(() => nextSong()).not.toThrow();
+  });
+
+  it("persistQueueOrder：PUT /api/queue/order 保存顺序键数组（网络歌用 stream: 前缀）", async () => {
+    state.songs = [
+      { id: "a", name: "A歌", path: "/a.mp3" },
+      { id: "s", name: "网歌", type: "stream", streamId: "9", path: null },
+      { id: "b", name: "B歌", path: "/b.mp3" },
+    ];
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    await persistQueueOrder();
+    const call = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/queue/order"));
+    expect(call).toBeTruthy();
+    expect(call[1].method).toBe("PUT");
+    expect(JSON.parse(call[1].body).paths).toEqual(["/a.mp3", "stream:9", "/b.mp3"]);
+  });
+
+  it("persistQueueOrder：非 200 → 抛错（调用方 toast）", async () => {
+    state.songs = [{ id: "a", name: "A歌", path: "/a.mp3" }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+    await expect(persistQueueOrder()).rejects.toThrow();
+  });
+
+  it("loadQueueOrder + loadSongs：刷新后按保存顺序恢复（round-trip）", async () => {
+    const fetchMock = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/queue/order")) {
+        return { ok: true, json: async () => ({ paths: ["/c.mp3", "/a.mp3", "/b.mp3"] }) };
+      }
+      if (u.includes("/api/songs")) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: "a", name: "A歌", path: "/a.mp3" },
+            { id: "b", name: "B歌", path: "/b.mp3" },
+            { id: "c", name: "C歌", path: "/c.mp3" },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await loadQueueOrder();
+    state.currentIndex = 0;
+    state.currentSong = { id: "a", name: "A歌", path: "/a.mp3" };
+    await loadSongs();
+    expect(state.songs.map((s) => s.name)).toEqual(["C歌", "A歌", "B歌"]);
+    expect(state.currentIndex).toBe(1); // A 现在在位置 1
+    expect(state.currentSong.name).toBe("A歌");
+  });
+
+  it("loadSongs：保存顺序与曲库无交集（换库/清库）→ 保持默认顺序", async () => {
+    const fetchMock = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/queue/order")) {
+        return { ok: true, json: async () => ({ paths: ["/old1.mp3", "/old2.mp3"] }) };
+      }
+      if (u.includes("/api/songs")) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: "a", name: "A歌", path: "/a.mp3" },
+            { id: "b", name: "B歌", path: "/b.mp3" },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await loadQueueOrder();
+    state.currentIndex = 0;
+    state.currentSong = { id: "a", name: "A歌", path: "/a.mp3" };
+    await loadSongs();
+    expect(state.songs.map((s) => s.name)).toEqual(["A歌", "B歌"]);
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("loadSongs：新歌（保存顺序之外）按曲库顺序补在末尾", async () => {
+    const fetchMock = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/queue/order")) {
+        return { ok: true, json: async () => ({ paths: ["/b.mp3"] }) };
+      }
+      if (u.includes("/api/songs")) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: "a", name: "A歌", path: "/a.mp3" },
+            { id: "b", name: "B歌", path: "/b.mp3" },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await loadQueueOrder();
+    state.currentIndex = 0;
+    state.currentSong = { id: "a", name: "A歌", path: "/a.mp3" };
+    await loadSongs();
+    expect(state.songs.map((s) => s.name)).toEqual(["B歌", "A歌"]);
+  });
+
+  it("loadSongs：未加载过队列顺序（queueOrder 为 null）→ 不重排", async () => {
+    const fetchMock = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes("/api/songs")) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: "a", name: "A歌", path: "/a.mp3" },
+            { id: "b", name: "B歌", path: "/b.mp3" },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    state.currentIndex = 0;
+    state.currentSong = { id: "a", name: "A歌", path: "/a.mp3" };
+    await loadSongs();
+    expect(state.songs.map((s) => s.name)).toEqual(["A歌", "B歌"]);
   });
 });

@@ -3,6 +3,11 @@ import { state, audio, selectSong, _resetPlayMode } from "./playerCore.js";
 import { showToast, toastError } from "./useToast.js";
 import i18n from "../locales/i18n.js";
 
+// 歌曲行拖到侧栏歌单（HTML5 DnD）的传输 MIME 类型：
+// 自定义槽位避开 sortablejs 原生拖拽写入的 'Text'（=text/plain，行文本会被覆盖）；
+// Playlist.vue（源）与 Sidebar.vue（目标）共用这一契约。
+export const DRAG_SONG_TYPE = "application/x-qqplayer-song";
+
 // ============ 收藏（后端持久化 ~/Library/Application Support/qqplayer）============
 export async function loadFavorites() {
   try {

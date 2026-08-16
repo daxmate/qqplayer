@@ -1059,6 +1059,8 @@ export async function loadSongs() {
     const res = await fetch("/api/songs", { cache: "no-store" });
     const songs = await res.json();
     state.songs = songs;
+    // 拖拽排序持久化的队列顺序：刷新/启动时恢复（loadQueueOrder 需先于首次 loadSongs 完成，见 App.vue）
+    applyQueueOrder();
     if (songs.length && state.currentIndex < 0) {
       state.currentIndex = 0;
       await selectSong(0);
@@ -1066,15 +1068,15 @@ export async function loadSongs() {
       // 刷新后保持当前选中：本地歌按 path；网络歌（path=null）按 streamId
       const cur = state.currentSong;
       const idx = cur.path
-        ? songs.findIndex((s) => s.path === cur.path)
+        ? state.songs.findIndex((s) => s.path === cur.path)
         : cur.streamId
-          ? songs.findIndex((s) => s.type === "stream" && s.streamId === cur.streamId)
+          ? state.songs.findIndex((s) => s.type === "stream" && s.streamId === cur.streamId)
           : -1;
       if (idx >= 0) {
         state.currentIndex = idx;
         // 同步 currentSong 引用到新数组：刮削保存/曲库刷新后播放界面立即显示新信息
         // （不改 audio/不重播；mediaSession 元数据 watch 自动跟随更新）
-        state.currentSong = songs[idx];
+        state.currentSong = state.songs[idx];
       }
     }
   } catch (e) {
@@ -1082,6 +1084,93 @@ export async function loadSongs() {
   } finally {
     state.loading = false;
   }
+}
+
+// ============ 播放队列顺序（后端持久化 /api/queue/order）============
+// 队列 = state.songs 顺序（点击播放/切歌/列表渲染都按它走）。
+// 拖拽排序后 PUT 到后端（不放 localStorage），启动/刷新时恢复；
+// 只影响顺序——「最近添加」等智能视图是 computed 按 mtime/plays 字段排序，不受数组顺序影响。
+// 顺序键：本地歌 = 文件路径；网络歌 path 为 null，用 'stream:<streamId>'。
+let queueOrder = null; // 后端持久化的顺序键数组；null = 未加载
+
+export function _resetQueueOrder() {
+  queueOrder = null;
+}
+
+function queueKey(song) {
+  return song?.type === "stream" && song.streamId
+    ? "stream:" + song.streamId
+    : (song?.path ?? null);
+}
+
+// 拉取持久化队列顺序（App 启动时先于 loadSongs 调用一次，之后走本地缓存）
+export async function loadQueueOrder() {
+  try {
+    const res = await fetch("/api/queue/order", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.paths)) queueOrder = data.paths;
+    }
+  } catch {
+    /* 后端暂不可用：保持默认顺序，下次重启再试 */
+  }
+}
+
+// 保存当前队列顺序到后端（乐观更新本地缓存；失败抛错由调用方 toast）
+export async function persistQueueOrder() {
+  const paths = state.songs.map(queueKey).filter((k) => typeof k === "string");
+  queueOrder = paths; // 本地缓存先行：刷新时立即恢复，不依赖后端往返
+  const res = await fetch("/api/queue/order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) throw new Error(i18n.global.t("errors.reorderQueue"));
+}
+
+// 按持久化顺序重排 state.songs：匹配到的按保存顺序前置，其余（新歌/试听残留等）保持相对顺序补在末尾。
+// 保存的顺序与当前曲库无交集（换库/清库）→ 不重排，保持曲库默认顺序。
+function applyQueueOrder() {
+  if (!Array.isArray(queueOrder) || !queueOrder.length) return;
+  const byKey = new Map();
+  for (const s of state.songs) {
+    const k = queueKey(s);
+    if (!byKey.has(k)) byKey.set(k, s);
+  }
+  const ordered = [];
+  const seen = new Set();
+  for (const key of queueOrder) {
+    if (seen.has(key) || !byKey.has(key)) continue;
+    ordered.push(byKey.get(key));
+    seen.add(key);
+  }
+  if (!ordered.length) return; // 与当前曲库无交集 → 不动
+  for (const s of state.songs) {
+    const k = queueKey(s);
+    if (seen.has(k)) continue;
+    ordered.push(s);
+    seen.add(k);
+  }
+  if (ordered.length !== state.songs.length) return; // 防御：长度不一致不重排
+  state.songs = ordered;
+}
+
+// 队列拖拽排序：把 from 位置的歌挪到 to（全部歌曲视图 onEnd 调用）。
+// 队列顺序变了 → 洗牌队列/播放历史失效（_resetPlayMode），下次自动重建。
+export function reorderQueue(from, to) {
+  if (from < 0 || to < 0 || from >= state.songs.length || to >= state.songs.length) return;
+  if (from === to) return;
+  const [song] = state.songs.splice(from, 1);
+  state.songs.splice(to, 0, song);
+  // 当前播放索引跟随：被移走的歌在原当前歌之前/之后决定偏移；移的就是当前歌 → 直接换到新位置
+  if (from === state.currentIndex) {
+    state.currentIndex = to;
+  } else if (from < state.currentIndex && to >= state.currentIndex) {
+    state.currentIndex -= 1;
+  } else if (from > state.currentIndex && to <= state.currentIndex) {
+    state.currentIndex += 1;
+  }
+  _resetPlayMode();
 }
 
 // 定位歌曲在队列（state.songs）中的索引：本地歌按 path；网络歌（type=stream, path=null）

@@ -63,6 +63,8 @@ DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
+# 播放队列顺序（前端拖拽排序后保存，启动/刷新时恢复；独立文件，不动 settings.json）
+QUEUE_ORDER_FILE = DATA_DIR / "queue_order.json"
 # 网络曲库条目（网易云等在线源登记，播放时实时取直链，不落盘音频）
 NETWORK_SONGS_FILE = DATA_DIR / "network_songs.json"
 # 播放记录滚动保留上限（超了删最旧）
@@ -931,6 +933,47 @@ def api_playlists_order(pid: str, body: dict):
     p["updatedAt"] = datetime.now(timezone.utc).isoformat()
     _save_playlists(playlists)
     return p
+
+
+# ============ 播放队列顺序（持久化 queue_order.json，前端拖拽排序后保存）============
+# 队列 = 全部歌曲视图的 state.songs 顺序；本地歌键 = 文件路径，网络歌键 = 'stream:<streamId>'（path 为 null 无法区分）
+# 只存顺序键数组，不存歌曲元数据（避免与曲库扫描结果漂移）；恢复时按键匹配，未匹配的新歌补在末尾
+
+
+def _load_queue_order() -> list:
+    """加载播放队列顺序（文件不存在/损坏返回空列表）"""
+    try:
+        data = json.loads(QUEUE_ORDER_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_queue_order(paths: list):
+    """保存播放队列顺序（写失败不影响播放功能）"""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        QUEUE_ORDER_FILE.write_text(
+            json.dumps(paths, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+@app.get("/api/queue/order")
+def api_queue_order_get():
+    """播放队列顺序（前端启动时恢复；空列表 = 未自定义顺序，按曲库默认顺序）"""
+    return {"paths": _load_queue_order()}
+
+
+@app.put("/api/queue/order")
+def api_queue_order_put(body: dict):
+    """保存播放队列顺序（paths 必须为字符串数组）"""
+    paths = body.get("paths")
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        raise HTTPException(400, "paths 必须是字符串数组")
+    _save_queue_order(paths)
+    return {"paths": paths}
 
 
 # ============ 网络曲库条目（持久化 network_songs.json，播放时实时取直链）============

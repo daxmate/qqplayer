@@ -7,6 +7,7 @@ export default {
     addToPlaylist: "加入歌单失败",
     removeFromPlaylist: "移出歌单失败",
     reorderPlaylist: "排序保存失败",
+    reorderQueue: "队列排序保存失败",
     restorePlaylist: "恢复歌单失败",
     deleteSongs: "删除失败",
     unknownSong: "未知歌曲",

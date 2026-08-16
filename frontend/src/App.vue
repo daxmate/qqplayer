@@ -182,6 +182,7 @@ import {
   loadSongs,
   loadFavorites,
   loadPlaylists,
+  loadQueueOrder,
   setupKeyboardShortcuts,
   setupMediaSession,
   setupPlaybackFlush,
@@ -277,7 +278,10 @@ function onSearchPick(item) {
 let cleanupDragImport = null;
 
 onMounted(() => {
-  loadSongs().then(() => restoreLastPlayed());
+  // 队列顺序持久化：先拉取再加载歌曲（loadSongs 恢复顺序依赖该缓存）
+  loadQueueOrder().then(() => {
+    loadSongs().then(() => restoreLastPlayed());
+  });
   loadFavorites();
   loadPlaylists();
   setupKeyboardShortcuts();

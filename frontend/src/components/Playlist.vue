@@ -73,6 +73,14 @@
           <option value="duration">{{ t("playlist.sort.duration") }}</option>
         </select>
         <button
+          class="pl-locate"
+          :disabled="state.currentIndex < 0"
+          :title="t('playlist.locate.title')"
+          @click="locateCurrent"
+        >
+          <LocateFixed :size="13" />
+        </button>
+        <button
           class="pl-fav-btn"
           :class="{ on: favOnly }"
           :title="favOnly ? t('playlist.fav.all') : t('playlist.fav.only')"
@@ -170,7 +178,13 @@
           @click="onRowClick(i, $event)"
           @contextmenu.prevent="openCtxMenu($event, i)"
         >
-          <span v-if="canDrag" class="pl-drag" :title="t('playlist.dragSort')">
+          <span
+            v-if="canDrag"
+            class="pl-drag"
+            :title="t('playlist.dragSort')"
+            draggable="true"
+            @dragstart="onRowDragStart($event, song.path)"
+          >
             <GripVertical :size="14" />
           </span>
           <span class="pl-idx">{{ vi + 1 }}</span>
@@ -193,7 +207,12 @@
               </span>
             </div>
           </div>
-          <span v-if="i === state.currentIndex" class="pl-eq" :title="t('playlist.playing')">
+          <span
+            v-if="i === state.currentIndex"
+            class="pl-eq"
+            :title="t('playlist.locate.title')"
+            @click.stop="locateCurrent"
+          >
             <span class="eq-bar"></span>
             <span class="eq-bar"></span>
             <span class="eq-bar"></span>
@@ -326,6 +345,7 @@ import {
   Plus,
   ArrowLeft,
   Trash2,
+  LocateFixed,
 } from "@lucide/vue";
 import {
   state,
@@ -340,6 +360,9 @@ import {
   addToPlaylist,
   removeFromPlaylist,
   setPlaylistOrder,
+  reorderQueue,
+  persistQueueOrder,
+  DRAG_SONG_TYPE,
   _resetPlayMode,
 } from "../composables/usePlayer.js";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
@@ -519,14 +542,10 @@ const visible = computed(() => {
   return list;
 });
 
-// 拖拽启用条件：歌单视图 + 无搜索/排序/收藏/分组过滤（保证可见集 = 歌单全量，排序不丢歌）
+// 拖拽启用条件：无搜索/排序/收藏/分组过滤时（保证可见集 = 全量，排序不丢歌）。
+// 歌单视图 = 歌单内排序；全部歌曲视图 = 播放队列排序（拖到侧栏歌单的拖拽源也走这个手柄）。
 const canDrag = computed(
-  () =>
-    inPlaylistView.value &&
-    sortKey.value === "default" &&
-    !query.value.trim() &&
-    !favOnly.value &&
-    !browseFilter.value,
+  () => sortKey.value === "default" && !query.value.trim() && !favOnly.value && !browseFilter.value,
 );
 
 function pick(i) {
@@ -916,16 +935,81 @@ function setupSortable() {
     ghostClass: "pl-ghost",
     supportPointer: true, // pointer 事件统一鼠标/触控笔/触摸（触屏可拖拽排序）
     onEnd: ({ oldIndex, newIndex }) => {
-      if (oldIndex === newIndex || !state.activePlaylistId) return;
-      const paths = [...listEl.value.querySelectorAll(".pl-item")].map((el) => el.dataset.path);
-      setPlaylistOrder(state.activePlaylistId, paths).catch((e) => toastError(e.message));
+      if (oldIndex === newIndex) return;
+      if (state.activePlaylistId) {
+        // 歌单视图：重排歌单内歌曲顺序
+        const paths = [...listEl.value.querySelectorAll(".pl-item")].map((el) => el.dataset.path);
+        setPlaylistOrder(state.activePlaylistId, paths).catch((e) => toastError(e.message));
+      } else {
+        // 全部歌曲视图：重排播放队列顺序并持久化（后端 /api/queue/order，刷新后恢复）
+        reorderQueue(oldIndex, newIndex);
+        persistQueueOrder().catch((e) => toastError(e.message));
+      }
     },
   });
 }
 
 watch([activePlaylist, canDrag], () => nextTick(setupSortable));
 onMounted(() => nextTick(setupSortable));
-onBeforeUnmount(() => sortable?.destroy());
+onBeforeUnmount(() => {
+  sortable?.destroy();
+  clearTimeout(locateTimer);
+});
+
+// ============ 拖拽到侧栏歌单（HTML5 DnD：歌曲行手柄 → Sidebar 歌单项） ============
+// 与 sortablejs 同源共用手柄：sortablejs 用 pointerdown + 原生 dragstart 驱动列表内排序，
+// 我们只附加 dataTransfer 元数据，drop 目标只有 Sidebar 歌单，两套语义互不干扰。
+function onRowDragStart(e, path) {
+  if (!path) {
+    // 网络歌（path=null）不能加入歌单
+    e.preventDefault();
+    return;
+  }
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  dt.setData(DRAG_SONG_TYPE, path);
+  dt.effectAllowed = "copy";
+}
+
+// ============ 定位当前播放（工具条按钮 / EQ 标记点击） ============
+let locateTimer = null;
+
+// 滚动 .pl-list 让行可见：行在视口内不动，否则滚到行顶（带内边距留白）
+function scrollRowIntoList(list, rowEl) {
+  const pad = 6;
+  const listRect = list.getBoundingClientRect();
+  const rowRect = rowEl.getBoundingClientRect();
+  const relTop = rowRect.top - listRect.top + list.scrollTop;
+  const relBottom = relTop + rowRect.height;
+  const viewTop = list.scrollTop;
+  const viewBottom = viewTop + list.clientHeight;
+  if (relTop < viewTop || relBottom > viewBottom) {
+    const top = Math.max(0, relTop - pad);
+    if (typeof list.scrollTo === "function") {
+      list.scrollTo({ top, behavior: "smooth" });
+    } else {
+      list.scrollTop = top;
+    }
+  }
+}
+
+function locateCurrent() {
+  const idx = state.currentIndex;
+  if (idx < 0 || !listEl.value) return;
+  const domIdx = visible.value.findIndex((v) => v.i === idx);
+  if (domIdx < 0) {
+    // 搜索/过滤中当前播放行不可见 → 提示
+    showToast(t("playlist.locate.notVisible"));
+    return;
+  }
+  const rowEl = listEl.value.querySelectorAll(".pl-item")[domIdx];
+  if (!rowEl) return;
+  scrollRowIntoList(listEl.value, rowEl);
+  // 临时高亮闪烁
+  rowEl.classList.add("pl-locate");
+  clearTimeout(locateTimer);
+  locateTimer = setTimeout(() => rowEl.classList.remove("pl-locate"), 1500);
+}
 
 function fmtDur(d) {
   const m = Math.floor(d / 60);
@@ -1224,6 +1308,28 @@ function fmtDur(d) {
   color: var(--red);
   background: var(--red-soft);
 }
+.pl-locate {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  color: var(--text3);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+@media (hover: hover) {
+  .pl-locate:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+}
+.pl-locate:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .pl-list {
   flex: 1;
   overflow-y: auto;
@@ -1340,6 +1446,19 @@ function fmtDur(d) {
   height: 13px;
   flex-shrink: 0;
   color: var(--accent);
+  cursor: pointer;
+}
+/* 定位当前播放：行临时高亮闪烁 */
+.pl-item.pl-locate {
+  animation: pl-locate-flash 1.4s ease-out;
+}
+@keyframes pl-locate-flash {
+  0% {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
 }
 .eq-bar {
   width: 3px;

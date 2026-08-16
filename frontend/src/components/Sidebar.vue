@@ -32,14 +32,17 @@
         </div>
       </template>
 
-      <!-- 歌单列表 -->
+      <!-- 歌单列表（拖拽目标：歌曲行拖进来加歌） -->
       <template v-for="p in state.playlists" :key="p.id">
         <div
           v-if="editingId !== p.id"
           class="sb-item"
-          :class="{ on: p.id === state.activePlaylistId }"
+          :class="{ on: p.id === state.activePlaylistId, 'sb-drop': dropOverId === p.id }"
           :title="p.name"
           @click="activate(p.id)"
+          @dragover="onPlaylistDragOver(p, $event)"
+          @dragleave="onPlaylistDragLeave(p, $event)"
+          @drop="onPlaylistDrop(p, $event)"
         >
           <ListMusic :size="15" />
           <span class="sb-name">{{ p.name }}</span>
@@ -110,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onBeforeUnmount } from "vue";
+import { ref, nextTick, onMounted, onBeforeUnmount } from "vue";
 import {
   Library,
   Music2,
@@ -129,6 +132,8 @@ import {
   renamePlaylist,
   deletePlaylist,
   addToPlaylist,
+  isInPlaylist,
+  DRAG_SONG_TYPE,
 } from "../composables/usePlayer.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import {
@@ -174,6 +179,7 @@ function closeSmartViewPanel() {
 
 // 侧栏被关闭（音乐库面板收起）时同步退出智能视图，避免残留覆盖层
 onBeforeUnmount(() => {
+  window.removeEventListener("dragend", clearDropHighlight);
   if (smartViewState.active) {
     const prev = smartViewState.prevPlaylistOpen;
     closeSmartView();
@@ -181,6 +187,50 @@ onBeforeUnmount(() => {
     smartViewState.prevPlaylistOpen = null;
   }
 });
+
+// ============ 拖拽加歌单（歌曲行 → 歌单项） ============
+// 只响应歌曲行拖拽（Playlist 用自定义 MIME 写入路径）；文件拖拽导入（Files 类型）不受影响
+const dropOverId = ref(null);
+
+function dragHasSong(e) {
+  return Array.from(e?.dataTransfer?.types || []).includes(DRAG_SONG_TYPE);
+}
+
+function onPlaylistDragOver(p, e) {
+  if (!dragHasSong(e)) return;
+  e.preventDefault(); // 允许 drop
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  dropOverId.value = p.id; // 高亮歌单项
+}
+
+function onPlaylistDragLeave(p, e) {
+  // 移入子元素也会触发 dragleave：relatedTarget 仍在歌单项内 → 不取消高亮
+  if (e.currentTarget.contains(e.relatedTarget)) return;
+  if (dropOverId.value === p.id) dropOverId.value = null;
+}
+
+async function onPlaylistDrop(p, e) {
+  if (!dragHasSong(e)) return;
+  e.preventDefault();
+  dropOverId.value = null;
+  const path = e.dataTransfer?.getData(DRAG_SONG_TYPE);
+  if (!path) return;
+  if (isInPlaylist(p.id, path)) {
+    showToast(t("sidebar.drag.alreadyIn", { name: p.name }));
+    return;
+  }
+  try {
+    await addToPlaylist(p.id, path); // 幂等：先查再调，toast 区分「已加入」/「已在」
+    showToast(t("sidebar.drag.added", { name: p.name }));
+  } catch (err) {
+    toastError(err.message);
+  }
+}
+
+function clearDropHighlight() {
+  dropOverId.value = null;
+}
+onMounted(() => window.addEventListener("dragend", clearDropHighlight));
 
 // ============ 新建 ============
 const creating = ref(false);
@@ -331,6 +381,12 @@ async function restorePlaylist(cached) {
   );
   color: var(--text);
   font-weight: 600;
+}
+/* 拖拽悬停高亮（歌曲行拖到歌单） */
+.sb-item.sb-drop {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
 }
 .sb-name {
   flex: 1;

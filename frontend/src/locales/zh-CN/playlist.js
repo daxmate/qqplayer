@@ -75,6 +75,11 @@ export default {
     dragSort: "拖拽排序",
     hasLyric: "有歌词",
     playing: "播放中",
+    // 定位当前播放（工具条按钮 / EQ 标记）
+    locate: {
+      title: "定位当前播放",
+      notVisible: "当前播放歌曲不在此列表",
+    },
     removeFromPlaylist: "从歌单移除",
     removeFromQueue: "从队列移除",
     removedFromPlaylist: "已从歌单移除《{name}》",

@@ -13,5 +13,10 @@ export default {
     deletedPlaylist: "已删除歌单「{name}」",
     undo: "撤销",
     restoredPlaylist: "已恢复歌单「{name}」",
+    // 拖拽加歌单（歌曲行拖到歌单项）
+    drag: {
+      added: "已加入歌单「{name}」",
+      alreadyIn: "已在歌单「{name}」中",
+    },
   },
 };
