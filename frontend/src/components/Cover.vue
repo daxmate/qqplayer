@@ -33,17 +33,26 @@ const coverUrl = ref("");
 const cache = new Map(); // path -> url
 
 watch(
-  () => props.song?.path,
-  (p) => {
-    if (!p) {
+  () => {
+    const s = props.song;
+    return s ? s.path || s.coverUrl || "" : "";
+  },
+  (key) => {
+    if (!key) {
       coverUrl.value = "";
       return;
     }
-    if (cache.has(p)) {
-      coverUrl.value = cache.get(p);
+    if (cache.has(key)) {
+      coverUrl.value = cache.get(key);
       return;
     }
-    coverUrl.value = "/api/cover?path=" + encodeURIComponent(p);
+    if (props.song?.coverUrl && !props.song?.path) {
+      // 流媒体歌（stream / 试听 / URL）：网络图 URL 直用，不走 /api/cover
+      coverUrl.value = props.song.coverUrl;
+      cache.set(key, props.song.coverUrl);
+      return;
+    }
+    coverUrl.value = "/api/cover?path=" + encodeURIComponent(key);
   },
   { immediate: true },
 );

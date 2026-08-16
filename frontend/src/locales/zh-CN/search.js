@@ -15,6 +15,12 @@ export default {
     downloading: "下载中…",
     downloadSuccess: "已开始下载：{title}",
     downloadFailed: "下载失败：{msg}",
+    preview: "试听",
+    previewing: "正在试听：{title}",
+    addToLibrary: "添加到曲库",
+    addedToLibrary: "已添加到曲库：{title}",
+    alreadyInLibrary: "已在曲库：{title}",
+    addToLibraryFailed: "添加到曲库失败：{msg}",
     badge: {
       song: "本地",
       online: "在线",

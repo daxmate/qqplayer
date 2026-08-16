@@ -155,6 +155,18 @@
                     /></span>
                   </div>
                 </div>
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="playbackSettings.streamStats = !playbackSettings.streamStats"
+                  >
+                    <div>
+                      <div class="setting-label">{{ t("settings.streamStats") }}</div>
+                      <div class="setting-desc">{{ t("settings.streamStatsDesc") }}</div>
+                    </div>
+                    <span class="switch" :class="{ on: playbackSettings.streamStats }"><i /></span>
+                  </div>
+                </div>
               </div>
 
               <div class="group">

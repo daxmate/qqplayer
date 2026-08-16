@@ -121,6 +121,13 @@
 
     <div v-if="state.error" class="error-bar">{{ state.error }}</div>
 
+    <!-- 播放器级 toast（流媒体直链失败 / URL 非法等） -->
+    <Transition name="player-toast">
+      <div v-if="playerToast.msg" class="player-toast" :class="{ err: playerToast.err }">
+        {{ playerToast.msg }}
+      </div>
+    </Transition>
+
     <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
     <LyricSpecModal />
     <!-- search anything 全屏搜索层本体（桌面/移动共用；v-if 由 isSearchOpen 单例控制） -->
@@ -176,16 +183,20 @@ import {
   desktopLyricSettings,
   miniRunning,
   refreshMiniStatus,
+  playerToast,
 } from "./composables/usePlayer.js";
 
 const { t } = useI18n();
 
 const settingsOpen = ref(false);
 
-// 封面模糊背景：当前歌曲封面 URL（开关 + 有歌时显示）
+// 封面模糊背景：当前歌曲封面 URL（开关 + 有歌时显示；流媒体歌用 coverUrl 网络图）
 const blurCoverUrl = computed(() => {
   if (!uiSettings.coverBlur || !state.currentSong) return "";
-  return "/api/cover?path=" + encodeURIComponent(state.currentSong.path);
+  const s = state.currentSong;
+  if (s.coverUrl) return s.coverUrl;
+  if (!s.path) return "";
+  return "/api/cover?path=" + encodeURIComponent(s.path);
 });
 
 // 面板组合 class：控制 grid 列数/区域（4 种状态）
@@ -582,5 +593,39 @@ onMounted(() => {
   border-radius: 20px;
   font-size: 13px;
   z-index: 99;
+}
+/* 播放器级 toast（流媒体直链失败 / URL 非法等） */
+.player-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  z-index: 500;
+  background: rgba(38, 41, 55, 0.95);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  box-shadow: 0 10px 32px var(--shadow-strong);
+  white-space: nowrap;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.player-toast.err {
+  border-color: rgba(255, 107, 107, 0.5);
+  color: #ffb3b3;
+}
+.player-toast-enter-active,
+.player-toast-leave-active {
+  transition:
+    opacity 0.25s,
+    transform 0.25s;
+}
+.player-toast-enter-from,
+.player-toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 </style>

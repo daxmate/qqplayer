@@ -261,6 +261,18 @@ export const settingsIndex = [
     },
   },
   {
+    id: "streamStats",
+    category: "playback",
+    subTab: null,
+    labelKey: "settings.streamStats",
+    keywords: ["流媒体", "试听", "播放统计", "计入统计", "stream", "preview", "试听统计"],
+    type: "toggle",
+    get: () => playbackSettings.streamStats,
+    set: (v) => {
+      playbackSettings.streamStats = v;
+    },
+  },
+  {
     id: "sleepTimerOn",
     category: "playback",
     subTab: null,

@@ -79,7 +79,59 @@
             </div>
             <template v-if="results.length">
               <template v-for="(item, i) in results" :key="item.id">
+                <!-- 在线行（网易云）：试听 / 添加到曲库 / 下载 三按钮布局；行点击 = 下载（保留现有行为） -->
+                <div
+                  v-if="item.kind === 'online'"
+                  class="sa-row sa-row-online"
+                  :class="{ active: i === activeIndex }"
+                  role="button"
+                  tabindex="0"
+                  @mousemove="activeIndex = i"
+                  @click="downloadOnline(item)"
+                >
+                  <span class="sa-badge" :class="'sa-badge-' + item.kind">
+                    {{ item.badge || t("search.badge." + item.kind) }}
+                  </span>
+                  <span class="sa-info">
+                    <span class="sa-title">{{ item.title }}</span>
+                    <span v-if="item.subtitle" class="sa-subtitle">{{ item.subtitle }}</span>
+                  </span>
+                  <span class="sa-acts">
+                    <button
+                      v-if="onlineSource === 'netease'"
+                      type="button"
+                      class="sa-act"
+                      :title="t('search.preview')"
+                      :aria-label="t('search.preview')"
+                      @click.stop="previewOnline(item)"
+                    >
+                      <Play :size="13" />
+                    </button>
+                    <button
+                      v-if="onlineSource === 'netease'"
+                      type="button"
+                      class="sa-act"
+                      :title="t('search.addToLibrary')"
+                      :aria-label="t('search.addToLibrary')"
+                      @click.stop="addOnlineToLibrary(item)"
+                    >
+                      <Plus :size="13" />
+                    </button>
+                    <button
+                      type="button"
+                      class="sa-act"
+                      :class="{ busy: downloading[item.id] }"
+                      :title="t('search.download')"
+                      :aria-label="t('search.download')"
+                      @click.stop="downloadOnline(item)"
+                    >
+                      <Loader2 v-if="downloading[item.id]" :size="13" class="sa-spin" />
+                      <Download v-else :size="13" />
+                    </button>
+                  </span>
+                </div>
                 <button
+                  v-else
                   type="button"
                   class="sa-row"
                   :class="{ active: i === activeIndex }"
@@ -100,12 +152,6 @@
                     :class="{ open: expandedId === item.id }"
                   />
                   <Play v-else-if="item.kind === 'song'" :size="14" class="sa-row-ic" />
-                  <Download
-                    v-else-if="item.kind === 'online'"
-                    :size="13"
-                    class="sa-row-ic"
-                    :class="{ busy: downloading[item.id] }"
-                  />
                 </button>
                 <!-- 设置行展开的内联控件（同一时间只展开一个；按 payload 条目 id 匹配） -->
                 <div
@@ -184,8 +230,23 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { Search, X, Loader2, Play, Download, ChevronRight, SlidersHorizontal } from "@lucide/vue";
-import { state, selectSong, play, playbackSettings } from "../composables/usePlayer.js";
+import {
+  Search,
+  X,
+  Loader2,
+  Play,
+  Plus,
+  Download,
+  ChevronRight,
+  SlidersHorizontal,
+} from "@lucide/vue";
+import {
+  state,
+  selectSong,
+  play,
+  playPreview,
+  playbackSettings,
+} from "../composables/usePlayer.js";
 import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
 import { SETTING_CATEGORIES, settingsIndex } from "../settingsIndex.js";
@@ -207,6 +268,7 @@ const inputEl = ref(null);
 const activeIndex = ref(-1); // 结果高亮行索引
 const expandedId = ref(null); // 当前展开内联控件的设置条目 id（互斥单开）
 const downloading = reactive({}); // 在线条目 id → 下载中
+const adding = reactive({}); // 在线条目 id → 添加到曲库中
 const toast = ref("");
 const toastErr = ref(false);
 
@@ -366,6 +428,67 @@ async function downloadOnline(item) {
     showToast(t("search.downloadFailed", { msg: err.message || t("search.noResult") }), true);
   } finally {
     downloading[item.id] = false;
+  }
+}
+
+// 在线歌曲试听（网易云）：实时取直链 → playPreview（临时播放列表语义：
+// 不改曲库/队列/currentIndex，播完自然停，切歌回主队列；默认不计播放统计）
+async function previewOnline(item) {
+  const p = item.payload || {};
+  const ok = await playPreview({
+    provider: "netease",
+    id: p.id,
+    title: p.title || item.title,
+    artist: p.artist || "",
+    album: p.album || "",
+    cover: p.cover,
+    duration: p.duration,
+  });
+  // 直链获取失败时 playPreview 已 toast 错误，这里只报成功
+  if (ok) showToast(t("search.previewing", { title: item.title }), false);
+}
+
+// 添加到曲库：POST /api/network-songs（后端幂等去重；曲库 3s 轮询自动刷新）
+async function addOnlineToLibrary(item) {
+  if (adding[item.id]) return;
+  adding[item.id] = true;
+  const p = item.payload || {};
+  try {
+    const res = await fetch("/api/network-songs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: p.id,
+        title: p.title || item.title,
+        artist: p.artist || "",
+        album: p.album || undefined,
+        coverUrl: p.cover || undefined,
+        duration: p.duration || undefined,
+      }),
+    });
+    // 幂等去重：409 或响应携带 alreadyExists/alreadyInLibrary 标记 → 提示已在曲库
+    let already = res.status === 409;
+    let failed = false;
+    let errMsg = "";
+    if (!already) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        already = !!(data && (data.alreadyExists || data.alreadyInLibrary));
+      } else {
+        failed = true;
+        errMsg = data.error || data.detail || "";
+      }
+    }
+    if (already) {
+      showToast(t("search.alreadyInLibrary", { title: item.title }), true);
+      return;
+    }
+    if (failed) throw new Error(errMsg);
+    showToast(t("search.addedToLibrary", { title: item.title }), false);
+  } catch (err) {
+    showToast(t("search.addToLibraryFailed", { msg: err.message || "" }), true);
+  } finally {
+    adding[item.id] = false;
   }
 }
 
@@ -631,7 +754,37 @@ onBeforeUnmount(() => {
 .sa-row-ic.busy {
   opacity: 0.5;
 }
-/* 设置行展开的内联控件 */
+/* 在线行：三按钮布局（试听 / 添加到曲库 / 下载） */
+.sa-row-online {
+  cursor: pointer;
+}
+.sa-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.sa-act {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+@media (hover: hover) {
+  .sa-act:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+}
+.sa-act.busy {
+  opacity: 0.5;
+  pointer-events: none;
+} /* 设置行展开的内联控件 */
 .sa-inline {
   margin: 0 10px 8px 10px;
   padding: 10px 14px;
@@ -763,6 +916,11 @@ onBeforeUnmount(() => {
   .sa-foot {
     gap: 10px;
     padding: 8px 14px;
+  }
+  /* 在线行动作按钮：增大触摸目标 */
+  .sa-act {
+    width: 32px;
+    height: 32px;
   }
 }
 </style>

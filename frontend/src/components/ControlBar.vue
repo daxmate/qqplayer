@@ -97,6 +97,10 @@
         </button>
       </template>
 
+      <button class="btn" :title="t('control.playUrl')" @click="urlOpen = true">
+        <Link2 :size="15" />
+      </button>
+
       <button
         class="btn"
         :class="{ on: state.zhVisible }"
@@ -155,6 +159,32 @@
 
     <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
     <div v-if="!isMobile && sleepTimerText" class="sleep-timer">{{ sleepTimerText }}</div>
+    <!-- 播放 URL 弹窗（试听语义：临时播放，默认不计统计；支持电台流） -->
+    <Teleport to="body">
+      <div v-if="urlOpen" class="url-mask" @click.self="urlOpen = false">
+        <div class="url-modal" role="dialog" aria-modal="true">
+          <div class="url-title">
+            <Link2 :size="15" />
+            {{ t("control.playUrl") }}
+          </div>
+          <input
+            v-model="urlInput"
+            class="url-input"
+            type="text"
+            :placeholder="t('control.playUrlPlaceholder')"
+            spellcheck="false"
+            @keydown.enter="confirmUrl"
+          />
+          <div v-if="urlError" class="url-err">{{ urlError }}</div>
+          <div class="url-actions">
+            <button class="url-btn" @click="urlOpen = false">{{ t("common.cancel") }}</button>
+            <button class="url-btn primary" @click="confirmUrl">
+              {{ t("control.playUrlConfirm") }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -170,6 +200,7 @@ import {
   StepForward,
   Mic,
   Gauge,
+  Link2,
   Repeat1,
   Repeat2,
   Repeat,
@@ -195,6 +226,7 @@ import {
   toggleZh,
   cyclePlayMode,
   toggleControls,
+  playUrl,
 } from "../composables/usePlayer.js";
 import { ChevronDown, Volume1, Volume2, VolumeX } from "@lucide/vue";
 import { Pencil } from "@lucide/vue";
@@ -210,6 +242,23 @@ const { t } = useI18n();
 
 // 歌曲信息编辑弹窗开关（仅当前播放歌曲存在时入口按钮可见）
 const tagEditorOpen = ref(false);
+
+// ============ 播放 URL（试听语义；校验 http/https，非法提示不关闭弹窗） ============
+const urlOpen = ref(false);
+const urlInput = ref("");
+const urlError = ref("");
+
+async function confirmUrl() {
+  const raw = urlInput.value.trim();
+  if (!/^https?:\/\//i.test(raw)) {
+    urlError.value = t("control.playUrlInvalid");
+    return;
+  }
+  urlOpen.value = false;
+  urlInput.value = "";
+  urlError.value = "";
+  await playUrl(raw);
+}
 
 function onSeek(e) {
   seek(parseFloat(e.target.value));
@@ -476,6 +525,87 @@ function fmt(t) {
   color: var(--text3);
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
+}
+/* 播放 URL 弹窗 */
+.url-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 16px;
+}
+.url-modal {
+  width: 380px;
+  max-width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 24px 72px var(--shadow-strong);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.url-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.url-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.url-input:focus {
+  border-color: var(--accent);
+}
+.url-input::placeholder {
+  color: var(--text3);
+}
+.url-err {
+  font-size: 12px;
+  color: #ff6b6b;
+}
+.url-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.url-btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+@media (hover: hover) {
+  .url-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+}
+.url-btn.primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent;
 }
 .fmt-badge {
   display: inline-block;

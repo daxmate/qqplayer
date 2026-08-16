@@ -22,5 +22,9 @@ export default {
     modeRepeatOne: "单曲循环（点击切换）",
     sleepTimerFired: "睡眠定时器已到点",
     sleepTimerRunning: "睡眠定时器 {time}",
+    playUrl: "播放 URL",
+    playUrlPlaceholder: "粘贴音频 URL（http/https，支持电台流）",
+    playUrlInvalid: "请输入合法的 http(s) 地址",
+    playUrlConfirm: "播放",
   },
 };

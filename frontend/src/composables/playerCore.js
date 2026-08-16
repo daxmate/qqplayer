@@ -1,7 +1,14 @@
 import { reactive, watch, ref } from "vue";
 import { uiSettings, ACCENT_OPTIONS } from "./useSettings.js";
 import { EQ_BANDS, EQ_PRESETS, _normalizeEqPreset } from "./useEq.js";
-import { loadLyric, reanchorKaraoke, currentLineIndex, nextLine, prevLine } from "./useLyric.js";
+import {
+  loadLyric,
+  loadOnlineLyricForSong,
+  reanchorKaraoke,
+  currentLineIndex,
+  nextLine,
+  prevLine,
+} from "./useLyric.js";
 import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
 import { isSearchOpen } from "./searchState.js";
@@ -76,6 +83,7 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   visualizerEnabled: true, // 频谱可视化开关（默认开；仅播放中活跃，暂停静止平线）
   sleepTimerOn: false, // 睡眠定时器开关（统一层持久化；运行中的倒计时不持久化，页面刷新即取消）
   sleepTimerMinutes: 30, // 睡眠定时器时长（分钟，chip 单选）
+  streamStats: false, // 流媒体统计开关：true = 试听 / URL 播放计入播放统计（曲库网络条目始终计入）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
@@ -236,6 +244,29 @@ export function toggleMute() {
   audio.volume = state.muted ? 0 : state.volume;
 }
 
+// ============ 播放器级 toast（流媒体直链失败等播放错误）============
+// 组件本地 toast 照旧各自维护；这里只处理播放器全局错误（stream 直链失败 / 非法 URL 等）
+// App.vue 渲染；测试可直接断言 playerToast.msg
+export const playerToast = reactive({ msg: "", err: false });
+
+let playerToastTimer = null;
+
+export function showPlayerToast(msg, isErr = true) {
+  playerToast.msg = msg;
+  playerToast.err = !!isErr;
+  clearTimeout(playerToastTimer);
+  playerToastTimer = setTimeout(() => {
+    playerToast.msg = "";
+  }, 3200);
+}
+
+// 仅供测试：立即清除播放器 toast（避免用例间残留）
+export function _resetPlayerToast() {
+  clearTimeout(playerToastTimer);
+  playerToast.msg = "";
+  playerToast.err = false;
+}
+
 // ============ 队列操作 ============
 export function removeFromQueue(index) {
   if (index < 0 || index >= state.songs.length) return;
@@ -269,7 +300,21 @@ let playbackSession = null; // { path,name,artist,album,startedAt,lastTickAt }
 
 function currentPlaybackSource() {
   // 播放来源：媒体键/自动切歌/手动选歌（后续可扩展）
+  const song = state.currentSong;
+  if (!song) return state.lastSource || "manual";
+  if (song.type === "url") return "url";
+  if (song.type === "preview") return "preview";
+  // 曲库网络条目（stream 歌）：source 标记 'stream'（享本地待遇，正常上报）
+  if (isStreamSong(song)) return "stream";
   return state.lastSource || "manual";
+}
+
+// 播放会话标识（path 为 null 的流媒体歌用 streamId/url 区分，避免同 null 误判为同一首歌）
+function songSessionKey(song) {
+  if (!song) return null;
+  if (song.path) return song.path;
+  if (song.streamId) return "stream:" + song.streamId;
+  return "song:" + song.name;
 }
 
 // 上报一条播放记录（POST /api/playback；失败静默，不影响播放）
@@ -293,6 +338,8 @@ export function flushPlaybackSession() {
   playbackSession = null;
   const played = (Date.now() - s.startedAt) / 1000;
   if (played < 3) return null; // 误触/短切
+  // 试听 / URL 播放：streamStats 关闭时不上报（曲库网络条目 stream 歌始终正常上报）
+  if (s.skipStats && !playbackSettings.streamStats) return null;
   const rec = {
     ts: new Date().toISOString(),
     path: s.path,
@@ -316,6 +363,7 @@ function startPlaybackSession() {
   const song = state.currentSong;
   if (!song) return;
   playbackSession = {
+    key: songSessionKey(song),
     path: song.path,
     name: song.name || "",
     artist: song.artist || "",
@@ -326,6 +374,8 @@ function startPlaybackSession() {
     source: currentPlaybackSource(),
     mode: state.mode,
     device: "mac",
+    // 试听 / URL 播放标记：streamStats 关闭时 flush 丢弃（曲库网络条目 stream 歌不标记）
+    skipStats: isPreviewSong(song),
   };
 }
 
@@ -438,14 +488,16 @@ function updateMediaMetadata() {
     ms.metadata = null;
     return;
   }
-  const artwork = song.path
-    ? [
-        {
-          src: absoluteUrl("/api/cover?path=" + encodeURIComponent(song.path)),
-          sizes: "512x512",
-        },
-      ]
-    : [];
+  const artwork = song.coverUrl
+    ? [{ src: song.coverUrl, sizes: "512x512" }] // 流媒体歌：直接用网络图 URL
+    : song.path
+      ? [
+          {
+            src: absoluteUrl("/api/cover?path=" + encodeURIComponent(song.path)),
+            sizes: "512x512",
+          },
+        ]
+      : [];
   ms.metadata = new MediaMetadata({
     title: song.name || i18n.global.t("errors.unknownSong"),
     artist: song.artist || "",
@@ -717,8 +769,10 @@ export async function loadSongs() {
       state.currentIndex = 0;
       await selectSong(0);
     } else if (songs.length && state.currentSong) {
-      // 刷新后保持当前选中
-      const idx = songs.findIndex((s) => s.path === state.currentSong.path);
+      // 刷新后保持当前选中（流媒体歌 path 为 null 不参与 path 匹配，避免误选中第一个 stream 条目）
+      const idx = state.currentSong.path
+        ? songs.findIndex((s) => s.path === state.currentSong.path)
+        : -1;
       if (idx >= 0) state.currentIndex = idx;
     }
   } catch (e) {
@@ -807,6 +861,150 @@ function fadeIn(sec) {
   }, 50);
 }
 
+// ============ 流媒体歌（曲库网络条目 / 试听 / URL 播放）============
+// 曲库网络条目：{type:'stream', streamId, provider, path:null, name, artist, album, duration, coverUrl}
+// 试听歌：{type:'preview', ...}；URL 播放：{type:'url', url, ...}——两者都是「临时播放列表」语义
+// （不改 state.songs / 不改 currentIndex，播完自然停，任何切歌操作回到主队列）
+
+export function isStreamSong(song) {
+  return !!song && (song.type === "stream" || (song.path === null && !!song.streamId));
+}
+
+export function isPreviewSong(song) {
+  return !!song && (song.type === "preview" || song.type === "url");
+}
+
+// 实时获取流媒体直链（每次播放前请求，不缓存）。失败自动重试一次；仍失败返回 null（调用方 toast）
+export async function fetchStreamUrl(provider, id, level = "exhigh") {
+  if (!id && id !== 0) return null;
+  const url =
+    "/api/stream/url?provider=" +
+    encodeURIComponent(provider || "netease") +
+    "&id=" +
+    encodeURIComponent(id) +
+    "&level=" +
+    encodeURIComponent(level);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.url) return data.url;
+      }
+    } catch {
+      // 网络错误：重试一次
+    }
+  }
+  return null;
+}
+
+// URL 播放 / 试听歌 → 内部歌对象（path: null，标记临时播放语义）
+function toPreviewSong(desc) {
+  if (desc.url) {
+    return {
+      type: "url",
+      path: null,
+      streamId: desc.url,
+      provider: "http",
+      name: desc.title || urlTitle(desc.url),
+      artist: desc.artist || "",
+      album: desc.album || "",
+      coverUrl: desc.cover || "",
+      duration: 0,
+      url: desc.url,
+    };
+  }
+  return {
+    type: "preview",
+    path: null,
+    streamId: String(desc.id),
+    provider: desc.provider || "netease",
+    name: desc.title || "",
+    artist: desc.artist || "",
+    album: desc.album || "",
+    coverUrl: desc.cover || "",
+    duration: desc.duration || 0,
+  };
+}
+
+// URL 默认标题：取文件名（pathname 最后一段）或域名
+function urlTitle(url) {
+  try {
+    const u = new URL(url);
+    const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+    return last || u.hostname;
+  } catch {
+    return url;
+  }
+}
+
+// 试听 = 临时播放列表（核心语义，用户 2026-08-16 拍板）：
+// - 保存当前播放上下文（currentIndex / currentSong 不动；isPlaying 由 play 事件接管）
+// - 不改 state.songs、不改 currentIndex
+// - 播完（ended）自然停止，不自动 nextSong
+// - nextSong / prevSong / selectSong → 走主队列正常逻辑（基于未动的 currentIndex，试听自然丢弃）
+// - 试听中歌词 / 封面照常显示（在线匹配）；不上报播放统计（streamStats 关时）
+// 返回 true = 已开始试听；false = 直链获取失败（已 toast）
+export async function playPreview(desc, opts = {}) {
+  const song = toPreviewSong(desc);
+  // 取直链：URL 播放直接用 url；网络试听实时请求（失败重试一次，仍失败 toast）
+  let src = song.url || null;
+  if (!src) {
+    src = await fetchStreamUrl(song.provider, song.streamId, opts.level);
+    if (!src) {
+      showPlayerToast(i18n.global.t("errors.streamUrlFailed", { name: song.name || "" }), true);
+      return false;
+    }
+  }
+  // 停止旧歌并上报旧会话（主队列正在播的歌是真实播放，照常上报）
+  audio.pause();
+  if (playbackSession) playbackSession.completed = audio.ended;
+  flushPlaybackSession();
+  // 挂载试听源：不动 state.songs / currentIndex
+  state.currentSong = song;
+  state.isPlaying = false;
+  audio.src = src;
+  audio.playbackRate = state.speed;
+  audio.volume = state.muted ? 0 : state.volume;
+  state.currentTime = 0;
+  state.duration = 0;
+  state.lyric = [];
+  state.lyricFormat = null;
+  state.lyricSource = null;
+  state.abLoop = null;
+  resetAbLoopCount();
+  if (opts.autoPlay !== false) {
+    audio.play().catch(() => {});
+  }
+  // 预取时长（电台流 duration=Infinity → 保持 0，进度条走空态不崩）
+  audio.addEventListener(
+    "loadedmetadata",
+    () => {
+      state.duration = isFiniteNumber(audio.duration) ? audio.duration : 0;
+    },
+    { once: true },
+  );
+  // 试听歌词：在线匹配（歌名/歌手）
+  const lr = await loadOnlineLyricForSong(song);
+  state.lyric = lr.lines;
+  state.lyricFormat = lr.format;
+  state.lyricSource = lr.source;
+  return true;
+}
+
+// 播放 URL（电台流 / 直链）：playPreview 语义（临时播放，不落库、默认不计统计）
+export async function playUrl(url, opts = {}) {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url.trim())) {
+    showPlayerToast(i18n.global.t("errors.urlInvalid"), true);
+    return;
+  }
+  await playPreview({ url: url.trim(), title: opts.title || "" }, opts);
+}
+
+function isFiniteNumber(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 // ============ 选歌 ============
 export async function selectSong(index, opts = {}) {
   if (index < 0 || index >= state.songs.length) return;
@@ -840,7 +1038,26 @@ export async function selectSong(index, opts = {}) {
   state.currentSong = state.songs[index];
   state.isPlaying = false;
   audio.pause();
-  audio.src = "/api/audio?path=" + encodeURIComponent(state.songs[index].path);
+  // 曲库网络条目（stream 歌）：实时取直链（失败重试一次，仍失败 toast）；本地歌走 /api/audio
+  let src;
+  if (isStreamSong(state.currentSong)) {
+    const { provider, streamId } = state.currentSong;
+    src = await fetchStreamUrl(provider, streamId, opts.level);
+    if (!src) {
+      // 保持已选歌曲状态（UI 可见），但不播放；清掉旧源避免播放键续播上一首
+      audio.removeAttribute("src");
+      state.currentTime = 0;
+      state.duration = 0;
+      showPlayerToast(
+        i18n.global.t("errors.streamUrlFailed", { name: state.currentSong.name || "" }),
+        true,
+      );
+      return;
+    }
+  } else {
+    src = "/api/audio?path=" + encodeURIComponent(state.currentSong.path);
+  }
+  audio.src = src;
   audio.playbackRate = state.speed;
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   audio.volume = state.muted ? 0 : state.volume;
@@ -859,10 +1076,11 @@ export async function selectSong(index, opts = {}) {
   // 加载歌词
   await loadLyric(index);
   // 预取时长；恢复上次播放时在这里 seek 到断点
+  // （电台流 duration=Infinity → 保持 0，进度条走空态不崩）
   audio.addEventListener(
     "loadedmetadata",
     () => {
-      state.duration = audio.duration || 0;
+      state.duration = isFiniteNumber(audio.duration) ? audio.duration : 0;
       if (opts.resumeAt != null && audio.duration) {
         const t = Math.min(opts.resumeAt, Math.max(0, audio.duration - 0.5));
         audio.currentTime = t;
@@ -977,10 +1195,16 @@ function scheduleNowPlaying(extra = {}) {
   nowPlayingTimer = setTimeout(flushNowPlaying, 250);
 }
 
-watch([() => state.currentSong?.path, currentLineIndex], ([path, line]) => {
+watch([() => songKeyOf(state.currentSong), currentLineIndex], ([path, line]) => {
   if (!path || line < 0) return;
   scheduleNowPlaying({ path, lineIndex: line });
 });
+
+// 当前播放歌曲的稳定标识（path 为 null 的流媒体歌用 streamId 兜底，桌面歌词/迷你窗照常上报）
+function songKeyOf(song) {
+  if (!song) return null;
+  return song.path || (song.streamId ? "stream:" + song.streamId : null);
+}
 
 // 播放状态/音量/时长变化 → 上报（迷你窗进度条与播放键状态实时跟随）
 watch([() => state.isPlaying, () => state.volume, () => state.muted, () => state.duration], () => {
@@ -992,7 +1216,7 @@ watch([() => state.isPlaying, () => state.volume, () => state.muted, () => state
 watch(
   () => uiSettings.accent,
   () => {
-    const path = state.currentSong?.path;
+    const path = songKeyOf(state.currentSong);
     const line = currentLineIndex.value;
     if (!path || line < 0) return;
     scheduleNowPlaying({ path, lineIndex: line });
@@ -1101,6 +1325,9 @@ loadLastPlayedCache();
 export function saveLastPlayed() {
   const song = state.currentSong;
   if (!playbackSettings.resumeLast || !song || !audio.src) return;
+  // 流媒体歌（试听 / URL / 曲库网络条目）没有本地 path：不记入恢复播放
+  // （恢复按 path 匹配，null 会误匹配曲库首个 stream 条目）
+  if (!song.path) return;
   const pos = audio.currentTime || 0;
   if (!(pos > 0)) return;
   const rec = { path: song.path, position: pos, ts: Date.now() };
@@ -1175,7 +1402,7 @@ audio.addEventListener("play", () => {
   // 真正开始出声才建播放会话：选歌但未播放不记；
   // 若已跟踪的歌不同（换歌后立即播放）→ 先上报旧会话
   const song = state.currentSong;
-  if (song && (!playbackSession || playbackSession.path !== song.path)) {
+  if (song && (!playbackSession || playbackSession.key !== songSessionKey(song))) {
     flushPlaybackSession();
     startPlaybackSession();
   }
@@ -1200,6 +1427,8 @@ audio.addEventListener("ended", () => {
     playbackSession.completed = true;
     flushPlaybackSession();
   }
+  // 试听 / URL 播放：播完自然停止，不自动切歌（currentIndex 未动，next/prev 随时回主队列）
+  if (isPreviewSong(state.currentSong)) return;
   if (state.mode !== "continuous") return;
   if (state.playMode === "repeatOne") {
     // 单曲循环：重播本首
@@ -1244,6 +1473,8 @@ export function setupPlaybackFlush() {
     playbackSession = null;
     const played = (Date.now() - s.startedAt) / 1000;
     if (played < 3) return;
+    // 试听 / URL 播放：streamStats 关闭时不上报（与 flushPlaybackSession 同规则）
+    if (s.skipStats && !playbackSettings.streamStats) return;
     const rec = {
       ts: new Date().toISOString(),
       path: s.path,

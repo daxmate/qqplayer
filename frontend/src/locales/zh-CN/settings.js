@@ -50,6 +50,8 @@ export default {
     },
     visualizer: "频谱可视化",
     visualizerDesc: "播放时封面下方显示动态频谱条（暂停时静止）",
+    streamStats: "流媒体 / 试听计入播放统计",
+    streamStatsDesc: "开启后试听与 URL 播放计入统计；曲库网络歌曲始终计入",
     abLoop: "AB 循环",
     abVisual: "区间可视化",
     abVisualDesc: "起点句 A / 终点句 B 徽标与区间进度显示",

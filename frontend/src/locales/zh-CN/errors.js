@@ -17,5 +17,7 @@ export default {
     loadPlayback: "加载播放记录失败",
     loadPlaybackStats: "加载播放统计失败",
     loadFailed: "加载失败",
+    streamUrlFailed: "获取试听直链失败：{name}",
+    urlInvalid: "请输入合法的 http(s) 音频地址",
   },
 };

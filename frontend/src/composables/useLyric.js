@@ -1,7 +1,31 @@
 import { computed, watch } from "vue";
 import { audio, state } from "./playerCore.js";
 import { lyricSettings } from "./useSettings.js";
+import { parseLrcText, mergeTranslationLines } from "../utils/parseLrc.js";
 import i18n from "../locales/i18n.js";
+
+// 非本地歌（stream 曲库网络条目 / 试听 / URL 播放）：没有可解析的本地歌词文件，
+// 按歌名/歌手走在线候选链路（/api/lyric/search 返回候选 LRC 全文 + 翻译），
+// 前端解析成与后端 /api/lyric 一致的 lines 结构。失败/无结果返回空歌词（不抛错）。
+export async function loadOnlineLyricForSong(song) {
+  try {
+    const q = new URLSearchParams({ title: song.name || "", artist: song.artist || "" });
+    const res = await fetch("/api/lyric/search?" + q.toString(), { cache: "no-store" });
+    if (!res.ok) return { lines: [], format: null, source: null };
+    const data = await res.json();
+    const results = Array.isArray(data.results) ? data.results : [];
+    if (!results.length) return { lines: [], format: null, source: null };
+    // 首选歌名精确匹配且有歌词的候选；否则第一个带歌词的
+    const exact = results.find((r) => r.text && r.title === song.name);
+    const hit = exact || results.find((r) => r.text);
+    if (!hit) return { lines: [], format: null, source: null };
+    let lines = parseLrcText(hit.text || "");
+    if (hit.tlyric) lines = mergeTranslationLines(lines, parseLrcText(hit.tlyric));
+    return { lines, format: lines.length ? "lrc" : null, source: hit.source || "online" };
+  } catch {
+    return { lines: [], format: null, source: null };
+  }
+}
 
 // ============ 歌词加载（默认当前歌）；来源优先级按 lyricSettings.source：============
 // 'local' 本地优先 | 'online' 在线优先（在线失败后端自动回退本地）
@@ -10,6 +34,15 @@ export async function loadLyric(index = state.currentIndex) {
     state.lyric = [];
     state.lyricFormat = null;
     state.lyricSource = null;
+    return;
+  }
+  const song = state.songs[index];
+  // 非本地歌（stream 网络歌 / path 为 null）：在线歌词链路（歌名/歌手搜索）
+  if (!song.path || song.type === "stream") {
+    const res = await loadOnlineLyricForSong(song);
+    state.lyric = res.lines;
+    state.lyricFormat = res.format;
+    state.lyricSource = res.source;
     return;
   }
   try {
