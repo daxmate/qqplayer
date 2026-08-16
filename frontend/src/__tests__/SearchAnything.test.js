@@ -390,7 +390,7 @@ describe("在线源切换（网易云 / 歌曲海）", () => {
     let dlCalls = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, init) => {
+      vi.fn(async (url) => {
         const u = String(url);
         if (u.includes("source=gequhai")) {
           return {
