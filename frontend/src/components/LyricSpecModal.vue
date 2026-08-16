@@ -159,7 +159,7 @@ import {
   searchLyricCandidates,
   state,
 } from "../composables/usePlayer.js";
-import { toastError } from "../composables/useToast.js";
+import { toastError, showToast } from "../composables/useToast.js";
 
 const { t } = useI18n();
 
@@ -305,11 +305,46 @@ async function save() {
   }
 }
 
+// 清除指定歌词：缓存原数据 → toast「已清除 [撤销]」→ 撤销 = PUT 原样恢复
+// 清除失败 → toastError（不弹撤销）
+const UNDO_DURATION = 5000;
+
+async function restoreManualLyric(cached) {
+  if (!cached) return;
+  try {
+    await saveManualLyric({
+      path: cached.path,
+      format: cached.format,
+      text: cached.text,
+      source: cached.source,
+      tlyric: cached.tlyric,
+    });
+    manual.value = await fetchManualLyric(cached.path);
+    await loadLyric();
+    showToast(t("lyric.manualRestored"));
+  } catch (err) {
+    toastError(err.message || t("spec.saveFailed"));
+  }
+}
+
 async function clearSpec() {
   if (!song.value) return;
-  await deleteManualLyric(song.value.path);
+  // 清除前缓存当前手动歌词数据（供撤销 PUT 恢复；manual 为打开弹窗时 GET 的当前内容）
+  const cached = manual.value ? { ...manual.value, path: song.value.path } : null;
+  const ok = await deleteManualLyric(song.value.path);
+  if (!ok) {
+    toastError(t("spec.clearFailed"));
+    return;
+  }
   manual.value = null;
   await loadLyric();
+  showToast(t("lyric.manualCleared"), {
+    duration: UNDO_DURATION,
+    action: {
+      label: t("queue.undo"),
+      onClick: () => restoreManualLyric(cached),
+    },
+  });
 }
 
 // 保存成功：刷新状态与歌词 → 关闭

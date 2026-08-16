@@ -127,6 +127,7 @@ const {
 const { toggleMusicLib, togglePlaylist, PANEL_KEY } = await import("../composables/usePlayer.js");
 const { toggleControls, CONTROLS_KEY } = await import("../composables/usePlayer.js");
 const { loadLyric } = await import("../composables/usePlayer.js");
+const { useToast, clearToasts } = await import("../composables/useToast.js");
 
 const RESET = {
   songs: [],
@@ -558,6 +559,70 @@ describe("removeFromQueue", () => {
     state.currentIndex = 1;
     removeFromQueue(5);
     expect(state.songs).toHaveLength(3);
+  });
+});
+
+describe("removeFromQueue 撤销（toast + 原位恢复）", () => {
+  const SONGS = [
+    { path: "/a.mp3", name: "A" },
+    { path: "/b.mp3", name: "B" },
+    { path: "/c.mp3", name: "C" },
+    { path: "/d.mp3", name: "D" },
+  ];
+
+  beforeEach(() => clearToasts());
+  afterEach(() => clearToasts());
+
+  it("移除后 toast 出现（带撤销 action、5s 窗口）；点撤销 → 歌曲回到原位", () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 1;
+    removeFromQueue(1); // 移除 B（当前歌）→ 切到 C
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "C", "D"]);
+    expect(state.currentIndex).toBe(1);
+    const { items } = useToast();
+    expect(items).toHaveLength(1);
+    expect(items[0].text).toContain("B");
+    expect(items[0].duration).toBe(5000);
+    expect(items[0].action.label).toBe("撤销");
+    items[0].action.onClick();
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C", "D"]);
+    expect(state.currentIndex).toBe(2); // C 仍是当前歌（索引顺延）
+  });
+
+  it("多首依次移除：各自独立 toast、各自原位撤销", () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 0;
+    removeFromQueue(1); // 移除 B → [A,C,D]
+    removeFromQueue(2); // 移除 D → [A,C]
+    const { items } = useToast();
+    expect(items).toHaveLength(2);
+    items[1].action.onClick(); // 撤销 D（原 index 2）→ [A,C,D]
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "C", "D"]);
+    items[0].action.onClick(); // 撤销 B（原 index 1）→ [A,B,C,D]
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("原 index 越界（期间又移除其他歌）→ clamp 到末尾，不丢歌", () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 3;
+    removeFromQueue(3); // 移除 D → [A,B,C]
+    removeFromQueue(1); // 移除 B → [A,C]
+    const { items } = useToast();
+    items[1].action.onClick(); // 撤销 B（index 1）→ [A,B,C]
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C"]);
+    items[0].action.onClick(); // 撤销 D（原 index 3 越界）→ clamp 到末尾
+    expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("撤销成功后弹出「已恢复」提示", () => {
+    state.songs = [...SONGS];
+    state.currentIndex = 0;
+    removeFromQueue(0);
+    const { items } = useToast();
+    items[0].action.onClick();
+    const after = useToast().items;
+    expect(after).toHaveLength(2); // 移除 toast + 已恢复 toast
+    expect(after[1].text).toContain("已恢复");
   });
 });
 
@@ -2217,6 +2282,30 @@ describe("歌单", () => {
     );
     await expect(removeFromPlaylist("p1", "/b.mp3")).rejects.toThrow("移出歌单失败");
     expect(isInPlaylist("p1", "/b.mp3")).toBe(true);
+  });
+
+  it("removeFromPlaylist 移除成功弹 toast（带撤销）；点撤销 → POST 加回歌单末尾", async () => {
+    state.playlists = [{ id: "p1", name: "旅行", songPaths: ["/a.mp3"] }];
+    state.songs = [{ path: "/a.mp3", name: "A歌" }];
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    clearToasts();
+    await removeFromPlaylist("p1", "/a.mp3");
+    expect(isInPlaylist("p1", "/a.mp3")).toBe(false);
+    const { items } = useToast();
+    expect(items).toHaveLength(1);
+    expect(items[0].text).toContain("A歌");
+    expect(items[0].duration).toBe(5000);
+    expect(items[0].action).toBeTruthy();
+    // 点撤销 → POST /api/playlists/p1/songs 加回
+    items[0].action.onClick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(isInPlaylist("p1", "/a.mp3")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/playlists/p1/songs",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ path: "/a.mp3" }) }),
+    );
+    clearToasts();
   });
 
   it("setPlaylistOrder 提交新顺序；失败回滚", async () => {

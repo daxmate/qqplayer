@@ -1,5 +1,6 @@
 import { computed } from "vue";
 import { state } from "./playerCore.js";
+import { showToast, toastError } from "./useToast.js";
 import i18n from "../locales/i18n.js";
 
 // ============ 收藏（后端持久化 ~/Library/Application Support/qqplayer）============
@@ -137,6 +138,18 @@ export async function addToPlaylist(pid, path) {
   }
 }
 
+// 移除成功后的撤销：加回歌单末尾（POST 现有 API；原位恢复需整体重排，成本高价值低）
+const UNDO_DURATION = 5000;
+
+async function restoreToPlaylist(pid, path, name) {
+  try {
+    await addToPlaylist(pid, path);
+    showToast(i18n.global.t("playlist.restoredToPlaylist", { name }));
+  } catch (e) {
+    toastError(e.message || i18n.global.t("errors.addToPlaylist"));
+  }
+}
+
 export async function removeFromPlaylist(pid, path) {
   const p = _playlistById(pid);
   if (!p) return;
@@ -151,6 +164,16 @@ export async function removeFromPlaylist(pid, path) {
     p.songPaths.push(...removed); // 回滚
     throw new Error(i18n.global.t("errors.removeFromPlaylist"));
   }
+  // 移除成功：toast「已移除 [撤销]」（函数内部处理，Playlist.vue 两个调用处自动生效）
+  const song = state.songs.find((s) => s.path === path);
+  const name = song?.name || i18n.global.t("errors.unknownSong");
+  showToast(i18n.global.t("playlist.removedFromPlaylist", { name }), {
+    duration: UNDO_DURATION,
+    action: {
+      label: i18n.global.t("queue.undo"),
+      onClick: () => restoreToPlaylist(pid, path, name),
+    },
+  });
 }
 
 export async function setPlaylistOrder(pid, paths) {

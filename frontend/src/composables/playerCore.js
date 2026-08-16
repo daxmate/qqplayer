@@ -14,6 +14,7 @@ import { handleKaraokeTick, resetAbLoopCount, setAbPointA, setAbPointB } from ".
 import { toggleFavorite } from "./useLibrary.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
 import { isSearchOpen } from "./searchState.js";
+import { showToast } from "./useToast.js";
 import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
@@ -289,9 +290,13 @@ export function _resetPlayerToast() {
 }
 
 // ============ 队列操作 ============
+// 移除 + 撤销：缓存 {index, song} → toast「已移除 [撤销]」→ 插回原位（越界 clamp 到末尾，不丢歌）
+// 多首依次移除各自独立撤销（各自 toast、各自原位）；撤销后若处于过滤/分组浏览可能不可见，但数据不丢
+const UNDO_DURATION = 5000;
+
 export function removeFromQueue(index) {
   if (index < 0 || index >= state.songs.length) return;
-  state.songs.splice(index, 1);
+  const [song] = state.songs.splice(index, 1);
   if (index < state.currentIndex) {
     state.currentIndex -= 1;
   } else if (index === state.currentIndex) {
@@ -311,6 +316,22 @@ export function removeFromQueue(index) {
   }
   // 歌曲列表变了：洗牌队列失效，下次自动重建
   _resetPlayMode();
+
+  const name = song?.name || i18n.global.t("errors.unknownSong");
+  showToast(i18n.global.t("queue.removed", { name }), {
+    duration: UNDO_DURATION,
+    action: {
+      label: i18n.global.t("queue.undo"),
+      onClick: () => {
+        // 插回原位；原 index 越界（期间又移除了前面的歌）→ clamp 到末尾
+        state.songs.splice(Math.min(index, state.songs.length), 0, song);
+        // 镜像移除时的索引前移：插回位置在当前歌之前 → 当前索引顺延（越界时当前索引为 -1，不动）
+        if (state.currentIndex >= 0 && index <= state.currentIndex) state.currentIndex += 1;
+        _resetPlayMode();
+        showToast(i18n.global.t("queue.restored", { name }));
+      },
+    },
+  });
 }
 
 // ============ 播放会话跟踪（上报播放统计）============

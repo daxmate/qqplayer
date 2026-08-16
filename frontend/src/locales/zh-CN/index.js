@@ -18,6 +18,7 @@ import errors from "./errors.js";
 import tags from "./tags.js";
 import search from "./search.js";
 import importMessages from "./import.js";
+import queue from "./queue.js";
 
 export default {
   ...common,
@@ -37,4 +38,5 @@ export default {
   ...tags,
   ...search,
   ...importMessages,
+  ...queue,
 };

@@ -49,6 +49,8 @@ export default {
     playing: "播放中",
     removeFromPlaylist: "从歌单移除",
     removeFromQueue: "从队列移除",
+    removedFromPlaylist: "已从歌单移除《{name}》",
+    restoredToPlaylist: "已恢复《{name}》到歌单末尾",
     // 空态
     empty: {
       scanning: "扫描中…",

@@ -29,6 +29,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const LyricSpecModal = (await import("../components/LyricSpecModal.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { useToast, clearToasts } = await import("../composables/useToast.js");
 
 const SONG = {
   path: "/music/夜に駆ける.mp3",
@@ -52,7 +53,9 @@ function mockFetch(routes = {}) {
         : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
     }
     if (u.includes("/api/lyric/manual") && opts?.method === "DELETE") {
-      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
+      return routes.delete
+        ? routes.delete()
+        : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
     }
     // GET /api/lyric/manual
     return Promise.resolve({
@@ -63,6 +66,24 @@ function mockFetch(routes = {}) {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
+
+// jsdom 下 FileReader.onload 是异步任务，全量并行（42 个 worker）时固定 10ms tick 可能不够，
+// 导致“文本已更新但按钮 disabled 未刷新”的偶发失败 → 轮询等待渲染完成再断言
+function waitFor(fn, timeout = 3000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      try {
+        if (fn()) return resolve();
+      } catch {
+        /* 继续等 */
+      }
+      if (Date.now() - start > timeout) return reject(new Error("waitFor 超时"));
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
 
 async function openModal() {
   const w = mount(LyricSpecModal, { attachTo: document.body });
@@ -81,6 +102,7 @@ beforeEach(() => {
 afterEach(() => {
   state.specLyricOpen = false;
   state.currentSong = null;
+  clearToasts();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -128,7 +150,9 @@ describe("LyricSpecModal 上传文件", () => {
     });
     Object.defineProperty(input.element, "files", { value: [file] });
     await input.trigger("change");
-    await tick(); // 等 FileReader.onload
+    // 等 FileReader.onload + 渲染：.spec-preview 仅在检测到格式后渲染（
+    // 不能用 includes("LRC")——错误提示文案里也含 LRC，会在解析完成前误匹配）
+    await waitFor(() => w.find(".spec-preview").exists());
     await nextTick();
 
     expect(w.text()).toContain("test.lrc");
@@ -211,7 +235,8 @@ describe("LyricSpecModal JSON 歌词", () => {
     const file = new File([json], "song.json", { type: "application/json" });
     Object.defineProperty(input.element, "files", { value: [file] });
     await input.trigger("change");
-    await tick();
+    // .spec-preview 仅在检测到格式后渲染（"JSON" 会匹配错误提示文案里的“JSON 需包含 lrc 字段”）
+    await waitFor(() => w.find(".spec-preview").exists());
     await nextTick();
 
     expect(w.text()).toContain("song.json");
@@ -241,7 +266,8 @@ describe("LyricSpecModal JSON 歌词", () => {
     });
     Object.defineProperty(input.element, "files", { value: [file] });
     await input.trigger("change");
-    await tick();
+    // 等解析完成：格式标签“格式：未识别”（错误提示文案“可用歌词格式：LRC…”不含此串）
+    await waitFor(() => w.text().includes("格式：未识别"));
     await nextTick();
     expect(w.text()).toContain("未识别");
     expect(w.find(".btn-primary").attributes("disabled")).toBeDefined();
@@ -286,6 +312,65 @@ describe("LyricSpecModal 粘贴文本", () => {
     await nextTick();
     expect(w.text()).toContain("未识别");
     expect(w.find(".btn-primary").attributes("disabled")).toBeDefined();
+    w.unmount();
+  });
+});
+
+describe("LyricSpecModal 清除指定歌词（toast + 撤销）", () => {
+  it("清除 → toast 出现（带撤销）→ 点撤销 → PUT 恢复被调用、手动标识恢复", async () => {
+    const fetchMock = mockFetch({
+      manual: {
+        specified: true,
+        format: "lrc",
+        source: "粘贴",
+        text: "[00:01.00]x",
+        created_at: 1,
+      },
+    });
+    const w = await openModal();
+    expect(w.text()).toContain("已手动指定");
+    // 清除指定 → DELETE + toast（带撤销）
+    await w.find(".clear-link").trigger("click");
+    await tick();
+    expect(w.text()).not.toContain("已手动指定");
+    const { items } = useToast();
+    expect(items).toHaveLength(1);
+    expect(items[0].text).toContain("已清除指定歌词");
+    expect(items[0].duration).toBe(5000);
+    expect(items[0].action).toBeTruthy();
+    // 点撤销 → PUT /api/lyric/manual 原样恢复
+    items[0].action.onClick();
+    await tick();
+    const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
+    expect(putCall).toBeTruthy();
+    expect(JSON.parse(putCall[1].body)).toMatchObject({
+      path: SONG.path,
+      format: "lrc",
+      text: "[00:01.00]x",
+      source: "粘贴",
+    });
+    await nextTick();
+    expect(w.text()).toContain("已手动指定"); // 重新拉取 → 手动标识恢复
+    w.unmount();
+  });
+
+  it("清除失败 → toastError（不弹撤销）", async () => {
+    mockFetch({
+      manual: {
+        specified: true,
+        format: "lrc",
+        source: "粘贴",
+        text: "[00:01.00]x",
+      },
+      delete: () => Promise.resolve({ ok: false, json: async () => ({ detail: "失败" }) }),
+    });
+    const w = await openModal();
+    await w.find(".clear-link").trigger("click");
+    await tick();
+    const { items } = useToast();
+    expect(items.some((i) => i.type === "error")).toBe(true);
+    expect(items.some((i) => i.action)).toBe(false);
+    expect(w.text()).toContain("已手动指定"); // 清除失败 → 状态不变
     w.unmount();
   });
 });

@@ -30,6 +30,7 @@ export default {
     searchTitleRequired: "请输入歌名",
     searchFailed: "搜索失败，请重试",
     saveFailed: "保存失败",
+    clearFailed: "清除指定歌词失败",
     sourceUpload: "上传·{name}",
     sourcePaste: "粘贴",
   },
