@@ -27,9 +27,8 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const Visualizer = (await import("../components/Visualizer.vue")).default;
-const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, _resetEqGraph } = await import(
-  "../composables/usePlayer.js",
-);
+const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, _resetEqGraph } =
+  await import("../composables/usePlayer.js");
 const { _resetVisualizer, _resetParticles } = await import("../composables/useVisualizer.js");
 
 // jsdom 无 canvas 2d 实现 → stub 一个假 2d context（并让绘制路径真实执行）

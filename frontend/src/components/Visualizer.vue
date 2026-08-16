@@ -74,9 +74,7 @@ function paint() {
   const a = ensureAnalyser() || getAnalyser();
   const active = !!(a && state.isPlaying);
   // small 变体（ControlBar 44px）：bar 数减半，圆形/粒子类渲染器按 opts.small 简化
-  const barCount = props.small
-    ? 32
-    : Math.max(16, Math.min(64, Math.floor(cv.width / 5)));
+  const barCount = props.small ? 32 : Math.max(16, Math.min(64, Math.floor(cv.width / 5)));
   const { accent, accent2 } = accentColors();
   const opts = {
     accent,

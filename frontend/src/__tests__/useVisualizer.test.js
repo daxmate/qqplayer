@@ -45,10 +45,29 @@ const localStorageStub = {
   },
 };
 
-const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, play, loadPlaybackSettings, _resetEqGraph } =
-  await import("../composables/usePlayer.js");
-const { ensureAnalyser, getAnalyser, readBarData, readWaveData, drawSpectrum, drawRadial, drawWave, drawPulse, drawMirror, drawParticle, FFT_SIZE, _resetVisualizer, _resetParticles } =
-  await import("../composables/useVisualizer.js");
+const {
+  state,
+  playbackSettings,
+  PLAYBACK_SETTINGS_KEY,
+  play,
+  loadPlaybackSettings,
+  _resetEqGraph,
+} = await import("../composables/usePlayer.js");
+const {
+  ensureAnalyser,
+  getAnalyser,
+  readBarData,
+  readWaveData,
+  drawSpectrum,
+  drawRadial,
+  drawWave,
+  drawPulse,
+  drawMirror,
+  drawParticle,
+  FFT_SIZE,
+  _resetVisualizer,
+  _resetParticles,
+} = await import("../composables/useVisualizer.js");
 
 // FakeAudioContext：jsdom 无 Web Audio，stub 记录滤波器链 + analyser 挂载
 class FakeAudioContext {

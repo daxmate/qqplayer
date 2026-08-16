@@ -298,7 +298,6 @@ export function drawMirror(ctx, w, h, data, opts = {}) {
 // 无数据（暂停/降级）：粒子低速漂移（静态感），不抛错。粒子状态模块级常驻（帧间连续），_resetParticles 供测试隔离。
 let particles = [];
 let particlesKey = "";
-let particleTime = 0;
 
 function ensureParticles(count, w, h) {
   const key = `${count}x${Math.round(w)}x${Math.round(h)}`;
@@ -331,7 +330,6 @@ export function drawParticle(ctx, w, h, data, opts = {}) {
   ensureParticles(count, w, h);
   const n = data ? data.length : 0;
   const avg = n ? data.reduce((s, v) => s + v, 0) / n : 0.06; // 无数据：低速漂移
-  particleTime += 1;
   for (const p of particles) {
     // 速度随频谱均值增强；大小随随机 bin 值脉动
     const drive = n ? data[Math.floor(Math.random() * n)] : 0;
@@ -354,7 +352,6 @@ export function drawParticle(ctx, w, h, data, opts = {}) {
 export function _resetParticles() {
   particles = [];
   particlesKey = "";
-  particleTime = 0;
 }
 
 // 仅供测试：重置挂载状态（与 playerCore._resetEqGraph 配套）
