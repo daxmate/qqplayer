@@ -66,7 +66,12 @@
         />
       </div>
       <template v-if="!gridMode">
-        <select v-model="sortKey" class="pl-sort" :title="t('playlist.sort.title')">
+        <select
+          v-model="sortKey"
+          class="pl-sort"
+          :title="t('playlist.sort.title')"
+          @change="onSelectSort"
+        >
           <option value="default">{{ t("playlist.sort.default") }}</option>
           <option value="name">{{ t("playlist.sort.name") }}</option>
           <option value="artist">{{ t("playlist.sort.artist") }}</option>
@@ -137,7 +142,7 @@
       </div>
     </div>
 
-    <!-- 多选批量操作条（桌面：⌘/Ctrl 点选进入多选态）+ 歌曲列表 -->
+    <!-- 多选批量操作条（桌面：⌘/Ctrl 点选进入多选态）+ 列头 + 歌曲列表 -->
     <div v-else class="pl-body">
       <div v-if="multiMode" class="pl-multi">
         <span class="pl-multi-count">
@@ -166,6 +171,46 @@
         <button class="pl-multi-btn" :title="t('playlist.multi.clear')" @click="clearSelection">
           <X :size="13" />
           {{ t("playlist.multi.clear") }}
+        </button>
+      </div>
+      <!-- 列头（桌面）：点击排序，三态循环 升序 → 降序 → 默认顺序；与工具条 select 共用 sortKey -->
+      <div class="pl-cols">
+        <span class="pl-cols-idx" aria-hidden="true"></span>
+        <button
+          type="button"
+          class="pl-col"
+          :class="{ on: sortKey === 'name' }"
+          data-testid="pl-col-name"
+          @click="onColSort('name')"
+        >
+          {{ t("playlist.sort.cols.name") }}
+          <span v-if="colArrow('name')" class="pl-col-arrow">{{
+            colArrow("name") === "asc" ? "↑" : "↓"
+          }}</span>
+        </button>
+        <button
+          type="button"
+          class="pl-col"
+          :class="{ on: sortKey === 'artist' }"
+          data-testid="pl-col-artist"
+          @click="onColSort('artist')"
+        >
+          {{ t("playlist.sort.cols.artist") }}
+          <span v-if="colArrow('artist')" class="pl-col-arrow">{{
+            colArrow("artist") === "asc" ? "↑" : "↓"
+          }}</span>
+        </button>
+        <button
+          type="button"
+          class="pl-col"
+          :class="{ on: sortKey === 'duration' }"
+          data-testid="pl-col-duration"
+          @click="onColSort('duration')"
+        >
+          {{ t("playlist.sort.cols.duration") }}
+          <span v-if="colArrow('duration')" class="pl-col-arrow">{{
+            colArrow("duration") === "asc" ? "↑" : "↓"
+          }}</span>
         </button>
       </div>
       <div ref="listEl" class="pl-list">
@@ -516,6 +561,8 @@ function hashBg(name) {
 // ============ 搜索 / 排序 / 收藏过滤 ============
 const query = ref("");
 const sortKey = ref("default");
+// 列头排序方向（select 无方向语义；列头点击才驱动）：'asc' | 'desc'
+const sortDir = ref("asc");
 const favOnly = ref(false);
 
 // 过滤 + 排序后的可见列表
@@ -532,15 +579,42 @@ const visible = computed(() => {
     );
   }
   const key = sortKey.value;
-  if (key === "name") {
-    list = [...list].sort((a, b) => (a.song.name || "").localeCompare(b.song.name || ""));
-  } else if (key === "artist") {
-    list = [...list].sort((a, b) => (a.song.artist || "").localeCompare(b.song.artist || ""));
-  } else if (key === "duration") {
-    list = [...list].sort((a, b) => (a.song.duration ?? 0) - (b.song.duration ?? 0));
+  if (key === "name" || key === "artist" || key === "duration") {
+    const dir = sortDir.value === "desc" ? -1 : 1;
+    list = [...list].sort((a, b) => {
+      let cmp;
+      if (key === "name") cmp = (a.song.name || "").localeCompare(b.song.name || "");
+      else if (key === "artist") cmp = (a.song.artist || "").localeCompare(b.song.artist || "");
+      else cmp = (a.song.duration ?? 0) - (b.song.duration ?? 0);
+      return cmp * dir;
+    });
   }
   return list;
 });
+
+// ============ 列头点击排序（三态循环：升序 → 降序 → 默认顺序） ============
+// 不同列 → 切列并重置为升序；同列升 → 降；同列降 → 回到默认（曲库原始顺序）
+function onColSort(key) {
+  if (sortKey.value !== key) {
+    sortKey.value = key;
+    sortDir.value = "asc";
+  } else if (sortDir.value === "asc") {
+    sortDir.value = "desc";
+  } else {
+    sortKey.value = "default";
+    sortDir.value = "asc";
+  }
+}
+
+// 列头激活态方向箭头：仅当前排序列返回 'asc' | 'desc'，否则 null（不显示）
+function colArrow(key) {
+  return sortKey.value === key ? sortDir.value : null;
+}
+
+// 工具条 select 切换：重置列头方向为升序（select 无方向语义，保持可预期）
+function onSelectSort() {
+  sortDir.value = "asc";
+}
 
 // 拖拽启用条件：无搜索/排序/收藏/分组过滤时（保证可见集 = 全量，排序不丢歌）。
 // 歌单视图 = 歌单内排序；全部歌曲视图 = 播放队列排序（拖到侧栏歌单的拖拽源也走这个手柄）。
@@ -1334,6 +1408,52 @@ function fmtDur(d) {
   flex: 1;
   overflow-y: auto;
   padding: 6px;
+}
+/* 列头（桌面列表视图）：点击排序。左缩进与行内序号对齐（列表内边距 6 + 行内边距 10 + 序号 20 + gap 10 = 46px），
+   歌名列与歌名左缘对齐；升/降箭头随激活态显示，默认顺序时不激活 */
+.pl-cols {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 16px;
+  font-size: 11px;
+  color: var(--text3);
+  user-select: none;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.pl-cols-idx {
+  width: 20px;
+  flex-shrink: 0;
+}
+.pl-col {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+@media (hover: hover) {
+  .pl-col:hover {
+    color: var(--text2);
+    background: var(--card2);
+  }
+}
+.pl-col.on {
+  color: var(--accent);
+  font-weight: 700;
+}
+.pl-col-arrow {
+  font-size: 10px;
+  line-height: 1;
 }
 /* 列表分支容器：多选条 + 列表纵向排列（v-else 与网格视图互斥） */
 .pl-body {

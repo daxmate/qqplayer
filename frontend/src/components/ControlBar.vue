@@ -610,6 +610,7 @@ function fmt(t) {
 .fmt-badge {
   display: inline-block;
   margin-left: 8px;
+  margin-right: 8px; /* 与编辑按钮拉开间距（.song-line 的 flex gap 8px 之上再加 8px，总 16px），避免徽标与铅笔按钮视觉粘连 */
   padding: 1px 8px;
   border-radius: 8px;
   background: var(--card2);

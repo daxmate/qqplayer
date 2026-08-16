@@ -30,6 +30,12 @@ export default {
       name: "按标题",
       artist: "按歌手",
       duration: "按时长",
+      // 列头（点击排序：升序 → 降序 → 默认）
+      cols: {
+        name: "歌名",
+        artist: "歌手",
+        duration: "时长",
+      },
     },
     // 收藏
     fav: {
