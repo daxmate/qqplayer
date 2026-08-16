@@ -1,6 +1,7 @@
 // Playlist 组件测试
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
@@ -47,6 +48,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // 清理 Teleport 到 body 的浮层残留（加歌浮层测试）
+  document.body.querySelectorAll(".add-menu, .am-backdrop").forEach((el) => el.remove());
 });
 
 describe("Playlist", () => {
@@ -419,5 +422,176 @@ describe("Playlist", () => {
     await wrapper.findAll(".pb-tab")[1].trigger("click");
     await wrapper.findAll(".gr-card")[0].trigger("click"); // 进入歌手分组
     expect(wrapper.find(".pl-drag").exists()).toBe(false);
+  });
+
+  // ============ 加歌浮层：锚定触发按钮 ============
+  describe("加歌浮层：锚定触发按钮", () => {
+    // 行内按钮顺序：红心 → 加歌（ListPlus） → 移除
+    const addBtn = (wrapper) => wrapper.findAll(".pl-action")[1];
+    const menuEl = () => document.body.querySelector(".add-menu");
+    const backdropEl = () => document.body.querySelector(".am-backdrop");
+    // 统一登记 wrapper：断言失败也能在 afterEach 卸载，避免残留 Teleport DOM 污染后续测试
+    const wrappers = [];
+    const m = (w) => {
+      wrappers.push(w);
+      return w;
+    };
+
+    function mountWithSongs() {
+      state.songs = [{ id: "a", name: "A歌", artist: "", path: "/a.mp3" }];
+      return m(mount(Playlist));
+    }
+
+    // mock 触发按钮的 getBoundingClientRect，返回 spy 供后续改值模拟 resize/滚动
+    function stubBtnRect(btn, rect) {
+      return vi.spyOn(btn.element, "getBoundingClientRect").mockReturnValue({
+        x: rect.left,
+        y: rect.top,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+        toJSON: () => ({}),
+        ...rect,
+      });
+    }
+
+    afterEach(() => {
+      wrappers.splice(0).forEach((w) => w.unmount());
+    });
+
+    it("打开时定位到按钮下方、右缘对齐（jsdom 视口 1024×768）", async () => {
+      const wrapper = mountWithSongs();
+      stubBtnRect(addBtn(wrapper), { left: 400, top: 280, right: 428, bottom: 300 });
+      await addBtn(wrapper).trigger("click");
+      await nextTick();
+      const menu = menuEl();
+      expect(menu).toBeTruthy();
+      expect(menu.style.top).toBe("306px"); // bottom(300) + 6
+      expect(menu.style.left).toBe("208px"); // right(428) - 220 右对齐按钮右缘
+    });
+
+    it("右边界 clamp：按钮靠右时浮层不超出视口右缘", async () => {
+      const wrapper = mountWithSongs();
+      stubBtnRect(addBtn(wrapper), { left: 1000, top: 280, right: 1028, bottom: 300 });
+      await addBtn(wrapper).trigger("click");
+      await nextTick();
+      const menu = menuEl();
+      // right(1028) - 220 = 808 → clamp 到 1024 - 220 - 8 = 796
+      expect(menu.style.left).toBe("796px");
+      expect(menu.style.top).toBe("306px");
+    });
+
+    it("底部放不下时翻转到按钮上方", async () => {
+      const wrapper = mountWithSongs();
+      stubBtnRect(addBtn(wrapper), { left: 400, top: 680, right: 428, bottom: 700 });
+      await addBtn(wrapper).trigger("click");
+      await nextTick();
+      const menu = menuEl();
+      // below = 706，706 + 220 = 926 > 768 - 8 → 翻转：top = 680 - 220 - 6 = 454
+      expect(menu.style.top).toBe("454px");
+      expect(menu.style.left).toBe("208px");
+    });
+
+    it("resize 时按按钮新位置重算", async () => {
+      const wrapper = mountWithSongs();
+      const btn = addBtn(wrapper);
+      const spy = stubBtnRect(btn, { left: 400, top: 280, right: 428, bottom: 300 });
+      await btn.trigger("click");
+      await nextTick();
+      expect(menuEl().style.top).toBe("306px");
+      // 窗口变化 → 按钮重新布局到更靠下位置（仍在下方放得下）
+      spy.mockReturnValue({
+        x: 400,
+        y: 400,
+        width: 28,
+        height: 20,
+        toJSON: () => ({}),
+        left: 400,
+        top: 400,
+        right: 428,
+        bottom: 420,
+      });
+      window.dispatchEvent(new Event("resize"));
+      await nextTick();
+      expect(menuEl().style.top).toBe("426px"); // 420 + 6
+    });
+
+    it("列表滚动时重算位置（捕获阶段监听任意滚动容器）", async () => {
+      // attachTo 使 .pl-list 真正挂到 document，滚动事件才能沿捕获路径传到 window
+      state.songs = [{ id: "a", name: "A歌", artist: "", path: "/a.mp3" }];
+      const wrapper = m(mount(Playlist, { attachTo: document.body }));
+      const btn = addBtn(wrapper);
+      const spy = stubBtnRect(btn, { left: 400, top: 280, right: 428, bottom: 300 });
+      await btn.trigger("click");
+      await nextTick();
+      expect(menuEl().style.top).toBe("306px");
+      // 列表向下滚动 → 按钮 rect 变化
+      spy.mockReturnValue({
+        x: 400,
+        y: 500,
+        width: 28,
+        height: 20,
+        toJSON: () => ({}),
+        left: 400,
+        top: 500,
+        right: 428,
+        bottom: 520,
+      });
+      wrapper.find(".pl-list").element.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await nextTick();
+      expect(menuEl().style.top).toBe("526px"); // 520 + 6
+    });
+
+    it("点击 backdrop 关闭浮层", async () => {
+      const wrapper = mountWithSongs();
+      await addBtn(wrapper).trigger("click");
+      await nextTick();
+      expect(menuEl()).toBeTruthy();
+      backdropEl().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await nextTick();
+      expect(menuEl()).toBeNull();
+    });
+
+    it("Esc 关闭浮层", async () => {
+      const wrapper = mountWithSongs();
+      await addBtn(wrapper).trigger("click");
+      await nextTick();
+      expect(menuEl()).toBeTruthy();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await nextTick();
+      expect(menuEl()).toBeNull();
+    });
+
+    it("位置纯函数：正常 / 右边界 / 底部翻转 / 左侧兜底 / 顶部兜底", () => {
+      const wrapper = mountWithSongs();
+      const { computeAddMenuPos } = wrapper.vm;
+      // 正常：按钮下方 + 右对齐右缘
+      expect(
+        computeAddMenuPos({ left: 400, top: 280, right: 428, bottom: 300 }, 220, 1024, 768),
+      ).toEqual({
+        top: 306,
+        left: 208,
+        flip: false,
+      });
+      // 右边界 clamp
+      expect(
+        computeAddMenuPos({ left: 1000, top: 280, right: 1028, bottom: 300 }, 220, 1024, 768).left,
+      ).toBe(796);
+      // 底部溢出 → 翻转
+      expect(
+        computeAddMenuPos({ left: 400, top: 680, right: 428, bottom: 700 }, 220, 1024, 768),
+      ).toEqual({
+        top: 454,
+        left: 208,
+        flip: true,
+      });
+      // 极窄视口：右缘 - 220 为负 → 左边界兜底 8
+      expect(
+        computeAddMenuPos({ left: 20, top: 280, right: 48, bottom: 300 }, 220, 200, 768).left,
+      ).toBe(8);
+      // 按钮滚出视口上方 → top 兜底到留白
+      expect(
+        computeAddMenuPos({ left: 400, top: -500, right: 428, bottom: -480 }, 220, 1024, 768).top,
+      ).toBe(8);
+    });
   });
 });
