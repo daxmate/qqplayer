@@ -2,7 +2,19 @@
 
 from fastapi import FastAPI
 
-from . import favorites, library, lyrics, media, playback, playlists, quark, settings, stream, tags
+from . import (
+    books,
+    favorites,
+    library,
+    lyrics,
+    media,
+    playback,
+    playlists,
+    quark,
+    settings,
+    stream,
+    tags,
+)
 
 _ROUTER_MODULES = (
     favorites,
@@ -15,6 +27,7 @@ _ROUTER_MODULES = (
     lyrics,
     tags,
     media,
+    books,
 )
 
 
