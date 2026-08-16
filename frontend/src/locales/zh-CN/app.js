@@ -12,11 +12,13 @@ export default {
     expandControls: "展开控制区",
     // 迷你模式
     miniMode: {
+      label: "迷你模式",
       running: "迷你模式（运行中，点击置前）",
       standalone: "迷你模式（独立小窗）",
     },
     // 桌面歌词
     desktopLyric: {
+      label: "桌面歌词",
       close: "关闭桌面歌词",
       open: "打开桌面歌词",
     },
@@ -28,6 +30,8 @@ export default {
     // 活动栏（ActivityBar.vue）
     activityBar: {
       label: "面板切换",
+      musicLib: "音乐库",
+      playlist: "播放列表",
       expandMusicLib: "展开音乐库",
       collapseMusicLib: "收起音乐库",
       expandPlaylist: "展开播放列表",

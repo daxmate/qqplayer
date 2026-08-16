@@ -11,6 +11,7 @@
       @click="toggleMusicLib()"
     >
       <Music2 :size="18" />
+      <span class="ab-label">{{ t("app.activityBar.musicLib") }}</span>
     </button>
     <button
       class="ab-btn"
@@ -23,6 +24,7 @@
       @click="togglePlaylist()"
     >
       <ListMusic :size="18" />
+      <span class="ab-label">{{ t("app.activityBar.playlist") }}</span>
     </button>
   </nav>
 </template>
@@ -45,18 +47,25 @@ const { t } = useI18n();
   overflow-y: auto;
 }
 .ab-btn {
-  width: 34px;
-  height: 34px;
+  width: 54px;
+  height: 50px;
   border-radius: 10px;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   background: transparent;
   color: var(--text3);
   cursor: pointer;
   transition: all 0.15s;
   position: relative;
   flex-shrink: 0;
+}
+.ab-label {
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
 }
 .ab-btn:hover {
   background: var(--card2);

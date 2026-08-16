@@ -40,6 +40,7 @@
             @click="openMiniPlayer()"
           >
             <PictureInPicture2 :size="18" />
+            <span class="gear-label">{{ t("app.miniMode.label") }}</span>
           </button>
           <button
             class="gear-btn lyric-float-btn"
@@ -52,9 +53,11 @@
             @click="toggleDesktopLyric()"
           >
             <MonitorPlay :size="18" />
+            <span class="gear-label">{{ t("app.desktopLyric.label") }}</span>
           </button>
           <button class="gear-btn" :title="t('app.settings')" @click="settingsOpen = true">
             <Settings :size="18" />
+            <span class="gear-label">{{ t("app.settings") }}</span>
           </button>
         </div>
       </header>
@@ -383,15 +386,22 @@ onUnmounted(() => {
   color: #fff;
 }
 .gear-btn {
-  width: 36px;
   height: 36px;
+  padding: 0 12px;
   border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   color: var(--text2);
   transition: all 0.15s;
   flex-shrink: 0;
+}
+.gear-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
 }
 .gear-btn:hover {
   background: var(--card2);
@@ -451,28 +461,28 @@ onUnmounted(() => {
 }
 .main.continuous.has-tabbar,
 .main.karaoke.has-tabbar {
-  grid-template-columns: 44px 1fr;
+  grid-template-columns: 64px 1fr;
   grid-template-areas:
     "activity center"
     "activity controls";
 }
 .main.continuous.has-tabbar.has-music,
 .main.karaoke.has-tabbar.has-music {
-  grid-template-columns: 44px 200px 1fr;
+  grid-template-columns: 64px 200px 1fr;
   grid-template-areas:
     "activity sidebar center"
     "activity controls controls";
 }
 .main.continuous.has-tabbar.has-playlist,
 .main.karaoke.has-tabbar.has-playlist {
-  grid-template-columns: 44px 280px 1fr;
+  grid-template-columns: 64px 280px 1fr;
   grid-template-areas:
     "activity playlist center"
     "activity controls controls";
 }
 .main.continuous.has-tabbar.has-music.has-playlist,
 .main.karaoke.has-tabbar.has-music.has-playlist {
-  grid-template-columns: 44px 200px 280px 1fr;
+  grid-template-columns: 64px 200px 280px 1fr;
   grid-template-areas:
     "activity sidebar playlist center"
     "activity controls controls controls";
