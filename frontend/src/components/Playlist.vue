@@ -129,76 +129,115 @@
       </div>
     </div>
 
-    <div v-else ref="listEl" class="pl-list">
-      <div
-        v-for="({ song, i }, vi) in visible"
-        :key="song.id"
-        class="pl-item"
-        :class="{ active: i === state.currentIndex }"
-        :data-path="song.path"
-        @click="pick(i)"
-      >
-        <span v-if="canDrag" class="pl-drag" :title="t('playlist.dragSort')">
-          <GripVertical :size="14" />
+    <!-- 多选批量操作条（桌面：⌘/Ctrl 点选进入多选态）+ 歌曲列表 -->
+    <div v-else class="pl-body">
+      <div v-if="multiMode" class="pl-multi">
+        <span class="pl-multi-count">
+          {{ t("playlist.multi.selected", { n: selectedPaths.length }) }}
         </span>
-        <span class="pl-idx">{{ vi + 1 }}</span>
-        <div class="pl-info">
-          <div class="pl-name">
-            {{ song.name }}
-            <span v-if="isFavorite(song.path)" class="pl-fav-mark" :title="t('playlist.fav.faved')">
-              <Heart :size="10" fill="currentColor" />
-            </span>
-          </div>
-          <div class="pl-artist">
-            {{ song.artist }}
-            <span v-if="song.duration" class="pl-dur">{{ fmtDur(song.duration) }}</span>
-            <span v-if="song.has_lyric" class="pl-lyric" :title="t('playlist.hasLyric')">
-              <Mic :size="11" />
-            </span>
-          </div>
-        </div>
-        <span v-if="i === state.currentIndex" class="pl-eq" :title="t('playlist.playing')">
-          <span class="eq-bar"></span>
-          <span class="eq-bar"></span>
-          <span class="eq-bar"></span>
-        </span>
-        <button
-          class="pl-action heart"
-          :class="{ on: isFavorite(song.path) }"
-          :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
-          @click.stop="toggleFavorite(song.path)"
-        >
-          <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
+        <button class="pl-multi-btn" :title="t('playlist.multi.fav')" @click="batchFavorite">
+          <Heart :size="13" fill="none" />
+          {{ t("playlist.multi.fav") }}
         </button>
         <button
-          class="pl-action"
-          :title="t('playlist.addMenu.title')"
-          @click.stop="openAddMenu($event, song.path)"
+          class="pl-multi-btn"
+          :title="t('playlist.multi.addToPlaylist')"
+          @click="batchAddPlaylist"
         >
-          <ListPlus :size="14" />
+          <ListPlus :size="13" />
+          {{ t("playlist.multi.addToPlaylist") }}
         </button>
         <button
-          class="pl-action remove"
-          :title="inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')"
-          @click.stop="removeItem(i)"
+          class="pl-multi-btn danger"
+          :title="t('playlist.multi.deleteToTrash')"
+          @click="batchDelete"
         >
-          <X :size="14" />
+          <Trash2 :size="13" />
+          {{ t("playlist.multi.deleteToTrash") }}
+        </button>
+        <button class="pl-multi-btn" :title="t('playlist.multi.clear')" @click="clearSelection">
+          <X :size="13" />
+          {{ t("playlist.multi.clear") }}
         </button>
       </div>
-      <div v-if="!visible.length" class="pl-empty">
-        {{
-          state.loading
-            ? t("playlist.empty.scanning")
-            : viewSongs.length
-              ? favOnly
-                ? t("playlist.empty.noFav")
-                : t("playlist.empty.noMatch")
-              : browseFilter
-                ? t("playlist.empty.noGroupSongs")
-                : inPlaylistView
-                  ? t("playlist.empty.emptyPlaylist")
-                  : t("playlist.empty.noSongs")
-        }}
+      <div ref="listEl" class="pl-list">
+        <div
+          v-for="({ song, i }, vi) in visible"
+          :key="song.id"
+          class="pl-item"
+          :class="{ active: i === state.currentIndex, selected: isSelected(song.path) }"
+          :data-path="song.path"
+          @click="onRowClick(i, $event)"
+          @contextmenu.prevent="openCtxMenu($event, i)"
+        >
+          <span v-if="canDrag" class="pl-drag" :title="t('playlist.dragSort')">
+            <GripVertical :size="14" />
+          </span>
+          <span class="pl-idx">{{ vi + 1 }}</span>
+          <div class="pl-info">
+            <div class="pl-name">
+              {{ song.name }}
+              <span
+                v-if="isFavorite(song.path)"
+                class="pl-fav-mark"
+                :title="t('playlist.fav.faved')"
+              >
+                <Heart :size="10" fill="currentColor" />
+              </span>
+            </div>
+            <div class="pl-artist">
+              {{ song.artist }}
+              <span v-if="song.duration" class="pl-dur">{{ fmtDur(song.duration) }}</span>
+              <span v-if="song.has_lyric" class="pl-lyric" :title="t('playlist.hasLyric')">
+                <Mic :size="11" />
+              </span>
+            </div>
+          </div>
+          <span v-if="i === state.currentIndex" class="pl-eq" :title="t('playlist.playing')">
+            <span class="eq-bar"></span>
+            <span class="eq-bar"></span>
+            <span class="eq-bar"></span>
+          </span>
+          <button
+            class="pl-action heart"
+            :class="{ on: isFavorite(song.path) }"
+            :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
+            @click.stop="toggleFavorite(song.path)"
+          >
+            <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
+          </button>
+          <button
+            class="pl-action"
+            :title="t('playlist.addMenu.title')"
+            @click.stop="openAddMenu($event, song.path)"
+          >
+            <ListPlus :size="14" />
+          </button>
+          <button
+            class="pl-action remove"
+            :title="
+              inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')
+            "
+            @click.stop="removeItem(i)"
+          >
+            <X :size="14" />
+          </button>
+        </div>
+        <div v-if="!visible.length" class="pl-empty">
+          {{
+            state.loading
+              ? t("playlist.empty.scanning")
+              : viewSongs.length
+                ? favOnly
+                  ? t("playlist.empty.noFav")
+                  : t("playlist.empty.noMatch")
+                : browseFilter
+                  ? t("playlist.empty.noGroupSongs")
+                  : inPlaylistView
+                    ? t("playlist.empty.emptyPlaylist")
+                    : t("playlist.empty.noSongs")
+          }}
+        </div>
       </div>
     </div>
 
@@ -214,18 +253,55 @@
           v-for="p in state.playlists"
           :key="p.id"
           class="am-item"
-          :class="{ in: isInPlaylist(p.id, addMenuPath) }"
+          :class="{ in: addMenuIn(p.id) }"
           @click="toggleAdd(p.id)"
         >
           <ListMusic :size="13" />
           <span class="am-name">{{ p.name }}</span>
           <span class="am-state">
-            <Check v-if="isInPlaylist(p.id, addMenuPath)" :size="13" />
+            <Check v-if="addMenuIn(p.id)" :size="13" />
             <Plus v-else :size="13" />
           </span>
         </div>
         <div v-if="!state.playlists.length" class="am-empty">
           {{ t("playlist.addMenu.noPlaylists") }}
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 右键菜单（桌面，Teleport 到 body 防裁剪） -->
+    <ContextMenu
+      :visible="ctxOpen"
+      :x="ctxPos.x"
+      :y="ctxPos.y"
+      :fav="ctxSong ? isFavorite(ctxSong.path) : false"
+      :can-go-artist="ctxCanGoArtist"
+      :can-go-album="ctxCanGoAlbum"
+      :has-path="!!ctxSong?.path"
+      @play="ctxPlay"
+      @play-next="ctxPlayNext"
+      @toggle-fav="ctxToggleFav"
+      @add-playlist="ctxAddPlaylist"
+      @go-artist="ctxGoArtist"
+      @go-album="ctxGoAlbum"
+      @delete="ctxDelete"
+      @close="ctxOpen = false"
+    />
+
+    <!-- 移到废纸篓确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="deleteOpen" class="dt-backdrop" @mousedown.self="deleteOpen = false"></div>
+      <div v-if="deleteOpen" class="dt-modal" role="dialog" aria-modal="true">
+        <div class="dt-title">
+          <Trash2 :size="15" />
+          {{ t("playlist.deleteToTrash.title") }}
+        </div>
+        <div class="dt-text">
+          {{ t("playlist.deleteToTrash.confirm", { n: deletePaths.length }) }}
+        </div>
+        <div class="dt-actions">
+          <button class="dt-btn" @click="deleteOpen = false">{{ t("common.cancel") }}</button>
+          <button class="dt-btn danger" @click="doDelete">{{ t("common.confirm") }}</button>
         </div>
       </div>
     </Teleport>
@@ -249,6 +325,7 @@ import {
   Check,
   Plus,
   ArrowLeft,
+  Trash2,
 } from "@lucide/vue";
 import {
   state,
@@ -263,9 +340,12 @@ import {
   addToPlaylist,
   removeFromPlaylist,
   setPlaylistOrder,
+  _resetPlayMode,
 } from "../composables/usePlayer.js";
+import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
-import { toastError } from "../composables/useToast.js";
+import { showToast, toastError } from "../composables/useToast.js";
+import ContextMenu from "./ContextMenu.vue";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -454,6 +534,192 @@ function pick(i) {
   play(); // 点击列表直接开始播放
 }
 
+// ============ 多选批量（桌面：⌘/Ctrl 点选进入多选态） ============
+const selectedPaths = ref([]);
+const multiMode = computed(() => selectedPaths.value.length > 0);
+
+function isSelected(path) {
+  return path != null && selectedPaths.value.includes(path);
+}
+
+function toggleSelected(path) {
+  const i = selectedPaths.value.indexOf(path);
+  if (i >= 0) selectedPaths.value.splice(i, 1);
+  else selectedPaths.value.push(path);
+}
+
+function clearSelection() {
+  selectedPaths.value = [];
+}
+
+// 行点击：多选态 = 切换选中；⌘/Ctrl+点选 = 进入多选态并选中；否则播放
+// 网络歌（path=null）不参与多选（所有批量操作都是 path 语义），⌘/Ctrl+点选也不动作
+function onRowClick(i, e) {
+  const entry = viewSongs.value[i];
+  if (!entry) return;
+  const path = entry.song.path;
+  const mod = e?.metaKey || e?.ctrlKey;
+  if (multiMode.value) {
+    if (path != null) toggleSelected(path);
+    return;
+  }
+  if (mod) {
+    if (path != null) toggleSelected(path);
+    return;
+  }
+  pick(i);
+}
+
+// 批量收藏：只加不删（幂等），新增数 toast
+async function batchFavorite() {
+  const paths = selectedPaths.value.filter((p) => p != null && !isFavorite(p));
+  if (!paths.length) return;
+  for (const p of paths) await toggleFavorite(p);
+  showToast(t("playlist.fav.batchAdded", { n: paths.length }));
+}
+
+// 批量加歌单：复用 addMenu 浮层（批量模式 = 只加不删）
+function batchAddPlaylist() {
+  const paths = selectedPaths.value.filter((p) => p != null);
+  if (!paths.length) return;
+  openAddMenuBatch(paths);
+}
+
+function openAddMenuBatch(paths) {
+  addMenuMode.value = "batch";
+  addMenuPaths.value = paths;
+  addMenuPos.value = {
+    top: ADD_MENU_MARGIN,
+    left: Math.max(ADD_MENU_MARGIN, window.innerWidth - ADD_MENU_WIDTH - 340),
+    flip: false,
+  };
+  addMenuOpen.value = true;
+}
+
+// 批量移到废纸篓（与单曲同一链路：确认弹窗 → DELETE → toast → loadSongs）
+function batchDelete() {
+  openDeleteDialog(selectedPaths.value);
+}
+
+// ============ 右键菜单（桌面） ============
+const ctxOpen = ref(false);
+const ctxSong = ref(null);
+const ctxIdx = ref(-1); // 曲库队列索引（viewSongs 可能被过滤/排序，用原始 i）
+const ctxPos = ref({ x: 0, y: 0 });
+
+function openCtxMenu(e, i) {
+  const entry = viewSongs.value[i];
+  if (!entry) return;
+  ctxSong.value = entry.song;
+  ctxIdx.value = entry.i;
+  ctxPos.value = { x: e.clientX, y: e.clientY };
+  ctxOpen.value = true;
+}
+
+function ctxClose() {
+  ctxOpen.value = false;
+}
+
+// 进歌手/进专辑：仅可跳转时显示（已在该分组视图内 → 隐藏对应入口）
+const ctxCanGoArtist = computed(() => {
+  const s = ctxSong.value;
+  if (!s || !s.artist) return false;
+  const v = norm(s.artist, UNKNOWN_ARTIST);
+  return !(browseFilter.value?.type === "artist" && browseFilter.value.value === v);
+});
+const ctxCanGoAlbum = computed(() => {
+  const s = ctxSong.value;
+  if (!s || !s.album) return false;
+  const v = norm(s.album, UNKNOWN_ALBUM);
+  return !(browseFilter.value?.type === "album" && browseFilter.value.value === v);
+});
+
+function ctxPlay() {
+  if (ctxIdx.value >= 0 && ctxIdx.value < state.songs.length) {
+    selectSong(ctxIdx.value);
+    play();
+  }
+  ctxClose();
+}
+
+// 下一首播放：把该歌挪到当前歌之后并立即播放（列表即队列，避免重复条目）
+function ctxPlayNext() {
+  const idx = ctxIdx.value;
+  if (idx < 0 || idx >= state.songs.length) {
+    ctxClose();
+    return;
+  }
+  const cur = state.currentIndex;
+  if (cur < 0 || idx === cur) {
+    selectSong(idx);
+    play();
+    ctxClose();
+    return;
+  }
+  const song = state.songs[idx];
+  state.songs.splice(idx, 1);
+  // 取走后当前歌索引可能前移；插到当前歌之后
+  const cur2 = idx < cur ? cur - 1 : cur;
+  state.songs.splice(cur2 + 1, 0, song);
+  _resetPlayMode(); // 洗牌队列失效，selectSong 会按新歌重建
+  selectSong(cur2 + 1);
+  play();
+  ctxClose();
+}
+
+function ctxToggleFav() {
+  const p = ctxSong.value?.path;
+  if (p != null) toggleFavorite(p);
+  ctxClose();
+}
+
+// 加歌单：复用现有 addMenu 浮层，锚定在鼠标位置（假 rect 右对齐 → 菜单从光标处展开）
+function ctxAddPlaylist() {
+  const p = ctxSong.value?.path;
+  if (p == null) {
+    ctxClose();
+    return;
+  }
+  const { x, y } = ctxPos.value;
+  ctxClose();
+  openAddMenuAt(p, {
+    getBoundingClientRect: () => ({
+      left: x,
+      top: y,
+      right: x + ADD_MENU_WIDTH,
+      bottom: y + 4,
+      width: ADD_MENU_WIDTH,
+      height: 4,
+    }),
+  });
+}
+
+function ctxGoArtist() {
+  const s = ctxSong.value;
+  if (s?.artist) {
+    browseFilter.value = { type: "artist", value: norm(s.artist, UNKNOWN_ARTIST) };
+  }
+  ctxClose();
+}
+
+function ctxGoAlbum() {
+  const s = ctxSong.value;
+  if (s?.album) {
+    browseFilter.value = { type: "album", value: norm(s.album, UNKNOWN_ALBUM), artist: s.artist };
+  }
+  ctxClose();
+}
+
+function ctxDelete() {
+  const p = ctxSong.value?.path;
+  if (p == null) {
+    ctxClose();
+    return;
+  }
+  ctxClose();
+  openDeleteDialog([p]);
+}
+
 // ============ 行操作：移除（跟随视图语义） / 加歌 ============
 function removeItem(i) {
   if (inPlaylistView.value) {
@@ -466,7 +732,9 @@ function removeItem(i) {
 
 // 加歌浮层：锚定触发按钮（getBoundingClientRect 动态定位，保留 Teleport 到 body 防裁剪）
 const addMenuOpen = ref(false);
-const addMenuPath = ref("");
+// 目标路径：单曲=[path]（切换收藏态）；批量=多 path（只加不删）
+const addMenuPaths = ref([]);
+const addMenuMode = ref("single"); // 'single' 切换 | 'batch' 只加
 const addMenuEl = ref(null); // 浮层根元素（用于测量实际高度）
 const addMenuAnchor = ref(null); // 触发按钮元素（resize/滚动时重取 rect）
 const addMenuPos = ref({ top: 0, left: 0 });
@@ -501,11 +769,16 @@ function applyAddMenuPos(rect) {
 }
 
 function openAddMenu(e, path) {
-  addMenuPath.value = path;
-  const btn = e?.currentTarget;
-  if (btn && typeof btn.getBoundingClientRect === "function") {
-    addMenuAnchor.value = btn;
-    addMenuPos.value = computeAddMenuPos(btn.getBoundingClientRect(), ADD_MENU_EST_HEIGHT);
+  openAddMenuAt(path, e?.currentTarget);
+}
+
+// 统一入口：anchor 为带 getBoundingClientRect 的元素（行内按钮 / 右键菜单鼠标位置的假 rect）
+function openAddMenuAt(path, anchor) {
+  addMenuMode.value = "single";
+  addMenuPaths.value = [path];
+  if (anchor && typeof anchor.getBoundingClientRect === "function") {
+    addMenuAnchor.value = anchor;
+    addMenuPos.value = computeAddMenuPos(anchor.getBoundingClientRect(), ADD_MENU_EST_HEIGHT);
     addMenuOpen.value = true;
     // 渲染后用实际浮层高度精修（歌单多时浮层更高，翻转判定更准）
     nextTick(() => {
@@ -528,9 +801,22 @@ const addMenuStyle = computed(() => ({
   left: addMenuPos.value.left + "px",
 }));
 
-// Esc 关闭；resize/滚动重算（scroll 用捕获阶段，任意滚动容器都能触发）
+// Esc 关闭（优先级：删除弹窗 → 右键菜单 → 加歌浮层 → 多选态）；resize/滚动重算（scroll 用捕获阶段，任意滚动容器都能触发）
 function onKeydown(e) {
-  if (e.key === "Escape") addMenuOpen.value = false;
+  if (e.key !== "Escape") return;
+  if (deleteOpen.value) {
+    deleteOpen.value = false;
+    return;
+  }
+  if (ctxOpen.value) {
+    ctxOpen.value = false;
+    return;
+  }
+  if (addMenuOpen.value) {
+    addMenuOpen.value = false;
+    return;
+  }
+  if (multiMode.value) clearSelection();
 }
 function onViewportChange() {
   if (!addMenuOpen.value || !addMenuAnchor.value) return;
@@ -548,15 +834,71 @@ onBeforeUnmount(() => {
 });
 
 async function toggleAdd(pid) {
-  const path = addMenuPath.value;
+  const paths = addMenuPaths.value;
+  if (!paths.length) return;
   try {
-    if (isInPlaylist(pid, path)) {
-      await removeFromPlaylist(pid, path);
+    if (addMenuMode.value === "batch") {
+      // 批量：只加不删（幂等），避免逐首移除弹多条撤销 toast
+      for (const p of paths) {
+        if (!isInPlaylist(pid, p)) await addToPlaylist(pid, p);
+      }
+    } else if (isInPlaylist(pid, paths[0])) {
+      await removeFromPlaylist(pid, paths[0]);
     } else {
-      await addToPlaylist(pid, path);
+      await addToPlaylist(pid, paths[0]);
     }
   } catch (e) {
     toastError(e.message);
+  }
+}
+
+// 浮层内歌单的勾选态：单曲 = 该歌在歌单；批量 = 全部选中歌都在歌单
+function addMenuIn(pid) {
+  const paths = addMenuPaths.value;
+  return paths.length > 0 && paths.every((p) => isInPlaylist(pid, p));
+}
+
+// ============ 移到废纸篓（确认 → DELETE → toast → 刷新，单曲/批量同一链路） ============
+const deleteOpen = ref(false);
+const deletePaths = ref([]);
+
+function openDeleteDialog(paths) {
+  deletePaths.value = paths.filter((p) => p != null);
+  if (deletePaths.value.length) deleteOpen.value = true;
+}
+
+async function doDelete() {
+  const paths = deletePaths.value;
+  if (!paths.length) return;
+  deleteOpen.value = false;
+  try {
+    const res = await deleteLibrarySongs(paths);
+    // 成功删除的路径 = 请求路径 − missing − errors（用于播放队列清理）
+    const missingSet = new Set(res.missing || []);
+    const errSet = new Set((res.errors || []).map((e) => e.path));
+    const successPaths = paths.filter((p) => !missingSet.has(p) && !errSet.has(p));
+    // 被删歌曲在播放队列 → 移除；当前播放 → 自动切下一首（removeSongsFromQueue 处理）
+    removeSongsFromQueue(successPaths);
+    // 汇总 toast：已删除 / 不在曲库 / 删除失败
+    const parts = [];
+    if (res.deleted > 0) parts.push(t("playlist.deleteToTrash.deleted", { n: res.deleted }));
+    if (res.missing?.length)
+      parts.push(t("playlist.deleteToTrash.missing", { n: res.missing.length }));
+    if (res.errors?.length)
+      parts.push(t("playlist.deleteToTrash.failed", { n: res.errors.length }));
+    if (parts.length) {
+      const msg = parts.join("，");
+      if (res.deleted > 0) showToast(msg);
+      else toastError(msg);
+    } else {
+      toastError(t("errors.deleteSongs"));
+    }
+    clearSelection();
+    // 刷新曲库；最近添加/最近播放/常听排行由既有 watch 自动重算
+    await loadSongs();
+  } catch (e) {
+    toastError(e.message || t("errors.deleteSongs"));
+    clearSelection();
   }
 }
 
@@ -887,6 +1229,13 @@ function fmtDur(d) {
   overflow-y: auto;
   padding: 6px;
 }
+/* 列表分支容器：多选条 + 列表纵向排列（v-else 与网格视图互斥） */
+.pl-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .pl-drag {
   display: inline-flex;
   align-items: center;
@@ -930,6 +1279,16 @@ function fmtDur(d) {
     color-mix(in srgb, var(--accent) 22%, transparent),
     color-mix(in srgb, var(--accent2) 12%, transparent)
   );
+}
+/* 多选态行 */
+.pl-item.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+@media (hover: hover) {
+  .pl-item.selected:hover {
+    background: var(--accent-soft);
+  }
 }
 .pl-idx {
   width: 20px;
@@ -1043,6 +1402,118 @@ function fmtDur(d) {
   color: var(--text3);
   font-size: 13px;
   padding: 30px 0;
+}
+/* 多选批量操作条 */
+.pl-multi {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pl-multi-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: auto;
+}
+.pl-multi-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text2);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: all 0.12s;
+}
+@media (hover: hover) {
+  .pl-multi-btn:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+}
+.pl-multi-btn.danger {
+  color: var(--red);
+}
+@media (hover: hover) {
+  .pl-multi-btn.danger:hover {
+    background: var(--red-soft);
+    color: var(--red);
+  }
+}
+/* 移到废纸篓确认弹窗 */
+.dt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  background: rgba(0, 0, 0, 0.35);
+}
+.dt-modal {
+  position: fixed;
+  z-index: 93;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 320px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px var(--shadow-strong);
+  padding: 18px;
+}
+.dt-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dt-title svg {
+  color: var(--red);
+}
+.dt-text {
+  font-size: 12.5px;
+  color: var(--text2);
+  line-height: 1.6;
+  margin: 10px 0 16px;
+}
+.dt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dt-btn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text2);
+  background: var(--card2);
+  transition: all 0.12s;
+}
+@media (hover: hover) {
+  .dt-btn:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+}
+.dt-btn.danger {
+  color: #fff;
+  background: var(--red);
+}
+@media (hover: hover) {
+  .dt-btn.danger:hover {
+    background: color-mix(in srgb, var(--red) 85%, #000);
+  }
 }
 /* 加歌浮层 */
 .am-backdrop {

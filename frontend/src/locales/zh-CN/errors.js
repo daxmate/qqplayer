@@ -8,6 +8,7 @@ export default {
     removeFromPlaylist: "移出歌单失败",
     reorderPlaylist: "排序保存失败",
     restorePlaylist: "恢复歌单失败",
+    deleteSongs: "删除失败",
     unknownSong: "未知歌曲",
     saveLibrarySettings: "保存音乐库设置失败",
     setLibrary: "设置失败",

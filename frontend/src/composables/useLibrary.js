@@ -1,5 +1,5 @@
 import { computed } from "vue";
-import { state } from "./playerCore.js";
+import { state, audio, selectSong, _resetPlayMode } from "./playerCore.js";
 import { showToast, toastError } from "./useToast.js";
 import i18n from "../locales/i18n.js";
 
@@ -192,4 +192,64 @@ export async function setPlaylistOrder(pid, paths) {
     p.songPaths = old; // 回滚
     throw new Error(i18n.global.t("errors.reorderPlaylist"));
   }
+}
+
+// ============ 移到废纸篓（删除曲库歌曲 + 磁盘文件）============
+// DELETE /api/library/songs → { deleted: number, missing: [path], errors: [{path, reason}] }
+// 网络歌 path 为 null 不参与删除；调用方（Playlist.vue）负责 toast 汇总与 loadSongs() 刷新
+// 非 200 抛错（调用方 toastError）；成功返回契约对象
+// 注意：后端并行开发中，按上述契约实现；后端未就绪时 fetch 失败会走到抛错分支
+export async function deleteLibrarySongs(paths) {
+  let res;
+  try {
+    res = await fetch("/api/library/songs", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    });
+  } catch {
+    // 网络失败（后端未就绪 / 服务未起）统一报「删除失败」
+    throw new Error(i18n.global.t("errors.deleteSongs"));
+  }
+  if (!res.ok) {
+    throw new Error(i18n.global.t("errors.deleteSongs"));
+  }
+  return res.json();
+}
+
+// 从播放队列移除已删除的歌曲（文件已删，撤销无意义 → 不弹队列撤销 toast）
+// 复用 removeFromQueue 的索引处理思路：splice + currentIndex 修正 + 当前歌自动切下一首
+// 倒序移除保证索引不漂移；网络歌（path=null）不参与
+const _deletePathSet = (paths) => new Set((paths || []).filter((p) => p != null));
+
+export function removeSongsFromQueue(paths) {
+  const set = _deletePathSet(paths);
+  for (let i = state.songs.length - 1; i >= 0; i--) {
+    const song = state.songs[i];
+    if (song?.path && set.has(song.path)) _spliceQueueAt(i);
+  }
+}
+
+// removeFromQueue 的核心索引逻辑（无 toast/撤销；撤销由删除 toast 语义取代）
+function _spliceQueueAt(index) {
+  state.songs.splice(index, 1);
+  if (index < state.currentIndex) {
+    state.currentIndex -= 1;
+  } else if (index === state.currentIndex) {
+    if (state.songs.length) {
+      // 删除当前歌：切到原位置的新歌（索引已自然顺延）
+      const next = Math.min(index, state.songs.length - 1);
+      selectSong(next);
+    } else {
+      state.currentIndex = -1;
+      state.currentSong = null;
+      state.isPlaying = false;
+      state.lyric = [];
+      state.lyricFormat = null;
+      audio.pause();
+      audio.removeAttribute("src");
+    }
+  }
+  // 歌曲列表变了：洗牌队列失效，下次自动重建
+  _resetPlayMode();
 }
