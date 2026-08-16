@@ -55,6 +55,16 @@
             >
               <Trash2 :size="16" />
             </button>
+            <!-- 删除（移到废纸篓 + 删磁盘文件）：网络歌 path=null 不显示 -->
+            <button
+              v-if="song.path"
+              class="ml-act ml-act-danger"
+              :title="t('mobile.list.delete')"
+              @click.stop="actDelete(song)"
+            >
+              <Trash2 :size="16" />
+              <span class="ml-act-label">{{ t("mobile.list.delete") }}</span>
+            </button>
           </div>
           <div
             class="ml-item"
@@ -150,6 +160,29 @@
         </div>
       </template>
     </div>
+
+    <!-- 删除确认弹层（轻量实现：遮罩 + 卡片，danger 操作防误触；全库无现成 confirm 组件） -->
+    <div v-if="confirmSong" class="ml-confirm-mask" @click.self="cancelDelete">
+      <div
+        class="ml-confirm"
+        role="alertdialog"
+        aria-modal="true"
+        :aria-label="t('mobile.list.deleteTitle')"
+      >
+        <h2 class="ml-confirm-title">{{ t("mobile.list.deleteTitle") }}</h2>
+        <p class="ml-confirm-text">
+          {{ t("mobile.list.deleteConfirm", { name: confirmSong.name }) }}
+        </p>
+        <div class="ml-confirm-btns">
+          <button class="ml-confirm-cancel" :disabled="deleting" @click="cancelDelete">
+            {{ t("common.cancel") }}
+          </button>
+          <button class="ml-confirm-ok" :disabled="deleting" @click="doDelete">
+            {{ t("mobile.list.delete") }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -176,9 +209,11 @@ import {
   removeFromPlaylist,
   setPlaylistOrder,
   findSongIndex,
+  loadSongs,
 } from "../../composables/usePlayer.js";
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
+import { deleteSongs } from "../../composables/useDeleteSong.js";
 
 const props = defineProps({
   kind: { type: String, required: true }, // songs | favorites | playlist | artist | album | playlists | artists | albums
@@ -387,6 +422,49 @@ async function actRemove(song) {
   swipe.close();
 }
 
+// 操作区删除：曲库删除（移到废纸篓 + 删磁盘文件）。
+// 流程：点删除 → 弹确认层防误触 → DELETE /api/library/songs → toast 结果 → loadSongs 刷新曲库
+// （播放中/队列由桌面任务负责清理；loadSongs 刷新后共享 state 自动一致）
+const confirmSong = ref(null);
+const deleting = ref(false);
+
+function actDelete(song) {
+  confirmSong.value = song;
+  swipe.close();
+}
+
+function cancelDelete() {
+  if (deleting.value) return;
+  confirmSong.value = null;
+}
+
+async function doDelete() {
+  const song = confirmSong.value;
+  if (!song || deleting.value) return;
+  deleting.value = true;
+  try {
+    const result = await deleteSongs([song.path]);
+    const failed = (result.missing || []).length + (result.errors || []).length;
+    if ((result.deleted || 0) > 0) {
+      showToast(
+        result.deleted === 1
+          ? t("mobile.list.deleted", { name: song.name })
+          : t("mobile.list.deletedCount", { n: result.deleted }),
+      );
+    }
+    if (failed > 0) {
+      toastError(t("mobile.list.deleteFailed", { n: failed }));
+    }
+    confirmSong.value = null;
+    await loadSongs(); // 刷新曲库列表（与桌面同一链路）
+  } catch (e) {
+    toastError(e.message);
+    confirmSong.value = null;
+  } finally {
+    deleting.value = false;
+  }
+}
+
 // 搜索入口自动聚焦（首页顶栏搜索 → 进入列表页直接开键盘输入）
 const searchInput = ref(null);
 onMounted(() => {
@@ -549,8 +627,10 @@ function hashBg(name) {
   flex: 1;
   min-width: 0;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   color: #fff;
   background: var(--card2);
   touch-action: manipulation;
@@ -560,6 +640,15 @@ function hashBg(name) {
 }
 .ml-act-remove {
   background: color-mix(in srgb, var(--red) 82%, #000);
+}
+/* 删除（危险）：亮红底 + 文案，区别于「移除」的暗红底 */
+.ml-act-danger {
+  background: var(--red);
+}
+.ml-act-label {
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
 }
 .ml-item {
   display: flex;
@@ -706,5 +795,72 @@ function hashBg(name) {
   color: var(--text3);
   font-size: 13.5px;
   padding: 40px 0;
+}
+
+/* 删除确认弹层（轻量实现）：遮罩 + 居中卡片；z 高于播放器(50)/智能列表(5)，低于 toast(300) */
+.ml-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+.ml-confirm {
+  width: 100%;
+  max-width: 320px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 18px 14px;
+  box-shadow: 0 12px 40px var(--shadow);
+}
+.ml-confirm-title {
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+}
+.ml-confirm-text {
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text2);
+  text-align: center;
+  word-break: break-all;
+}
+.ml-confirm-btns {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.ml-confirm-cancel,
+.ml-confirm-ok {
+  flex: 1;
+  height: 42px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+}
+.ml-confirm-cancel {
+  background: var(--card2);
+  color: var(--text);
+}
+.ml-confirm-ok {
+  background: var(--red);
+  color: #fff;
+}
+.ml-confirm-cancel:active,
+.ml-confirm-ok:active {
+  opacity: 0.85;
+}
+.ml-confirm-cancel:disabled,
+.ml-confirm-ok:disabled {
+  opacity: 0.5;
 }
 </style>
