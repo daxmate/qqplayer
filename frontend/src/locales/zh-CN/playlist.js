@@ -90,6 +90,11 @@ export default {
     removeFromQueue: "从队列移除",
     removedFromPlaylist: "已从歌单移除《{name}》",
     restoredToPlaylist: "已恢复《{name}》到歌单末尾",
+    // 下载网络歌（行内按钮）
+    download: "下载",
+    downloading: "下载中…",
+    downloadSuccess: "已开始下载：{title}",
+    downloadFailed: "下载失败：{msg}",
     // 空态
     empty: {
       scanning: "扫描中…",

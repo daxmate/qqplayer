@@ -104,6 +104,18 @@
       </button>
 
       <button
+        v-if="isNetworkCurrent"
+        class="btn"
+        data-testid="download-btn"
+        :class="{ busy: downloadingId !== null }"
+        :title="downloadingId !== null ? t('control.downloading') : t('control.download')"
+        @click="downloadCurrent"
+      >
+        <Loader2 v-if="downloadingId !== null" :size="15" class="dl-spin" />
+        <Download v-else :size="15" />
+      </button>
+
+      <button
         class="btn"
         :class="{ on: state.zhVisible }"
         :title="t('control.toggleZh')"
@@ -208,6 +220,8 @@ import {
   Repeat,
   Shuffle,
   Languages,
+  Download,
+  Loader2,
 } from "@lucide/vue";
 import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
 import { sleepTimerText } from "../composables/useSleepTimer.js";
@@ -230,7 +244,11 @@ import {
   cyclePlayMode,
   toggleControls,
   playUrl,
+  isStreamSong,
+  isPreviewSong,
+  downloadSettings,
 } from "../composables/usePlayer.js";
+import { showToast, toastError } from "../composables/useToast.js";
 import { ChevronDown, Volume1, Volume2, VolumeX } from "@lucide/vue";
 import { Pencil } from "@lucide/vue";
 import { ref } from "vue";
@@ -245,6 +263,43 @@ const { t } = useI18n();
 
 // 歌曲信息编辑弹窗开关（仅当前播放歌曲存在时入口按钮可见）
 const tagEditorOpen = ref(false);
+
+// ============ 下载当前网络歌（试听/曲库网络歌） ============
+// 与 SearchAnything 同一链路：POST /api/online/download → 网易云取直链落盘到下载目录
+// （设置 download.downloadDir，空 = 曲库），曲库 mtime 监听自动刷新。
+// 当前歌是网络歌（type=stream / type=preview / type=url）时显示下载按钮；本地歌不显示。
+const isNetworkCurrent = computed(
+  () => isStreamSong(state.currentSong) || isPreviewSong(state.currentSong),
+);
+const downloadingId = ref(null); // 下载中的 streamId（同一时刻只下一首）
+
+async function downloadCurrent() {
+  const song = state.currentSong;
+  const id = song?.streamId;
+  if (!id || downloadingId.value !== null) return;
+  downloadingId.value = id;
+  try {
+    const res = await fetch("/api/online/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        level: downloadSettings.defaultQuality,
+        title: song.name,
+        artist: song.artist || "",
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.message || "");
+    }
+    showToast(t("control.downloadSuccess", { title: song.name }));
+  } catch (err) {
+    toastError(t("control.downloadFailed", { msg: err.message || "" }));
+  } finally {
+    downloadingId.value = null;
+  }
+}
 
 // ============ 播放 URL（试听语义；校验 http/https，非法提示不关闭弹窗） ============
 const urlOpen = ref(false);
@@ -450,6 +505,20 @@ function fmt(t) {
   width: 56px;
   font-size: 22px;
   padding: 0;
+}
+.btn.busy {
+  color: var(--accent);
+}
+.dl-spin {
+  animation: dl-spin 0.9s linear infinite;
+}
+@keyframes dl-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .vol-group {
   display: inline-flex;

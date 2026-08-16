@@ -278,6 +278,16 @@
             <ListPlus :size="14" />
           </button>
           <button
+            v-if="isStreamSong(song)"
+            class="pl-action dl"
+            :class="{ busy: downloading[song.streamId] }"
+            :title="downloading[song.streamId] ? t('playlist.downloading') : t('playlist.download')"
+            @click.stop="downloadSong(song)"
+          >
+            <Loader2 v-if="downloading[song.streamId]" :size="14" class="pl-spin" />
+            <Download v-else :size="14" />
+          </button>
+          <button
             class="pl-action remove"
             :title="
               inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')
@@ -373,7 +383,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import Sortable from "sortablejs";
 import {
@@ -391,6 +401,8 @@ import {
   ArrowLeft,
   Trash2,
   LocateFixed,
+  Download,
+  Loader2,
 } from "@lucide/vue";
 import {
   state,
@@ -409,6 +421,8 @@ import {
   persistQueueOrder,
   DRAG_SONG_TYPE,
   _resetPlayMode,
+  isStreamSong,
+  downloadSettings,
 } from "../composables/usePlayer.js";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
@@ -820,6 +834,38 @@ function removeItem(i) {
     if (path) removeFromPlaylist(state.activePlaylistId, path);
   } else {
     removeFromQueue(i);
+  }
+}
+
+// ============ 下载网络歌（行内按钮） ============
+// 后端 POST /api/online/download（body {id, level?, title?, artist?}）→ 网易云取直链落盘到
+// 下载目录（设置 download.downloadDir，空 = 曲库）；曲库 mtime 监听自动刷新，下载完成即出现为本地歌。
+const downloading = reactive({}); // streamId → 下载中
+
+async function downloadSong(song) {
+  const id = song?.streamId;
+  if (!id || downloading[id]) return;
+  downloading[id] = true;
+  try {
+    const res = await fetch("/api/online/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        level: downloadSettings.defaultQuality,
+        title: song.name,
+        artist: song.artist || "",
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.message || "");
+    }
+    showToast(t("playlist.downloadSuccess", { title: song.name }));
+  } catch (err) {
+    toastError(t("playlist.downloadFailed", { msg: err.message || "" }));
+  } finally {
+    downloading[id] = false;
   }
 }
 
@@ -1635,6 +1681,21 @@ function fmtDur(d) {
 .pl-action.heart.on {
   opacity: 1;
   color: var(--red);
+}
+.pl-action.dl.busy {
+  opacity: 1;
+  color: var(--accent);
+}
+.pl-spin {
+  animation: pl-dl-spin 0.9s linear infinite;
+}
+@keyframes pl-dl-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .pl-empty {
   text-align: center;

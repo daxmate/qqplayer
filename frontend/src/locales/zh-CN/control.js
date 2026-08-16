@@ -26,5 +26,10 @@ export default {
     playUrlPlaceholder: "粘贴音频 URL（http/https，支持电台流）",
     playUrlInvalid: "请输入合法的 http(s) 地址",
     playUrlConfirm: "播放",
+    // 下载当前网络歌
+    download: "下载",
+    downloading: "下载中…",
+    downloadSuccess: "已开始下载：{title}",
+    downloadFailed: "下载失败：{msg}",
   },
 };
