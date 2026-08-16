@@ -54,6 +54,12 @@ export default {
       moreArtists: "{names} 等",
       remove: "移除",
       removed: "已移除",
+      delete: "删除",
+      deleteTitle: "删除歌曲",
+      deleteConfirm: "将《{name}》移入废纸篓并删除磁盘文件，此操作不可撤销",
+      deleted: "已删除《{name}》",
+      deletedCount: "已删除 {n} 首歌曲",
+      deleteFailed: "部分歌曲删除失败（{n} 首）",
     },
     player: {
       collapse: "收起播放器",
