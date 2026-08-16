@@ -113,7 +113,7 @@
           </span>
         </template>
         <template v-else>
-          <span class="gr-cover">
+          <span v-if="uiSettings.showCover" class="gr-cover">
             <img
               v-if="g.coverUrl"
               :src="g.coverUrl"
@@ -423,6 +423,7 @@ import {
   _resetPlayMode,
   isStreamSong,
   downloadSettings,
+  uiSettings,
 } from "../composables/usePlayer.js";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";

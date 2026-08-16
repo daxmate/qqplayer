@@ -30,7 +30,7 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const Playlist = (await import("../components/Playlist.vue")).default;
-const { state, isFavorite } = await import("../composables/usePlayer.js");
+const { state, isFavorite, uiSettings } = await import("../composables/usePlayer.js");
 
 beforeEach(() => {
   Object.assign(state, {
@@ -350,6 +350,23 @@ describe("Playlist", () => {
     expect(zz.find(".gr-count").text()).toContain("3");
     // 封面 img 指向 /api/cover
     expect(zz.find(".gr-cover img").attributes("src")).toContain("/api/cover?path=");
+  });
+
+  it("专辑卡封面跟随「显示封面」设置：关闭后不渲染，重开恢复", async () => {
+    state.songs = SAMPLE;
+    const wrapper = mount(Playlist);
+    await wrapper.findAll(".pb-tab")[2].trigger("click"); // 专辑
+    // 默认开启：封面渲染
+    expect(wrapper.find(".gr-cover img").exists()).toBe(true);
+    // 关闭 → 封面区域整个不渲染（meta 仍在）
+    uiSettings.showCover = false;
+    await nextTick();
+    expect(wrapper.find(".gr-cover").exists()).toBe(false);
+    expect(wrapper.find(".gr-name").exists()).toBe(true);
+    // 重开 → 恢复
+    uiSettings.showCover = true;
+    await nextTick();
+    expect(wrapper.find(".gr-cover img").exists()).toBe(true);
   });
 
   it("点击歌手卡 → 列表只显示该歌手 + 返回条标题", async () => {
