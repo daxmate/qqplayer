@@ -29,7 +29,8 @@ vi.stubGlobal("Audio", FakeAudio);
 const Visualizer = (await import("../components/Visualizer.vue")).default;
 const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, _resetEqGraph } =
   await import("../composables/usePlayer.js");
-const { _resetVisualizer, _resetParticles } = await import("../composables/useVisualizer.js");
+const { _resetVisualizer, _resetParticles, _resetPeaks } =
+  await import("../composables/useVisualizer.js");
 
 // jsdom 无 canvas 2d 实现 → stub 一个假 2d context（并让绘制路径真实执行）
 let fakeCtx = null;
@@ -42,6 +43,8 @@ function fakeCtx2d() {
     beginPath: vi.fn(),
     closePath: vi.fn(),
     arc: vi.fn(),
+    roundRect: vi.fn(),
+    quadraticCurveTo: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
     createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
@@ -50,6 +53,9 @@ function fakeCtx2d() {
     strokeStyle: "",
     lineWidth: 1,
     lineCap: "",
+    lineJoin: "",
+    shadowBlur: 0,
+    shadowColor: "",
   };
 }
 
@@ -69,6 +75,7 @@ beforeEach(() => {
   _resetEqGraph();
   _resetVisualizer();
   _resetParticles();
+  _resetPeaks();
   vi.stubGlobal("localStorage", localStorageStub);
   for (const k of Object.keys(lsStore)) delete lsStore[k];
   playbackSettings.visualizerEnabled = true;
@@ -89,12 +96,12 @@ function mountViz(props = {}) {
 
 describe("Visualizer 渲染", () => {
   it("默认渲染 canvas（无 AudioContext 静默降级，不抛错）", () => {
-    // 不 stub AudioContext：jsdom 无 → ensureAnalyser 返回 null → 画平线
+    // 不 stub AudioContext：jsdom 无 → ensureAnalyser 返回 null → 画设计感静态态
     const w = mountViz();
     expect(w.find('[data-testid="viz-canvas"]').exists()).toBe(true);
     expect(w.find('[data-testid="visualizer"]').isVisible()).toBe(true);
-    // 挂载即画一帧（平线）
-    expect(fakeCtx.fillRect).toHaveBeenCalled();
+    // 挂载即画一帧（圆角鼓包静态轮廓）
+    expect(fakeCtx.roundRect).toHaveBeenCalled();
     w.unmount();
   });
 
@@ -124,12 +131,12 @@ describe("Visualizer 渲染", () => {
 
   it("播放中启动 rAF 绘制，暂停停掉；全程不抛错", async () => {
     const w = mountViz();
-    const drawsBefore = fakeCtx.fillRect.mock.calls.length;
+    const drawsBefore = fakeCtx.roundRect.mock.calls.length;
     state.isPlaying = true;
     await nextTick();
     // 等一帧 rAF（jsdom 有 rAF）
     await new Promise((r) => requestAnimationFrame(r));
-    expect(fakeCtx.fillRect.mock.calls.length).toBeGreaterThan(drawsBefore);
+    expect(fakeCtx.roundRect.mock.calls.length).toBeGreaterThan(drawsBefore);
     state.isPlaying = false;
     await nextTick();
     w.unmount();
@@ -160,12 +167,12 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
     },
   );
 
-  it("bars 样式：画频谱条（fillRect 多次）", async () => {
+  it("bars 样式：画圆角频谱条（roundRect 多次）", async () => {
     const w = mountViz();
     state.isPlaying = true;
     await nextTick();
     await new Promise((r) => requestAnimationFrame(r));
-    expect(fakeCtx.fillRect.mock.calls.length).toBeGreaterThan(1);
+    expect(fakeCtx.roundRect.mock.calls.length).toBeGreaterThan(1);
     state.isPlaying = false;
     await nextTick();
     w.unmount();
@@ -208,15 +215,15 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
     w.unmount();
   });
 
-  it("非法样式值回落默认 bars（画频谱条不抛错）", async () => {
+  it("非法样式值回落默认 bars（画圆角条不抛错）", async () => {
     playbackSettings.visualizerStyle = "spiral";
     const w = mountViz();
     state.isPlaying = true;
     await nextTick();
     await new Promise((r) => requestAnimationFrame(r));
-    // bars 用 fillRect 画条（radial/particle 用 arc/fill，wave 用 lineTo）
-    expect(fakeCtx.fillRect.mock.calls.length).toBeGreaterThan(1);
-    expect(fakeCtx.arc).not.toHaveBeenCalled();
+    // bars 用 roundRect 画条（radial/particle 用 arc/fill，wave 用 lineTo）
+    expect(fakeCtx.roundRect.mock.calls.length).toBeGreaterThan(1);
+    expect(fakeCtx.arc).not.toHaveBeenCalled(); // 静态态无峰值亮帽
     state.isPlaying = false;
     await nextTick();
     w.unmount();

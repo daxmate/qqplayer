@@ -115,11 +115,11 @@ function tick() {
   paint();
 }
 
-// 开关 + 播放状态驱动：播放中跑 rAF；暂停/关闭停掉并画一帧静止平线（避免空转）
+// 开关驱动：开启即跑 rAF（播放中画频谱，暂停画呼吸 idle，保持活感）；关闭停掉并画一帧静止
 watch(
-  () => [enabled.value, state.isPlaying],
+  () => enabled.value,
   () => {
-    if (enabled.value && state.isPlaying) {
+    if (enabled.value) {
       if (!running) {
         running = true;
         rafId = requestAnimationFrame(tick);
@@ -130,7 +130,7 @@ watch(
       paint();
     }
   },
-  { flush: "sync" },
+  { flush: "sync", immediate: true },
 );
 
 onMounted(() => {
@@ -139,7 +139,7 @@ onMounted(() => {
   if (ro && canvasEl.value && canvasEl.value.parentElement) {
     ro.observe(canvasEl.value.parentElement);
   }
-  paint(); // 首帧静态（未播放时画平线，避免画布空白闪烁）
+  paint(); // 首帧静态（未播放时画呼吸 idle，避免画布空白闪烁）
 });
 
 onBeforeUnmount(() => {
