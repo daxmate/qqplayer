@@ -103,12 +103,23 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   abLoopCountOn: true, // AB 循环计数（防走开安全阀）：B 句播完算一遍，满 N 遍停回 A 句首暂停
   abLoopMaxCount: 10, // AB 循环计数上限（1-20）
   visualizerEnabled: true, // 频谱可视化开关（默认开；仅播放中活跃，暂停静止平线）
+  visualizerStyle: "bars", // 视觉化样式：'bars' 频谱条 | 'radial' 圆环 | 'wave' 波形 | 'pulse' 脉冲环 | 'mirror' 镜像 | 'particle' 粒子（见 VISUALIZER_STYLES）
   sleepTimerOn: false, // 睡眠定时器开关（统一层持久化；运行中的倒计时不持久化，页面刷新即取消）
   sleepTimerMinutes: 30, // 睡眠定时器时长（分钟，chip 单选）
   streamStats: false, // 流媒体统计开关：true = 试听 / URL 播放计入播放统计（曲库网络条目始终计入）
 };
 
 export const playbackSettings = reactive({ ...PLAYBACK_SETTINGS_DEFAULTS });
+
+// 视觉化 6 样式（任务 K）：id 存 playbackSettings.visualizerStyle，labelKey 文案在 zh-CN settings.visualizerStyle.*
+export const VISUALIZER_STYLES = [
+  { id: "bars", labelKey: "settings.visualizerStyle.bars" },
+  { id: "radial", labelKey: "settings.visualizerStyle.radial" },
+  { id: "wave", labelKey: "settings.visualizerStyle.wave" },
+  { id: "pulse", labelKey: "settings.visualizerStyle.pulse" },
+  { id: "mirror", labelKey: "settings.visualizerStyle.mirror" },
+  { id: "particle", labelKey: "settings.visualizerStyle.particle" },
+];
 
 export function loadPlaybackSettings() {
   try {
@@ -120,6 +131,10 @@ export function loadPlaybackSettings() {
     }
   } catch {
     /* 忽略损坏的缓存 */
+  }
+  // 脏数据归一化：visualizerStyle 必须是合法枚举，否则回落默认 'bars'
+  if (!VISUALIZER_STYLES.some((s) => s.id === playbackSettings.visualizerStyle)) {
+    playbackSettings.visualizerStyle = PLAYBACK_SETTINGS_DEFAULTS.visualizerStyle;
   }
 }
 loadPlaybackSettings();

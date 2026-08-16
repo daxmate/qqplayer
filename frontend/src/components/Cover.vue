@@ -1,5 +1,5 @@
 <template>
-  <div class="cover-wrap" :class="{ small }">
+  <div class="cover-wrap" :class="{ small, 'no-cover': !showCover }">
     <div class="cover-box">
       <img
         v-if="coverUrl"
@@ -17,12 +17,18 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { ref, watch, computed } from "vue";
 import { Music } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { state } from "../composables/usePlayer.js";
+import { state, uiSettings } from "../composables/usePlayer.js";
 
 const { t } = useI18n();
+
+// 显示封面开关（设置 → 界面）：关闭时隐藏封面图片但保留占位。
+// 选 visibility:hidden 而非 v-if/v-show：v-if 会换成 v-else 的回退图标（不是想要的效果），
+// v-show（display:none）会折叠掉固定尺寸的 cover-box，破坏父级 flex 布局（列表行高/播放器封面区）；
+// visibility:hidden 保留盒子尺寸与占位，small/大图两种变体都不影响布局。
+const showCover = computed(() => !!uiSettings.showCover);
 
 const props = defineProps({
   song: { type: Object, default: null },
@@ -71,6 +77,9 @@ function onCoverError() {
   justify-content: center;
   align-items: center;
   flex-shrink: 0;
+}
+.cover-wrap.no-cover {
+  visibility: hidden; /* 隐藏封面但保留占位（不折叠布局，见 showCover 注释） */
 }
 .cover-box {
   width: min(46vh, 340px);

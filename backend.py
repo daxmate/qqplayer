@@ -126,7 +126,7 @@ LIBRARY_SETTINGS_DEFAULTS = {
     "autoRefresh": True,  # watchdog 自动刷新（库变动自动重扫）
     "autoScanOnStart": True,  # 启动时自动扫描歌曲库
 }
-# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 8 字段（只读拷贝）
+# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 9 字段（只读拷贝）
 UI_SETTINGS_DEFAULTS = {
     "showSongInfo": False,  # 跟唱模式歌词面板顶部显示当前歌曲信息
     "karaokeShowTime": False,  # 跟唱模式每句显示起止时间戳
@@ -136,6 +136,7 @@ UI_SETTINGS_DEFAULTS = {
     "accent": "orange",  # 强调色预设 key
     "coverBlur": False,  # 封面模糊背景
     "compact": False,  # 紧凑模式
+    "showCover": True,  # 显示封面（关闭后隐藏封面图片，保留占位）
 }
 # lyric：前端 useSettings.js LYRIC_SETTINGS_DEFAULTS 全部 15 字段
 LYRIC_SETTINGS_DEFAULTS = {
@@ -155,7 +156,7 @@ LYRIC_SETTINGS_DEFAULTS = {
     "jpColor": "",  # 主行文字颜色（自定义）
     "zhColor": "",  # 翻译行文字颜色（自定义）
 }
-# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 34 字段
+# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 35 字段
 PLAYBACK_SETTINGS_DEFAULTS = {
     "playMode": "order",  # 'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
     "resumeLast": True,  # 启动时恢复上次播放的歌曲与进度
@@ -190,6 +191,7 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "abLoopCountOn": True,  # AB 循环计数（防走开安全阀）
     "abLoopMaxCount": 10,  # AB 循环计数上限（1-20）
     "visualizerEnabled": True,  # 频谱可视化开关
+    "visualizerStyle": "bars",  # 视觉化样式：bars/radial/wave/pulse/mirror/particle
     "streamStats": False,  # 流媒体播放计入播放统计
     "sleepTimerOn": False,  # 睡眠定时器开关（运行中的倒计时不持久化，刷新即取消）
     "sleepTimerMinutes": 30,  # 睡眠定时器时长（分钟，chip 单选 15/30/45/60/90）
@@ -296,6 +298,7 @@ _SETTINGS_SPEC = {
         ),
         "coverBlur": (UI_SETTINGS_DEFAULTS["coverBlur"], _norm_bool),
         "compact": (UI_SETTINGS_DEFAULTS["compact"], _norm_bool),
+        "showCover": (UI_SETTINGS_DEFAULTS["showCover"], _norm_bool),
     },
     "lyric": {
         "fontFamily": (
@@ -361,6 +364,13 @@ _SETTINGS_SPEC = {
         "abLoopCountOn": (True, _norm_bool),
         "abLoopMaxCount": (10, lambda v, d: _norm_num(v, d, lo=1, hi=20, integer=True)),
         "visualizerEnabled": (True, _norm_bool),
+        # 任务 K：视觉化 6 样式（bars/radial/wave/pulse/mirror/particle），非法值回落默认
+        "visualizerStyle": (
+            "bars",
+            lambda v, d: _norm_str(
+                v, d, allowed={"bars", "radial", "wave", "pulse", "mirror", "particle"}
+            ),
+        ),
         "streamStats": (False, _norm_bool),
         "sleepTimerOn": (False, _norm_bool),
         "sleepTimerMinutes": (30, lambda v, d: v if v in {15, 30, 45, 60, 90} else d),

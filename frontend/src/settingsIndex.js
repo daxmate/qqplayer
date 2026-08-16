@@ -36,6 +36,7 @@ import {
   DOWNLOAD_QUALITY_OPTIONS,
   QUARK_QUALITY_OPTIONS,
   DOWNLOAD_ENGINE_OPTIONS,
+  VISUALIZER_STYLES,
 } from "./composables/usePlayer.js";
 import { sleepTimer, toggleSleepTimer, cancelSleepTimer } from "./composables/useSleepTimer.js";
 
@@ -258,6 +259,33 @@ export const settingsIndex = [
     get: () => playbackSettings.visualizerEnabled,
     set: (v) => {
       playbackSettings.visualizerEnabled = v;
+    },
+  },
+  {
+    id: "visualizerStyle",
+    category: "playback",
+    subTab: null,
+    labelKey: "settings.visualizerStyleLabel",
+    keywords: [
+      "视觉化样式",
+      "频谱样式",
+      "波形",
+      "圆环",
+      "脉冲",
+      "镜像",
+      "粒子",
+      "visualizer style",
+      "radial",
+      "wave",
+      "pulse",
+      "mirror",
+      "particle",
+    ],
+    type: "select",
+    options: VISUALIZER_STYLES.map((s) => ({ value: s.id, labelKey: s.labelKey })),
+    get: () => playbackSettings.visualizerStyle,
+    set: (v) => {
+      playbackSettings.visualizerStyle = v;
     },
   },
   {
@@ -795,6 +823,18 @@ export const settingsIndex = [
     get: () => uiSettings.coverBlur,
     set: (v) => {
       uiSettings.coverBlur = v;
+    },
+  },
+  {
+    id: "showCover",
+    category: "ui",
+    subTab: null,
+    labelKey: "settings.showCover",
+    keywords: ["显示封面", "封面", "隐藏封面", "封面显示", "show cover", "cover"],
+    type: "toggle",
+    get: () => uiSettings.showCover,
+    set: (v) => {
+      uiSettings.showCover = v;
     },
   },
   {

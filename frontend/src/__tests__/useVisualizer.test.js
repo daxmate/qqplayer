@@ -45,9 +45,9 @@ const localStorageStub = {
   },
 };
 
-const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, play, _resetEqGraph } =
+const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, play, loadPlaybackSettings, _resetEqGraph } =
   await import("../composables/usePlayer.js");
-const { ensureAnalyser, getAnalyser, readBarData, drawSpectrum, FFT_SIZE, _resetVisualizer } =
+const { ensureAnalyser, getAnalyser, readBarData, readWaveData, drawSpectrum, drawRadial, drawWave, drawPulse, drawMirror, drawParticle, FFT_SIZE, _resetVisualizer, _resetParticles } =
   await import("../composables/useVisualizer.js");
 
 // FakeAudioContext：jsdom 无 Web Audio，stub 记录滤波器链 + analyser 挂载
@@ -246,6 +246,119 @@ describe("drawSpectrum", () => {
   });
 });
 
+// ============ 任务 K：readWaveData + 6 样式渲染器 ============
+function fullCtx2d() {
+  const g = {
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    beginPath: vi.fn(),
+    closePath: vi.fn(),
+    arc: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    lineCap: "",
+  };
+  return g;
+}
+
+describe("readWaveData（时域波形）", () => {
+  it("getByteTimeDomainData 数据归一化 -1~1，count 抽稀", () => {
+    const a = {
+      fftSize: 256,
+      getByteTimeDomainData: (arr) => {
+        for (let i = 0; i < arr.length; i++) arr[i] = 128; // 全静音中线
+      },
+    };
+    const vals = readWaveData(a, 16);
+    expect(vals).toHaveLength(16);
+    vals.forEach((v) => expect(v).toBeCloseTo(0, 5)); // 128/128-1 = 0
+  });
+
+  it("正负采样值（128=中线，255=+1，0=-1）", () => {
+    const a = {
+      fftSize: 4,
+      getByteTimeDomainData: (arr) => {
+        arr[0] = 255;
+        arr[1] = 128;
+        arr[2] = 0;
+        arr[3] = 64;
+      },
+    };
+    const vals = readWaveData(a, 4);
+    expect(vals[0]).toBeCloseTo(0.992, 2); // 255/128-1 ≈ 0.992
+    expect(vals[1]).toBeCloseTo(0, 5);
+    expect(vals[2]).toBeCloseTo(-1, 5);
+    expect(vals[3]).toBeCloseTo(-0.5, 5); // 64/128-1 = -0.5
+  });
+});
+
+describe("任务 K 渲染器（6 样式）", () => {
+  it("drawRadial：数据 → n 段弧；无数据 → 静态基准环，不抛错", () => {
+    const g = fullCtx2d();
+    drawRadial(g, 200, 64, [0.5, 0.25, 0.75, 1.0], { accent: "#ff7e5f", accent2: "#feb47b" });
+    expect(g.clearRect).toHaveBeenCalledWith(0, 0, 200, 64);
+    expect(g.arc.mock.calls.length).toBe(4);
+    expect(g.stroke.mock.calls.length).toBe(4);
+    expect(() => drawRadial(g, 200, 64, null, {})).not.toThrow();
+    expect(g.arc.mock.calls.length).toBe(5); // +1 基准环
+    expect(g.stroke.mock.calls.length).toBe(5);
+  });
+
+  it("drawWave：数据 → 折线描边 + 柔光填充；无数据 → 中线，不抛错", () => {
+    const g = fullCtx2d();
+    drawWave(g, 200, 64, [0.5, -0.5, 0.25, -0.25], {});
+    expect(g.moveTo).toHaveBeenCalled();
+    expect(g.lineTo.mock.calls.length).toBeGreaterThan(2);
+    expect(g.stroke).toHaveBeenCalled();
+    expect(g.fill).toHaveBeenCalled(); // 柔光填充
+    expect(() => drawWave(g, 200, 64, null, {})).not.toThrow();
+    expect(g.moveTo).toHaveBeenCalledWith(0, 32); // 中线
+  });
+
+  it("drawPulse：低频均值 → 中心圆（radial 渐变）+ 外圈光环；无数据 → 静态，不抛错", () => {
+    const g = fullCtx2d();
+    drawPulse(g, 200, 64, [0.8, 0.6, 0.4, 0.2, 0.1, 0.1, 0.1, 0.1], {});
+    expect(g.createRadialGradient).toHaveBeenCalled();
+    expect(g.fill).toHaveBeenCalled();
+    expect(g.arc.mock.calls.length).toBeGreaterThan(4); // 中心圆 + 外圈
+    expect(() => drawPulse(g, 200, 64, null, {})).not.toThrow();
+  });
+
+  it("drawMirror：数据 → 2n 条镜像条 + 中线亮线；无数据 → 底部平线", () => {
+    const g = fullCtx2d();
+    drawMirror(g, 400, 64, [0.5, 0.25, 0.75, 1.0], {});
+    // 4 条下镜像 + 4 条上镜像 + 1 中线
+    expect(g.fillRect.mock.calls.length).toBe(9);
+    expect(() => drawMirror(g, 400, 64, null, {})).not.toThrow();
+    expect(g.fillRect).toHaveBeenCalledWith(0, 62, 400, 2); // 底部平线
+  });
+
+  it("drawParticle：粒子流不抛错；数据/无数据都画粒子；小尺寸粒子数缩减", () => {
+    const g = fullCtx2d();
+    expect(() => drawParticle(g, 360, 64, [0.5, 0.25, 0.75, 1.0], {})).not.toThrow();
+    expect(g.fill.mock.calls.length).toBeGreaterThan(0);
+    expect(() => drawParticle(g, 360, 64, null, {})).not.toThrow(); // 暂停低速漂移
+    expect(() => drawParticle(g, 44, 44, [0.5], { small: true })).not.toThrow();
+    _resetParticles();
+  });
+
+  it("6 个渲染器均接受非法颜色，不抛错（颜色工具兜底）", () => {
+    const g = fullCtx2d();
+    expect(() => drawRadial(g, 100, 40, [0.1], { accent: "x", accent2: "" })).not.toThrow();
+    expect(() => drawWave(g, 100, 40, [0.1], { accent: "x", accent2: "" })).not.toThrow();
+    expect(() => drawPulse(g, 100, 40, [0.1], { accent: "x", accent2: "" })).not.toThrow();
+    expect(() => drawMirror(g, 100, 40, [0.1], { accent: "x", accent2: "" })).not.toThrow();
+    expect(() => drawParticle(g, 100, 40, [0.1], { accent: "x", accent2: "" })).not.toThrow();
+  });
+});
+
 describe("开关持久化", () => {
   it("切换 visualizerEnabled 写入 PLAYBACK_SETTINGS_KEY", async () => {
     localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
@@ -261,5 +374,26 @@ describe("开关持久化", () => {
 
   it("默认开启（仅播放中活跃，暂停静止）", () => {
     expect(playbackSettings.visualizerEnabled).toBe(true);
+  });
+
+  it("visualizerStyle 默认 'bars'，切换写入 PLAYBACK_SETTINGS_KEY", async () => {
+    expect(playbackSettings.visualizerStyle).toBe("bars");
+    playbackSettings.visualizerStyle = "radial";
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    expect(saved.visualizerStyle).toBe("radial");
+    playbackSettings.visualizerStyle = "bars"; // 恢复默认，避免污染其他用例
+    await nextTick();
+  });
+
+  it("脏数据（非法枚举）加载时回落默认 'bars'", async () => {
+    localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify({ visualizerStyle: "spiral" }));
+    loadPlaybackSettings();
+    expect(playbackSettings.visualizerStyle).toBe("bars");
+    // 合法值保留
+    localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify({ visualizerStyle: "wave" }));
+    loadPlaybackSettings();
+    expect(playbackSettings.visualizerStyle).toBe("wave");
+    playbackSettings.visualizerStyle = "bars";
   });
 });

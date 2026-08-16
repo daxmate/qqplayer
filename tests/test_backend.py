@@ -809,7 +809,7 @@ def test_api_settings_get_all_namespaces():
     # library 4 字段
     assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
-    # ui 8 字段
+    # ui 9 字段
     assert set(s["ui"]) == {
         "showSongInfo",
         "karaokeShowTime",
@@ -819,8 +819,10 @@ def test_api_settings_get_all_namespaces():
         "accent",
         "coverBlur",
         "compact",
+        "showCover",
     }
     assert s["ui"]["theme"] == "dark" and s["ui"]["accent"] == "orange"
+    assert s["ui"]["showCover"] is True
     # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
     assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
     assert (
@@ -830,6 +832,8 @@ def test_api_settings_get_all_namespaces():
     assert set(s["playback"]) == set(backend.PLAYBACK_SETTINGS_DEFAULTS)
     assert s["playback"]["playMode"] == "order" and s["playback"]["eqGains"] == [0] * 10
     assert s["playback"]["sleepTimerOn"] is False and s["playback"]["sleepTimerMinutes"] == 30
+    # 任务 K：visualizerStyle 默认 'bars'，与前端 PLAYBACK_SETTINGS_DEFAULTS 一致
+    assert s["playback"]["visualizerStyle"] == "bars"
     # desktopLyric 11 字段
     assert set(s["desktopLyric"]) == set(backend.DESKTOP_LYRIC_DEFAULTS)
     assert s["desktopLyric"]["fontSize"] == 26
@@ -876,8 +880,13 @@ def test_api_settings_put_validation():
         "/api/settings",
         json={
             "lyric": {"fontSize": "big", "align": "diagonal", "colorScheme": "neon"},
-            "ui": {"theme": 123, "compact": "yes"},
-            "playback": {"eqGains": [99] * 10, "abLoopMaxCount": 0, "playMode": "weird"},
+            "ui": {"theme": 123, "compact": "yes", "showCover": "no"},
+            "playback": {
+                "eqGains": [99] * 10,
+                "abLoopMaxCount": 0,
+                "playMode": "weird",
+                "visualizerStyle": "spiral",
+            },
             "player": {"volume": 5, "panel": "x", "lastPlayed": {"path": 1}},
         },
     )
@@ -887,9 +896,11 @@ def test_api_settings_put_validation():
     assert s["lyric"]["colorScheme"] == "neon"  # 合法字符串保留
     assert s["ui"]["theme"] == "dark"
     assert s["ui"]["compact"] is False
+    assert s["ui"]["showCover"] is True  # 类型非法回落默认
     assert s["playback"]["eqGains"] == [12.0] * 10  # clamp 到 +12
     assert s["playback"]["abLoopMaxCount"] == 1  # 越界 clamp 到 1~20（与前端一致）
     assert s["playback"]["playMode"] == "order"
+    assert s["playback"]["visualizerStyle"] == "bars"  # 枚举非法回落默认
     assert s["player"]["volume"] == 1.0  # clamp 0~1
     assert s["player"]["panel"] is True
     assert s["player"]["lastPlayed"] is None  # 非法结构回落 null
@@ -919,6 +930,22 @@ def test_api_settings_put_validation():
         "/api/settings", json={"player": {"lastPlayed": {"path": "/a/b.mp3", "time": 12.5}}}
     )
     assert r.json()["settings"]["player"]["lastPlayed"] == {"path": "/a/b.mp3", "time": 12.5}
+
+    # 任务 K：showCover / visualizerStyle 合法值保留
+    r = client.put(
+        "/api/settings",
+        json={"ui": {"showCover": False}, "playback": {"visualizerStyle": "wave"}},
+    )
+    s = r.json()["settings"]
+    assert s["ui"]["showCover"] is False
+    assert s["playback"]["visualizerStyle"] == "wave"
+    r = client.put(
+        "/api/settings",
+        json={"ui": {"showCover": 1}, "playback": {"visualizerStyle": "particle!"}},
+    )
+    s = r.json()["settings"]
+    assert s["ui"]["showCover"] is True  # 非法类型回落默认 True
+    assert s["playback"]["visualizerStyle"] == "bars"  # 非法枚举回落默认
 
 
 def test_api_settings_put_unknown_namespace_ignored():
@@ -1012,7 +1039,7 @@ def test_migrate_legacy_settings_keeps_player_namespace():
 
 # ============ 兼容层：旧三端点读写统一存储 ============
 def test_compat_ui_settings_reads_unified_store():
-    """GET/PUT /api/ui/settings 读写统一 settings.json 的 ui namespace（现可接受全部 8 字段）"""
+    """GET/PUT /api/ui/settings 读写统一 settings.json 的 ui namespace（现可接受全部 9 字段）"""
     client.put("/api/settings", json={"ui": {"theme": "light", "accent": "blue", "compact": True}})
     s = client.get("/api/ui/settings").json()["settings"]
     assert s["theme"] == "light" and s["accent"] == "blue" and s["compact"] is True
@@ -1020,7 +1047,7 @@ def test_compat_ui_settings_reads_unified_store():
     client.put("/api/ui/settings", json={"miniTheme": "dark"})
     s = client.get("/api/settings").json()["settings"]["ui"]
     assert s["miniTheme"] == "dark" and s["theme"] == "light"
-    # 兼容层 PUT 接受全部 8 个 ui 字段
+    # 兼容层 PUT 接受全部 9 个 ui 字段
     client.put(
         "/api/ui/settings",
         json={
@@ -1028,6 +1055,7 @@ def test_compat_ui_settings_reads_unified_store():
             "karaokeShowTime": True,
             "karaokeShowNum": False,
             "coverBlur": True,
+            "showCover": False,
         },
     )
     s = client.get("/api/ui/settings").json()["settings"]
@@ -1035,6 +1063,7 @@ def test_compat_ui_settings_reads_unified_store():
     assert s["karaokeShowTime"] is True
     assert s["karaokeShowNum"] is False
     assert s["coverBlur"] is True
+    assert s["showCover"] is False
     # 非法字段忽略（回落默认）
     client.put("/api/ui/settings", json={"theme": 999})
     assert client.get("/api/ui/settings").json()["settings"]["theme"] == "dark"

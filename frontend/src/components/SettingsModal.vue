@@ -154,6 +154,18 @@
                       ><i
                     /></span>
                   </div>
+                  <!-- 视觉化 6 样式（任务 K）：chips 单选，跟随开关显示（同 EQ 预设模式） -->
+                  <div v-if="playbackSettings.visualizerEnabled" class="ext-grid viz-style-grid">
+                    <button
+                      v-for="s in VISUALIZER_STYLES"
+                      :key="s.id"
+                      class="ext-chip"
+                      :class="{ on: playbackSettings.visualizerStyle === s.id }"
+                      @click="playbackSettings.visualizerStyle = s.id"
+                    >
+                      {{ t(s.labelKey) }}
+                    </button>
+                  </div>
                 </div>
                 <div class="setting-item">
                   <div
@@ -942,6 +954,15 @@
                   </div>
                 </div>
                 <div class="setting-item">
+                  <div class="toggle-row" @click="uiSettings.showCover = !uiSettings.showCover">
+                    <div>
+                      <div class="setting-label">{{ t("settings.showCover") }}</div>
+                      <div class="setting-desc">{{ t("settings.showCoverDesc") }}</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.showCover }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
                   <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
                     <div>
                       <div class="setting-label">{{ t("settings.compact") }}</div>
@@ -1162,6 +1183,7 @@ import {
   ACCENT_OPTIONS,
   SHORTCUTS,
   SHORTCUT_CATEGORIES,
+  VISUALIZER_STYLES,
   fmtShortcutKey,
   parseShortcutCombo,
 } from "../composables/usePlayer.js";

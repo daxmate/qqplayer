@@ -27,8 +27,10 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const Visualizer = (await import("../components/Visualizer.vue")).default;
-const { state, playbackSettings, _resetEqGraph } = await import("../composables/usePlayer.js");
-const { _resetVisualizer } = await import("../composables/useVisualizer.js");
+const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, _resetEqGraph } = await import(
+  "../composables/usePlayer.js",
+);
+const { _resetVisualizer, _resetParticles } = await import("../composables/useVisualizer.js");
 
 // jsdom 无 canvas 2d 实现 → stub 一个假 2d context（并让绘制路径真实执行）
 let fakeCtx = null;
@@ -36,14 +38,42 @@ function fakeCtx2d() {
   return {
     clearRect: vi.fn(),
     fillRect: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    beginPath: vi.fn(),
+    closePath: vi.fn(),
+    arc: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
     createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    lineCap: "",
   };
 }
+
+// jsdom 无 localStorage（vitest 4）→ stub 手动实现（持久化断言用）
+const lsStore = {};
+const localStorageStub = {
+  getItem: (k) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k, v) => {
+    lsStore[k] = String(v);
+  },
+  removeItem: (k) => {
+    delete lsStore[k];
+  },
+};
 
 beforeEach(() => {
   _resetEqGraph();
   _resetVisualizer();
+  _resetParticles();
+  vi.stubGlobal("localStorage", localStorageStub);
+  for (const k of Object.keys(lsStore)) delete lsStore[k];
   playbackSettings.visualizerEnabled = true;
+  playbackSettings.visualizerStyle = "bars";
   state.isPlaying = false;
   fakeCtx = fakeCtx2d();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(fakeCtx);
@@ -111,5 +141,95 @@ describe("Visualizer 渲染", () => {
     expect(w.find('[data-testid="viz-canvas"]').exists()).toBe(true);
     expect(w.find(".visualizer.small").exists()).toBe(true);
     w.unmount();
+  });
+});
+
+describe("Visualizer 6 样式分发（任务 K）", () => {
+  it.each(["bars", "radial", "wave", "pulse", "mirror", "particle"])(
+    "样式 %s：播放中 rAF 绘制不抛错",
+    async (s) => {
+      playbackSettings.visualizerStyle = s;
+      const w = mountViz();
+      state.isPlaying = true;
+      await nextTick();
+      await new Promise((r) => requestAnimationFrame(r)); // 等一帧 rAF
+      // 每种样式都调用了 clearRect（至少画了一帧），全程不抛错
+      expect(fakeCtx.clearRect).toHaveBeenCalled();
+      state.isPlaying = false;
+      await nextTick();
+      w.unmount();
+    },
+  );
+
+  it("bars 样式：画频谱条（fillRect 多次）", async () => {
+    const w = mountViz();
+    state.isPlaying = true;
+    await nextTick();
+    await new Promise((r) => requestAnimationFrame(r));
+    expect(fakeCtx.fillRect.mock.calls.length).toBeGreaterThan(1);
+    state.isPlaying = false;
+    await nextTick();
+    w.unmount();
+  });
+
+  it("radial 样式：走圆弧描边路径（arc/stroke）", async () => {
+    playbackSettings.visualizerStyle = "radial";
+    const w = mountViz();
+    state.isPlaying = true;
+    await nextTick();
+    await new Promise((r) => requestAnimationFrame(r));
+    expect(fakeCtx.arc).toHaveBeenCalled();
+    expect(fakeCtx.stroke).toHaveBeenCalled();
+    state.isPlaying = false;
+    await nextTick();
+    w.unmount();
+  });
+
+  it("wave 样式：读时域数据（getByteTimeDomainData）走折线", async () => {
+    playbackSettings.visualizerStyle = "wave";
+    const w = mountViz();
+    state.isPlaying = true;
+    await nextTick();
+    await new Promise((r) => requestAnimationFrame(r));
+    expect(fakeCtx.moveTo).toHaveBeenCalled();
+    expect(fakeCtx.lineTo.mock.calls.length).toBeGreaterThan(1);
+    state.isPlaying = false;
+    await nextTick();
+    w.unmount();
+  });
+
+  it("暂停/无 analyser：各样式画静态不抛错（wave 画中线）", async () => {
+    playbackSettings.visualizerStyle = "wave";
+    const w = mountViz();
+    // state.isPlaying 保持 false，无 analyser → drawWave 静态中线
+    expect(fakeCtx.moveTo).toHaveBeenCalled(); // 挂载首帧已画
+    playbackSettings.visualizerStyle = "radial";
+    await nextTick();
+    expect(() => w.find('[data-testid="viz-canvas"]')).toBeTruthy();
+    w.unmount();
+  });
+
+  it("非法样式值回落默认 bars（画频谱条不抛错）", async () => {
+    playbackSettings.visualizerStyle = "spiral";
+    const w = mountViz();
+    state.isPlaying = true;
+    await nextTick();
+    await new Promise((r) => requestAnimationFrame(r));
+    // bars 用 fillRect 画条（radial/particle 用 arc/fill，wave 用 lineTo）
+    expect(fakeCtx.fillRect.mock.calls.length).toBeGreaterThan(1);
+    expect(fakeCtx.arc).not.toHaveBeenCalled();
+    state.isPlaying = false;
+    await nextTick();
+    w.unmount();
+  });
+
+  it("visualizerStyle 切换写入 PLAYBACK_SETTINGS_KEY", async () => {
+    localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
+    playbackSettings.visualizerStyle = "pulse";
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    expect(saved.visualizerStyle).toBe("pulse");
+    playbackSettings.visualizerStyle = "bars";
+    await nextTick();
   });
 });

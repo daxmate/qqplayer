@@ -6,12 +6,18 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
-import { state, playbackSettings } from "../composables/usePlayer.js";
+import { state, playbackSettings, VISUALIZER_STYLES } from "../composables/usePlayer.js";
 import {
   ensureAnalyser,
   getAnalyser,
   readBarData,
+  readWaveData,
   drawSpectrum,
+  drawRadial,
+  drawWave,
+  drawPulse,
+  drawMirror,
+  drawParticle,
 } from "../composables/useVisualizer.js";
 
 const props = defineProps({
@@ -20,6 +26,12 @@ const props = defineProps({
 
 const canvasEl = ref(null);
 const enabled = computed(() => !!playbackSettings.visualizerEnabled);
+// 视觉化样式（任务 K）：非法值（脏数据）回落默认 'bars'；持久化由设置层负责
+const style = computed(() =>
+  VISUALIZER_STYLES.some((s) => s.id === playbackSettings.visualizerStyle)
+    ? playbackSettings.visualizerStyle
+    : "bars",
+);
 
 let rafId = 0;
 let running = false;
@@ -58,14 +70,46 @@ function paint() {
   if (!cv) return;
   const g = cv.getContext("2d");
   if (!g) return;
-  // 播放中读真实频谱；暂停/降级 → 平线。analyser 图内常驻，切歌换源不受影响。
+  // 播放中读真实数据；暂停/降级 → 各样式画平线/静态（不抛错）。analyser 图内常驻，切歌换源不受影响。
   const a = ensureAnalyser() || getAnalyser();
-  const values =
-    a && state.isPlaying
-      ? readBarData(a, Math.max(16, Math.min(64, Math.floor(cv.width / 5))))
-      : null;
+  const active = !!(a && state.isPlaying);
+  // small 变体（ControlBar 44px）：bar 数减半，圆形/粒子类渲染器按 opts.small 简化
+  const barCount = props.small
+    ? 32
+    : Math.max(16, Math.min(64, Math.floor(cv.width / 5)));
   const { accent, accent2 } = accentColors();
-  drawSpectrum(g, cv.width, cv.height, values, accent, accent2);
+  const opts = {
+    accent,
+    accent2,
+    small: props.small,
+    dpr: Math.min(2, window.devicePixelRatio || 1),
+  };
+  const s = style.value;
+  // 数据源：wave 用时域（readWaveData），其余用频谱（readBarData）
+  const data = active
+    ? s === "wave"
+      ? readWaveData(a, barCount)
+      : readBarData(a, barCount)
+    : null;
+  switch (s) {
+    case "radial":
+      drawRadial(g, cv.width, cv.height, data, opts);
+      break;
+    case "wave":
+      drawWave(g, cv.width, cv.height, data, opts);
+      break;
+    case "pulse":
+      drawPulse(g, cv.width, cv.height, data, opts);
+      break;
+    case "mirror":
+      drawMirror(g, cv.width, cv.height, data, opts);
+      break;
+    case "particle":
+      drawParticle(g, cv.width, cv.height, data, opts);
+      break;
+    default:
+      drawSpectrum(g, cv.width, cv.height, data, accent, accent2);
+  }
 }
 
 function tick() {

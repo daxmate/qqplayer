@@ -1,4 +1,4 @@
-// SettingsModal 组件测试：播放分类「频谱可视化」小节
+// SettingsModal 组件测试：播放分类「频谱可视化」小节 + 任务 K（视觉化 6 样式 chips / 显示封面开关）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
@@ -26,10 +26,19 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const SettingsModal = (await import("../components/SettingsModal.vue")).default;
-const { playbackSettings } = await import("../composables/usePlayer.js");
+const { playbackSettings, uiSettings } = await import("../composables/usePlayer.js");
+const { VISUALIZER_STYLES } = await import("../composables/playerCore.js");
+const zhCN = (await import("../locales/zh-CN/index.js")).default;
+
+// 从聚合语言包解析 settings.xxx.yyy 点路径
+function resolveKey(lang, key) {
+  return key.split(".").reduce((o, k) => (o ? o[k] : undefined), lang);
+}
 
 beforeEach(() => {
   playbackSettings.visualizerEnabled = true;
+  playbackSettings.visualizerStyle = "bars";
+  uiSettings.showCover = true;
   // 弹窗 watch(open) 会触发 loadLibrary / loadLibrarySettings（fetch），stub 掉
   vi.stubGlobal(
     "fetch",
@@ -72,6 +81,66 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     row.click();
     await nextTick();
     expect(playbackSettings.visualizerEnabled).toBe(true);
+    w.unmount();
+  });
+});
+
+describe("SettingsModal 任务 K - 视觉化 6 样式 chips", () => {
+  it("chips 6 选 1：文案 = VISUALIZER_STYLES 的 zh-CN 翻译，点击生效并移动高亮", async () => {
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    const chips = [...root.querySelectorAll(".viz-style-grid .ext-chip")];
+    expect(chips).toHaveLength(6);
+    expect(chips.map((c) => c.textContent.trim())).toEqual(
+      VISUALIZER_STYLES.map((s) => resolveKey(zhCN, s.labelKey)),
+    );
+    // 默认 bars 高亮
+    expect(playbackSettings.visualizerStyle).toBe("bars");
+    expect(chips[0].classList.contains("on")).toBe(true);
+    // 点第 3 个（wave）→ 样式切换、高亮移动
+    chips[2].click();
+    await nextTick();
+    expect(playbackSettings.visualizerStyle).toBe("wave");
+    expect(chips[2].classList.contains("on")).toBe(true);
+    expect(chips[0].classList.contains("on")).toBe(false);
+    w.unmount();
+  });
+
+  it("视觉化关闭时 chips 隐藏（同 EQ 预设模式）", async () => {
+    playbackSettings.visualizerEnabled = false;
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    expect(root.querySelector(".viz-style-grid")).toBeFalsy();
+    w.unmount();
+  });
+});
+
+describe("SettingsModal 任务 K - 显示封面开关", () => {
+  it("界面分类：默认开，点击切换 uiSettings.showCover", async () => {
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    // 切到「界面」分类
+    const uiNav = [...root.querySelectorAll(".nav-item")].find((el) =>
+      el.textContent.includes("界面"),
+    );
+    expect(uiNav).toBeTruthy();
+    uiNav.click();
+    await nextTick();
+    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
+      el.textContent.includes("显示封面"),
+    );
+    expect(row).toBeTruthy();
+    expect(row.querySelector(".switch.on")).toBeTruthy();
+    row.click();
+    await nextTick();
+    expect(uiSettings.showCover).toBe(false);
+    expect(row.querySelector(".switch.on")).toBeFalsy();
+    row.click();
+    await nextTick();
+    expect(uiSettings.showCover).toBe(true);
     w.unmount();
   });
 });
