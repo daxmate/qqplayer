@@ -14,6 +14,7 @@ import { handleKaraokeTick, resetAbLoopCount, setAbPointA, setAbPointB } from ".
 import { toggleFavorite } from "./useLibrary.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
 import { isSearchOpen } from "./searchState.js";
+import { isSettingsOpen } from "./settingsState.js";
 import { showToast } from "./useToast.js";
 import i18n from "../locales/i18n.js";
 
@@ -96,6 +97,7 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   shortcutFaster: "BracketRight", // 变速 +
   shortcutVolStepUp: "Meta+ArrowUp", // 音量 +20%（⌘↑）
   shortcutVolStepDown: "Meta+ArrowDown", // 音量 -20%（⌘↓）
+  shortcutOpenSettings: "Meta+Comma", // 打开设置（⌘，）
   eqEnabled: false, // 均衡器开关（false = 全部 0dB 直通）
   eqPreset: "flat", // 均衡器预设：EQ_PRESETS 的 key；'custom' = 用户自定义
   eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 自定义增益（dB，-12~12，10 段，与 EQ_BANDS 对齐）
@@ -673,6 +675,17 @@ export const SHORTCUTS = [
     meta: false,
     handler: () => stepSpeed(1),
   },
+  {
+    id: "openSettings",
+    labelKey: "settings.shortcutOpenSettings",
+    category: "other",
+    settingKey: "shortcutOpenSettings",
+    defaultCode: "Meta+Comma",
+    meta: true,
+    handler: () => {
+      isSettingsOpen.value = true;
+    },
+  },
 ];
 
 // 组合解析："Meta+<code>" → { meta: true, code }；纯 <code> → { meta: false, code }
@@ -708,6 +721,7 @@ export function fmtShortcutKey(code) {
   if (rest.startsWith("Digit")) return mod + rest.slice(5);
   if (rest === "BracketLeft") return mod + "[";
   if (rest === "BracketRight") return mod + "]";
+  if (rest === "Comma") return mod + ",";
   return mod + rest;
 }
 

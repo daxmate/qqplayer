@@ -82,7 +82,7 @@ function rowOf(root, label) {
 }
 
 describe("SettingsModal 快捷键 tab（任务 G）", () => {
-  it("配置表全列表渲染（21 行），按 6 个分类分组，全部可录制", async () => {
+  it("配置表全列表渲染（22 行），按 6 个分类分组，全部可录制", async () => {
     const { root, w } = await openShortcutsTab();
     const rows = [...root.querySelectorAll(".shortcut-item.editable")];
     expect(rows).toHaveLength(SHORTCUTS.length);
@@ -116,7 +116,14 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     }
     // 行内容覆盖全部 labelKey（通过渲染文本抽查关键新项）
     const text = root.textContent;
-    for (const label of ["上一首", "下一首", "静音切换", "收藏 / 取消收藏", "播放模式切换"]) {
+    for (const label of [
+      "上一首",
+      "下一首",
+      "静音切换",
+      "收藏 / 取消收藏",
+      "播放模式切换",
+      "打开设置",
+    ]) {
       expect(text).toContain(label);
     }
     w.unmount();
@@ -130,6 +137,8 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     expect(mute.querySelector("kbd").textContent).toBe("M");
     const search = rowOf(root, "打开搜索");
     expect(search.querySelector("kbd").textContent).toBe("⌘K");
+    const settings = rowOf(root, "打开设置");
+    expect(settings.querySelector("kbd").textContent).toBe("⌘,");
     w.unmount();
   });
 
@@ -228,6 +237,21 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     await nextTick();
     expect(playbackSettings.searchKey).toBe("KeyQ");
     expect(search.querySelector("kbd").textContent).toBe("Q");
+    w.unmount();
+  });
+
+  it("打开设置快捷键（⌘,）渲染与录制", async () => {
+    const { root, w } = await openShortcutsTab();
+    const settings = rowOf(root, "打开设置");
+    // 默认组合显示 ⌘,
+    expect(settings.querySelector("kbd").textContent).toBe("⌘,");
+    // 录制 ⌘+逗号 → 存 Meta+Comma，显示 ⌘,
+    settings.click();
+    await nextTick();
+    press("Comma", { key: ",", metaKey: true });
+    await nextTick();
+    expect(playbackSettings.shortcutOpenSettings).toBe("Meta+Comma");
+    expect(settings.querySelector("kbd").textContent).toBe("⌘,");
     w.unmount();
   });
 });

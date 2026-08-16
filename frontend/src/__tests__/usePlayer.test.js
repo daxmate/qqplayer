@@ -818,8 +818,8 @@ describe("快捷键配置表（任务 G）", () => {
     return ev;
   }
 
-  it("配置表覆盖全部快捷键（21 项），默认值与持久化字段一致", () => {
-    expect(SHORTCUTS).toHaveLength(21);
+  it("配置表覆盖全部快捷键（22 项），默认值与持久化字段一致", () => {
+    expect(SHORTCUTS).toHaveLength(22);
     for (const s of SHORTCUTS) {
       expect(playbackSettings[s.settingKey]).toBe(s.defaultCode);
       expect(s.id && s.labelKey && s.category && s.defaultCode).toBeTruthy();
@@ -1040,6 +1040,18 @@ describe("快捷键配置表（任务 G）", () => {
     expect(a.paused).toBe(true);
   });
 
+  it("⌘, 打开设置（openSettings 快捷键）", async () => {
+    const h = captureHandler();
+    const { isSettingsOpen } = await import("../composables/settingsState.js");
+    isSettingsOpen.value = false;
+    fire(h, "Comma", {}, { metaKey: true });
+    expect(isSettingsOpen.value).toBe(true);
+    // 纯 , 不触发（⌘ 组合要求 metaKey）
+    isSettingsOpen.value = false;
+    fire(h, "Comma");
+    expect(isSettingsOpen.value).toBe(false);
+  });
+
   it("parseShortcutCombo：历史 Meta+K 归一为 KeyK", () => {
     expect(parseShortcutCombo("Meta+K")).toEqual({ meta: true, code: "KeyK" });
     expect(parseShortcutCombo("Meta+KeyK")).toEqual({ meta: true, code: "KeyK" });
@@ -1056,6 +1068,8 @@ describe("快捷键配置表（任务 G）", () => {
     expect(fmtShortcutKey("KeyM")).toBe("M");
     expect(fmtShortcutKey("BracketLeft")).toBe("[");
     expect(fmtShortcutKey("BracketRight")).toBe("]");
+    expect(fmtShortcutKey("Meta+Comma")).toBe("⌘,");
+    expect(fmtShortcutKey("Comma")).toBe(",");
     expect(fmtShortcutKey("Digit5")).toBe("5");
     expect(fmtShortcutKey("F3")).toBe("F3");
     expect(fmtShortcutKey("")).toBe("—");

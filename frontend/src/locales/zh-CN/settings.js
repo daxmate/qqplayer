@@ -262,6 +262,7 @@ export default {
     shortcutFav: "收藏 / 取消收藏",
     shortcutCycleMode: "播放模式切换",
     shortcutZhToggle: "中文翻译显示",
+    shortcutOpenSettings: "打开设置",
     shortcutKaraokeMode: "连播 ↔ 跟唱",
     shortcutAbA: "AB 循环：设起点 A",
     shortcutAbB: "AB 循环：设终点 B",

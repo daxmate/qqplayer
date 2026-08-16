@@ -2,7 +2,7 @@
   <div class="app">
     <div v-if="blurCoverUrl" class="bg-blur" :style="{ backgroundImage: `url(${blurCoverUrl})` }" />
     <!-- 移动端（<1024px）：页面栈式布局（媒体库首页 / 列表 / 全屏播放器 + 迷你播放条） -->
-    <MobileShell v-if="isMobile" @open-settings="settingsOpen = true" />
+    <MobileShell v-if="isMobile" @open-settings="isSettingsOpen = true" />
     <!-- 桌面端（≥1024px）：三栏布局（完全不变） -->
     <template v-else>
       <!-- 顶栏 -->
@@ -55,7 +55,7 @@
             <MonitorPlay :size="18" />
             <span class="gear-label">{{ t("app.desktopLyric.label") }}</span>
           </button>
-          <button class="gear-btn" :title="t('app.settings')" @click="settingsOpen = true">
+          <button class="gear-btn" :title="t('app.settings')" @click="isSettingsOpen = true">
             <Settings :size="18" />
             <span class="gear-label">{{ t("app.settings") }}</span>
           </button>
@@ -140,7 +140,7 @@
       </div>
     </Transition>
 
-    <SettingsModal :open="settingsOpen" @close="settingsOpen = false" />
+    <SettingsModal :open="isSettingsOpen" @close="isSettingsOpen = false" />
     <LyricSpecModal />
     <!-- search anything 全屏搜索层本体（桌面/移动共用；v-if 由 isSearchOpen 单例控制） -->
     <SearchAnything @pick="onSearchPick" />
@@ -185,6 +185,7 @@ import SettingsModal from "./components/SettingsModal.vue";
 import SearchAnything from "./components/SearchAnything.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
+import { isSettingsOpen } from "./composables/settingsState.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import {
   coverSizePx,
@@ -219,7 +220,6 @@ import {
 
 const { t } = useI18n();
 
-const settingsOpen = ref(false);
 const centerRef = ref(null);
 let cleanupCoverObserve = null;
 
