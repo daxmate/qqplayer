@@ -129,7 +129,7 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
     await wrapper.find(".ml-actions .ml-act-remove").trigger("click");
     await flushPromises();
     expect(state.songs.map((s) => s.path)).toEqual(["/lib/b.mp3", "/lib/c.mp3"]);
-    expect(useToast().items[0].text).toBe("已移除");
+    expect(useToast().items[0].text).toBe("已从队列移除《雪の華》");
     expect(wrapper.findAll(".ml-item").length).toBe(2); // 行已消失
   });
 
@@ -151,7 +151,7 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
           opt.method === "DELETE",
       ),
     ).toBe(true);
-    expect(useToast().items[0].text).toBe("已移除");
+    expect(useToast().items[0].text).toBe("已从歌单移除《雪の華》");
   });
 
   it("同一时间只展开一行：滑动第二行时第一行收起", async () => {

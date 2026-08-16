@@ -104,7 +104,7 @@ describe("MobileSmartList 左滑操作（swipe-reveal）", () => {
     await wrapper.find(".msv-actions .msv-act-remove").trigger("click");
     await flushPromises();
     expect(state.songs.map((s) => s.path)).toEqual(["/lib/b.mp3"]);
-    expect(useToast().items[0].text).toBe("已移除");
+    expect(useToast().items[0].text).toBe("已从队列移除《雪の華》");
   });
 
   it("滑动结束后点击行 → 点击被抑制（不播放），行保持展开；再次点击收起", async () => {
