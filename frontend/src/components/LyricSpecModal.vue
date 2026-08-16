@@ -116,6 +116,18 @@
             :placeholder="t('spec.pastePlaceholder')"
             spellcheck="false"
           />
+          <div class="paste-tools">
+            <button
+              class="align-btn"
+              :disabled="aligning || !pasteText.trim()"
+              :title="t('spec.align')"
+              @click="doAlign"
+            >
+              <Loader2 v-if="aligning" :size="14" class="spin" />
+              <Sparkles v-else :size="14" />
+              {{ aligning ? t("spec.aligning") : t("spec.align") }}
+            </button>
+          </div>
           <div v-if="pasteText.trim()" class="paste-meta">
             {{ t("spec.detectFormatLabel")
             }}<b>{{ pasteFormat ? pasteFormat.toUpperCase() : t("spec.unrecognized") }}</b>
@@ -150,8 +162,18 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ClipboardPaste, FileMusic, FileUp, Loader2, Search, Trash2, X } from "@lucide/vue";
 import {
+  ClipboardPaste,
+  FileMusic,
+  FileUp,
+  Loader2,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from "@lucide/vue";
+import {
+  alignLyric,
   deleteManualLyric,
   fetchManualLyric,
   loadLyric,
@@ -264,6 +286,25 @@ async function pickResult(r, i) {
 // ---- 粘贴文本 ----
 const pasteText = ref("");
 const pasteFormat = computed(() => (pasteText.value ? detectFormat(pasteText.value) : null));
+
+// ---- AI 对齐（粘贴 tab）：纯歌词文本 → 本地 ForcedAligner 生成时间戳 → 填入 LRC ----
+const aligning = ref(false);
+
+async function doAlign() {
+  if (aligning.value || !song.value || !pasteText.value.trim()) return;
+  aligning.value = true;
+  try {
+    const data = await alignLyric({ path: song.value.path, text: pasteText.value });
+    // 对齐耗时较长，期间用户可能已关弹窗/切歌：结果只在弹窗仍打开时填入
+    if (!state.specLyricOpen || !song.value) return;
+    pasteText.value = data.lrc; // 填入后 detectFormat 自动识别为 lrc，canSave 通过
+    showToast(t("spec.alignDone"));
+  } catch (err) {
+    toastError(err.message || t("spec.alignFailed"));
+  } finally {
+    aligning.value = false;
+  }
+}
 
 // ---- 保存 / 清除 ----
 const saving = ref(false);
@@ -390,6 +431,7 @@ watch(
       savingIdx.value = -1;
       searchTitle.value = song.value.name || "";
       searchArtist.value = song.value.artist || "";
+      aligning.value = false;
       const st = await fetchManualLyric(song.value.path);
       manual.value = st?.specified ? st : null;
     }
@@ -725,7 +767,7 @@ watch(
 
 .paste-area {
   width: 100%;
-  height: 220px;
+  height: 200px;
   resize: vertical;
   padding: 12px;
   border-radius: 10px;
@@ -740,6 +782,33 @@ watch(
 .paste-area:focus {
   border-color: var(--accent);
   outline: none;
+}
+.paste-tools {
+  display: flex;
+  align-items: center;
+}
+.align-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+@media (hover: hover) {
+  .align-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+}
+.align-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .paste-meta {
   font-size: 12.5px;

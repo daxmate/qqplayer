@@ -27,8 +27,14 @@ class FakeAudio {
 }
 vi.stubGlobal("Audio", FakeAudio);
 
+// mock usePlayer 模块：保留全部真实实现，仅替换 alignLyric（组件内点击 AI 对齐用）
+vi.mock("../composables/usePlayer.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, alignLyric: vi.fn() };
+});
+
 const LyricSpecModal = (await import("../components/LyricSpecModal.vue")).default;
-const { state } = await import("../composables/usePlayer.js");
+const { state, alignLyric } = await import("../composables/usePlayer.js");
 const { useToast, clearToasts } = await import("../composables/useToast.js");
 
 const SONG = {
@@ -97,6 +103,7 @@ async function openModal() {
 beforeEach(() => {
   state.specLyricOpen = false;
   state.currentSong = { ...SONG };
+  alignLyric.mockReset();
 });
 
 afterEach(() => {
@@ -312,6 +319,71 @@ describe("LyricSpecModal 粘贴文本", () => {
     await nextTick();
     expect(w.text()).toContain("未识别");
     expect(w.find(".btn-primary").attributes("disabled")).toBeDefined();
+    w.unmount();
+  });
+});
+
+describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
+  it("渲染 AI 对齐按钮，纯文本为空时禁用，有内容后可点", async () => {
+    mockFetch();
+    const w = await openModal();
+    await w.findAll(".spec-tab")[2].trigger("click");
+    await nextTick();
+    const btn = w.find(".align-btn");
+    expect(btn.exists()).toBe(true);
+    expect(btn.text()).toContain("AI 对齐");
+    expect(btn.attributes("disabled")).toBeDefined();
+    await w.find(".paste-area").setValue("一行歌词\n二行歌词");
+    await nextTick();
+    expect(w.find(".align-btn").attributes("disabled")).toBeUndefined();
+    w.unmount();
+  });
+
+  it("点击 AI 对齐 → loading（禁用+文案）→ 成功填入 LRC 并识别格式", async () => {
+    mockFetch();
+    let resolveAlign;
+    alignLyric.mockImplementation(() => new Promise((r) => (resolveAlign = r)));
+    const w = await openModal();
+    await w.findAll(".spec-tab")[2].trigger("click");
+    await nextTick();
+    await w.find(".paste-area").setValue("一行歌词\n二行歌词");
+    await nextTick();
+    await w.find(".align-btn").trigger("click");
+    await nextTick();
+
+    // loading：按钮禁用 + 文案「AI 对齐中…」，且带当前歌曲 path 调用 API
+    expect(alignLyric).toHaveBeenCalledWith({ path: SONG.path, text: "一行歌词\n二行歌词" });
+    expect(w.find(".align-btn").attributes("disabled")).toBeDefined();
+    expect(w.text()).toContain("AI 对齐中");
+
+    // 成功：LRC 填入 textarea → 检测为 LRC → 保存按钮可用 + 完成 toast
+    resolveAlign({ lrc: "[00:01.23]一行歌词\n[00:05.67]二行歌词", lines: 2, duration: 38 });
+    await tick();
+    await nextTick();
+    expect(w.find(".paste-area").element.value).toBe("[00:01.23]一行歌词\n[00:05.67]二行歌词");
+    expect(w.text()).toContain("LRC");
+    const { items } = useToast();
+    expect(items.some((i) => i.type === "success" && i.text.includes("AI 对齐完成"))).toBe(true);
+    expect(w.find(".btn-primary").attributes("disabled")).toBeUndefined();
+    expect(w.find(".align-btn").attributes("disabled")).toBeUndefined(); // 按钮恢复
+    w.unmount();
+  });
+
+  it("对齐失败 → error toast（带 detail），按钮恢复", async () => {
+    mockFetch();
+    alignLyric.mockRejectedValue(new Error("AI 对齐失败，请检查音频文件与歌词内容"));
+    const w = await openModal();
+    await w.findAll(".spec-tab")[2].trigger("click");
+    await nextTick();
+    await w.find(".paste-area").setValue("一行歌词");
+    await nextTick();
+    await w.find(".align-btn").trigger("click");
+    await tick();
+    await nextTick();
+    const { items } = useToast();
+    expect(items.some((i) => i.type === "error" && i.text.includes("AI 对齐失败"))).toBe(true);
+    expect(w.find(".align-btn").attributes("disabled")).toBeUndefined();
+    expect(w.find(".paste-area").element.value).toBe("一行歌词"); // 原文本保留
     w.unmount();
   });
 });

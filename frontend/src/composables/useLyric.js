@@ -130,6 +130,20 @@ export async function searchLyricCandidates(title, artist) {
   return (await res.json()).results || [];
 }
 
+// AI 歌词对齐：纯歌词文本（无时间戳）→ 后端调本地 Qwen3-ForcedAligner 生成时间戳 → LRC 字符串
+// 对齐耗时较长（模型加载 + 长音频分段），调用方负责 loading 态；失败抛带 detail 的 Error
+// language 第一版不传（后端自动检测）
+export async function alignLyric({ path, text }) {
+  const res = await fetch("/api/lyric/align", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, text }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || i18n.global.t("spec.alignFailed"));
+  return data; // { lrc, lines, duration? }
+}
+
 export function toggleZh() {
   state.zhVisible = !state.zhVisible;
 }

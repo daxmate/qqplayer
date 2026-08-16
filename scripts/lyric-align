@@ -1,0 +1,529 @@
+#!/usr/bin/env bash
+# ============================================================
+#  align — Qwen3-ForcedAligner 词级时间戳对齐工具
+#  用法: align <音频文件> [选项]
+#
+#  流程:
+#  1. 按静音切分音频为多段（长音频分段对齐，避免尾部时间戳退化）
+#  2. 每段用 omlx Qwen3-ASR 转写（或使用 --text 全文）
+#  3. 每段用 Qwen3-ForcedAligner 词级对齐，加偏移合并
+#  4. 输出词级时间戳 json / 句级 srt / vtt
+#
+#  依赖: oMLX app 内置 python3.11 (framework-mlx-base) + ffmpeg + nagisa
+# ============================================================
+set -euo pipefail
+
+# ---------- 配置 ----------
+PY=/Applications/oMLX.app/Contents/Resources/Python/framework-mlx-base/bin/python_
+SP=/Applications/oMLX.app/Contents/Resources/Python/framework-mlx-base/lib/python3.11/site-packages
+MODEL="$HOME/.omlx/mlx-community/Qwen3-ForcedAligner-0.6B-5bit"
+ASR_MODEL="Qwen3-ASR-0.6B-5bit"
+API_URL="${OMLX_API_URL:-http://localhost:8000}"
+LANGUAGE=""
+KNOWN_TEXT=""
+OUTPUT="json"
+SILENCE_DB="-30"
+SILENCE_DUR="0.25"
+MIN_SEG="1.0"
+WIN_SEC="30"            # 转写窗口大小（用户方案：30s）
+WIN_OVERLAP="5"         # 窗口重叠秒数（用户方案：5s）
+
+# ---------- 帮助 ----------
+show_help() {
+    cat <<'EOF'
+用法: align <音频文件> [选项]
+
+参数:
+  音频文件                必选 (wav/mp3/m4a/flac...)
+
+选项:
+  -l, --language LANG     语言 (Chinese/English/Japanese...，默认自动检测)
+  -t, --text TEXT         已知文本（跳过 ASR；长文本建议配合分段使用）
+  -m, --model PATH        对齐模型路径 (默认: ~/.omlx/mlx-community/Qwen3-ForcedAligner-0.6B-5bit)
+  -o, --output FMT        输出格式: json|srt|vtt|text (默认: json)
+      --silence-db DB     静音检测阈值 dB (默认 -30)
+      --silence-dur SEC   最小静音时长秒 (默认 0.25)
+      --win-sec SEC       转写窗口大小秒 (默认 30)
+      --win-overlap SEC   窗口重叠秒 (默认 5)
+      --no-split          不分段（整段一次对齐，短音频用）
+  -h, --help              显示帮助
+
+示例:
+  align song.mp3                                # 分段 ASR + 词级对齐
+  align song.mp3 -l Japanese                    # 指定语言
+  align song.mp3 -o srt                         # 输出 SRT 字幕
+  align clip.wav --no-split -t "已知文本"        # 短音频 + 已知文本
+EOF
+}
+
+# ---------- 解析参数 ----------
+POSITIONAL=()
+SPLIT="auto"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -l|--language)  LANGUAGE="$2"; shift 2 ;;
+        -t|--text)      KNOWN_TEXT="$2"; shift 2 ;;
+        -m|--model)     MODEL="$2"; shift 2 ;;
+        -o|--output)    OUTPUT="$2"; shift 2 ;;
+        --silence-db)   SILENCE_DB="$2"; shift 2 ;;
+        --silence-dur)  SILENCE_DUR="$2"; shift 2 ;;
+        --win-sec)      WIN_SEC="$2"; shift 2 ;;
+        --win-overlap)  WIN_OVERLAP="$2"; shift 2 ;;
+        --no-split)     SPLIT="off"; shift ;;
+        -h|--help)      show_help; exit 0 ;;
+        -*) echo "❌ 未知选项: $1" >&2; show_help >&2; exit 1 ;;
+        *) POSITIONAL+=("$1"); shift ;;
+    esac
+done
+[[ ${#POSITIONAL[@]} -ge 1 ]] || { echo "❌ 必须指定音频文件" >&2; show_help >&2; exit 1; }
+AUDIO="${POSITIONAL[0]}"
+[[ -f "$AUDIO" ]] || { echo "❌ 文件不存在: $AUDIO" >&2; exit 1; }
+case "$OUTPUT" in json|srt|vtt|text) ;; *) echo "❌ 输出格式: json|srt|vtt|text" >&2; exit 1 ;; esac
+
+# ---------- 对齐模型：缺失时自动下载（ModelScope 优先，HuggingFace 保底）----------
+# 模型目录不存在 → 提示用户并下载（约 1GB，首次使用需要几分钟）。
+# 优先 modelscope.cn（国内直连快），失败后回退 huggingface.co。两者都下载到 $MODEL 目录。
+if [[ ! -d "$MODEL" ]]; then
+  echo "ℹ️ 对齐模型不存在，准备下载（约 1GB，首次使用需要几分钟）..." >&2
+  PY_DL=/Applications/oMLX.app/Contents/Resources/Python/framework-mlx-base/bin/python_
+  SP_DL=/Applications/oMLX.app/Contents/Resources/Python/framework-mlx-base/lib/python3.11/site-packages
+  if [[ ! -x "$PY_DL" ]]; then
+    echo "❌ 对齐模型不存在且无法自动下载（oMLX 运行时缺失）: $MODEL" >&2
+    echo "   请先安装 oMLX，或手动放置模型目录后重试" >&2
+    exit 1
+  fi
+  REPO="mlx-community/Qwen3-ForcedAligner-0.6B-5bit"
+  mkdir -p "$(dirname "$MODEL")"
+  PYTHONPATH="$SP_DL" "$PY_DL" - "$REPO" "$MODEL" <<'PYEOF2'
+import sys
+from pathlib import Path
+repo, target = sys.argv[1], Path(sys.argv[2])
+try:
+    from modelscope import snapshot_download
+    print("⏳ 从 ModelScope 下载模型（国内直连，约 1GB）...", file=sys.stderr, flush=True)
+    snapshot_download(repo, local_dir=str(target))
+    print("✅ ModelScope 下载完成", file=sys.stderr, flush=True)
+    sys.exit(0)
+except Exception as e:
+    print(f"⚠️ ModelScope 下载失败: {e}", file=sys.stderr, flush=True)
+try:
+    from huggingface_hub import snapshot_download
+    print("⏳ 回退 HuggingFace 下载模型...", file=sys.stderr, flush=True)
+    snapshot_download(repo, local_dir=str(target))
+    print("✅ HuggingFace 下载完成", file=sys.stderr, flush=True)
+    sys.exit(0)
+except Exception as e:
+    print(f"❌ HuggingFace 下载也失败: {e}", file=sys.stderr, flush=True)
+    sys.exit(1)
+PYEOF2
+  if [[ $? -ne 0 ]]; then
+    echo "❌ 模型自动下载失败，请手动下载: https://modelscope.cn/models/mlx-community/Qwen3-ForcedAligner-0.6B-5bit" >&2
+    echo "   放到: $MODEL" >&2
+    exit 1
+  fi
+  [[ -d "$MODEL" ]] || { echo "❌ 下载完成但目录异常: $MODEL" >&2; exit 1; }
+  echo "✅ 模型就绪: $MODEL" >&2
+fi
+
+# ---------- API Key ----------
+SETTINGS="$HOME/.omlx/settings.json"
+API_KEY=""
+[[ -f "$SETTINGS" ]] && API_KEY=$(sed -n 's/.*"api_key": *"\([^"]*\)".*/\1/p' "$SETTINGS" | head -1)
+[[ -n "$API_KEY" ]] || { echo "❌ 未找到 API Key" >&2; exit 1; }
+
+# ---------- 转写函数（omlx ASR）----------
+asr_segment() {
+    local segfile="$1"
+    curl -sS -m 300 -X POST "${API_URL}/v1/audio/transcriptions" \
+        -H "Authorization: Bearer ${API_KEY}" \
+        -F "file=@${segfile}" \
+        -F "model=${ASR_MODEL}" \
+        -F "response_format=json" \
+        ${LANGUAGE:+-F "language=$LANGUAGE"} \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('text','') if 'text' in d else '')"
+}
+
+# ---------- 主流程（python）----------
+export T_AUDIO="$AUDIO" T_MODEL="$MODEL" T_TEXT="$KNOWN_TEXT" T_LANG="$LANGUAGE" \
+       T_OUTPUT="$OUTPUT" T_SPLIT="$SPLIT" T_SILENCE_DB="$SILENCE_DB" \
+       T_SILENCE_DUR="$SILENCE_DUR" T_MIN_SEG="$MIN_SEG" T_WIN_SEC="$WIN_SEC" T_WIN_OVERLAP="$WIN_OVERLAP" \
+       T_API_URL="$API_URL" T_API_KEY="$API_KEY" T_ASR_MODEL="$ASR_MODEL"
+
+PYTHONPATH="$SP" "$PY" - <<'PYEOF'
+import json, os, re, subprocess, sys, tempfile, urllib.request
+
+audio   = os.environ["T_AUDIO"]
+model_path = os.environ["T_MODEL"]
+text    = os.environ["T_TEXT"].strip()
+lang    = os.environ["T_LANG"] or None
+output  = os.environ["T_OUTPUT"]
+split   = os.environ["T_SPLIT"] != "off"
+s_db    = os.environ["T_SILENCE_DB"]
+s_dur   = float(os.environ["T_SILENCE_DUR"])
+min_seg = float(os.environ["T_MIN_SEG"])
+win_sec = float(os.environ["T_WIN_SEC"])
+win_overlap = float(os.environ["T_WIN_OVERLAP"])
+api_url = os.environ["T_API_URL"]
+api_key = os.environ["T_API_KEY"]
+asr_model = os.environ["T_ASR_MODEL"]
+
+# ISO 代码 → 模型语言全名映射（encode_timestamp 只认全名）
+LANG_MAP = {
+    "ja": "Japanese", "jp": "Japanese", "japanese": "Japanese",
+    "zh": "Chinese", "zh-cn": "Chinese", "chinese": "Chinese", "zh-tw": "Chinese", "cantonese": "Cantonese",
+    "ko": "Korean", "korean": "Korean",
+    "en": "English", "english": "English",
+    "de": "German", "fr": "French", "es": "Spanish", "pt": "Portuguese",
+    "id": "Indonesian", "it": "Italian", "ru": "Russian", "th": "Thai",
+    "vi": "Vietnamese", "tr": "Turkish", "hi": "Hindi", "ms": "Malay",
+    "nl": "Dutch", "sv": "Swedish", "da": "Danish", "fi": "Finnish",
+    "pl": "Polish", "cs": "Czech", "fil": "Filipino", "fa": "Persian",
+    "el": "Greek", "ro": "Romanian", "hu": "Hungarian", "mk": "Macedonian",
+    "ar": "Arabic",
+}
+lang = LANG_MAP.get((lang or "").lower(), lang or None)
+
+def ts_srt(t):
+    h=int(t//3600); m=int(t%3600//60); s=int(t%60); ms=int(round((t-int(t))*1000))
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+def ts_vtt(t):
+    h=int(t//3600); m=int(t%3600//60); s=int(t%60); ms=int(round((t-int(t))*1000))
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+def call_asr(path):
+    boundary = "----transcribe" + os.urandom(8).hex()
+    body = b""
+    def field(name, value):
+        nonlocal body
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").encode()
+    def upload(name, fpath):
+        nonlocal body
+        with open(fpath, "rb") as fh:
+            data = fh.read()
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; "
+                 f"filename=\"{os.path.basename(fpath)}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+        body += data + b"\r\n"
+    field("model", asr_model)
+    field("response_format", "json")
+    if lang:
+        field("language", lang)
+    upload("file", path)
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        f"{api_url}/v1/audio/transcriptions", data=body,
+        headers={"Authorization": f"Bearer {api_key}",
+                 "Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            d = json.loads(resp.read().decode())
+        if isinstance(d, dict) and "error" in d:
+            return ""
+        return d.get("text", "")
+    except Exception:
+        return ""
+
+# ---------- 加载对齐模型 ----------
+print("⏳ 加载 ForcedAligner 模型...", file=sys.stderr)
+from mlx_audio.stt.utils import load_model
+model = load_model(model_path)
+
+def detect_lang(txt):
+    # 注意顺序：日文歌含汉字（笑/僕/全部），不能先判中文！
+    # 平假名/片假名是日文的强特征，优先检测
+    if any('\u3040' <= ch <= '\u30ff' for ch in txt):
+        return "Japanese"
+    if any('\uac00' <= ch <= '\ud7af' for ch in txt):
+        return "Korean"
+    if any('\u4e00' <= ch <= '\u9fff' for ch in txt):
+        return "Chinese"
+    return "English"
+
+def align_one(audio_path, text_for_align, seg_offset, label):
+    """对齐单个音频段，返回带全局偏移的词列表（含句末标记）"""
+    txt = " ".join(text_for_align.split())
+    if not txt:
+        return []
+    l = lang or detect_lang(txt)
+    try:
+        result = model.generate(audio_path, text=txt, language=l)
+        items = list(result)
+    except Exception as exc:
+        print(f"⚠️ [{label}] 对齐失败: {exc}", file=sys.stderr)
+        return []
+    # 超长词兜底：若某个"词"超过 10 字符（ASR 粘连/分词异常时出现），
+    # 用 nagisa 二次分词并按时间比例拆分，保证输出粒度合理
+    import nagisa
+    # 分词（与模型同款 tokenizer 路径），用于标点断句
+    proc_l = (l or "").lower()
+    if proc_l == "japanese":
+        word_list = [x for x in nagisa.tagging(txt).words if x.strip()]
+    elif proc_l == "chinese":
+        word_list = []
+        for seg in re.split(r"([\u4e00-\u9fff])", txt):
+            if not seg:
+                continue
+            if re.fullmatch(r"[\u4e00-\u9fff]", seg):
+                word_list.append(seg)
+            elif seg.strip():
+                word_list.extend(seg.split())
+    else:
+        word_list = [x for x in txt.split() if x.strip()]
+    # 词 → 原文位置，找句末标点（。！？!?…）
+    se = set()  # 词索引 → 该词后断句
+    pos = 0
+    for i, w in enumerate(word_list):
+        idx = txt.find(w, pos)
+        if idx < 0:
+            pos = 0
+            idx = txt.find(w, pos)
+        pos = idx + len(w)
+        j = pos
+        while j < len(txt) and txt[j] in " \u3000\t\n":
+            j += 1
+        if j < len(txt) and txt[j] in "。！？!?…；;":
+            se.add(i)
+    words = []
+    for it in items:
+        w = it.text
+        if len(w) > 10:
+            subs = [x for x in nagisa.tagging(w).words if x.strip()]
+            if len(subs) > 1:
+                span = it.end_time - it.start_time
+                total_chars = sum(len(x) for x in subs)
+                cur = it.start_time
+                for k, x in enumerate(subs):
+                    frac = len(x) / total_chars if total_chars else 1.0 / len(subs)
+                    nxt = cur + span * frac
+                    words.append({"word": x, "start": round(cur + seg_offset, 3),
+                                  "end": round(nxt + seg_offset, 3), "se": False})
+                    cur = nxt
+                continue
+        words.append({"word": w, "start": round(it.start_time + seg_offset, 3),
+                      "end": round(it.end_time + seg_offset, 3), "se": False})
+    # 把句末标记映射到输出词（按词序对齐 word_list 与 items）
+    # 简单映射：items 顺序与 word_list 一致（未拆分时），拆分时最后子词继承标记
+    out_i = 0
+    wl_i = 0
+    for it in items:
+        w = it.text
+        if wl_i in se and out_i < len(words):
+            words[out_i]["se"] = True
+        if len(w) > 10:
+            subs = [x for x in nagisa.tagging(w).words if x.strip()]
+            if len(subs) > 1:
+                out_i += len(subs)
+            else:
+                out_i += 1
+        else:
+            out_i += 1
+        wl_i += 1
+    print(f"✓ [{label}] {len(words)} 词, {txt[:30]}...", file=sys.stderr)
+    return words
+
+def find_cut(text, lo, target):
+    """从 target 位置向两侧找最近的标点/空白作为切点（不切断词）。
+    lo=段起始字符位置，保证切点 >= lo。返回切点索引（不含）。
+    标点（。！？…；;，,、.）→ 标点后切开（标点归前段）；
+    空白（空格/换行/tab）→ 空白前切开（空白归后段，词完整不拆）。"""
+    n = len(text)
+    window = 60  # 向两侧搜索窗口（字符）
+    best, best_score = target, -1e9
+    for i in range(max(lo, target - window), min(n, target + window)):
+        ch = text[i]
+        if ch in "。！？!?…；;，,、.":
+            score = -abs(i - target)
+            if score > best_score:
+                best_score = score
+                best = i + 1
+        elif ch in " \u3000\t\n\r":
+            score = -abs(i - target) - 0.5  # 同位置标点优先
+            if score > best_score:
+                best_score = score
+                best = i
+    if best_score > -1e8 and best > lo:
+        return best
+    return max(lo, min(n, target))
+
+
+def slice_text_by_segs(text, segs):
+    """把已知文本按各段时长占比切成 N 份，切点尽量落在标点/空白。
+    返回与 segs 等长的切片列表（空段给空串，由调用方跳过）。"""
+    total_dur = segs[-1][1] - segs[0][0]
+    total_chars = len(text)
+    out = []
+    prev = 0
+    for i, (st, en) in enumerate(segs):
+        if i == len(segs) - 1:
+            cut = total_chars  # 最后一段吃下剩余全部
+        else:
+            target = round(total_chars * (en - segs[0][0]) / total_dur)
+            cut = find_cut(text, prev, target)
+        out.append(text[prev:cut])
+        prev = cut
+    return out
+
+
+def get_duration(path):
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path],
+        capture_output=True, text=True)
+    try:
+        return float(json.loads(probe.stdout)["format"]["duration"])
+    except Exception:
+        return 0.0
+
+def find_splits(path):
+    """返回切分点列表（静音中点）"""
+    proc = subprocess.run(
+        ["ffmpeg", "-i", path, "-af", f"silencedetect=noise={s_db}dB:d={s_dur}",
+         "-f", "null", "-"], capture_output=True, text=True)
+    silences, cur = [], None
+    for line in proc.stderr.splitlines():
+        m = re.search(r"silence_start: ([\d.]+)", line)
+        if m:
+            cur = {"start": float(m.group(1))}
+        m = re.search(r"silence_end: ([\d.]+) \| silence_duration: ([\d.]+)", line)
+        if m and cur is not None:
+            cur["end"] = float(m.group(1)); cur["dur"] = float(m.group(2))
+            silences.append(cur); cur = None
+    cuts = []
+    for s in silences:
+        if s["dur"] >= s_dur and s["start"] > 0:
+            cuts.append((s["start"] + s["end"]) / 2)
+    return cuts
+
+# ---------- 生成分段（用户方案：30s 窗口 + 5s 重叠）----------
+# 窗口: 0-30, 25-55, 50-80, ... （重叠 5s 保证句首句尾不截断）
+# ASR 用窗口转写；对齐时用去重叠后的实际边界 [prev_end, cur_end]，
+# 每个对齐段的文本来自对应窗口的转写（重叠区文本在相邻段重复出现，
+# 对齐时按边界截取，重复词自然只保留在其真实时间位置）
+total = get_duration(audio)
+if split and total > win_sec:
+    step = win_sec - win_overlap  # 25s
+    starts = []
+    t = 0.0
+    while t < total:
+        starts.append(t)
+        t += step
+    windows = [(s, min(s + win_sec, total)) for s in starts]
+    # 对齐边界：去重叠后（0,25,50,...）
+    bounds = [0.0]
+    for w in windows[1:]:
+        bounds.append(w[0])  # 每个窗口起点 = 实际边界
+    bounds.append(total)
+    align_segs = [(bounds[i], bounds[i+1]) for i in range(len(bounds)-1)
+                  if bounds[i+1] - bounds[i] >= min_seg]
+    print(f"ℹ️ 音频 {total:.1f}s → {len(windows)} 转写窗口(30s+5s重叠), {len(align_segs)} 对齐段", file=sys.stderr)
+else:
+    windows = [(0.0, total)]
+    align_segs = [(0.0, total)]
+    print(f"ℹ️ 音频 {total:.1f}s → 整段对齐", file=sys.stderr)
+
+# ---------- 转写 + 对齐（窗口转写，对齐段对齐）----------
+tmpdir = tempfile.mkdtemp(prefix="align_split.")
+all_words = []
+# 过滤 ASR 误报的哼唱/无意义词（无人声段如前奏/尾奏会被识别成 うん/ええ 等）
+JUNK_WORDS = {"うん", "ええ", "ああ", "ん", "「」", "「", "」", "♪", "～", "…"}
+try:
+    # 已知文本 + 分段：按段时长占比切片（每段用对应歌词片段，避免全文塞每段尾部塌缩）
+    seg_texts = None
+    if text and len(align_segs) > 1:
+        seg_texts = slice_text_by_segs(text, align_segs)
+        for i, (st, en) in enumerate(align_segs):
+            snippet = seg_texts[i][:40] if seg_texts[i] else "(空)"
+            print(f"  TEXT[{st:.0f}-{en:.0f}]: {snippet}", file=sys.stderr)
+
+    # 1. 每个窗口 ASR 转写（仅 ASR 模式；带 5s 重叠，保证句子完整）
+    window_texts = []
+    if not text:
+        for idx, (wst, wen) in enumerate(windows):
+            win_file = os.path.join(tmpdir, f"win_{idx:03d}.m4a")
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", audio, "-ss", str(wst), "-to", str(wen),
+                 "-vn", "-c:a", "aac", "-b:a", "128k", win_file],
+                capture_output=True, check=True)
+            seg_text = call_asr(win_file)
+            window_texts.append(seg_text)
+            if seg_text:
+                print(f"  ASR[{wst:.0f}-{wen:.0f}]: {seg_text[:40]}", file=sys.stderr)
+
+    # 2. 每个对齐段对齐（已知文本→切片；ASR→覆盖段中心的窗口转写）
+    for idx, (st, en) in enumerate(align_segs):
+        if seg_texts is not None:
+            seg_text = seg_texts[idx]
+        elif text:
+            seg_text = text  # 未分段（短音频）：全文整段对齐
+        else:
+            # 找覆盖此段中心的窗口
+            center = (st + en) / 2
+            w_idx = 0
+            for wi, (wst, wen) in enumerate(windows):
+                if wst <= center < wen:
+                    w_idx = wi
+                    break
+            seg_text = window_texts[w_idx]
+        seg_file = os.path.join(tmpdir, f"seg_{idx:03d}.m4a")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", audio, "-ss", str(st), "-to", str(en),
+             "-vn", "-c:a", "aac", "-b:a", "128k", seg_file],
+            capture_output=True, check=True)
+        words = align_one(seg_file, seg_text, st, f"{st:.1f}-{en:.1f}")
+        # 过滤无意义词（整段只有哼唱时丢弃，如纯前奏/尾奏）
+        if words and len(words) <= 2 and all(w["word"] in JUNK_WORDS for w in words):
+            print(f"  ⚠️ [{st:.1f}-{en:.1f}] 疑似无人声段，丢弃 {len(words)} 词", file=sys.stderr)
+            continue
+        all_words.extend(words)
+finally:
+    import shutil
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+# ---------- 输出 ----------
+# 词级合并成句：优先标点断句（se 标记），时间间隔 >0.3s 兑底；
+# 太碎的句（时长 <1.5s 且非长句）与下一句合并，避免 ASR 标点碎句
+raw_lines = []
+cur_start, cur_end, cur_txt = None, None, []
+for w in all_words:
+    if not w["word"]:
+        continue
+    if cur_start is None:
+        cur_start, cur_end, cur_txt = w["start"], w["end"], [w["word"]]
+    elif w.get("se") or (w["start"] - cur_end > 0.3):
+        raw_lines.append({"start": cur_start, "end": cur_end, "text": "".join(cur_txt)})
+        cur_start, cur_end, cur_txt = w["start"], w["end"], [w["word"]]
+    else:
+        cur_end = w["end"]
+        cur_txt.append(w["word"])
+if cur_start is not None:
+    raw_lines.append({"start": cur_start, "end": cur_end, "text": "".join(cur_txt)})
+
+# 合并碎句：时长 <1.2s 的短句并入下一句（歌词里标点常打在短语后）
+lines = []
+i = 0
+while i < len(raw_lines):
+    s = raw_lines[i]
+    if i + 1 < len(raw_lines) and (s["end"] - s["start"]) < 1.2:
+        nxt = raw_lines[i + 1]
+        s = {"start": s["start"], "end": nxt["end"], "text": s["text"] + nxt["text"]}
+        i += 1
+    lines.append(s)
+    i += 1
+
+# json: words 带 se 标记，另附 sentences
+if output == "json":
+    out = {"words": all_words, "sentences": lines}
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+elif output == "text":
+    print("\n".join(s["text"] for s in lines))
+elif output == "srt":
+    for i, s in enumerate(lines, 1):
+        print(f"{i}")
+        print(f"{ts_srt(s['start'])} --> {ts_srt(s['end'])}")
+        print(s["text"]); print()
+else:  # vtt
+    print("WEBVTT"); print()
+    for s in lines:
+        print(f"{ts_vtt(s['start'])} --> {ts_vtt(s['end'])}")
+        print(s["text"]); print()
+PYEOF
+echo "✅ 完成" >&2

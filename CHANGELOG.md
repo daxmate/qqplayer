@@ -15,6 +15,12 @@
   - 设置面板：视觉化总开关下新增「氛围背景」「迷你频谱」两个子开关（sub-toggle 缩进样式）；6 样式 chips 语义变为「迷你频谱样式」（主区域已无样式概念）；settingsIndex 同步收录两个新开关
   - 持久化：ambientEnabled / miniSpectrumEnabled 为前端本地持久化字段——后端 settings 白名单未收录，PUT 时被 _norm_namespace 丢弃，仅存 localStorage（PLAYBACK_SETTINGS_KEY），跨设备不同步（报告已说明）
   - 测试：前端 +31（848 全绿，含 drawAmbient / extractCoverColor / MiniSpectrum / 子开关新用例）
+- **歌词指定弹窗 AI 对齐**（任务 D：粘贴纯歌词 → 本地 ForcedAligner 生成时间戳）
+  - 粘贴 tab 新增「AI 对齐」按钮（Sparkles 图标）：纯歌词文本（无时间戳）→ 点按 → 本地 Qwen3-ForcedAligner（`~/bin/align`）生成时间戳 → LRC 填入编辑框 → 用户确认后走现有保存（不自动保存/不自动关弹窗）
+  - 按钮状态：文本非空可点；对齐中显示转圈 + 「AI 对齐中…」并禁用防重复提交；成功 toast「AI 对齐完成，请确认后保存」，失败 error toast（带后端 detail）；对齐期间关弹窗则忽略迟到结果
+  - 新 API `POST /api/lyric/align`：校验 path 存在（404）/ text 非空（400）→ subprocess **参数列表**调用项目内 `scripts/lyric-align <path> -t <text> [-l <lang>] -o json`（无 shell 注入，超时 600s → 504）→ sentences 转 `[mm:ss.xx]` LRC → 返回 `{lrc, lines, duration}`；失败 500 并在 detail 附 align stderr 尾部（~500 字）；模型缺失自动下载（ModelScope 优先/HF 保底，~1GB），下载失败 detail 附 modelscope.cn 手动下载指引；工具未装 → 500；不缓存每次实时对齐
+  - `alignLyric({path, text})` 封装于 useLyric.js；i18n 文案（align/aligning/alignDone/alignFailed）入 zh-CN/spec.js
+  - 测试：后端 +12（285 全绿）、前端 +3（820 全绿）
 - **曲库列头点击排序**（第二批收尾）
   - 歌曲列表上方新增列头行「歌名 / 歌手 / 时长」，点击排序，三态循环：升序 → 降序 → 默认顺序（第三次点击回到曲库原始顺序）
   - 激活列头高亮（强调色）+ 方向箭头（↑/↓），切换列自动重置为升序

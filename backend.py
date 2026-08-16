@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -2131,6 +2132,91 @@ def api_lyric_search(title: str = "", artist: str = ""):
     if not title:
         raise HTTPException(400, "缺少搜索关键词")
     return {"results": search_lyric_candidates(title, artist or "")}
+
+
+# ============ AI 歌词对齐 ============
+# Qwen3-ForcedAligner 本地对齐工具（项目内 scripts/lyric-align：oMLX 内嵌 python + mlx-community
+# 模型 + ffmpeg + nagisa；模型缺失时自动下载，ModelScope 优先、HuggingFace 保底）
+ALIGN_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "lyric-align")
+# 模型缺失时首次使用会先下载（约 1GB），超时上限放宽到 600s
+ALIGN_TIMEOUT = 600
+# 模型手动下载指引（自动下载失败时附进错误 detail）
+ALIGN_MODEL_URL = "https://modelscope.cn/models/mlx-community/Qwen3-ForcedAligner-0.6B-5bit"
+
+
+def _align_to_lrc(sentences: list) -> str:
+    """align json 的 sentences（[{start, end, text}]）→ LRC 字符串 [mm:ss.xx]text 每行"""
+    lines = []
+    for s in sentences:
+        try:
+            start = float(s.get("start") or 0)
+        except (TypeError, ValueError):
+            continue
+        line_text = (s.get("text") or "").strip()
+        if not line_text:
+            continue
+        total_cs = int(round(start * 100))
+        mm, rem = divmod(total_cs, 6000)
+        ss, cs = divmod(rem, 100)
+        lines.append(f"[{mm:02d}:{ss:02d}.{cs:02d}]{line_text}")
+    return "\n".join(lines)
+
+
+@app.post("/api/lyric/align")
+def api_lyric_align(body: dict):
+    """AI 歌词对齐：纯歌词文本（无时间戳）→ 本地 ForcedAligner 生成时间戳 → LRC 字符串
+
+    请求体: {"path": "<歌曲绝对路径>", "text": "<纯歌词文本>", "language": "ja|zh|en|...(可选)"}
+    返回: {"lrc": "<LRC 字符串>", "lines": <行数>, "duration": <音频秒数>}
+    """
+    path = (body.get("path") or "").strip()
+    text = body.get("text") or ""
+    language = (body.get("language") or "").strip() or None
+    if not path:
+        raise HTTPException(400, "缺少歌曲路径")
+    if not text.strip():
+        raise HTTPException(400, "歌词内容为空")
+    f = Path(path)
+    if not f.exists():
+        raise HTTPException(404, "文件不存在")
+    align = Path(ALIGN_SCRIPT)
+    if not align.exists():
+        raise HTTPException(500, "对齐工具未安装")
+    # subprocess 参数列表传参（禁止 shell 拼接）：歌词含引号/换行/特殊字符也不会注入
+    cmd = [str(align), str(f), "-t", text, "-o", "json"]
+    if language:
+        cmd += ["-l", language]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=ALIGN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "AI 对齐超时，请稍后重试或缩短歌词") from None
+    if proc.returncode != 0:
+        # stderr 尾部附进 detail 帮助排查（截断 ~500 字符）；模型下载场景给出明确指引
+        stderr_text = proc.stderr or ""
+        stderr_tail = " | ".join(stderr_text.strip().splitlines()[-6:])[-500:]
+        detail = "AI 对齐失败，请检查音频文件与歌词内容"
+        if "下载" in stderr_text or "模型" in stderr_text:
+            if "请手动下载" in stderr_text or "下载失败" in stderr_text:
+                detail = (
+                    "AI 对齐失败：首次使用需下载对齐模型（约 1GB），自动下载未成功，"
+                    f"请手动下载 {ALIGN_MODEL_URL} 后重试"
+                )
+            elif "准备下载" in stderr_text:
+                detail = "AI 对齐失败：首次使用需下载对齐模型（约 1GB），请稍后重试"
+            elif "未找到 API Key" in stderr_text:
+                detail = "AI 对齐失败：oMLX API Key 未配置，请先在 oMLX 中登录后重试"
+        if stderr_tail:
+            detail += f"（{stderr_tail}）"
+        raise HTTPException(500, detail)
+    try:
+        data = json.loads(proc.stdout or "")
+        sentences = data.get("sentences") or []
+    except (json.JSONDecodeError, AttributeError):
+        raise HTTPException(500, "AI 对齐输出异常，请重试") from None
+    lrc = _align_to_lrc(sentences)
+    if not lrc:
+        raise HTTPException(500, "AI 对齐失败，未识别到歌词行，请检查音频文件与歌词内容")
+    return {"lrc": lrc, "lines": lrc.count("\n") + 1, "duration": get_duration(f)}
 
 
 # ============ 音频流（支持 Range） ============
