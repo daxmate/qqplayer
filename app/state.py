@@ -1,0 +1,209 @@
+"""共享状态与常量（原 backend.py 全部可变状态/路径常量迁至此）。
+
+约定：业务代码一律 `from app import state` 后 `state.XXX` 模块访问，
+禁止 `from app.state import XXX` 绑定导入 —— 测试通过 patch `app.state.XXX`
+注入临时路径/状态，绑定导入会让 patch 失效。
+"""
+
+import os
+import threading
+from pathlib import Path
+
+from app.storage import JsonStore
+
+ROOT = Path(__file__).resolve().parent.parent
+# 默认歌曲库：用户本地 iCloud 音乐文件夹（不在仓库内，仓库不存音频文件）
+DEFAULT_LIBRARY = Path(
+    "/Users/dax/Library/Mobile Documents/iCloud~dev~clq~Cosmos-Music-Player/Documents"
+)
+DEFAULT_PORT = 17627
+
+# 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）
+DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
+FAVORITES_FILE = DATA_DIR / "favorites.json"
+PLAYLISTS_FILE = DATA_DIR / "playlists.json"
+PLAYBACK_FILE = DATA_DIR / "playback.json"
+# 播放队列顺序（前端拖拽排序后保存，启动/刷新时恢复；独立文件，不动 settings.json）
+QUEUE_ORDER_FILE = DATA_DIR / "queue_order.json"
+# 网络曲库条目（网易云等在线源登记，播放时实时取直链，不落盘音频）
+NETWORK_SONGS_FILE = DATA_DIR / "network_songs.json"
+# 播放记录滚动保留上限（超了删最旧）
+PLAYBACK_LIMIT = 5000
+# 播放时长少于该秒数视为误触，不记录
+PLAYBACK_MIN_SECONDS = 3
+
+# 桌面歌词/迷你窗：主页面状态上报，悬浮窗轮询读取（内存态，不持久化）
+_now_playing: dict = {
+    "path": None,
+    "name": None,
+    "artist": None,
+    "duration": 0.0,
+    "currentTime": 0.0,
+    "isPlaying": False,
+    "volume": 1.0,
+    "lineIndex": -1,
+    "updatedAt": 0.0,
+    "accent": None,
+}
+_now_playing_lock = threading.Lock()
+# 迷你窗控制指令队列：迷你窗 POST 入队，主播放器页面轮询取走执行（内存态）
+# 元素: {"action": str, "value": float|None}
+_player_actions: list[dict] = []
+_player_actions_lock = threading.Lock()
+# 合法指令白名单（防止任意指令注入）
+_PLAYER_ACTIONS = {"togglePlay", "play", "pause", "next", "prev", "seek", "volume"}
+# 迷你窗运行状态：Swift 壳启动/退出时上报，主页面轮询点亮顶栏开关
+_mini_status: dict = {"running": False}
+_mini_status_lock = threading.Lock()
+
+# 库变动监听：事件去抖窗口（秒）与扫描缓存
+WATCH_DEBOUNCE_SECONDS = 2.0
+# 孤儿歌词定期清理：每周一 03:00（本次无设置 UI，默认开启即可）
+LYRIC_CLEANUP_ENABLED = True
+LYRIC_CLEANUP_HOUR = 3
+_scan_cache: dict | None = None  # {"library": str, "songs": [...]}
+_scan_version = 0
+_scan_lock = threading.Lock()
+_watch_timer: threading.Timer | None = None
+_watch_observer = None  # watchdog Observer（延迟 import 避免顶层依赖 watchdog）
+
+# 运行时歌曲库路径（可通过命令行参数修改；argv 覆盖逻辑在 app/main.py 模块级）
+LIBRARY = DEFAULT_LIBRARY
+
+# 支持的音频格式（默认全选，可在设置里多选过滤）
+DEFAULT_AUDIO_EXTS = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"]
+AUDIO_EXTS = set(DEFAULT_AUDIO_EXTS)
+LYRIC_EXTS = {".srt", ".lrc"}
+
+# ============ 统一设置文件路径（单一 settings.json · 7 namespace）============
+SETTINGS_FILE = DATA_DIR / "settings.json"
+# 遗留单文件设置（一次性迁移数据源；迁移后只读保留作备份，不再写入）
+UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
+DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
+# 内存缓存：完整 7 namespace 结构
+_settings: dict | None = None
+
+# ---- 各 namespace 默认值 ----
+# library：现有 LIBRARY_SETTINGS_DEFAULTS 4 字段
+LIBRARY_SETTINGS_DEFAULTS = {
+    "audioExts": DEFAULT_AUDIO_EXTS,
+    "ignoreHidden": True,  # 忽略隐藏文件/文件夹
+    "autoRefresh": True,  # watchdog 自动刷新（库变动自动重扫）
+    "autoScanOnStart": True,  # 启动时自动扫描歌曲库
+}
+# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 9 字段（只读拷贝）
+UI_SETTINGS_DEFAULTS = {
+    "showSongInfo": False,  # 跟唱模式歌词面板顶部显示当前歌曲信息
+    "karaokeShowTime": False,  # 跟唱模式每句显示起止时间戳
+    "karaokeShowNum": True,  # 跟唱模式每句左侧显示行号
+    "theme": "dark",  # 主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
+    "miniTheme": "theme",  # 迷你窗外观：'theme' 跟随主窗口 | 'dark' 深色 | 'light' 浅色
+    "accent": "orange",  # 强调色预设 key
+    "coverBlur": False,  # 封面模糊背景
+    "compact": False,  # 紧凑模式
+    "showCover": True,  # 显示封面（关闭后隐藏封面图片，保留占位）
+}
+# lyric：前端 useSettings.js LYRIC_SETTINGS_DEFAULTS 全部 15 字段
+LYRIC_SETTINGS_DEFAULTS = {
+    "fontFamily": "system",  # 'system' | 'serif' | 'rounded'
+    "fontSize": 20,  # 当前句基准字号（px）
+    "align": "left",  # 'left' | 'center' | 'right'
+    "engine": "amll",  # 歌词滚动引擎：'amll' | 'spring' | 'native'
+    "showRoma": True,  # 显示罗马音
+    "showZh": True,  # 显示中文翻译
+    "showSec": True,  # 显示段落标题
+    "focusPos": 0.5,  # 焦点句停靠位置（0~1）
+    "fadeMask": True,  # 上下渐隐遮罩
+    "autoScroll": True,  # 切句自动跟随滚动
+    "offset": 0,  # 歌词延迟校准（秒，-2~2）
+    "source": "local",  # 'local' 本地优先 | 'online' 在线优先
+    "colorScheme": "theme",  # 配色方案 key
+    "jpColor": "",  # 主行文字颜色（自定义）
+    "zhColor": "",  # 翻译行文字颜色（自定义）
+}
+# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 35 字段
+PLAYBACK_SETTINGS_DEFAULTS = {
+    "playMode": "order",  # 'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
+    "resumeLast": True,  # 启动时恢复上次播放的歌曲与进度
+    "rememberVolume": True,  # 记住音量
+    "fadeSec": 0,  # 切歌淡入淡出时长（秒）；0 = 关闭
+    "karaokeNextKey": "KeyN",  # 跟唱：下一句快捷键
+    "karaokePrevKey": "KeyP",  # 跟唱：上一句快捷键
+    "searchKey": "Meta+K",  # 搜索：打开 search anything（Cmd+K；存 e.code 风格）
+    # 任务 G：快捷键全量可录制（默认值 e.code 风格；⌘ 组合存 "Meta+<code>"）
+    "shortcutPlayPause": "Space",  # 播放 / 暂停
+    "shortcutRewind": "ArrowLeft",  # 快退 10 秒
+    "shortcutForward": "ArrowRight",  # 快进 10 秒
+    "shortcutVolUp": "ArrowUp",  # 音量 +10%
+    "shortcutVolDown": "ArrowDown",  # 音量 -10%
+    "shortcutPrevTrack": "Meta+ArrowLeft",  # 上一首（⌘←）
+    "shortcutNextTrack": "Meta+ArrowRight",  # 下一首（⌘→）
+    "shortcutMute": "KeyM",  # 静音切换
+    "shortcutFav": "KeyF",  # 收藏 / 取消收藏当前歌
+    "shortcutCycleMode": "KeyR",  # 播放模式切换
+    "shortcutZhToggle": "KeyL",  # 中文翻译显示开关
+    "shortcutKaraokeMode": "KeyG",  # 连播 ↔ 跟唱模式切换
+    "shortcutAbA": "KeyA",  # AB 循环：设起点
+    "shortcutAbB": "KeyB",  # AB 循环：设终点
+    "shortcutSlower": "BracketLeft",  # 变速 -
+    "shortcutFaster": "BracketRight",  # 变速 +
+    "shortcutVolStepUp": "Meta+ArrowUp",  # 音量 +20%（⌘↑）
+    "shortcutVolStepDown": "Meta+ArrowDown",  # 音量 -20%（⌘↓）
+    "eqEnabled": False,  # 均衡器开关
+    "eqPreset": "flat",  # 均衡器预设 key（'custom' = 用户自定义）
+    "eqGains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 自定义增益（dB，-12~12，10 段）
+    "abVisual": True,  # AB 循环区间可视化
+    "abLoopCountOn": True,  # AB 循环计数（防走开安全阀）
+    "abLoopMaxCount": 10,  # AB 循环计数上限（1-20）
+    "visualizerEnabled": True,  # 频谱可视化开关
+    "visualizerStyle": "bars",  # 视觉化样式：bars/radial/wave/pulse/mirror/particle
+    "streamStats": False,  # 流媒体播放计入播放统计
+    "sleepTimerOn": False,  # 睡眠定时器开关（运行中的倒计时不持久化，刷新即取消）
+    "sleepTimerMinutes": 30,  # 睡眠定时器时长（分钟，chip 单选 15/30/45/60/90）
+}
+# desktopLyric：现有 DESKTOP_LYRIC_DEFAULTS 11 字段（不动）
+DESKTOP_LYRIC_DEFAULTS = {
+    "enabled": False,
+    "showZh": True,
+    "fontFamily": "system",
+    "fontSize": 26,
+    "zhSize": 16,
+    "align": "center",
+    "width": 460,
+    "height": 140,
+    "colorScheme": "white",
+    "jpColor": "#ffffff",
+    "zhColor": "#ffffff",
+}
+# player：播放器运行时状态（volume 数字 0~1；panel/controls 布尔；lastPlayed 对象或 null）
+PLAYER_SETTINGS_DEFAULTS = {
+    "volume": 1.0,
+    "panel": True,
+    "controls": False,
+    "lastPlayed": None,
+}
+
+# ============ 曲库导入 ============
+# 单文件导入大小上限（超出报 error 不写盘）
+IMPORT_MAX_BYTES = 500 * 1024 * 1024  # 500MB
+
+# ============ AI 歌词对齐 ============
+# Qwen3-ForcedAligner 本地对齐工具（项目内 scripts/lyric-align：oMLX 内嵌 python + mlx-community
+# 模型 + ffmpeg + nagisa；模型缺失时自动下载，ModelScope 优先、HuggingFace 保底）
+ALIGN_SCRIPT = str(ROOT / "scripts" / "lyric-align")
+# 模型缺失时首次使用会先下载（约 1GB），超时上限放宽到 600s
+ALIGN_TIMEOUT = 600
+# 模型手动下载指引（自动下载失败时附进错误 detail）
+ALIGN_MODEL_URL = "https://modelscope.cn/models/mlx-community/Qwen3-ForcedAligner-0.6B-5bit"
+
+# ============ 播放记录写锁（避免并发上报时读改写竞争丢数据）============
+_playback_lock = threading.Lock()
+
+# ============ P1 存储抽象：JSON store 实例 ============
+# 路径全部延迟解析（path_getter 可调用）：测试 patch state.XXX_FILE 后
+# load/save 自动走新路径，import 时不需要固化路径。
+favorites_store = JsonStore(lambda: FAVORITES_FILE, default=[])
+playlists_store = JsonStore(lambda: PLAYLISTS_FILE, default=[])
+queue_order_store = JsonStore(lambda: QUEUE_ORDER_FILE, default=[])
+network_songs_store = JsonStore(lambda: NETWORK_SONGS_FILE, default=[])
+playback_store = JsonStore(lambda: PLAYBACK_FILE, default=[])

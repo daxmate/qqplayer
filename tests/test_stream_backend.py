@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
 import netease_provider  # noqa: E402
+from app import state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -26,13 +27,13 @@ client = TestClient(backend.app)
 @pytest.fixture(autouse=True)
 def _isolate_data(tmp_path, monkeypatch):
     """存储隔离：settings / network_songs 都写临时目录，不碰真实用户数据；每测试后重置缓存"""
-    monkeypatch.setattr(backend, "SETTINGS_FILE", tmp_path / "settings.json")
-    monkeypatch.setattr(backend, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
-    monkeypatch.setattr(backend, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
-    monkeypatch.setattr(backend, "NETWORK_SONGS_FILE", tmp_path / "network_songs.json")
-    backend._settings = None
+    monkeypatch.setattr(state, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(state, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
+    monkeypatch.setattr(state, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
+    monkeypatch.setattr(state, "NETWORK_SONGS_FILE", tmp_path / "network_songs.json")
+    state._settings = None
     yield
-    backend._settings = None
+    state._settings = None
 
 
 def _add_song(**overrides):
@@ -64,12 +65,12 @@ def make_mp3(path: Path):
 @pytest.fixture()
 def local_library(tmp_path, monkeypatch):
     """临时歌曲库：1 首本地歌"""
-    monkeypatch.setattr(backend, "LIBRARY", tmp_path / "lib")
+    monkeypatch.setattr(state, "LIBRARY", tmp_path / "lib")
     (tmp_path / "lib").mkdir()
     make_mp3(tmp_path / "lib" / "local.mp3")
-    backend._scan_cache = None
+    state._scan_cache = None
     yield tmp_path / "lib"
-    backend._scan_cache = None
+    state._scan_cache = None
 
 
 # ============ GET /api/stream/url ============
@@ -406,7 +407,7 @@ def test_stream_stats_valid_preserved():
         "playback"
     ]
     assert s["streamStats"] is True
-    backend._settings = None
+    state._settings = None
     s = client.get("/api/settings").json()["settings"]["playback"]
     assert s["streamStats"] is True
 

@@ -13,8 +13,11 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT))
+import app.routers.library as library_router  # noqa: E402
+import app.services.library_scan as library_scan  # noqa: E402
 import backend  # noqa: E402
 import lyric_fetch  # noqa: E402
+from app import state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -51,34 +54,34 @@ class _FakeSend2Trash:
 @pytest.fixture(autouse=True)
 def _isolate_storage(tmp_path, monkeypatch):
     """用户数据隔离：设置/收藏/歌单/手动歌词目录全走临时目录，不碰真实数据"""
-    monkeypatch.setattr(backend, "SETTINGS_FILE", tmp_path / "settings.json")
-    monkeypatch.setattr(backend, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
-    monkeypatch.setattr(backend, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
-    monkeypatch.setattr(backend, "PLAYLISTS_FILE", tmp_path / "playlists.json")
+    monkeypatch.setattr(state, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(state, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
+    monkeypatch.setattr(state, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
+    monkeypatch.setattr(state, "PLAYLISTS_FILE", tmp_path / "playlists.json")
     monkeypatch.setattr(lyric_fetch, "MANUAL_DIR", tmp_path / "manual")
-    backend._settings = None
+    state._settings = None
     yield
-    backend._settings = None
+    state._settings = None
 
 
 @pytest.fixture(autouse=True)
 def _reset_watch_state():
     """每个测试前重置扫描缓存/版本号/去抖 timer，避免全局状态串扰"""
     with backend._scan_lock:
-        backend._scan_cache = None
-        backend._scan_version = 0
+        state._scan_cache = None
+        state._scan_version = 0
         if backend._watch_timer is not None:
             backend._watch_timer.cancel()
-            backend._watch_timer = None
+            state._watch_timer = None
     yield
     with backend._scan_lock:
-        backend._scan_cache = None
-        backend._scan_version = 0
+        state._scan_cache = None
+        state._scan_version = 0
         if backend._watch_timer is not None:
             backend._watch_timer.cancel()
-            backend._watch_timer = None
+            state._watch_timer = None
 
 
 @pytest.fixture()
@@ -86,20 +89,20 @@ def song_library(tmp_path):
     """临时歌曲库：2 首假 mp3"""
     old = backend.LIBRARY
     try:
-        backend.LIBRARY = tmp_path
+        state.LIBRARY = tmp_path
         make_mp3(tmp_path / "a.mp3", title="歌曲A")
         make_mp3(tmp_path / "b.mp3", title="歌曲B")
         yield tmp_path
     finally:
-        backend.LIBRARY = old
+        state.LIBRARY = old
 
 
 # ============ 曲库删除 API ============
 def test_delete_songs_trash_and_clean_refs(song_library, monkeypatch):
     """删除库内歌曲：send2trash 调用（重复路径去重）、歌单/收藏引用清理、触发重扫"""
     calls = []
-    monkeypatch.setattr(backend, "send2trash", _FakeSend2Trash(calls))
-    monkeypatch.setattr(backend, "_schedule_rescan", lambda: calls.append("rescan"))
+    monkeypatch.setattr(library_router, "send2trash", _FakeSend2Trash(calls))
+    monkeypatch.setattr(library_scan, "_schedule_rescan", lambda: calls.append("rescan"))
     a = song_library / "a.mp3"
     b = song_library / "b.mp3"
     backend.scan_library()  # 预热缓存
@@ -127,8 +130,8 @@ def test_delete_songs_trash_and_clean_refs(song_library, monkeypatch):
 def test_delete_outside_library_goes_to_missing(song_library, monkeypatch):
     """不在库内（但磁盘真实存在）→ missing 且绝不调 send2trash、文件原样保留"""
     calls = []
-    monkeypatch.setattr(backend, "send2trash", _FakeSend2Trash(calls))
-    monkeypatch.setattr(backend, "_schedule_rescan", lambda: calls.append("rescan"))
+    monkeypatch.setattr(library_router, "send2trash", _FakeSend2Trash(calls))
+    monkeypatch.setattr(library_scan, "_schedule_rescan", lambda: calls.append("rescan"))
     outside = song_library.parent / "outside.mp3"
     outside.write_bytes(b"x" * 100)
     r = delete_songs([str(outside)])
@@ -141,8 +144,8 @@ def test_delete_outside_library_goes_to_missing(song_library, monkeypatch):
 def test_delete_mixed_in_and_out(song_library, monkeypatch):
     """混合请求：库内路径正常删除，非库内路径进 missing"""
     calls = []
-    monkeypatch.setattr(backend, "send2trash", _FakeSend2Trash(calls))
-    monkeypatch.setattr(backend, "_schedule_rescan", lambda: calls.append("rescan"))
+    monkeypatch.setattr(library_router, "send2trash", _FakeSend2Trash(calls))
+    monkeypatch.setattr(library_scan, "_schedule_rescan", lambda: calls.append("rescan"))
     a = song_library / "a.mp3"
     r = delete_songs([str(a), "/not/in/library.mp3"])
     assert r.status_code == 200
@@ -154,8 +157,8 @@ def test_delete_mixed_in_and_out(song_library, monkeypatch):
 def test_delete_file_already_gone_counts_deleted(song_library, monkeypatch):
     """库内但磁盘已丢 → 计入 deleted、照常清理引用、不调 send2trash、触发重扫"""
     calls = []
-    monkeypatch.setattr(backend, "send2trash", _FakeSend2Trash(calls))
-    monkeypatch.setattr(backend, "_schedule_rescan", lambda: calls.append("rescan"))
+    monkeypatch.setattr(library_router, "send2trash", _FakeSend2Trash(calls))
+    monkeypatch.setattr(library_scan, "_schedule_rescan", lambda: calls.append("rescan"))
     a = song_library / "a.mp3"
     backend.scan_library()  # 预热缓存（库里含 a）
     a.unlink()  # 磁盘丢失
@@ -175,8 +178,8 @@ def test_delete_send2trash_error_reported(song_library, monkeypatch):
         def send2trash(self, path):
             raise OSError("模拟移废纸篓失败")
 
-    monkeypatch.setattr(backend, "send2trash", _BoomSend2Trash())
-    monkeypatch.setattr(backend, "_schedule_rescan", lambda: pytest.fail("不应触发重扫"))
+    monkeypatch.setattr(library_router, "send2trash", _BoomSend2Trash())
+    monkeypatch.setattr(library_scan, "_schedule_rescan", lambda: pytest.fail("不应触发重扫"))
     a = song_library / "a.mp3"
     client.post("/api/favorites/toggle", json={"path": str(a)})
     r = delete_songs([str(a)])

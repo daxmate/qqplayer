@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import backend  # noqa: E402
+from app import state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -162,7 +163,7 @@ def test_align_timeout_504(song_file, monkeypatch):
 
 
 def test_align_script_missing_500(song_file, monkeypatch):
-    monkeypatch.setattr(backend, "ALIGN_SCRIPT", "/nonexistent/bin/align")
+    monkeypatch.setattr(state, "ALIGN_SCRIPT", "/nonexistent/bin/align")
     res = client.post("/api/lyric/align", json={"path": str(song_file), "text": "歌词"})
     assert res.status_code == 500
     assert "未安装" in res.json()["detail"]

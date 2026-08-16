@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 import backend  # noqa: E402
 import tag_editor  # noqa: E402
+from app import state  # noqa: E402
 from tag_editor import UnsupportedFormatError, save_tags  # noqa: E402
 
 client = TestClient(backend.app)
@@ -278,13 +279,13 @@ def _api_files(tmp_path, monkeypatch, old):
     """把三个数据文件指到临时目录并预置旧路径引用；返回数据目录"""
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    monkeypatch.setattr(backend, "DATA_DIR", data_dir)
+    monkeypatch.setattr(state, "DATA_DIR", data_dir)
     fav = data_dir / "favorites.json"
     pls = data_dir / "playlists.json"
     pb = data_dir / "playback.json"
-    monkeypatch.setattr(backend, "FAVORITES_FILE", fav)
-    monkeypatch.setattr(backend, "PLAYLISTS_FILE", pls)
-    monkeypatch.setattr(backend, "PLAYBACK_FILE", pb)
+    monkeypatch.setattr(state, "FAVORITES_FILE", fav)
+    monkeypatch.setattr(state, "PLAYLISTS_FILE", pls)
+    monkeypatch.setattr(state, "PLAYBACK_FILE", pb)
     fav.write_text(json.dumps([old, "/other/fav.mp3"], ensure_ascii=False), encoding="utf-8")
     pls.write_text(
         json.dumps(

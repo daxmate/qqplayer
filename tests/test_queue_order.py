@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
+from app import state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -21,7 +22,7 @@ client = TestClient(backend.app)
 @pytest.fixture(autouse=True)
 def _isolate_queue_order(tmp_path, monkeypatch):
     """存储隔离：写临时目录，不碰真实用户数据"""
-    monkeypatch.setattr(backend, "QUEUE_ORDER_FILE", tmp_path / "queue_order.json")
+    monkeypatch.setattr(state, "QUEUE_ORDER_FILE", tmp_path / "queue_order.json")
     yield
 
 

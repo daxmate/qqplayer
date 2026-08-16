@@ -11,8 +11,11 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(ROOT))
+import app.routers.lyrics as router_lyrics  # noqa: E402
+import app.services.library_scan as library_scan  # noqa: E402
 import backend  # noqa: E402
 import netease_provider  # noqa: E402
+from app import state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -63,7 +66,7 @@ def song_library(tmp_path):
     """临时歌曲库：子目录 1 首带歌词的日文歌，根目录 1 首带内嵌封面、无歌词的中文歌"""
     old = backend.LIBRARY
     try:
-        backend.LIBRARY = tmp_path
+        state.LIBRARY = tmp_path
         d = tmp_path / "yakimochi"
         d.mkdir()
         make_mp3(d / "song.mp3", title="ヤキモチ", artist="高橋優", album="開往明天的旅行")
@@ -71,16 +74,16 @@ def song_library(tmp_path):
         make_mp3(tmp_path / "五月天 - 知足.mp3", title="知足", artist="五月天", cover=FAKE_JPEG)
         yield tmp_path
     finally:
-        backend.LIBRARY = old
+        state.LIBRARY = old
 
 
 @pytest.fixture(autouse=True)
 def _isolate_settings(tmp_path, monkeypatch):
     """设置存储隔离：统一 settings.json + 两个遗留文件都写临时目录，不碰真实用户数据；每测试后重置缓存"""
-    monkeypatch.setattr(backend, "SETTINGS_FILE", tmp_path / "settings.json")
-    monkeypatch.setattr(backend, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
-    monkeypatch.setattr(backend, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
-    backend._settings = None
+    monkeypatch.setattr(state, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(state, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
+    monkeypatch.setattr(state, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
+    state._settings = None
     yield
 
 
@@ -91,13 +94,13 @@ def _isolate_manual_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(lyric_fetch, "MANUAL_DIR", tmp_path / "manual")
     yield
-    backend._settings = None
+    state._settings = None
 
 
 @pytest.fixture(autouse=True)
 def _no_auto_translation(monkeypatch):
     """默认禁用自动补翻译（真实实现会发网易云网络请求），各用例自行 monkeypatch 覆盖"""
-    monkeypatch.setattr(backend, "auto_attach_translation", lambda *a, **kw: None)
+    monkeypatch.setattr(router_lyrics, "auto_attach_translation", lambda *a, **kw: None)
 
 
 # ============ 歌曲库扫描 ============
@@ -126,11 +129,11 @@ def test_scan_library_metadata(song_library):
 
 def test_scan_empty_library(tmp_path):
     old = backend.LIBRARY
-    backend.LIBRARY = tmp_path
+    state.LIBRARY = tmp_path
     try:
         assert backend.scan_library() == []
     finally:
-        backend.LIBRARY = old
+        state.LIBRARY = old
 
 
 # ============ API 路由 ============
@@ -179,7 +182,7 @@ def test_api_lyric_yakimochi(song_library):
 
 def test_api_lyric_missing(song_library, monkeypatch):
     """本地无歌词且在线也获取失败 → 404"""
-    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None))
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"]})
     assert r.status_code == 404
@@ -189,7 +192,9 @@ def test_api_lyric_online_fallback(song_library, monkeypatch):
     """本地无歌词时在线获取成功 → 200，带 source 和翻译合并"""
     lrc = "[00:10.00]沈むように溶けてゆくように\n[00:20.00]二人だけの空"
     tlyric = "[00:10.00]像是沉溺溶化一般\n[00:20.00]只有两人的天空"
-    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (lrc, tlyric, "netease"))
+    monkeypatch.setattr(
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, tlyric, "netease")
+    )
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"]})
     assert r.status_code == 200
@@ -203,7 +208,7 @@ def test_api_lyric_online_fallback(song_library, monkeypatch):
 def test_api_lyric_prefer_online_uses_online(song_library, monkeypatch):
     """prefer=online 且本地有歌词 → 用在线歌词（在线优先）"""
     lrc = "[00:01.00]オンライン優先の歌詞\n[00:02.00]二行目"
-    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (lrc, None, "lrclib"))
+    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, None, "lrclib"))
     song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")  # 本地有 srt
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
     assert r.status_code == 200
@@ -216,7 +221,7 @@ def test_api_lyric_prefer_online_uses_online(song_library, monkeypatch):
 
 def test_api_lyric_prefer_online_fallback_local(song_library, monkeypatch):
     """prefer=online 且在线失败 → 回退本地歌词"""
-    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None))
     song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
     assert r.status_code == 200
@@ -227,7 +232,7 @@ def test_api_lyric_prefer_online_fallback_local(song_library, monkeypatch):
 
 def test_api_lyric_prefer_online_missing(song_library, monkeypatch):
     """prefer=online、本地无歌词且在线失败 → 404"""
-    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None))
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
     assert r.status_code == 404
@@ -236,7 +241,7 @@ def test_api_lyric_prefer_online_missing(song_library, monkeypatch):
 def test_api_lyric_prefer_invalid_defaults_local(song_library, monkeypatch):
     """prefer 非法值 → 按 local 处理（本地优先）"""
     lrc = "[00:01.00]不应使用"
-    monkeypatch.setattr(backend, "fetch_online_lyric", lambda *a, **k: (lrc, None, "netease"))
+    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, None, "netease"))
     song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "bogus"})
     assert r.status_code == 200
@@ -270,16 +275,16 @@ def test_api_cover_from_file(tmp_path):
 
 # ============ 收藏 ============
 def test_api_favorites_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
     r = client.get("/api/favorites")
     assert r.status_code == 200
     assert r.json() == {"paths": []}
 
 
 def test_api_favorites_toggle(tmp_path, monkeypatch):
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
     # 收藏
     r = client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
     assert r.json() == {"path": "/a.mp3", "favorited": True}
@@ -293,8 +298,8 @@ def test_api_favorites_toggle(tmp_path, monkeypatch):
 
 
 def test_api_favorites_multi(tmp_path, monkeypatch):
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
     client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
     client.post("/api/favorites/toggle", json={"path": "/b.mp3"})
     r = client.get("/api/favorites")
@@ -302,8 +307,8 @@ def test_api_favorites_multi(tmp_path, monkeypatch):
 
 
 def test_api_favorites_missing_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(backend, "FAVORITES_FILE", tmp_path / "favorites.json")
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
     r = client.post("/api/favorites/toggle", json={})
     assert r.status_code == 400
 
@@ -313,9 +318,9 @@ def test_api_favorites_missing_path(tmp_path, monkeypatch):
 
 def _playback(tmp_path, monkeypatch):
     """把 PLAYBACK_FILE 指到临时目录并返回该路径"""
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
     p = tmp_path / "playback.json"
-    monkeypatch.setattr(backend, "PLAYBACK_FILE", p)
+    monkeypatch.setattr(state, "PLAYBACK_FILE", p)
     return p
 
 
@@ -366,7 +371,7 @@ def test_api_playback_missing_path(tmp_path, monkeypatch):
 
 def test_api_playback_rollover_limit(tmp_path, monkeypatch):
     p = _playback(tmp_path, monkeypatch)
-    monkeypatch.setattr(backend, "PLAYBACK_LIMIT", 5)
+    monkeypatch.setattr(state, "PLAYBACK_LIMIT", 5)
     for i in range(7):
         client.post(
             "/api/playback", json=_rec(path=f"/songs/{i}.mp3", ts=f"2026-08-12T12:0{i}:00+00:00")
@@ -497,8 +502,8 @@ def test_merge_translation_none():
 
 # ============ 歌单 ============
 def _pl_client(tmp_path, monkeypatch):
-    monkeypatch.setattr(backend, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(backend, "PLAYLISTS_FILE", tmp_path / "playlists.json")
+    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "PLAYLISTS_FILE", tmp_path / "playlists.json")
     return client
 
 
@@ -567,18 +572,18 @@ def test_api_playlists_persist(tmp_path, monkeypatch):
 def _reset_watch_state():
     """每个测试前重置扫描缓存/版本号/去抖 timer，避免全局状态串扰"""
     with backend._scan_lock:
-        backend._scan_cache = None
-        backend._scan_version = 0
+        state._scan_cache = None
+        state._scan_version = 0
         if backend._watch_timer is not None:
             backend._watch_timer.cancel()
-            backend._watch_timer = None
+            state._watch_timer = None
     yield
     with backend._scan_lock:
-        backend._scan_cache = None
-        backend._scan_version = 0
+        state._scan_cache = None
+        state._scan_version = 0
         if backend._watch_timer is not None:
             backend._watch_timer.cancel()
-            backend._watch_timer = None
+            state._watch_timer = None
 
 
 def test_scan_library_cache_hit(song_library, monkeypatch):
@@ -590,7 +595,7 @@ def test_scan_library_cache_hit(song_library, monkeypatch):
         calls.append(1)
         return real()
 
-    monkeypatch.setattr(backend, "_full_scan", counting)
+    monkeypatch.setattr(library_scan, "_full_scan", counting)
     backend.scan_library()
     backend.scan_library()
     assert len(calls) == 1
@@ -599,7 +604,7 @@ def test_scan_library_cache_hit(song_library, monkeypatch):
 def test_scan_cache_invalid_when_library_changes(song_library, monkeypatch):
     """切换歌曲库路径后缓存自动失效（按 library 路径做 key）"""
     backend.scan_library()
-    backend.LIBRARY = song_library / "sub"
+    state.LIBRARY = song_library / "sub"
     backend.LIBRARY.mkdir()
     make_mp3(backend.LIBRARY / "新歌.mp3", title="新歌")
     songs = backend.scan_library()
@@ -611,7 +616,7 @@ def test_rescan_bumps_version_and_updates_cache(song_library):
     backend.scan_library()
     make_mp3(song_library / "新增.mp3", title="新增")
     backend._rescan()
-    assert backend._scan_version == 1
+    assert state._scan_version == 1
     assert backend.scan_library() == backend._scan_cache["songs"]
     names = {s["name"] for s in backend.scan_library()}
     assert "新增" in names
@@ -619,9 +624,9 @@ def test_rescan_bumps_version_and_updates_cache(song_library):
 
 def test_schedule_rescan_debounce(song_library, monkeypatch):
     """去抖：窗口内多次事件只触发一次重扫"""
-    backend.WATCH_DEBOUNCE_SECONDS = 0.05
+    state.WATCH_DEBOUNCE_SECONDS = 0.05
     calls = []
-    monkeypatch.setattr(backend, "_rescan", lambda: calls.append(1))
+    monkeypatch.setattr(library_scan, "_rescan", lambda: calls.append(1))
     for _ in range(5):
         backend._schedule_rescan()
     assert len(calls) == 0  # 去抖窗口内还没执行
@@ -634,7 +639,7 @@ def test_schedule_rescan_debounce(song_library, monkeypatch):
 def test_handler_skips_dir_modified(song_library, monkeypatch):
     """目录自身 modified 事件（iCloud 同步频繁）不触发重扫；文件事件触发"""
     calls = []
-    monkeypatch.setattr(backend, "_schedule_rescan", lambda: calls.append(1))
+    monkeypatch.setattr(library_scan, "_schedule_rescan", lambda: calls.append(1))
     h = backend._LibraryHandler()
 
     class Ev:
@@ -651,7 +656,7 @@ def test_handler_skips_dir_modified(song_library, monkeypatch):
 
 def test_start_watcher_skips_missing_dir(song_library):
     """歌曲库目录不存在时不启动 observer"""
-    backend.LIBRARY = song_library / "ghost"
+    state.LIBRARY = song_library / "ghost"
     backend.start_watcher()
     assert backend._watch_observer is None
 
@@ -666,8 +671,8 @@ def test_api_library_version(song_library):
 
 def test_api_set_library_clears_cache_and_bumps_version(song_library, monkeypatch):
     """切换歌曲库：缓存清空、版本号 +1、新库可扫（watcher 用桩避免真起线程）"""
-    monkeypatch.setattr(backend, "start_watcher", lambda: None)
-    monkeypatch.setattr(backend, "stop_watcher", lambda: None)
+    monkeypatch.setattr(library_scan, "start_watcher", lambda: None)
+    monkeypatch.setattr(library_scan, "stop_watcher", lambda: None)
     backend.scan_library()
     v0 = client.get("/api/library/version").json()["version"]
     new_dir = song_library / "newlib"
@@ -700,7 +705,7 @@ def test_settings_persist_roundtrip(tmp_path, monkeypatch):
     assert new["audioExts"] == [".mp3", ".flac"]
     assert new["autoRefresh"] is False
     assert backend.SETTINGS_FILE.exists()
-    backend._settings = None  # 模拟重启
+    state._settings = None  # 模拟重启
     s = backend.load_settings()
     assert s["audioExts"] == [".mp3", ".flac"]
     assert s["autoRefresh"] is False
@@ -765,8 +770,8 @@ def test_api_update_settings_ext_bumps_version(song_library):
 def test_api_update_settings_auto_refresh_toggle(song_library, monkeypatch):
     """autoRefresh 开关变化：关→stop_watcher，开→start_watcher（幂等安全）"""
     calls = []
-    monkeypatch.setattr(backend, "start_watcher", lambda: calls.append("start"))
-    monkeypatch.setattr(backend, "stop_watcher", lambda: calls.append("stop"))
+    monkeypatch.setattr(library_scan, "start_watcher", lambda: calls.append("start"))
+    monkeypatch.setattr(library_scan, "stop_watcher", lambda: calls.append("stop"))
     backend.save_settings({"autoRefresh": True})
     calls.clear()
     # 关闭自动刷新 → stop
@@ -792,10 +797,10 @@ def test_init_library_respects_settings(song_library, monkeypatch):
     """启动初始化：autoScanOnStart 控制预热扫描，autoRefresh 控制 watcher"""
     calls = {"scan": 0, "watch": 0}
     monkeypatch.setattr(
-        backend, "scan_library", lambda: calls.__setitem__("scan", calls["scan"] + 1)
+        library_scan, "scan_library", lambda: calls.__setitem__("scan", calls["scan"] + 1)
     )
     monkeypatch.setattr(
-        backend, "start_watcher", lambda: calls.__setitem__("watch", calls["watch"] + 1)
+        library_scan, "start_watcher", lambda: calls.__setitem__("watch", calls["watch"] + 1)
     )
     backend.save_settings({"autoScanOnStart": True, "autoRefresh": True})
     backend.init_library()
@@ -876,7 +881,7 @@ def test_api_settings_put_deep_merge():
     assert s["lyric"]["fontSize"] == 24  # 保留
     assert s["lyric"]["offset"] == 1.2
     # 落盘后重置缓存（模拟重启）再读
-    backend._settings = None
+    state._settings = None
     s = client.get("/api/settings").json()["settings"]
     assert s["lyric"]["fontSize"] == 24 and s["lyric"]["offset"] == 1.2
     assert s["player"]["volume"] == 0.5
@@ -973,7 +978,7 @@ def test_api_settings_search_history_validation():
     r = client.put("/api/settings", json={"ui": {"searchHistory": ["晴天", "五月天", "周杰伦"]}})
     s = r.json()["settings"]
     assert s["ui"]["searchHistory"] == ["晴天", "五月天", "周杰伦"]
-    backend._settings = None  # 模拟重启
+    state._settings = None  # 模拟重启
     assert client.get("/api/settings").json()["settings"]["ui"]["searchHistory"] == [
         "晴天",
         "五月天",
@@ -1051,14 +1056,14 @@ def test_migrate_legacy_settings_idempotent():
         "player",
         "download",
     }
-    backend._settings = None
+    state._settings = None
     backend.migrate_legacy_settings()  # 再跑一次
     second = json.loads(backend.SETTINGS_FILE.read_text(encoding="utf-8"))
     assert first == second
     # 已是新格式 → 跳过，后续改动不被覆盖
     first["library"]["autoRefresh"] = False
     backend.SETTINGS_FILE.write_text(json.dumps(first), encoding="utf-8")
-    backend._settings = None
+    state._settings = None
     backend.migrate_legacy_settings()
     assert backend.load_all_settings()["library"]["autoRefresh"] is False
 
@@ -1076,7 +1081,7 @@ def test_migrate_legacy_settings_keeps_player_namespace():
     backend.save_all_settings(
         {"player": {"volume": 0.7, "lastPlayed": {"path": "/x.mp3", "time": 3}}}
     )
-    backend._settings = None
+    state._settings = None
     backend.migrate_legacy_settings()  # 新格式已存在 → 跳过
     s = backend.load_all_settings()
     assert s["player"]["volume"] == 0.7
@@ -1244,7 +1249,7 @@ def test_manual_lyric_auto_translation(song_library, tmp_path, monkeypatch):
         calls["args"] = (title, artist, text, fmt)
         return "[00:01.00]你之前交往过的人的事\n"
 
-    monkeypatch.setattr(backend, "auto_attach_translation", fake_auto)
+    monkeypatch.setattr(router_lyrics, "auto_attach_translation", fake_auto)
     r = client.put(
         "/api/lyric/manual",
         json={"path": str(song), "format": "lrc", "text": lrc, "source": "粘贴"},
@@ -1269,7 +1274,7 @@ def test_manual_lyric_srt_auto_translation(song_library, tmp_path, monkeypatch):
         calls["args"] = (title, artist, text, fmt)
         return "[00:10.00]你之前交往过的人的事\n"
 
-    monkeypatch.setattr(backend, "auto_attach_translation", fake_auto)
+    monkeypatch.setattr(router_lyrics, "auto_attach_translation", fake_auto)
     r = client.put(
         "/api/lyric/manual",
         json={"path": str(song), "format": "srt", "text": srt, "source": "上传"},
@@ -1286,7 +1291,7 @@ def test_manual_lyric_auto_not_called_with_explicit_tlyric(song_library, tmp_pat
     def boom(*a, **kw):
         raise AssertionError("不该自动补翻译")
 
-    monkeypatch.setattr(backend, "auto_attach_translation", boom)
+    monkeypatch.setattr(router_lyrics, "auto_attach_translation", boom)
     tlyric = "[00:01.00]用户自带翻译\n"
     r = client.put(
         "/api/lyric/manual",
@@ -1312,7 +1317,7 @@ def test_manual_lyric_auto_skip_without_metadata(song_library, tmp_path, monkeyp
         calls.append(a)
         return "[00:01.00]不应出现\n"
 
-    monkeypatch.setattr(backend, "auto_attach_translation", fake_auto)
+    monkeypatch.setattr(router_lyrics, "auto_attach_translation", fake_auto)
     r = client.put(
         "/api/lyric/manual",
         json={"path": str(song), "format": "lrc", "text": "[00:01.00]ok\n", "source": "粘贴"},
@@ -1325,7 +1330,7 @@ def test_manual_lyric_auto_skip_without_metadata(song_library, tmp_path, monkeyp
 def test_manual_lyric_auto_failure_silent(song_library, tmp_path, monkeypatch):
     """自动补翻译失败（返回 None）→ 保存成功且不附带 tlyric"""
     song = tmp_path / "yakimochi" / "song.mp3"
-    monkeypatch.setattr(backend, "auto_attach_translation", lambda *a, **kw: None)
+    monkeypatch.setattr(router_lyrics, "auto_attach_translation", lambda *a, **kw: None)
     r = client.put(
         "/api/lyric/manual",
         json={"path": str(song), "format": "lrc", "text": "[00:01.00]原文\n", "source": "粘贴"},
@@ -1340,7 +1345,7 @@ def test_manual_lyric_auto_failure_silent(song_library, tmp_path, monkeypatch):
 def test_lyric_search_api(song_library, monkeypatch):
     """搜索 API：返回候选列表；空关键词 400"""
     monkeypatch.setattr(
-        backend,
+        router_lyrics,
         "search_lyric_candidates",
         lambda t, a: [{"source": "netease", "title": "T", "artist": "A", "text": "[00:01.00]hi"}],
     )
@@ -1642,7 +1647,7 @@ def test_api_online_download_success(monkeypatch, fake_stream, tmp_path):
 def test_api_online_download_dir_setting(monkeypatch, fake_stream, tmp_path):
     """downloadDir 为空 → 落到当前 LIBRARY；无 title/artist 用 id 兜底"""
     old = backend.LIBRARY
-    backend.LIBRARY = tmp_path / "lib"
+    state.LIBRARY = tmp_path / "lib"
     (tmp_path / "lib").mkdir()
     try:
         monkeypatch.setattr(
@@ -1655,7 +1660,7 @@ def test_api_online_download_dir_setting(monkeypatch, fake_stream, tmp_path):
         assert r.json()["path"] == str(tmp_path / "lib" / "1.mp3")
         assert (tmp_path / "lib" / "1.mp3").exists()
     finally:
-        backend.LIBRARY = old
+        state.LIBRARY = old
 
 
 def test_api_online_download_no_url(monkeypatch):
@@ -1806,7 +1811,7 @@ def test_api_import_path_traversal(song_library):
 
 def test_api_import_too_large(song_library, monkeypatch):
     """超大文件报 error 不崩：不落盘、不 bump version"""
-    monkeypatch.setattr(backend, "IMPORT_MAX_BYTES", 1024)
+    monkeypatch.setattr(state, "IMPORT_MAX_BYTES", 1024)
     v0 = client.get("/api/library/version").json()["version"]
     big = b"x" * 2048
     r = client.post(
