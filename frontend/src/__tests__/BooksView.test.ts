@@ -39,6 +39,13 @@ const book = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // loadBook 先 fetch(fileUrl) → arrayBuffer → ePub(ArrayBuffer)
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
+    ),
+  );
   (fetchBooks as ReturnType<typeof vi.fn>).mockResolvedValue([book]);
   mocks.ePub.mockReturnValue({
     ready: Promise.resolve(),
@@ -62,7 +69,7 @@ describe("BooksView", () => {
     await flushPromises();
     expect(wrapper.find(".reader").exists()).toBe(true);
     expect(wrapper.find(".reader-title").text()).toBe("三体");
-    expect(mocks.ePub).toHaveBeenCalledWith("/api/books/b1/file");
+    expect(mocks.ePub.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer);
 
     // 返回 → 书架
     await wrapper.find(".reader-topbar .reader-btn").trigger("click");

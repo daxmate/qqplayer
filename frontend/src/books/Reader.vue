@@ -274,7 +274,12 @@ async function loadBook() {
   errorMsg.value = "";
   tocOpen.value = false;
   try {
-    const book = ePub(props.book.fileUrl);
+    // 先取 ArrayBuffer 再喂 epub.js：绕开 URL 语义（非 .epub 后缀被当书库目录）
+    // 与 request/XHR 兼容问题（参考 ~/codes/qq 成功案例：ePub(arrayBuffer) 直接解析）
+    const resp = await fetch(props.book.fileUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const buf = await resp.arrayBuffer();
+    const book = ePub(buf);
     bookRef.value = book;
     await book.ready;
     const container = containerRef.value;

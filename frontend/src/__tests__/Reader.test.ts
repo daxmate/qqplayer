@@ -81,6 +81,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   storage.clear();
   vi.stubGlobal("localStorage", lsMock); // afterEach 不 unstub，保持常驻
+  // loadBook 现在先 fetch(fileUrl) → arrayBuffer → ePub(ArrayBuffer)（参考 ~/codes/qq 成功案例）
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
+    ),
+  );
   mocks.ePub.mockReturnValue(makeBookObject());
   mocks.rendition.display.mockResolvedValue(undefined);
   (saveBookProgress as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
@@ -103,7 +110,7 @@ describe("Reader", () => {
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
 
-    expect(mocks.ePub).toHaveBeenCalledWith("/api/books/b1/file");
+    expect(mocks.ePub.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer);
     const renderToCall = mocks.ePub.mock.results[0].value.renderTo.mock.calls[0];
     expect(renderToCall[0]).toBeInstanceOf(HTMLElement);
     expect(renderToCall[1]).toEqual({ width: expect.any(Number), height: expect.any(Number) });
@@ -122,7 +129,7 @@ describe("Reader", () => {
     await flushPromises();
 
     expect(mocks.rendition.destroy).toHaveBeenCalled();
-    expect(mocks.ePub).toHaveBeenLastCalledWith("/api/books/b2/file");
+    expect(mocks.ePub.mock.calls[1][0]).toBeInstanceOf(ArrayBuffer);
 
     wrapper.unmount();
   });

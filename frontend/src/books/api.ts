@@ -1,7 +1,7 @@
 /**
  * 电子书阅读器 - 后端 API 封装
  */
-import type { BookView, BookProgress, ImportBookResult } from "./types";
+import type { BookView, BookMeta, BookProgress, ImportBookResult } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -18,16 +18,30 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** 后端返回的书架条目 → 前端视图（拼 fileUrl/coverUrl 派生字段） */
+function toView(meta: BookMeta): BookView {
+  return {
+    ...meta,
+    fileUrl: `/api/books/${meta.id}/file`,
+    coverUrl: `/api/books/${meta.id}/cover`,
+  };
+}
+
 /** 书架列表（含进度） */
-export function fetchBooks(): Promise<BookView[]> {
-  return request<BookView[]>("/api/books");
+export async function fetchBooks(): Promise<BookView[]> {
+  const list = await request<BookMeta[]>("/api/books");
+  return list.map(toView);
 }
 
 /** 导入 EPUB（multipart 上传） */
 export async function importBook(file: File): Promise<ImportBookResult> {
   const form = new FormData();
   form.append("file", file);
-  return request<ImportBookResult>("/api/books/import", { method: "POST", body: form });
+  const meta = await request<BookMeta>("/api/books/import", {
+    method: "POST",
+    body: form,
+  });
+  return toView(meta);
 }
 
 /** 保存阅读进度 */
