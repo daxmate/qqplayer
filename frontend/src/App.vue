@@ -28,6 +28,10 @@
             <Mic :size="13" />
             {{ t("app.mode.karaoke") }}
           </button>
+          <button class="tab" :class="{ on: state.mode === 'books' }" @click="switchMode('books')">
+            <BookOpen :size="13" />
+            {{ t("app.mode.books") }}
+          </button>
         </div>
         <div class="topbar-search">
           <SearchAnything entry />
@@ -109,7 +113,7 @@
       </main>
 
       <!-- 主体：跟唱模式 -->
-      <main v-else class="main karaoke" :class="panelClass">
+      <main v-else-if="state.mode === 'karaoke'" class="main karaoke" :class="panelClass">
         <ActivityBar v-if="panelsActive" class="activity-bar" />
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
         <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
@@ -120,6 +124,20 @@
           :expand-btn="!panelsActive"
         />
         <ControlBar v-show="!state.controlsHidden" class="panel controls" karaoke />
+        <button
+          v-if="state.controlsHidden"
+          class="expand-controls-btn"
+          :title="t('app.expandControls')"
+          @click="toggleControls()"
+        >
+          <ChevronUp :size="18" />
+        </button>
+      </main>
+
+      <!-- 主体：图书模式（书架/阅读器；ControlBar 保留，背景音乐可继续播） -->
+      <main v-else class="main books">
+        <BooksView class="books-area" />
+        <ControlBar v-show="!state.controlsHidden" class="panel controls" />
         <button
           v-if="state.controlsHidden"
           class="expand-controls-btn"
@@ -171,6 +189,7 @@ import {
   MonitorPlay,
   PictureInPicture2,
   Upload,
+  BookOpen,
 } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
@@ -183,6 +202,7 @@ import ControlBar from "./components/ControlBar.vue";
 import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import SearchAnything from "./components/SearchAnything.vue";
+import BooksView from "./books/BooksView.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
@@ -533,6 +553,18 @@ onUnmounted(() => {
 .main.continuous.has-tabbar.has-music.has-playlist.no-controls,
 .main.karaoke.has-tabbar.has-music.has-playlist.no-controls {
   grid-template-areas: "activity sidebar playlist center";
+}
+/* 图书模式：纵向布局（书架/阅读器 + 底部控制条），不参与面板 grid */
+.main.books {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  position: relative;
+}
+.books-area {
+  flex: 1;
+  min-height: 0;
 }
 .activity-bar {
   grid-area: activity;

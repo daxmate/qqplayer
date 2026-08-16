@@ -14,6 +14,16 @@ export default [
     // 带 plugins 的 config 是插件注册，必须保持全局；只给无 files 的规则 config 补 TS 限定
     cfg.plugins ? cfg : { ...cfg, files: cfg.files ?? ["**/*.{ts,mts,cts,tsx}"] },
   ),
+  {
+    // 契约类标记接口（如 `interface ImportBookResult extends BookView {}`）允许空体
+    files: ["**/*.{ts,mts,cts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-empty-object-type": [
+        "error",
+        { allowInterfaces: "with-single-extends" },
+      ],
+    },
+  },
   ...vue.configs["flat/recommended"],
   prettier,
   {

@@ -120,6 +120,17 @@
           </span>
         </button>
 
+        <!-- 电子书入口：书架 + 阅读器 -->
+        <button class="mh-card" @click="$emit('open', { name: 'books' })">
+          <span class="mh-tile" style="--tile: #14b8a6; --tile2: #2dd4bf">
+            <BookOpen :size="22" />
+          </span>
+          <span class="mh-card-meta">
+            <span class="mh-card-name">{{ t("mobile.home.books") }}</span>
+            <span class="mh-card-count">{{ t("books.title") }}</span>
+          </span>
+        </button>
+
         <!-- 智能视图入口：最近添加 / 最近播放 / 常听排行 -->
         <button class="mh-card" @click="openSmartView('recentAdded')">
           <span class="mh-tile" style="--tile: #06b6d4; --tile2: #22d3ee">
@@ -195,6 +206,7 @@ import {
   History,
   TrendingUp,
   RefreshCw,
+  BookOpen,
 } from "@lucide/vue";
 import { state, isFavorite, loadSongs } from "../../composables/usePlayer.js";
 import { useSearchAnything } from "../../composables/useSearchAnything.js";

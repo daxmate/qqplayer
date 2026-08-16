@@ -19,6 +19,7 @@ import tags from "./tags.js";
 import search from "./search.js";
 import importMessages from "./import.js";
 import queue from "./queue.js";
+import books from "./books.js";
 
 export default {
   ...common,
@@ -39,4 +40,5 @@ export default {
   ...search,
   ...importMessages,
   ...queue,
+  ...books,
 };

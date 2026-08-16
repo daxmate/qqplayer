@@ -351,6 +351,18 @@ describe("连播播放模式：随机 / 单曲循环", () => {
     expect(a.paused).toBe(false);
   });
 
+  it("图书模式（books）：播完同样自动切下一首（读书放背景音乐不中断）", async () => {
+    state.songs = SONGS5;
+    stubFetch();
+    state.mode = "books";
+    await selectSong(0);
+    const a = audio();
+    a.currentTime = 100;
+    fireEnded();
+    expect(state.currentIndex).toBe(1);
+    expect(a.paused).toBe(false); // 自动播放
+  });
+
   it("selectSong 默认不自动播放（手动选歌由调用方决定是否播放）", async () => {
     state.songs = SONGS5;
     stubFetch();

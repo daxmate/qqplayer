@@ -5,6 +5,7 @@ export default {
     mode: {
       continuous: "连播",
       karaoke: "跟唱",
+      books: "图书",
     },
     // 顶栏按钮
     settings: "设置",

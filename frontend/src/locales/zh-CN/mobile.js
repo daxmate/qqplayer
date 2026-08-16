@@ -12,6 +12,7 @@ export default {
       albums: "专辑",
       openFile: "打开文件",
       importMusic: "导入音乐",
+      books: "图书",
       recentAdded: "最近添加",
       recentPlayed: "最近播放",
       topPlayed: "常听排行",

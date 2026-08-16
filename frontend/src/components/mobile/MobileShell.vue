@@ -18,6 +18,7 @@
         @play="playFromList"
         @open="push"
       />
+      <MobileBooks v-else-if="top.name === 'books'" :key="'books-' + stack.length" @back="pop" />
       <div v-else key="void" class="mp-void"></div>
     </Transition>
 
@@ -38,6 +39,7 @@ import { useEdgeSwipe } from "../../composables/useSwipe.js";
 import MobileHome from "./MobileHome.vue";
 import MobileList from "./MobileList.vue";
 import MobilePlayer from "./MobilePlayer.vue";
+import MobileBooks from "../../books/MobileBooks.vue";
 import MiniPlayerBar from "./MiniPlayerBar.vue";
 
 const shellEl = ref(null);

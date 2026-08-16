@@ -1862,8 +1862,9 @@ audio.addEventListener("pause", () => {
   // 但因每句间隔很短，连续跟唱会被下一句 play 合并？不会——pause 即 flush，
   // 跟唱模式每句暂停都会产生一条短记录。处理：跟唱模式下不因句间暂停 flush，
   // 而是等切歌/播完/退出模式时再报。
-  // 这里仅对连播模式的主动暂停 flush；跟唱模式交还给时间锚点逻辑。
-  if (state.mode === "continuous" && playbackSession) {
+  // 这里仅对非跟唱模式的主动暂停 flush（连播/图书等；跟唱交还给时间锚点逻辑，
+  // 图书模式下用户读书放背景音乐，暂停是真实的收听行为）
+  if (state.mode !== "karaoke" && playbackSession) {
     flushPlaybackSession();
   }
 });
@@ -1877,7 +1878,8 @@ audio.addEventListener("ended", () => {
   }
   // 试听 / URL 播放：播完自然停止，不自动切歌（currentIndex 未动，next/prev 随时回主队列）
   if (isPreviewSong(state.currentSong)) return;
-  if (state.mode !== "continuous") return;
+  // 跟唱模式播完自然停（句间暂停由时间锚点接管）；连播/图书等模式自动切歌继续
+  if (state.mode === "karaoke") return;
   if (state.playMode === "repeatOne") {
     // 单曲循环：重播本首
     audio.currentTime = 0;
