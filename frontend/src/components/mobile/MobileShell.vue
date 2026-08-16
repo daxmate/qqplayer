@@ -1,5 +1,5 @@
 <template>
-  <div class="mobile-shell">
+  <div ref="shellEl" class="mobile-shell" :class="{ 'edge-dragging': edge.dragging }">
     <!-- 页面栈视图：home / list（底部迷你播放条之上） -->
     <Transition name="mp-push" mode="out-in">
       <MobileHome
@@ -34,10 +34,13 @@
 <script setup>
 import { ref, computed } from "vue";
 import { selectSong, play, state } from "../../composables/usePlayer.js";
+import { useEdgeSwipe } from "../../composables/useSwipe.js";
 import MobileHome from "./MobileHome.vue";
 import MobileList from "./MobileList.vue";
 import MobilePlayer from "./MobilePlayer.vue";
 import MiniPlayerBar from "./MiniPlayerBar.vue";
+
+const shellEl = ref(null);
 
 defineEmits(["open-settings"]);
 
@@ -64,6 +67,9 @@ function pop() {
   if (stack.value.length > 1) stack.value.pop();
 }
 
+// 屏幕左缘右滑返回（iOS 式边缘滑动）：与返回按钮/系统返回共用同一个 pop；首页（栈底）不响应
+const edge = useEdgeSwipe(shellEl, { enabled: () => stack.value.length > 1, onTrigger: pop });
+
 function openPlayer() {
   if (top.value.name !== "player") stack.value.push({ name: "player" });
 }
@@ -86,6 +92,14 @@ async function playFromList(song) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 边缘滑动返回：跟手平移（--edge-shift 由 useEdgeSwipe 写入）+ 左侧投影（--edge-progress 0..1） */
+  transform: translateX(var(--edge-shift, 0px));
+  transition: transform 0.22s ease;
+  box-shadow: -14px 0 32px rgba(0, 0, 0, calc(var(--edge-progress, 0) * 0.35));
+  will-change: transform;
+}
+.mobile-shell.edge-dragging {
+  transition: none; /* 跟手时禁用过渡，位移直跟手指 */
 }
 .mp-void {
   display: none;

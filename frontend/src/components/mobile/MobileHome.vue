@@ -6,6 +6,15 @@
       <div class="mh-actions">
         <button
           class="mh-icon-btn"
+          :class="{ spinning: refreshing }"
+          :disabled="refreshing"
+          :title="t('mobile.home.rescan')"
+          @click="onRescan"
+        >
+          <RefreshCw :size="20" />
+        </button>
+        <button
+          class="mh-icon-btn"
           :title="t('mobile.home.searchSong')"
           @click="isSearchOpen = true"
         >
@@ -185,11 +194,12 @@ import {
   Sparkles,
   History,
   TrendingUp,
+  RefreshCw,
 } from "@lucide/vue";
-import { state, isFavorite } from "../../composables/usePlayer.js";
+import { state, isFavorite, loadSongs } from "../../composables/usePlayer.js";
 import { useSearchAnything } from "../../composables/useSearchAnything.js";
 import { SMART_VIEW_LIMIT } from "../../composables/useSmartViews.js";
-import { toastError } from "../../composables/useToast.js";
+import { showToast, toastError } from "../../composables/useToast.js";
 import { isAudioFile, importFiles } from "../../composables/useDragImport.js";
 import MobileSmartList from "./MobileSmartList.vue";
 
@@ -197,6 +207,21 @@ defineEmits(["open", "open-settings"]);
 
 const { t } = useI18n();
 const { isSearchOpen } = useSearchAnything();
+
+// ============ 重新扫描曲库（对应桌面刷新按钮：loadSongs 立即拉取 /api/songs） ============
+const refreshing = ref(false);
+
+async function onRescan() {
+  if (refreshing.value) return; // 进行中：禁用重复点击
+  refreshing.value = true;
+  try {
+    await loadSongs(); // 失败时内部写 state.error（不抛），完成/失败都收 spinner
+    if (state.error) toastError(state.error);
+    else showToast(t("mobile.home.refreshed"));
+  } finally {
+    refreshing.value = false;
+  }
+}
 
 // 收藏数量：以曲库中实际收藏的歌曲计
 const favoriteCount = computed(() => state.songs.filter((s) => isFavorite(s.path)).length);
@@ -300,6 +325,17 @@ function onFilePicked(e) {
   background: var(--card2);
   color: var(--text);
   transform: scale(0.92);
+}
+.mh-icon-btn:disabled {
+  opacity: 0.6;
+}
+.mh-icon-btn.spinning svg {
+  animation: mh-refresh-spin 0.9s linear infinite;
+}
+@keyframes mh-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .mh-scroll {
   flex: 1;

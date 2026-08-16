@@ -325,10 +325,10 @@ describe("MobileList 歌单拖拽排序", () => {
     });
     await flushPromises();
     expect(sortableMock.onEnd).toBeTypeOf("function");
-    // 模拟拖拽：真实调整 DOM 顺序（c 插到 a 前），再触发 onEnd
+    // 模拟拖拽：真实调整 DOM 顺序（Sortable 移动的是容器直接子元素 .ml-wrap，c 插到 a 前），再触发 onEnd
     const listEl = wrapper.find(".ml-scroll").element;
-    const items = wrapper.findAll(".ml-item");
-    listEl.insertBefore(items[1].element, items[0].element);
+    const wraps = wrapper.findAll(".ml-wrap");
+    listEl.insertBefore(wraps[1].element, wraps[0].element);
     sortableMock.onEnd({ oldIndex: 0, newIndex: 1 });
     await flushPromises();
     const fetchCalls = vi.mocked(fetch).mock.calls;

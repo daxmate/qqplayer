@@ -16,6 +16,8 @@ export default {
       recentPlayed: "最近播放",
       topPlayed: "常听排行",
       topPlayedDesc: "播放次数排行",
+      rescan: "重新扫描",
+      refreshed: "已刷新",
       foot: "从手机/NAS 浏览器直接播放音乐库",
     },
     count: {
@@ -50,6 +52,8 @@ export default {
       emptySongs: "没有歌曲，请先导入音乐",
       albumSubtitle: "{artist} · {n} 首",
       moreArtists: "{names} 等",
+      remove: "移除",
+      removed: "已移除",
     },
     player: {
       collapse: "收起播放器",

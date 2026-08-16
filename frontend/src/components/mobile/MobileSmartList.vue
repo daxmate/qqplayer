@@ -9,42 +9,72 @@
       <span class="msv-count">{{ t("smart.count", { n: rows.length }) }}</span>
     </header>
 
-    <!-- 列表 -->
-    <div class="msv-list">
+    <!-- 列表（行左滑露出操作区：收藏/移除） -->
+    <div ref="listEl" class="msv-list">
       <div v-if="loading" class="msv-empty">{{ t("smart.loading") }}</div>
       <div v-else-if="error" class="msv-empty">{{ error }}</div>
       <template v-else>
         <div
           v-for="row in rows"
           :key="row.song.path"
-          class="msv-item"
-          :class="{ active: isCurrent(row) }"
-          :data-path="row.song.path"
-          @click="onPlay(row)"
+          class="msv-wrap"
+          :class="{ open: isOpen(row.song.path) }"
         >
-          <div class="msv-cover">
-            <img
-              v-if="coverOk(row.song.path)"
-              :src="'/api/cover?path=' + encodeURIComponent(row.song.path)"
-              :alt="row.song.name"
-              loading="lazy"
-              @error="markCoverError(row.song.path)"
-            />
-            <Music2 v-else :size="18" />
+          <!-- 左滑露出的操作区（藏在行内容下方） -->
+          <div class="msv-actions">
+            <button
+              class="msv-act"
+              :class="{ on: isFavorite(row.song.path) }"
+              :title="
+                isFavorite(row.song.path) ? t('mobile.list.unfavorite') : t('mobile.list.favorite')
+              "
+              @click.stop="actFavorite(row.song.path)"
+            >
+              <Heart :size="17" :fill="isFavorite(row.song.path) ? 'currentColor' : 'none'" />
+            </button>
+            <button
+              class="msv-act msv-act-remove"
+              :title="t('mobile.list.remove')"
+              @click.stop="actRemove(row)"
+            >
+              <Trash2 :size="16" />
+            </button>
           </div>
-          <div class="msv-info">
-            <div class="msv-name">
-              {{ row.song.name }}
-              <span
-                v-if="isCurrent(row) && state.isPlaying"
-                class="msv-eq"
-                :title="t('smart.playing')"
-              >
-                <span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span>
-              </span>
+          <div
+            class="msv-item"
+            :class="{ active: isCurrent(row) }"
+            :data-path="row.song.path"
+            :style="{
+              transform: rowTransform(row.song.path),
+              transition: isDragging(row.song.path) ? 'none' : '',
+            }"
+            @click="onRowClick(row)"
+          >
+            <div class="msv-cover">
+              <img
+                v-if="coverOk(row.song.path)"
+                :src="'/api/cover?path=' + encodeURIComponent(row.song.path)"
+                :alt="row.song.name"
+                loading="lazy"
+                @error="markCoverError(row.song.path)"
+              />
+              <Music2 v-else :size="18" />
             </div>
-            <div class="msv-sub">
-              {{ row.song.artist }}<template v-if="sub(row)"> · {{ sub(row) }}</template>
+            <div class="msv-info">
+              <div class="msv-name">
+                {{ row.song.name }}
+                <span
+                  v-if="isCurrent(row) && state.isPlaying"
+                  class="msv-eq"
+                  :title="t('smart.playing')"
+                >
+                  <span class="eq-bar"></span><span class="eq-bar"></span
+                  ><span class="eq-bar"></span>
+                </span>
+              </div>
+              <div class="msv-sub">
+                {{ row.song.artist }}<template v-if="sub(row)"> · {{ sub(row) }}</template>
+              </div>
             </div>
           </div>
         </div>
@@ -57,8 +87,10 @@
 <script setup>
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ChevronLeft, Music2 } from "@lucide/vue";
-import { state } from "../../composables/usePlayer.js";
+import { ChevronLeft, Music2, Heart, Trash2 } from "@lucide/vue";
+import { state, isFavorite, toggleFavorite, removeFromQueue } from "../../composables/usePlayer.js";
+import { showToast, toastError } from "../../composables/useToast.js";
+import { useSwipeReveal } from "../../composables/useSwipe.js";
 import {
   SMART_VIEWS,
   smartViewState,
@@ -86,10 +118,40 @@ function sub(row) {
   return fmtSmartSub(row);
 }
 
-// 点击行：播放并打开全屏播放器（与 MobileShell.playFromList 一致）
-function onPlay(row) {
+// 点击行：刚滑完的点击忽略；已展开的行点击 = 收起；否则播放并打开全屏播放器（与 MobileShell.playFromList 一致）
+function onRowClick(row) {
+  const path = row.song.path;
+  if (consumeSwipe(path)) return;
+  if (isOpen(path)) {
+    swipe.close();
+    return;
+  }
   if (!playSmartRow(row)) return;
   emit("open-player");
+}
+
+// ============ 左滑操作（swipe-reveal：收藏 / 移除） ============
+// 事件委托挂在 .msv-list 上（passive: false，横向判定后才 preventDefault，不抢纵向滚动）
+const listEl = ref(null);
+const swipe = useSwipeReveal(listEl, { rowSelector: ".msv-item" });
+const { isOpen, isDragging, rowTransform, consumeSwipe } = swipe;
+
+// 操作区收藏：与列表页同一函数（乐观更新），静默不打扰
+async function actFavorite(path) {
+  await toggleFavorite(path);
+  swipe.close();
+}
+
+// 操作区移除：智能视图行对应队列歌曲 → 从队列移除（与桌面非歌单视图语义一致）
+async function actRemove(row) {
+  try {
+    const idx = state.songs.findIndex((s) => s.path === row.song.path);
+    if (idx >= 0) removeFromQueue(idx);
+    showToast(t("mobile.list.removed"));
+  } catch (e) {
+    toastError(e.message);
+  }
+  swipe.close();
 }
 
 // 进入视图时拉取数据（切换 kind 重新拉取）
@@ -166,6 +228,37 @@ function markCoverError(path) {
   padding: 0 10px 28px;
   -webkit-overflow-scrolling: touch;
 }
+/* 左滑操作：行容器（裁切操作区）+ 操作按钮层 + 行内容（左移露出操作区） */
+.msv-wrap {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.msv-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  width: 168px;
+}
+.msv-act {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--card2);
+  touch-action: manipulation;
+}
+.msv-act.on {
+  color: var(--red);
+}
+.msv-act-remove {
+  background: color-mix(in srgb, var(--red) 82%, #000);
+}
 .msv-item {
   display: flex;
   align-items: center;
@@ -173,7 +266,10 @@ function markCoverError(path) {
   padding: 9px 10px;
   border-radius: 12px;
   cursor: pointer;
-  transition: background 0.12s;
+  background: linear-gradient(160deg, var(--bg), var(--bg2)); /* 不透明底：左移时遮住下方操作区 */
+  transition:
+    background 0.12s,
+    transform 0.22s ease; /* 展开/收起过渡；跟手时由内联 transition:none 接管 */
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
