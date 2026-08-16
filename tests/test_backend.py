@@ -94,6 +94,12 @@ def _isolate_manual_dir(tmp_path, monkeypatch):
     backend._settings = None
 
 
+@pytest.fixture(autouse=True)
+def _no_auto_translation(monkeypatch):
+    """默认禁用自动补翻译（真实实现会发网易云网络请求），各用例自行 monkeypatch 覆盖"""
+    monkeypatch.setattr(backend, "auto_attach_translation", lambda *a, **kw: None)
+
+
 # ============ 歌曲库扫描 ============
 def test_scan_library_counts(song_library):
     songs = backend.scan_library()
@@ -1186,6 +1192,109 @@ def test_manual_lyric_missing_fields():
     assert (
         client.put("/api/lyric/manual", json={"path": "/x.mp3", "text": "   "}).status_code == 400
     )
+
+
+def test_manual_lyric_auto_translation(song_library, tmp_path, monkeypatch):
+    """未带 tlyric 的保存：自动补翻译并落盘（行级匹配在 lyric_fetch，这里验证后端调用与存储）"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    lrc = "[00:01.00]君が前に付き合っていた人のこと\n"
+    calls = {}
+
+    def fake_auto(title, artist, text, fmt="lrc"):
+        calls["args"] = (title, artist, text, fmt)
+        return "[00:01.00]你之前交往过的人的事\n"
+
+    monkeypatch.setattr(backend, "auto_attach_translation", fake_auto)
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "lrc", "text": lrc, "source": "粘贴"},
+    )
+    assert r.status_code == 200
+    assert r.json()["tlyric"] == "[00:01.00]你之前交往过的人的事\n"
+    # 歌名/歌手取自歌曲文件元数据
+    assert calls["args"] == ("ヤキモチ", "高橋優", lrc, "lrc")
+    # /api/lyric 合并翻译进歌词行
+    r = client.get("/api/lyric", params={"path": str(song)})
+    assert r.json()["source"] == "manual"
+    assert r.json()["lines"][0]["text"][2] == "你之前交往过的人的事"
+
+
+def test_manual_lyric_srt_auto_translation(song_library, tmp_path, monkeypatch):
+    """SRT 手动歌词保存：自动补翻译传入 srt 格式（翻译时间戳 = SRT 起始时间）"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    srt = "1\n00:00:10,000 --> 00:00:15,000\n君が前に付き合っていた人のこと\n"
+    calls = {}
+
+    def fake_auto(title, artist, text, fmt="lrc"):
+        calls["args"] = (title, artist, text, fmt)
+        return "[00:10.00]你之前交往过的人的事\n"
+
+    monkeypatch.setattr(backend, "auto_attach_translation", fake_auto)
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "srt", "text": srt, "source": "上传"},
+    )
+    assert r.status_code == 200
+    assert calls["args"] == ("ヤキモチ", "高橋優", srt, "srt")
+    assert r.json()["tlyric"] == "[00:10.00]你之前交往过的人的事\n"
+
+
+def test_manual_lyric_auto_not_called_with_explicit_tlyric(song_library, tmp_path, monkeypatch):
+    """请求体显式带 tlyric → 尊重用户，不自动补翻译"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+
+    def boom(*a, **kw):
+        raise AssertionError("不该自动补翻译")
+
+    monkeypatch.setattr(backend, "auto_attach_translation", boom)
+    tlyric = "[00:01.00]用户自带翻译\n"
+    r = client.put(
+        "/api/lyric/manual",
+        json={
+            "path": str(song),
+            "format": "lrc",
+            "text": "[00:01.00]原文\n",
+            "source": "上传·x.json",
+            "tlyric": tlyric,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["tlyric"] == tlyric
+
+
+def test_manual_lyric_auto_skip_without_metadata(song_library, tmp_path, monkeypatch):
+    """无歌名/歌手元数据的歌 → 跳过自动补翻译，保存不受影响"""
+    song = tmp_path / "no_tags.mp3"
+    make_mp3(song)  # 无 ID3 标签
+    calls = []
+
+    def fake_auto(*a, **kw):
+        calls.append(a)
+        return "[00:01.00]不应出现\n"
+
+    monkeypatch.setattr(backend, "auto_attach_translation", fake_auto)
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "lrc", "text": "[00:01.00]ok\n", "source": "粘贴"},
+    )
+    assert r.status_code == 200
+    assert calls == []
+    assert "tlyric" not in r.json()
+
+
+def test_manual_lyric_auto_failure_silent(song_library, tmp_path, monkeypatch):
+    """自动补翻译失败（返回 None）→ 保存成功且不附带 tlyric"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    monkeypatch.setattr(backend, "auto_attach_translation", lambda *a, **kw: None)
+    r = client.put(
+        "/api/lyric/manual",
+        json={"path": str(song), "format": "lrc", "text": "[00:01.00]原文\n", "source": "粘贴"},
+    )
+    assert r.status_code == 200
+    assert "tlyric" not in r.json()
+    r = client.get("/api/lyric/manual", params={"path": str(song)})
+    assert r.json()["specified"] is True
+    assert "tlyric" not in r.json()
 
 
 def test_lyric_search_api(song_library, monkeypatch):
