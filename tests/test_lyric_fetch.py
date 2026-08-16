@@ -436,3 +436,168 @@ def test_search_combined(fake_http, monkeypatch):
     monkeypatch.setattr(lyric_fetch, "search_netease", lambda t, a: ["n1"])
     monkeypatch.setattr(lyric_fetch, "search_lrclib", lambda t, a: ["l1", "l2"])
     assert lyric_fetch.search_lyric_candidates("t", "a") == ["n1", "l1", "l2"]
+
+
+# ============ 自动补翻译（手动歌词 → 网易云 tlyric 行级匹配） ============
+def _auto_search_one(title, artist):
+    return [
+        {
+            "id": "123",
+            "title": title,
+            "artist": artist,
+            "album": "",
+            "cover": "",
+            "duration": "04:54",
+            "level": "exhigh",
+        }
+    ]
+
+
+def _auto_lyric(lrc: str, tlyric: str | None):
+    data = {"lrc": {"lyric": lrc}}
+    if tlyric is not None:
+        data["tlyric"] = {"lyric": tlyric}
+    return data
+
+
+def test_auto_attach_translation_success(fake_netease):
+    """行级匹配成功：翻译按手动歌词行时间戳输出（不依赖网易云时间戳）"""
+    fake_netease["search"] = lambda q, limit=20: _auto_search_one("布拉格广场", "蔡依林")
+    fake_netease["get_lyric"] = lambda sid: _auto_lyric(
+        "[00:20.80]琴键上透着光\n[00:22.01]彩绘的玻璃窗\n[00:23.15]装饰着哥特式教堂",
+        "[00:20.80]琴键上泛着光\n[00:22.01]彩绘的玻璃窗\n[00:23.15]哥特式教堂的装饰",
+    )
+    manual = "[00:01.00]琴键上透着光\n[00:02.50]彩绘的玻璃窗\n[00:04.00]装饰着哥特式教堂"
+    out = lyric_fetch.auto_attach_translation("布拉格广场", "蔡依林", manual)
+    assert out == "[00:01.00]琴键上泛着光\n[00:02.50]彩绘的玻璃窗\n[00:04.00]哥特式教堂的装饰"
+
+
+def test_auto_attach_partial_translation(fake_netease):
+    """部分行无翻译：只输出有翻译的匹配行，时间戳仍用手动行"""
+    fake_netease["search"] = lambda q, limit=20: _auto_search_one("x", "y")
+    fake_netease["get_lyric"] = lambda sid: _auto_lyric(
+        "[00:01.00]line1\n[00:02.00]line2\n[00:03.00]line3\n[00:04.00]line4",
+        "[00:01.00]翻译1\n[00:03.00]翻译3",
+    )
+    manual = "[00:10.00]line1\n[00:11.00]line2\n[00:12.00]line3\n[00:13.00]line4"
+    out = lyric_fetch.auto_attach_translation("x", "y", manual)
+    assert out == "[00:10.00]翻译1\n[00:12.00]翻译3"
+
+
+def test_auto_attach_ratio_below_threshold(fake_netease):
+    """匹配率不足 0.6 → None（防错配）"""
+    fake_netease["search"] = lambda q, limit=20: _auto_search_one("x", "y")
+    fake_netease["get_lyric"] = lambda sid: _auto_lyric(
+        "[00:01.00]match_me\n[00:02.00]another", "[00:01.00]翻译\n[00:02.00]翻译2"
+    )
+    manual = "[00:01.00]match_me\n[00:02.00]totally\n[00:03.00]different\n[00:04.00]lines\n[00:05.00]here"
+    assert lyric_fetch.auto_attach_translation("x", "y", manual) is None
+
+
+def test_auto_attach_no_netease_result(fake_netease):
+    """网易云无搜索结果 → None"""
+    fake_netease["search"] = lambda q, limit=20: []
+    assert (
+        lyric_fetch.auto_attach_translation("不存在", "无名", "[00:01.00]hi\n[00:02.00]bye") is None
+    )
+
+
+def test_auto_attach_skip_without_title_artist(fake_netease):
+    """歌名/歌手均空 → 跳过（不发起搜索）"""
+
+    def boom(q, limit=20):
+        raise AssertionError("不该搜索")
+
+    fake_netease["search"] = boom
+    assert lyric_fetch.auto_attach_translation("", "", "[00:01.00]hi\n[00:02.00]bye") is None
+    assert lyric_fetch.auto_attach_translation("  ", None, "[00:01.00]hi\n[00:02.00]bye") is None
+
+
+def test_auto_attach_first_candidate_with_translation(fake_netease):
+    """跳过无翻译的候选，取第一个带翻译的"""
+    fake_netease["search"] = lambda q, limit=20: [
+        {
+            "id": "1",
+            "title": "x",
+            "artist": "y",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        },
+        {
+            "id": "2",
+            "title": "x",
+            "artist": "y",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        },
+    ]
+    fake_netease["get_lyric"] = lambda sid: (
+        _auto_lyric("[00:01.00]no trans", None)
+        if sid == "1"
+        else _auto_lyric("[00:01.00]line a\n[00:02.00]line b", "[00:01.00]译a\n[00:02.00]译b")
+    )
+    manual = "[00:05.00]line a\n[00:06.00]line b"
+    out = lyric_fetch.auto_attach_translation("x", "y", manual)
+    assert out == "[00:05.00]译a\n[00:06.00]译b"
+
+
+def test_auto_attach_prefers_line_with_translation(fake_netease):
+    """重复副歌：优先匹配带翻译的原文行（避免只命中无翻译的首段）"""
+    fake_netease["search"] = lambda q, limit=20: _auto_search_one("x", "y")
+    fake_netease["get_lyric"] = lambda sid: _auto_lyric(
+        "[00:01.00]chorus\n[00:02.00]verse\n[03:00.00]chorus", "[03:00.00]合唱翻译"
+    )
+    manual = "[00:10.00]chorus\n[00:11.00]verse"
+    out = lyric_fetch.auto_attach_translation("x", "y", manual)
+    assert out == "[00:10.00]合唱翻译"
+
+
+def test_auto_attach_srt_manual(fake_netease):
+    """SRT 手动歌词：解析行文本匹配，输出 LRC 翻译（时间戳 = SRT 起始时间）"""
+    fake_netease["search"] = lambda q, limit=20: _auto_search_one("x", "y")
+    fake_netease["get_lyric"] = lambda sid: _auto_lyric(
+        "[00:01.00]琴键上透着光\n[00:02.00]彩绘的玻璃窗",
+        "[00:01.00]琴键上泛着光\n[00:02.00]彩绘的玻璃窗",
+    )
+    manual_srt = (
+        "1\n00:00:10,000 --> 00:00:15,000\n琴键上透着光\n"
+        "2\n00:00:20,000 --> 00:00:25,000\n彩绘的玻璃窗\n"
+    )
+    out = lyric_fetch.auto_attach_translation("x", "y", manual_srt, fmt="srt")
+    assert out == "[00:10.00]琴键上泛着光\n[00:20.00]彩绘的玻璃窗"
+
+
+def test_auto_attach_punctuation_insensitive(fake_netease):
+    """标点/大小写差异不影响匹配"""
+    fake_netease["search"] = lambda q, limit=20: _auto_search_one("x", "y")
+    fake_netease["get_lyric"] = lambda sid: _auto_lyric(
+        "[00:01.00]Hello World!!\n[00:02.00]second line", "[00:01.00]你好世界\n[00:02.00]第二行"
+    )
+    manual = "[00:30.00]hello world\n[00:31.00]SECOND LINE!"
+    out = lyric_fetch.auto_attach_translation("x", "y", manual)
+    assert out == "[00:30.00]你好世界\n[00:31.00]第二行"
+
+
+def test_auto_attach_network_error(fake_netease):
+    """网络错误 → None，不抛异常"""
+
+    def boom(q, limit=20):
+        raise httpx.TimeoutException("timeout")
+
+    fake_netease["search"] = boom
+    assert lyric_fetch.auto_attach_translation("x", "y", "[00:01.00]a\n[00:02.00]b") is None
+
+
+def test_auto_attach_empty_text(fake_netease):
+    """空文本 / 无文本行 → 跳过（不发起搜索）"""
+
+    def boom(q, limit=20):
+        raise AssertionError("不该搜索")
+
+    fake_netease["search"] = boom
+    assert lyric_fetch.auto_attach_translation("x", "y", "   ") is None
+    assert lyric_fetch.auto_attach_translation("x", "y", "[00:01.00]") is None

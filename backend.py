@@ -38,6 +38,7 @@ import quark_provider
 import tag_editor
 import tag_scraper
 from lyric_fetch import (
+    auto_attach_translation,
     cleanup_orphan_manual_lyrics,
     delete_manual_lyric,
     fetch_online_lyric,
@@ -2143,6 +2144,8 @@ def api_lyric_manual_put(body: dict):
     """保存手动指定歌词（上传文件/在线选择/粘贴文本统一走这里，覆盖旧值）
 
     tlyric 可选：中文翻译 LRC（JSON 歌词上传时携带），/api/lyric 返回时合并进歌词行。
+    请求体未携带 tlyric（或为空）时：自动尝试网易云翻译补全（行级文本匹配，失败/无匹配/
+    无歌名歌手元数据时静默跳过，不阻塞保存；请求体显式带 tlyric 则尊重用户）。
     """
     path = (body.get("path") or "").strip()
     fmt = body.get("format") or "lrc"
@@ -2163,6 +2166,15 @@ def api_lyric_manual_put(body: dict):
         raise HTTPException(
             400, "歌词内容解析失败，请检查格式（LRC 需 [mm:ss] 时间戳，SRT 需序号+时间轴）"
         )
+    if not tlyric:
+        # 自动补翻译：网易云行级匹配（仅本地歌且歌名/歌手元数据至少一项非空；失败静默）
+        artist, title, _album = extract_tags(f)
+        title = (title or "").strip()
+        artist = (artist or "").strip()
+        if title or artist:
+            auto = auto_attach_translation(title, artist, text, fmt)
+            if auto:
+                tlyric = auto
     payload = save_manual_lyric(str(f), fmt, text, source, tlyric)
     return {"ok": True, **payload}
 
