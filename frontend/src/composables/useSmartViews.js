@@ -5,7 +5,7 @@
 //   - 常听排行：GET /api/playback/stats（聚合 songs 按播放次数降序，并列按累计时长）
 // 视图进入时拉取一次；recentAdded 为纯前端计算，曲库变化（添加/删除）时自动重算。
 import { reactive, watch } from "vue";
-import { state, selectSong, play } from "./usePlayer.js";
+import { state, selectSong, play, findSongIndex } from "./usePlayer.js";
 import i18n from "../locales/i18n.js";
 
 export const SMART_VIEW_LIMIT = 50;
@@ -114,9 +114,9 @@ watch(
 
 // ============ 播放 ============
 // 点击行：定位到全局队列（state.songs）并播放，与 Playlist/MobileShell 同一链路
+// 网络歌（path=null）按 streamId 定位（findSongIndex），本地歌按 path
 export function playSmartRow(row) {
-  const path = row && row.song && row.song.path;
-  const idx = state.songs.findIndex((s) => s.path === path);
+  const idx = findSongIndex(row && row.song);
   if (idx < 0) return false;
   selectSong(idx);
   play();

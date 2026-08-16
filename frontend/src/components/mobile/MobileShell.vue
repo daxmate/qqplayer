@@ -33,7 +33,7 @@
 
 <script setup>
 import { ref, computed } from "vue";
-import { selectSong, play, state } from "../../composables/usePlayer.js";
+import { selectSong, play, findSongIndex } from "../../composables/usePlayer.js";
 import { useEdgeSwipe } from "../../composables/useSwipe.js";
 import MobileHome from "./MobileHome.vue";
 import MobileList from "./MobileList.vue";
@@ -76,7 +76,7 @@ function openPlayer() {
 
 // 列表点击歌曲：开始播放并进入全屏播放器
 async function playFromList(song) {
-  const idx = state.songs.findIndex((s) => s.path === song.path);
+  const idx = findSongIndex(song);
   if (idx < 0) return;
   await selectSong(idx);
   play();

@@ -128,7 +128,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { Search, X, Music, Play, Download, Loader2 } from "@lucide/vue";
-import { state, selectSong, play } from "../composables/usePlayer.js";
+import { state, selectSong, play, findSongIndex } from "../composables/usePlayer.js";
 import {
   downloadSettings,
   DOWNLOAD_QUALITY_OPTIONS,
@@ -261,7 +261,7 @@ async function runSearch() {
 
 // 本地歌曲点击：走现有选歌逻辑直接播放
 function playLocal(song) {
-  const idx = state.songs.findIndex((s) => s.path === song.path);
+  const idx = findSongIndex(song);
   if (idx < 0) return;
   selectSong(idx);
   play();

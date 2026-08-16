@@ -116,6 +116,9 @@
 
 ### 🐛 修复
 
+- **刮削保存后播放界面不更新**：`loadSongs` 刷新列表时只更新了 currentIndex，`state.currentSong` 仍指向旧数组里的旧对象（旧歌名/封面）；改为同步替换引用（本地歌按 path、网络歌按 streamId 定位），播放不中断，ControlBar/跟唱面板/媒体键元数据立即显示新信息
+- **「最近添加」等列表点击网络歌不播放/播错歌**：所有按 `path` 定位队列索引的写法对网络曲库条目（type=stream, path=null）会误匹配第一个 stream 条目；新增 `findSongIndex`（网络歌按 streamId、本地歌按 path），统一替换智能视图/移动端列表/搜索层/在线搜索 6 处播放与移除定位；`restoreLastPlayed` 保持不恢复网络歌
+
 - **aria2 RPC 被 macOS 系统代理劫持**：Python urllib 在 macOS 上会读取系统网络代理（127.0.0.1），httpx 默认 trust_env 把它套到 localhost:6800 的 RPC 请求上 → 返回 503 → aria2 引擎静默降级 httpx（选了 aria2 实际不生效的第二个根因）；`_aria2_rpc_call` 加 `trust_env=False`，回环 RPC 永不走代理
 
 - **网易云下载接入 aria2 引擎**：设置里选「下载引擎 = aria2」后，网易云源（search anything / 在线搜索）下载仍走内置 httpx（只有歌曲海接入了引擎）；`/api/online/download` 改用 `_download_with_engine`，与歌曲海一致——aria2 不可用/超时自动降级 httpx

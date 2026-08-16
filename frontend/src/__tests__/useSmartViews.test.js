@@ -22,6 +22,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
+  removeAttribute() {}
   addEventListener(ev, fn) {
     this.listeners[ev] = fn;
   }
@@ -268,6 +269,18 @@ describe("playSmartRow（点击行播放链路）", () => {
     const ok = playSmartRow({ song: { path: "/lib/unknown.mp3" } });
     expect(ok).toBe(false);
     expect(state.currentIndex).toBe(-1);
+  });
+
+  it("网络歌（path=null）：按 streamId 定位播放，不误匹配第一个 stream 条目", () => {
+    state.songs = [
+      { path: "/a.mp3", name: "本地A" },
+      { type: "stream", streamId: "s1", path: null, name: "网络1" },
+      { type: "stream", streamId: "s2", path: null, name: "网络2" },
+    ];
+    const ok = playSmartRow({ song: state.songs[2] });
+    expect(ok).toBe(true);
+    expect(state.currentIndex).toBe(2);
+    expect(state.currentSong.streamId).toBe("s2");
   });
 });
 

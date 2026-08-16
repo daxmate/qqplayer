@@ -175,6 +175,7 @@ import {
   removeFromQueue,
   removeFromPlaylist,
   setPlaylistOrder,
+  findSongIndex,
 } from "../../composables/usePlayer.js";
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
@@ -376,7 +377,7 @@ async function actRemove(song) {
     if (props.kind === "playlist") {
       await removeFromPlaylist(props.payload.playlist.id, song.path);
     } else {
-      const idx = state.songs.findIndex((s) => s.path === song.path);
+      const idx = findSongIndex(song);
       if (idx >= 0) removeFromQueue(idx);
     }
     showToast(t("mobile.list.removed"));

@@ -88,7 +88,13 @@
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronLeft, Music2, Heart, Trash2 } from "@lucide/vue";
-import { state, isFavorite, toggleFavorite, removeFromQueue } from "../../composables/usePlayer.js";
+import {
+  state,
+  isFavorite,
+  toggleFavorite,
+  removeFromQueue,
+  findSongIndex,
+} from "../../composables/usePlayer.js";
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
 import {
@@ -145,7 +151,7 @@ async function actFavorite(path) {
 // 操作区移除：智能视图行对应队列歌曲 → 从队列移除（与桌面非歌单视图语义一致）
 async function actRemove(row) {
   try {
-    const idx = state.songs.findIndex((s) => s.path === row.song.path);
+    const idx = findSongIndex(row.song);
     if (idx >= 0) removeFromQueue(idx);
     showToast(t("mobile.list.removed"));
   } catch (e) {

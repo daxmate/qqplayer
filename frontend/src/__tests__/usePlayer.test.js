@@ -58,6 +58,7 @@ const {
   toggleKaraoke,
   toggleZh,
   loadSongs,
+  findSongIndex,
   selectSong,
   play,
   playLine,
@@ -1103,6 +1104,60 @@ describe("loadSongs", () => {
     await loadSongs();
     expect(state.error).toContain("加载歌曲列表失败");
     expect(state.loading).toBe(false);
+  });
+
+  it("刷新后 currentSong 引用同步到新数组（刮削改名/封面后播放界面立即更新）", async () => {
+    state.songs = [{ path: "/old.mp3", name: "旧名", artist: "旧歌手" }];
+    state.currentIndex = 0;
+    state.currentSong = state.songs[0];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [{ path: "/old.mp3", name: "新名", artist: "新歌手" }],
+      })),
+    );
+    await loadSongs();
+    expect(state.currentIndex).toBe(0);
+    expect(state.currentSong.name).toBe("新名"); // 不再是旧对象
+    expect(state.currentSong.artist).toBe("新歌手");
+  });
+
+  it("刷新后网络歌按 streamId 保持选中（path 为 null 不误匹配）", async () => {
+    state.songs = [
+      { path: "/a.mp3", name: "本地A" },
+      { type: "stream", streamId: "s1", path: null, name: "网络1" },
+      { type: "stream", streamId: "s2", path: null, name: "网络2" },
+    ];
+    state.currentIndex = 2;
+    state.currentSong = state.songs[2]; // 正在播网络2
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { path: "/a.mp3", name: "本地A" },
+          { type: "stream", streamId: "s1", path: null, name: "网络1" },
+          { type: "stream", streamId: "s2", path: null, name: "网络2" },
+        ],
+      })),
+    );
+    await loadSongs();
+    expect(state.currentIndex).toBe(2);
+    expect(state.currentSong.streamId).toBe("s2");
+  });
+
+  it("findSongIndex：本地歌按 path，网络歌按 streamId，空/不存在返回 -1", () => {
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { type: "stream", streamId: "s1", path: null, name: "S1" },
+      { type: "stream", streamId: "s2", path: null, name: "S2" },
+    ];
+    expect(findSongIndex({ path: "/a.mp3" })).toBe(0);
+    expect(findSongIndex({ type: "stream", streamId: "s2", path: null })).toBe(2);
+    expect(findSongIndex({ type: "stream", streamId: "s1", path: null })).toBe(1); // 不误匹配第一个 stream
+    expect(findSongIndex({ path: "/nope.mp3" })).toBe(-1);
+    expect(findSongIndex(null)).toBe(-1);
   });
 });
 

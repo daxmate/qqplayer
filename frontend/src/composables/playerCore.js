@@ -1063,17 +1063,39 @@ export async function loadSongs() {
       state.currentIndex = 0;
       await selectSong(0);
     } else if (songs.length && state.currentSong) {
-      // 刷新后保持当前选中（流媒体歌 path 为 null 不参与 path 匹配，避免误选中第一个 stream 条目）
-      const idx = state.currentSong.path
-        ? songs.findIndex((s) => s.path === state.currentSong.path)
-        : -1;
-      if (idx >= 0) state.currentIndex = idx;
+      // 刷新后保持当前选中：本地歌按 path；网络歌（path=null）按 streamId
+      const cur = state.currentSong;
+      const idx = cur.path
+        ? songs.findIndex((s) => s.path === cur.path)
+        : cur.streamId
+          ? songs.findIndex((s) => s.type === "stream" && s.streamId === cur.streamId)
+          : -1;
+      if (idx >= 0) {
+        state.currentIndex = idx;
+        // 同步 currentSong 引用到新数组：刮削保存/曲库刷新后播放界面立即显示新信息
+        // （不改 audio/不重播；mediaSession 元数据 watch 自动跟随更新）
+        state.currentSong = songs[idx];
+      }
     }
   } catch (e) {
     state.error = i18n.global.t("errors.loadSongs", { msg: e.message });
   } finally {
     state.loading = false;
   }
+}
+
+// 定位歌曲在队列（state.songs）中的索引：本地歌按 path；网络歌（type=stream, path=null）
+// 按 streamId——旧写法 findIndex(s => s.path === song.path) 对网络歌会匹配到第一个
+// stream 条目（path 全为 null）→ 播错歌/不播放（2026-08-16 用户反馈“最近添加有时点击不播放”）
+export function findSongIndex(song) {
+  if (!song) return -1;
+  if (song.type === "stream" && song.streamId) {
+    return state.songs.findIndex((s) => s.type === "stream" && s.streamId === song.streamId);
+  }
+  if (song.path) {
+    return state.songs.findIndex((s) => s.path === song.path);
+  }
+  return -1;
 }
 
 // ============ 歌曲库自动刷新（iCloud 文件夹变动） ============

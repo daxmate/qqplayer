@@ -196,10 +196,10 @@ import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } 
 import { useI18n } from "vue-i18n";
 import { Search, X, Loader2, Play, Plus, Download, ChevronRight } from "@lucide/vue";
 import {
-  state,
   selectSong,
   play,
   playPreview,
+  findSongIndex,
   playbackSettings,
   fmtShortcutKey,
   parseShortcutCombo,
@@ -329,7 +329,7 @@ function onRowClick(item) {
 // 本地歌曲点击 → 播放（selectSong/play），播放后收起搜索层
 function playLocal(item) {
   const p = item.payload || {};
-  const idx = state.songs.findIndex((s) => s.path === p.path);
+  const idx = findSongIndex(p);
   if (idx < 0) return;
   selectSong(idx);
   play();
