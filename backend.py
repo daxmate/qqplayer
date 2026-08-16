@@ -18,10 +18,11 @@ import uuid
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from watchdog.events import FileSystemEventHandler
@@ -1485,6 +1486,71 @@ async def api_set_library(body: dict):
         _scan_version += 1
     start_watcher()
     return {"path": str(LIBRARY), "count": len(scan_library())}
+
+
+# ============ 曲库导入（拖拽/上传 → 复制进库，不动源文件）============
+# 单文件导入大小上限（超出报 error 不写盘）
+IMPORT_MAX_BYTES = 500 * 1024 * 1024  # 500MB
+
+
+class _ImportTooLargeError(Exception):
+    pass
+
+
+@app.post("/api/import")
+async def api_import(files: Annotated[list[UploadFile], File()]):
+    """拖拽导入曲库：multipart 字段 files（可多个，files=@a.mp3 重复传）
+
+    复制进库不覆盖源文件；同名自动加后缀；非音频跳过；成功 version+1（前端轮询自动刷新）。
+    响应 200: {"imported": n, "skipped": [...], "errors": [{"name", "detail"}]}
+    """
+    global _scan_cache, _scan_version
+    imported = 0
+    skipped: list[str] = []
+    errors: list[dict] = []
+    try:
+        LIBRARY.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(500, f"曲库目录不可用: {e}") from None
+    for uf in files:
+        raw = (uf.filename or "").strip()
+        ext = Path(raw).suffix.lower()
+        if ext not in AUDIO_EXTS:
+            skipped.append(raw or "(无文件名)")
+            continue
+        # 文件名清洗：只取 basename 再去非法字符，防目录穿越；resolve 后校验仍在 LIBRARY 下
+        name = _sanitize_filename(Path(raw).name)
+        if not name or name in {".", ".."}:
+            errors.append({"name": raw, "detail": "非法文件名"})
+            continue
+        dest = _unique_path(LIBRARY / name)
+        try:
+            if dest.resolve().parent != LIBRARY.resolve():
+                errors.append({"name": raw, "detail": "非法文件名"})
+                continue
+            # 大文件流式写入：分块读，不一次性进内存；超限报 error 不崩
+            with dest.open("wb") as out:
+                written = 0
+                while True:
+                    chunk = await uf.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > IMPORT_MAX_BYTES:
+                        raise _ImportTooLargeError(f"超过单文件 {IMPORT_MAX_BYTES} 字节上限")
+                    out.write(chunk)
+            imported += 1
+        except _ImportTooLargeError as e:
+            dest.unlink(missing_ok=True)
+            errors.append({"name": raw, "detail": str(e)})
+        except OSError as e:
+            dest.unlink(missing_ok=True)
+            errors.append({"name": raw, "detail": f"写入失败: {e}"})
+    if imported:
+        with _scan_lock:
+            _scan_cache = None  # 强制下次扫描重扫，新文件才能被扫到
+            _scan_version += 1  # 前端 3s 轮询 /api/library/version 自动刷新曲库
+    return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
 def _migrate_path_refs(old: str, new: str):

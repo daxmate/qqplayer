@@ -1530,3 +1530,124 @@ def test_sanitize_filename():
     assert backend._sanitize_filename("  正常 名字 ") == "正常 名字"
     assert backend._sanitize_filename(None) == ""
     assert backend._sanitize_filename("///") == ""
+
+
+# ============ 曲库导入 /api/import ============
+def _import_files(*pairs):
+    """pairs: (filename, bytes) → multipart files 参数（字段名统一 files）"""
+    return [("files", (name, data, "application/octet-stream")) for name, data in pairs]
+
+
+def test_api_import_basic(song_library):
+    """正常导入多文件：复制进库（源字节一致）、version+1、扫描能扫到"""
+    v0 = client.get("/api/library/version").json()["version"]
+    r = client.post(
+        "/api/import",
+        files=_import_files(("新歌.mp3", b"ID3 fake bytes"), ("贝斯.flac", b"fLaC fake")),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["imported"] == 2
+    assert body["skipped"] == []
+    assert body["errors"] == []
+    assert (song_library / "新歌.mp3").read_bytes() == b"ID3 fake bytes"
+    assert (song_library / "贝斯.flac").read_bytes() == b"fLaC fake"
+    # version +1（前端 3s 轮询自动刷新曲库）
+    assert client.get("/api/library/version").json()["version"] == v0 + 1
+    # 导入后库扫描能扫到
+    names = {s["name"] for s in backend.scan_library()}
+    assert {"新歌", "贝斯"} <= names
+    assert len(backend.scan_library()) == 4  # fixture 2 首 + 导入 2 首
+
+
+def test_api_import_duplicate_suffix(song_library):
+    """同名冲突不覆盖：第二次导入同名 → xxx (1).mp3，源文件字节不变"""
+    r1 = client.post("/api/import", files=_import_files(("歌.mp3", b"AAA")))
+    assert r1.json()["imported"] == 1
+    r2 = client.post("/api/import", files=_import_files(("歌.mp3", b"BBB")))
+    assert r2.json()["imported"] == 1
+    r3 = client.post("/api/import", files=_import_files(("歌.mp3", b"CCC")))
+    assert r3.json()["imported"] == 1
+    assert (song_library / "歌.mp3").read_bytes() == b"AAA"
+    assert (song_library / "歌 (1).mp3").read_bytes() == b"BBB"
+    assert (song_library / "歌 (2).mp3").read_bytes() == b"CCC"
+    # 同一请求里同名也各自加后缀
+    r4 = client.post("/api/import", files=_import_files(("歌.mp3", b"DDD"), ("歌.mp3", b"EEE")))
+    assert r4.json()["imported"] == 2
+    assert (song_library / "歌 (3).mp3").read_bytes() == b"DDD"
+    assert (song_library / "歌 (4).mp3").read_bytes() == b"EEE"
+
+
+def test_api_import_skip_non_audio(song_library):
+    """非音频跳过（skipped 计数），混合请求只导入音频；imported=0 不 bump version"""
+    v0 = client.get("/api/library/version").json()["version"]
+    r = client.post(
+        "/api/import",
+        files=_import_files(
+            ("a.mp3", b"AAA"),
+            ("note.txt", b"hello"),
+            ("photo.jpg", b"\xff\xd8jpeg"),
+        ),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["imported"] == 1
+    assert body["skipped"] == ["note.txt", "photo.jpg"]
+    assert body["errors"] == []
+    assert (song_library / "a.mp3").read_bytes() == b"AAA"
+    assert not (song_library / "note.txt").exists()
+    assert not (song_library / "photo.jpg").exists()
+    assert client.get("/api/library/version").json()["version"] == v0 + 1  # 有 1 个导入
+
+
+def test_api_import_path_traversal(song_library):
+    """文件名清洗/路径穿越防护：../、绝对路径、反斜杠只落为库内纯文件名，绝不写到 LIBRARY 外"""
+    r = client.post(
+        "/api/import",
+        files=_import_files(
+            ("../evil.mp3", b"X"),
+            ("/tmp/abs.mp3", b"Y"),
+            ("..\\win.mp3", b"Z"),
+            ("a:b?c.mp3", b"W"),
+        ),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["imported"] == 4
+    assert body["errors"] == []
+    # 库外/系统路径未被写入
+    assert not (song_library.parent / "evil.mp3").exists()
+    assert not Path("/tmp/abs.mp3").exists()
+    assert not (song_library.parent / "win.mp3").exists()
+    # 清洗后都在 LIBRARY 内
+    assert (song_library / "evil.mp3").read_bytes() == b"X"
+    assert (song_library / "abs.mp3").read_bytes() == b"Y"
+    assert (song_library / "..win.mp3").read_bytes() == b"Z"
+    assert (song_library / "abc.mp3").read_bytes() == b"W"
+
+
+def test_api_import_too_large(song_library, monkeypatch):
+    """超大文件报 error 不崩：不落盘、不 bump version"""
+    monkeypatch.setattr(backend, "IMPORT_MAX_BYTES", 1024)
+    v0 = client.get("/api/library/version").json()["version"]
+    big = b"x" * 2048
+    r = client.post(
+        "/api/import",
+        files=_import_files(("big.mp3", big), ("ok.mp3", b"small")),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["imported"] == 1  # 小文件照常导入
+    assert body["skipped"] == []
+    assert len(body["errors"]) == 1
+    assert body["errors"][0]["name"] == "big.mp3"
+    assert "上限" in body["errors"][0]["detail"]
+    assert not (song_library / "big.mp3").exists()  # 超限文件不残留
+    assert (song_library / "ok.mp3").read_bytes() == b"small"
+    assert client.get("/api/library/version").json()["version"] == v0 + 1
+
+
+def test_api_import_no_files():
+    """不传 files 字段 → 422（FastAPI 必填校验），不崩"""
+    r = client.post("/api/import")
+    assert r.status_code == 422
