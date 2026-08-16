@@ -59,6 +59,7 @@ const {
   PANEL_KEY,
   CONTROLS_KEY,
   LAST_PLAYED_KEY,
+  MODE_KEY,
 } = await import("../composables/usePlayer.js");
 
 // fetch stub：GET 走 getResponder（对象路由或函数；值可为 Promise），PUT 记录到 putBodies
@@ -163,6 +164,47 @@ describe("统一 Settings 层：GET 分发（load）", () => {
     expect(JSON.parse(lsStore[UI_SETTINGS_KEY]).accent).toBe("purple");
   });
 
+  it("mode：启动缓存首帧即恢复（不闪变），与后端一致时无脏冲突不误上传", async () => {
+    lsStore[MODE_KEY] = "karaoke"; // 上次停在跟唱
+    getResponder = {
+      "/api/settings": defaultSettings({ player: { mode: "karaoke" } }), // 与缓存一致
+    };
+    stubFetch();
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    const sync = await import("../composables/settingsSync.js");
+    expect(m.state.mode).toBe("karaoke"); // 首帧即恢复（同步读缓存种子）
+    await sync.settingsLoadPromise;
+    expect(m.state.mode).toBe("karaoke");
+    expect(putBodies.length).toBe(0); // 无脏字段：不误上传
+  });
+
+  it("GET 返回 player.mode：无本地缓存时应用后端值（后端为真源）并写透缓存", async () => {
+    let resolveGet;
+    getResponder = {
+      "/api/settings": new Promise((res) => {
+        resolveGet = res;
+      }),
+    };
+    stubFetch();
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    const sync = await import("../composables/settingsSync.js");
+    expect(m.state.mode).toBe("continuous"); // 无缓存：默认连播（GET 返回前）
+    resolveGet(defaultSettings({ player: { mode: "books" } }));
+    await sync.settingsLoadPromise;
+    expect(m.state.mode).toBe("books"); // 后端为真源：应用
+    expect(lsStore[MODE_KEY]).toBe("books"); // 写透缓存
+  });
+
+  it("mode 启动缓存非法值回落 continuous", async () => {
+    lsStore[MODE_KEY] = "hack";
+    stubFetch();
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    expect(m.state.mode).toBe("continuous"); // 非法缓存被忽略
+  });
+
   it("GET 失败：降级纯缓存模式（loaded 置真，后续变化照常 PUT 重试）", async () => {
     stubFetch(); // GET 返回 ok:false
     vi.useFakeTimers();
@@ -209,7 +251,12 @@ describe("统一 Settings 层：防抖保存（save）", () => {
     expect(body.lyric.fontSize).toBe(26);
     expect(body.desktopLyric.enabled).toBe(true);
     expect(body.playback.fadeSec).toBe(1);
-    expect(body.player).toEqual({ volume: 0.4, panel: false, controls: true });
+    expect(body.player).toEqual({
+      volume: 0.4,
+      panel: false,
+      controls: true,
+      mode: "continuous",
+    });
     // 写透缓存（同步）
     expect(JSON.parse(lsStore[UI_SETTINGS_KEY]).theme).toBe("light");
     expect(lsStore[VOLUME_KEY]).toBe("0.4");
@@ -249,6 +296,24 @@ describe("统一 Settings 层：防抖保存（save）", () => {
     await vi.advanceTimersByTimeAsync(350);
     expect(putBodies.length).toBe(2);
     expect(putBodies[1].body.ui.theme).toBe("dark");
+    vi.useRealTimers();
+  });
+
+  it("mode 变化：防抖 PUT 载荷含 player.mode，localStorage 缓存写透", async () => {
+    getResponder = { "/api/settings": defaultSettings() };
+    stubFetch();
+    vi.useFakeTimers();
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    const sync = await import("../composables/settingsSync.js");
+    await sync.settingsLoadPromise;
+    vi.clearAllTimers();
+    m.state.mode = "books"; // 切到阅读（App.vue switchMode / 快捷键任何赋值路径都被 watch 兜住）
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(putBodies.length).toBe(1);
+    expect(putBodies[0].body.player.mode).toBe("books");
+    expect(lsStore[MODE_KEY]).toBe("books"); // 写透缓存
     vi.useRealTimers();
   });
 
@@ -352,6 +417,30 @@ describe("统一 Settings 层：一次性导入（字段级 diff）", () => {
     expect(m.state.controlsHidden).toBe(true);
   });
 
+  it("mode 脏数据导入：本地缓存合法且 ≠ 后端 → 上传并胜出；后端未返回 mode 不参与", async () => {
+    lsStore[MODE_KEY] = "books"; // 本地旧缓存：上次停在阅读
+    getResponder = {
+      "/api/settings": defaultSettings({ player: { mode: "continuous" } }),
+    };
+    stubFetch();
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    const sync = await import("../composables/settingsSync.js");
+    await sync.settingsLoadPromise;
+    expect(putBodies.length).toBe(1);
+    expect(putBodies[0].body).toEqual({ player: { mode: "books" } }); // 只传脏字段
+    expect(m.state.mode).toBe("books"); // 本地旧数据胜出
+    expect(lsStore[MODE_KEY]).toBe("books"); // 写透缓存
+    // 老后端兼容：后端没返回 mode → 不参与 diff（不上传）
+    putBodies = [];
+    getResponder = { "/api/settings": defaultSettings() }; // player 为空对象
+    vi.resetModules();
+    await import("../composables/usePlayer.js");
+    const sync2 = await import("../composables/settingsSync.js");
+    await sync2.settingsLoadPromise;
+    expect(putBodies.length).toBe(0);
+  });
+
   it("开关过滤导入：rememberVolume=false 不上传 volume；resumeLast=false 不上传 lastPlayed", async () => {
     lsStore[VOLUME_KEY] = "0.5";
     lsStore[LAST_PLAYED_KEY] = JSON.stringify({ path: "/a.mp3", position: 10, ts: 1 });
@@ -400,7 +489,7 @@ describe("统一 Settings 层：开关语义", () => {
     await nextTick();
     await vi.advanceTimersByTimeAsync(350);
     expect(putBodies.length).toBe(1);
-    expect(putBodies[0].body.player).toEqual({ panel: true, controls: true }); // 无 volume/lastPlayed
+    expect(putBodies[0].body.player).toEqual({ panel: true, controls: true, mode: "continuous" }); // 无 volume/lastPlayed；mode 不受开关影响始终上传
     // 写透缓存同样按开关：不写音量
     expect(lsStore[VOLUME_KEY]).toBeUndefined();
     vi.useRealTimers();

@@ -39,7 +39,7 @@ export const state = reactive({
   isPlaying: false,
   currentTime: 0,
   duration: 0,
-  mode: "continuous", // 'continuous' 连播 | 'karaoke' 跟唱
+  mode: "continuous", // 'continuous' 连播 | 'karaoke' 跟唱 | 'books' 阅读（localStorage 启动缓存 + 统一层持久化，重启恢复）
   playMode: "order", // 连播播放模式：'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
   karaokeOn: true, // 跟唱开关：开=每句播完自动停
   karaokeLoop: false, // 单句循环：跟唱开启时生效，句末自动回到句首重播
@@ -249,6 +249,22 @@ watch(
   () => applyEqToGraph(),
   { deep: true },
 );
+
+// ============ 模式记忆（localStorage 启动缓存；统一 Settings 层为真源）============
+export const MODE_KEY = "qqplayer.mode.v1";
+
+export const MODE_VALUES = ["continuous", "karaoke", "books"];
+
+// 启动同步读取缓存种子：首帧即恢复上次模式（非法/缺失回落 continuous）
+function loadMode() {
+  try {
+    const raw = localStorage.getItem(MODE_KEY);
+    if (MODE_VALUES.includes(raw)) state.mode = raw;
+  } catch {
+    /* 忽略损坏的缓存 */
+  }
+}
+loadMode();
 
 // ============ 音量（localStorage 持久化）============
 export const VOLUME_KEY = "qqplayer.volume.v1";
@@ -1812,6 +1828,8 @@ export function persistPlayerCache() {
       JSON.stringify({ musicLib: state.musicLibOpen, playlist: state.playlistOpen }),
     );
     localStorage.setItem(CONTROLS_KEY, state.controlsHidden ? "1" : "0");
+    // 模式记忆：始终写透（不受 rememberVolume/resumeLast 开关影响）
+    localStorage.setItem(MODE_KEY, state.mode);
     // 从未播放过（path 为空）时不写，避免用空记录覆盖有效缓存
     if (lastPlayedState.path) {
       localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify(lastPlayedState));
@@ -1827,7 +1845,14 @@ registerPlayerBridge({
   audio,
   playbackSettings,
   lastPlayedState,
-  keys: { PLAYBACK_SETTINGS_KEY, VOLUME_KEY, PANEL_KEY, CONTROLS_KEY, LAST_PLAYED_KEY },
+  keys: {
+    PLAYBACK_SETTINGS_KEY,
+    VOLUME_KEY,
+    PANEL_KEY,
+    CONTROLS_KEY,
+    LAST_PLAYED_KEY,
+    MODE_KEY,
+  },
   persistPlayerCache,
 });
 

@@ -126,3 +126,30 @@ def test_shortcut_fields_norm():
         "playback"
     ]
     assert "shortcutHack" not in s
+
+
+def test_player_mode_default():
+    """player.mode 默认 'continuous'（连播），随 GET /api/settings 返回"""
+    s = client.get("/api/settings").json()["settings"]["player"]
+    assert s["mode"] == "continuous"
+
+
+def test_player_mode_invalid_falls_back():
+    """非法值（类型非法/枚举非法）回落默认 'continuous'"""
+    for bad in (123, None, ["books"], True):
+        s = client.put("/api/settings", json={"player": {"mode": bad}}).json()["settings"]["player"]
+        assert s["mode"] == "continuous", f"mode={bad!r} 应回落默认"
+
+
+def test_player_mode_valid_preserved():
+    """合法值（'books'/'karaoke'）保留，并落盘持久化（模拟重启后仍读到）"""
+    s = client.put("/api/settings", json={"player": {"mode": "books"}}).json()["settings"]["player"]
+    assert s["mode"] == "books"
+    s = client.put("/api/settings", json={"player": {"mode": "karaoke"}}).json()["settings"][
+        "player"
+    ]
+    assert s["mode"] == "karaoke"
+    # 模拟重启：重置缓存后仍读到持久化值
+    state._settings = None
+    s = client.get("/api/settings").json()["settings"]["player"]
+    assert s["mode"] == "karaoke"

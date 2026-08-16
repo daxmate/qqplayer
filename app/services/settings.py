@@ -204,6 +204,11 @@ _SETTINGS_SPEC = {
         "panel": (True, _norm_bool),
         "controls": (False, _norm_bool),
         "lastPlayed": (None, lambda v, d: _norm_last_played(v)),
+        # 任务：记住当前模式（连播/跟唱/阅读），重启恢复
+        "mode": (
+            "continuous",
+            lambda v, d: _norm_str(v, d, allowed={"continuous", "karaoke", "books"}),
+        ),
     },
     "download": {
         # 在线下载目录：非空用该路径，空 = 当前歌曲库
