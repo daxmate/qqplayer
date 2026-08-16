@@ -107,9 +107,9 @@ def test_shortcut_fields_norm():
         ]["playback"]
         assert s["shortcutMute"] == "KeyM", f"shortcutMute={bad!r} 应回落默认"
     # 合法字符串保留（用户录制的 ⌘ 组合 / 单键）
-    s = client.put("/api/settings", json={"playback": {"shortcutMute": "KeyX"}}).json()[
-        "settings"
-    ]["playback"]
+    s = client.put("/api/settings", json={"playback": {"shortcutMute": "KeyX"}}).json()["settings"][
+        "playback"
+    ]
     assert s["shortcutMute"] == "KeyX"
     s = client.put(
         "/api/settings", json={"playback": {"shortcutPrevTrack": "Meta+ArrowRight"}}
@@ -121,7 +121,7 @@ def test_shortcut_fields_norm():
     assert s["shortcutPrevTrack"] == "Meta+ArrowRight"
     assert s["shortcutMute"] == "KeyX"
     # 未知字段不进白名单（GET 不返回）
-    s = client.put("/api/settings", json={"playback": {"shortcutHack": "KeyZ"}}).json()[
-        "settings"
-    ]["playback"]
+    s = client.put("/api/settings", json={"playback": {"shortcutHack": "KeyZ"}}).json()["settings"][
+        "playback"
+    ]
     assert "shortcutHack" not in s
