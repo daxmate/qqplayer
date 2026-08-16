@@ -49,6 +49,11 @@
 - [x] 给header部分添加一个 search anything（原 search anywhere），可以搜索歌曲名，歌手，专辑，设置项等 ✅ 2026-08-14 完成（Spotlight 式全屏搜索层 + 五类混合结果 + 匹配度排序 + 设置项内联操作）
 - [x] 改进现在的搜索功能，现在简体与繁体不能互通搜索，英语字母不能与有声调的字母互通 ✅ 2026-08-13 完成（搜索归一化层：简繁/声调/全半角互通，commit `ae8fbd9`）
 
+## 后端架构重构（2026-08-16 用户拍板，跨会话待办）
+
+- [x] backend.py 拆分（P0）✅ 2026-08-16 完成（commit `4e4ce90`，14m45s 子代理 + maintainer review）：2328 行单文件 56 路由 → `app/` 包（10 域 routers + 5 services + state 共享状态 + main 组装）；backend.py 变 131 行薄兼容层（PEP 562 `__getattr__` 委托 state，测试 `import backend` 零逻辑改动，patch 目标机械迁移约 60 处）
+- [x] storage.py 存储抽象（P1）✅ 2026-08-16 完成（同 commit）：`app/storage.py` JsonStore——原子写（tmp+os.replace）/损坏备份 .bak/路径延迟解析（path_getter 可调用，支持测试注入）/deepcopy 防默认值污染；favorites/playlists/queue_order/network_songs/playback 5 实例；留 SQLite 迁移口（播放统计将来迁 sqlite3）
+
 ## 今晚并行批次（2026-08-13 晚，parallel-dev 工作流，用户拍板）
 
 - [x] 睡眠定时器（设置→播放，倒计时暂停）
