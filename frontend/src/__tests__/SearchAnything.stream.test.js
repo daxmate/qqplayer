@@ -13,6 +13,9 @@ function latestToast() {
   return items[items.length - 1];
 }
 
+// 网络直链 → 同源代理 URL（与 playerCore.streamProxyUrl 同款格式）
+const PROXY_SRC = (u) => "/api/stream/proxy?url=" + encodeURIComponent(u);
+
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
   static instances = [];
@@ -168,7 +171,7 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
     expect(state.currentSong.type).toBe("preview");
     expect(state.currentSong.name).toBe("晴天");
     expect(state.currentSong.streamId).toBe("1001");
-    expect(FakeAudio.instances[0].src).toBe("http://stream.example.com/1001.mp3");
+    expect(FakeAudio.instances[0].src).toBe(PROXY_SRC("http://stream.example.com/1001.mp3"));
     // 试听成功 toast（全局 toast）
     expect(latestToast().text).toContain("正在试听");
     // 搜索层不收起（试听 = 边听边逛）

@@ -11,6 +11,7 @@
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -143,6 +144,119 @@ def test_stream_url_unsupported_provider_400():
     """provider 非 netease → 400"""
     r = client.get("/api/stream/url", params={"id": "1", "provider": "gequhai"})
     assert r.status_code == 400
+
+
+# ============ GET /api/stream/proxy ============
+class _FakeProxyResp:
+    """mock httpx.stream 响应（proxy 端点用）：chunk 迭代 + 头/状态 + 上下文管理"""
+
+    def __init__(self, chunks=b"", status_code=200, headers=None, error=None):
+        self._chunks = chunks if isinstance(chunks, (list, tuple)) else [chunks]
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._error = error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        if self._error:
+            raise self._error
+
+    def iter_bytes(self):
+        yield from self._chunks
+
+
+@pytest.fixture
+def fake_proxy_stream(monkeypatch):
+    """mock backend.httpx.stream：记录 (method, url, kwargs)，返回可配置流式响应
+    state["resp"] 可以是响应对象或返回响应的 callable（模拟连接失败抛错）"""
+    state = {"calls": [], "resp": None}
+
+    def stream_fn(method, url, **kw):
+        state["calls"].append((method, url, kw))
+        return state["resp"]() if callable(state["resp"]) else state["resp"]
+
+    monkeypatch.setattr(backend.httpx, "stream", stream_fn)
+    return state
+
+
+def test_stream_proxy_ok(fake_proxy_stream):
+    """正常 200 流式转发：body = 上游 chunks；content-type/content-length 透传；
+    httpx 参数符合契约（timeout/follow_redirects/trust_env=False）"""
+    fake_proxy_stream["resp"] = _FakeProxyResp(
+        chunks=[b"ID3", b" audio bytes"],
+        headers={"content-type": "audio/mpeg", "content-length": "12"},
+    )
+    r = client.get("/api/stream/proxy", params={"url": "http://m701.music.126.net/a.mp3"})
+    assert r.status_code == 200
+    assert r.content == b"ID3 audio bytes"
+    assert r.headers["content-type"].startswith("audio/mpeg")
+    assert r.headers["content-length"] == "12"
+    method, url, kw = fake_proxy_stream["calls"][0]
+    assert method == "GET"
+    assert url == "http://m701.music.126.net/a.mp3"
+    assert kw["timeout"] == 30.0
+    assert kw["follow_redirects"] is True
+    assert kw["trust_env"] is False
+    assert kw["headers"]["User-Agent"]
+
+
+def test_stream_proxy_range_passthrough(fake_proxy_stream):
+    """带 Range 请求 → 上游透传 Range 头；206 + content-range/accept-ranges 透传"""
+    fake_proxy_stream["resp"] = _FakeProxyResp(
+        chunks=[b"x" * 1024],
+        status_code=206,
+        headers={"content-range": "bytes 0-1023/102400", "accept-ranges": "bytes"},
+    )
+    r = client.get(
+        "/api/stream/proxy",
+        params={"url": "http://cdn.example.com/a.mp3"},
+        headers={"Range": "bytes=0-1023"},
+    )
+    assert r.status_code == 206
+    assert len(r.content) == 1024
+    assert r.headers["content-range"] == "bytes 0-1023/102400"
+    assert r.headers["accept-ranges"] == "bytes"
+    kw = fake_proxy_stream["calls"][0][2]
+    assert kw["headers"]["Range"] == "bytes=0-1023"
+
+
+def test_stream_proxy_non_http_400(fake_proxy_stream):
+    """非 http(s) url / 空 url → 400，不发起上游请求；缺 url 参数 → 422"""
+    for bad in ("ftp://x/a.mp3", "/api/audio?path=/lib/a.mp3", "", "javascript:alert(1)"):
+        r = client.get("/api/stream/proxy", params={"url": bad})
+        assert r.status_code == 400, f"url={bad!r} 应 400"
+    assert fake_proxy_stream["calls"] == []
+    assert client.get("/api/stream/proxy").status_code == 422
+
+
+def test_stream_proxy_upstream_connect_fail_502(fake_proxy_stream):
+    """上游连接失败（httpx.stream 抛错）→ 502 带原因"""
+
+    def boom(*a, **kw):
+        raise httpx.HTTPError("connection refused")
+
+    fake_proxy_stream["resp"] = boom
+    r = client.get("/api/stream/proxy", params={"url": "http://x/a.mp3"})
+    assert r.status_code == 502
+    assert "connection refused" in r.json()["detail"]
+
+
+def test_stream_proxy_upstream_http_error_502(fake_proxy_stream):
+    """上游非 2xx（404）→ 502 带原因"""
+    req = httpx.Request("GET", "http://x/a.mp3")
+    fake_proxy_stream["resp"] = _FakeProxyResp(
+        error=httpx.HTTPStatusError(
+            "404 Not Found", request=req, response=httpx.Response(404, request=req)
+        )
+    )
+    r = client.get("/api/stream/proxy", params={"url": "http://x/a.mp3"})
+    assert r.status_code == 502
+    assert "404" in r.json()["detail"]
 
 
 # ============ 网络曲库条目 CRUD ============

@@ -13,6 +13,13 @@
 # ============================================================
 set -euo pipefail
 
+# ---------- PATH 兜底（launchd 托管服务 PATH 无 /opt/homebrew/bin）----------
+# ffprobe/ffmpeg 由 brew 安装在 /opt/homebrew/bin；若 PATH 找不到且目录存在则追加，
+# 避免直接调用 ffprobe/ffmpeg 时 FileNotFoundError（launchd 进程 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin）
+if [[ -d /opt/homebrew/bin ]] && { ! command -v ffprobe >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; }; then
+    export PATH="/opt/homebrew/bin:$PATH"
+fi
+
 # ---------- 配置 ----------
 PY=/Applications/oMLX.app/Contents/Resources/Python/framework-mlx-base/bin/python_
 SP=/Applications/oMLX.app/Contents/Resources/Python/framework-mlx-base/lib/python3.11/site-packages

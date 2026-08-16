@@ -26,8 +26,8 @@ from typing import Annotated
 import httpx
 import send2trash
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -1349,6 +1349,58 @@ def api_stream_url(id: str, provider: str = "netease", level: str = "exhigh"):
     }
 
 
+@app.get("/api/stream/proxy")
+def api_stream_proxy(url: str, request: Request):
+    """同源流媒体代理：转发上游直链，绕开 Web Audio 播放跨域媒体的 CORS 限制
+
+    背景：前端 EQ/频谱音频图用 createMediaElementSource(audio) 常驻接管 audio 元素，
+    Web Audio 模式播放跨域媒体时服务器必须返回 CORS 头，否则浏览器静音输出
+    （进度走但无声）。网易云直链 m701.music.126.net 实测不带 CORS 头 → 无声。
+    本端点做同源代理：audio.src 指向 /api/stream/proxy?url=...，浏览器请求同源，
+    不再受上游 CORS 限制。支持 Range（拖动进度条 206）。
+
+    url 必填且必须 http(s)；透传 Range 头；上游超时/请求失败 → 502。
+    """
+    url = (url or "").strip()
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        raise HTTPException(400, "url 必须为 http(s) 链接")
+    upstream_headers = {"User-Agent": DOWNLOAD_UA}
+    range_h = request.headers.get("range")
+    if range_h:
+        upstream_headers["Range"] = range_h
+    # trust_env=False：直链/本机回环都不应被环境代理（HTTP(S)_PROXY）劫持（2026-08-16 教训）
+    try:
+        upstream = httpx.stream(
+            "GET",
+            url,
+            timeout=30.0,
+            follow_redirects=True,
+            headers=upstream_headers,
+            trust_env=False,
+        )
+        resp = upstream.__enter__()
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"上游请求失败: {e}") from None
+
+    def gen():
+        try:
+            yield from resp.iter_bytes()
+        finally:
+            upstream.__exit__(None, None, None)
+
+    resp_headers = {}
+    for h in ("content-length", "content-range", "accept-ranges"):
+        if resp.headers.get(h):
+            resp_headers[h] = resp.headers[h]
+    return StreamingResponse(
+        gen(),
+        status_code=resp.status_code,
+        media_type=resp.headers.get("content-type"),
+        headers=resp_headers,
+    )
+
+
 # ============ 歌曲海下载（gequhai_provider + quark_provider + 下载引擎）============
 
 
@@ -2186,8 +2238,13 @@ def api_lyric_align(body: dict):
     cmd = [str(align), str(f), "-t", text, "-o", "json"]
     if language:
         cmd += ["-l", language]
+    # launchd 托管服务的 PATH 没有 /opt/homebrew/bin，脚本内 ffprobe/ffmpeg 会找不到；
+    # 这里显式把 brew bin 追加进子进程 PATH 作兜底（与 scripts/lyric-align 内兜底双保险）
+    env = dict(os.environ)
+    if os.path.isdir("/opt/homebrew/bin"):
+        env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=ALIGN_TIMEOUT)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=ALIGN_TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "AI 对齐超时，请稍后重试或缩短歌词") from None
     if proc.returncode != 0:

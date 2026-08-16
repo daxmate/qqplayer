@@ -36,6 +36,9 @@ vi.stubGlobal("Audio", FakeAudio);
 const ControlBar = (await import("../components/ControlBar.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
 
+// 网络直链 → 同源代理 URL（与 playerCore.streamProxyUrl 同款格式）
+const PROXY_SRC = (u) => "/api/stream/proxy?url=" + encodeURIComponent(u);
+
 let wrapper = null;
 
 beforeEach(() => {
@@ -138,7 +141,7 @@ describe("ControlBar 播放 URL 入口", () => {
     expect(document.body.querySelector(".url-mask")).toBeFalsy(); // 弹窗已关
     expect(state.currentSong.type).toBe("url");
     expect(state.currentSong.name).toBe("station.mp3");
-    expect(FakeAudio.instances[0].src).toBe("https://example.com/radio/station.mp3");
+    expect(FakeAudio.instances[0].src).toBe(PROXY_SRC("https://example.com/radio/station.mp3"));
     wrapper.unmount();
   });
 

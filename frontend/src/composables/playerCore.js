@@ -1348,6 +1348,15 @@ function urlTitle(url) {
   }
 }
 
+// 网络直链 → 同源代理 URL：EQ/频谱音频图常驻接管 audio 后，跨域媒体必须带 CORS 头
+// （网易云等直链不带 → 浏览器静音输出）。走 /api/stream/proxy 同源转发（支持 Range 拖动）。
+// 非 http(s)（本地 /api/audio 等）原样返回（防御性）。
+function streamProxyUrl(url) {
+  return typeof url === "string" && /^https?:\/\//i.test(url)
+    ? "/api/stream/proxy?url=" + encodeURIComponent(url)
+    : url;
+}
+
 // 试听 = 临时播放列表（核心语义，用户 2026-08-16 拍板）：
 // - 保存当前播放上下文（currentIndex / currentSong 不动；isPlaying 由 play 事件接管）
 // - 不改 state.songs、不改 currentIndex
@@ -1370,10 +1379,10 @@ export async function playPreview(desc, opts = {}) {
   audio.pause();
   if (playbackSession) playbackSession.completed = audio.ended;
   flushPlaybackSession();
-  // 挂载试听源：不动 state.songs / currentIndex
+  // 挂载试听源：不改 state.songs / currentIndex（http(s) 直链走同源代理防跨域无声）
   state.currentSong = song;
   state.isPlaying = false;
-  audio.src = src;
+  audio.src = streamProxyUrl(src);
   audio.playbackRate = state.speed;
   audio.volume = state.muted ? 0 : state.volume;
   state.currentTime = 0;
@@ -1467,7 +1476,7 @@ export async function selectSong(index, opts = {}) {
   } else {
     src = "/api/audio?path=" + encodeURIComponent(state.currentSong.path);
   }
-  audio.src = src;
+  audio.src = streamProxyUrl(src);
   audio.playbackRate = state.speed;
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   audio.volume = state.muted ? 0 : state.volume;

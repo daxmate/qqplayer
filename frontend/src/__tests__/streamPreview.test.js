@@ -68,6 +68,9 @@ const {
 
 const audio = () => FakeAudio.instances[0];
 
+// 网络直链 → 同源代理 URL（与 playerCore.streamProxyUrl 同款格式）
+const PROXY_SRC = (u) => "/api/stream/proxy?url=" + encodeURIComponent(u);
+
 const LOCAL_SONGS = [
   { path: "/lib/a.mp3", name: "A", artist: "甲", album: "一" },
   { path: "/lib/b.mp3", name: "B", artist: "乙", album: "二" },
@@ -186,7 +189,7 @@ describe("playPreview 试听语义（临时播放列表）", () => {
     expect(state.currentSong.type).toBe("preview");
     expect(state.currentSong.name).toBe("晴");
     expect(state.currentSong.path).toBeNull();
-    expect(audio().src).toBe("http://stream.example.com/song.mp3");
+    expect(audio().src).toBe(PROXY_SRC("http://stream.example.com/song.mp3"));
     expect(streamCalls()).toBe(1); // 实时取直链一次
     // 试听歌词：在线匹配（/api/lyric/search + 前端 LRC 解析）
     expect(state.lyric.length).toBe(2);
@@ -244,12 +247,12 @@ describe("playPreview 试听语义（临时播放列表）", () => {
 });
 
 describe("stream 歌播放（曲库网络条目）", () => {
-  it("selectSong stream 歌：实时取直链 → audio.src = 直链（不走 /api/audio）", async () => {
+  it("selectSong stream 歌：实时取直链 → audio.src = 代理 URL（不走 /api/audio）", async () => {
     const { streamCalls } = stubFetch();
     state.songs = [STREAM_SONG, ...LOCAL_SONGS];
     await selectSong(0);
     expect(streamCalls()).toBe(1);
-    expect(audio().src).toBe("http://stream.example.com/song.mp3");
+    expect(audio().src).toBe(PROXY_SRC("http://stream.example.com/song.mp3"));
     expect(state.currentIndex).toBe(0);
   });
 
@@ -268,7 +271,7 @@ describe("stream 歌播放（曲库网络条目）", () => {
     state.songs = [STREAM_SONG];
     await selectSong(0);
     expect(streamCalls()).toBe(2);
-    expect(audio().src).toBe("http://stream.example.com/song.mp3");
+    expect(audio().src).toBe(PROXY_SRC("http://stream.example.com/song.mp3"));
     expect(playerToast.msg).toBe("");
   });
 
@@ -362,10 +365,10 @@ describe("播放统计：streamStats 开关", () => {
 });
 
 describe("URL 播放（playUrl）", () => {
-  it("合法 URL：audio.src = url，title 取文件名，type=url", async () => {
+  it("合法 URL：audio.src = 代理 URL，title 取文件名，type=url", async () => {
     const { streamCalls } = stubFetch();
     await playUrl("https://example.com/radio/station.mp3");
-    expect(audio().src).toBe("https://example.com/radio/station.mp3");
+    expect(audio().src).toBe(PROXY_SRC("https://example.com/radio/station.mp3"));
     expect(state.currentSong.type).toBe("url");
     expect(state.currentSong.name).toBe("station.mp3");
     expect(state.currentSong.path).toBeNull();
