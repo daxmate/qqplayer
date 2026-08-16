@@ -69,7 +69,7 @@ final class DragOverlayView: NSView {
 }
 
 // ============ App 入口 ============
-final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDelegate {
     // 三窗口
     var mainWindow: NSWindow!
     var mainWebView: WKWebView!
@@ -187,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         mainWebView = WKWebView(frame: mainWindow.contentView!.bounds, configuration: config)
         mainWebView.autoresizingMask = [.width, .height]
         mainWebView.allowsMagnification = false
+        mainWebView.uiDelegate = self
         mainWindow.contentView?.addSubview(mainWebView)
 
         loadURL(BACKEND_BASE, into: mainWebView)
@@ -228,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         miniWebView.setValue(false, forKey: "drawsBackground") // 透明
         miniWebView.autoresizingMask = [.width, .height]
         miniWebView.allowsMagnification = false
+        miniWebView.uiDelegate = self
         miniPanel.contentView?.addSubview(miniWebView, positioned: .below, relativeTo: dragBar)
 
         loadURL("\(BACKEND_BASE)/mini.html", into: miniWebView)
@@ -270,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         lyricWebView.setValue(false, forKey: "drawsBackground") // 透明
         lyricWebView.autoresizingMask = [.width, .height]
         lyricWebView.allowsMagnification = false
+        lyricWebView.uiDelegate = self
         lyricPanel.contentView?.addSubview(lyricWebView)
 
         // 鼠标覆盖层（盖在 webView 上，处理拖动/双击）
@@ -509,6 +512,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             }
             completion(img)
         }.resume()
+    }
+
+    // ============ WKUIDelegate：网页 <input type="file"> → 原生 NSOpenPanel ============
+    // WKWebView 默认不弹文件选择框——不实现 runOpenPanel 则壳内点文件选择按钮无反应
+    // （图书导入 .epub / 歌词上传等所有 input[type=file] 都走这里）
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        // 不限制文件类型：前端按 accept/扩展名自行过滤（如 .epub），限制反而挡其它用途
+        panel.begin { response in
+            if response == .OK {
+                completionHandler(panel.urls)
+            } else {
+                completionHandler(nil)
+            }
+        }
     }
 
     // ============ 文件选择桥：NSOpenPanel 选文件夹 → POST /api/library ============
