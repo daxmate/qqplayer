@@ -183,10 +183,7 @@
         </div>
       </div>
 
-      <!-- 下载结果 toast -->
-      <Transition name="sa-toast">
-        <div v-if="toast" class="sa-toast" :class="{ err: toastErr }">{{ toast }}</div>
-      </Transition>
+      <!-- 下载/添加结果提示：走全局 toast（ToastContainer），搜索层收起后仍可见 -->
     </div>
   </Transition>
 
@@ -209,6 +206,7 @@ import {
 } from "../composables/usePlayer.js";
 import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
+import { showToast, toastError } from "../composables/useToast.js";
 import { settingsIndex } from "../settingsIndex.js";
 import InlineControl from "./InlineControl.vue";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
@@ -229,8 +227,6 @@ const activeIndex = ref(-1); // 结果高亮行索引
 const expandedId = ref(null); // 当前展开内联控件的设置条目 id（互斥单开）
 const downloading = reactive({}); // 在线条目 id → 下载中
 const adding = reactive({}); // 在线条目 id → 添加到曲库中
-const toast = ref("");
-const toastErr = ref(false);
 
 const expandedEntry = computed(() => settingsIndex.find((e) => e.id === expandedId.value) || null);
 
@@ -371,9 +367,10 @@ async function downloadOnline(item) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || data.message || "");
     }
-    showToast(t("search.downloadSuccess", { title: item.title }), false);
+    showToast(t("search.downloadSuccess", { title: item.title }));
+    // 下载完成提示走全局 toast（ToastContainer）：搜索层收起/切页后也能看到
   } catch (err) {
-    showToast(t("search.downloadFailed", { msg: err.message || t("search.noResult") }), true);
+    toastError(t("search.downloadFailed", { msg: err.message || t("search.noResult") }));
   } finally {
     downloading[item.id] = false;
   }
@@ -393,7 +390,7 @@ async function previewOnline(item) {
     duration: p.duration,
   });
   // 直链获取失败时 playPreview 已 toast 错误，这里只报成功
-  if (ok) showToast(t("search.previewing", { title: item.title }), false);
+  if (ok) showToast(t("search.previewing", { title: item.title }));
 }
 
 // 添加到曲库：POST /api/network-songs（后端幂等去重；曲库 3s 轮询自动刷新）
@@ -428,13 +425,13 @@ async function addOnlineToLibrary(item) {
       }
     }
     if (already) {
-      showToast(t("search.alreadyInLibrary", { title: item.title }), true);
+      toastError(t("search.alreadyInLibrary", { title: item.title }));
       return;
     }
     if (failed) throw new Error(errMsg);
-    showToast(t("search.addedToLibrary", { title: item.title }), false);
+    showToast(t("search.addedToLibrary", { title: item.title }));
   } catch (err) {
-    showToast(t("search.addToLibraryFailed", { msg: err.message || "" }), true);
+    toastError(t("search.addToLibraryFailed", { msg: err.message || "" }));
   } finally {
     adding[item.id] = false;
   }
@@ -446,7 +443,7 @@ const pendingDownload = ref(null); // 登录成功后要自动重试的在线条
 
 function onQuarkLoginSuccess() {
   loginOpen.value = false;
-  showToast(t("online.quarkLoginOk"), false);
+  showToast(t("online.quarkLoginOk"));
   const item = pendingDownload.value;
   pendingDownload.value = null;
   if (item) downloadOnline(item); // 自动重试刚才的下载
@@ -458,23 +455,12 @@ function toggleEntry(entry) {
   expandedId.value = expandedId.value === entry.id ? null : entry.id;
 }
 
-let toastTimer = null;
-function showToast(msg, isErr) {
-  toast.value = msg;
-  toastErr.value = isErr;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-  }, 3200);
-}
-
 onMounted(() => {
   // Cmd+K 监听只在搜索层本体注册（entry 只是按钮，避免双实例双监听导致双切换）
   if (!props.entry) window.addEventListener("keydown", onWindowKeydown, true);
 });
 onBeforeUnmount(() => {
   if (!props.entry) window.removeEventListener("keydown", onWindowKeydown, true);
-  clearTimeout(toastTimer);
 });
 </script>
 
@@ -800,41 +786,6 @@ onBeforeUnmount(() => {
   border-radius: 5px;
   padding: 1px 5px;
   margin-right: 4px;
-}
-
-/* toast */
-.sa-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 84px;
-  transform: translateX(-50%);
-  z-index: 210;
-  background: rgba(38, 41, 55, 0.95);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 18px;
-  border-radius: 12px;
-  font-size: 12.5px;
-  box-shadow: 0 10px 32px var(--shadow-strong);
-  white-space: nowrap;
-  max-width: calc(100vw - 32px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sa-toast.err {
-  border-color: rgba(255, 107, 107, 0.5);
-  color: #ffb3b3;
-}
-.sa-toast-enter-active,
-.sa-toast-leave-active {
-  transition:
-    opacity 0.25s,
-    transform 0.25s;
-}
-.sa-toast-enter-from,
-.sa-toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
 }
 
 /* 淡入 */

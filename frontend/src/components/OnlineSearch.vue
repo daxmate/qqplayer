@@ -115,11 +115,6 @@
       </div>
     </div>
 
-    <!-- 下载结果 toast -->
-    <Transition name="os-toast">
-      <div v-if="toast" class="os-toast" :class="{ err: toastErr }">{{ toast }}</div>
-    </Transition>
-
     <!-- 夸克扫码登录（歌曲海下载 401 时弹出；登录成功自动重试下载） -->
     <QuarkLoginModal
       :open="quarkLoginOpen"
@@ -140,6 +135,7 @@ import {
   QUARK_QUALITY_OPTIONS,
 } from "../composables/useSettings.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
+import { showToast, toastError } from "../composables/useToast.js";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 
 // 在线搜索防抖时长（输入停止后才请求）
@@ -165,8 +161,6 @@ const searched = ref(false); // 是否已完成过至少一次在线搜索（控
 const searchError = ref("");
 const onlineItems = ref([]);
 const downloading = reactive({}); // 在线条目 id → 下载中
-const toast = ref("");
-const toastErr = ref(false);
 
 // 在线源：'netease' 网易云（默认，现有行为不变）| 'gequhai' 歌曲海（夸克网盘直链下载）
 const source = ref("netease");
@@ -174,7 +168,6 @@ const quarkLoginOpen = ref(false); // 夸克扫码登录弹窗
 let pendingDownload = null; // 401 触发登录时待重试的歌曲海条目
 
 let debounceTimer = null;
-let toastTimer = null;
 let searchSeq = 0; // 请求序列号：过期响应丢弃（快速连续输入时）
 
 // 本地歌曲匹配：title/artist/album 模糊匹配（复用 Playlist 过滤思路 + searchNormalize）
@@ -306,7 +299,7 @@ async function download(item, opts = {}) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "");
       }
-      showToast(t("online.downloadSuccess", { title: item.title }), false);
+      showToast(t("online.downloadSuccess", { title: item.title }));
       return;
     }
     // 网易云：现有逻辑不变
@@ -324,9 +317,9 @@ async function download(item, opts = {}) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || "");
     }
-    showToast(t("online.downloadSuccess", { title: item.title }), false);
+    showToast(t("online.downloadSuccess", { title: item.title }));
   } catch (e) {
-    showToast(t("online.downloadFailed", { msg: e.message || t("online.searchFailed") }), true);
+    toastError(t("online.downloadFailed", { msg: e.message || t("online.searchFailed") }));
   } finally {
     downloading[item.id] = false;
   }
@@ -338,15 +331,6 @@ function onQuarkLoginSuccess() {
   const item = pendingDownload;
   pendingDownload = null;
   if (item) download(item, { noLoginPrompt: true });
-}
-
-function showToast(msg, isErr) {
-  toast.value = msg;
-  toastErr.value = isErr;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-  }, 3200);
 }
 
 function clearQuery() {
@@ -368,7 +352,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener("click", onDocClick);
   clearTimeout(debounceTimer);
-  clearTimeout(toastTimer);
 });
 </script>
 
@@ -627,40 +610,5 @@ onBeforeUnmount(() => {
   to {
     transform: rotate(360deg);
   }
-}
-
-/* toast（组件内自绘，不依赖全局 toast 系统） */
-.os-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 84px;
-  transform: translateX(-50%);
-  z-index: 300;
-  background: rgba(38, 41, 55, 0.95);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 18px;
-  border-radius: 12px;
-  font-size: 12.5px;
-  box-shadow: 0 10px 32px var(--shadow-strong);
-  white-space: nowrap;
-  max-width: calc(100vw - 32px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.os-toast.err {
-  border-color: rgba(255, 107, 107, 0.5);
-  color: #ffb3b3;
-}
-.os-toast-enter-active,
-.os-toast-leave-active {
-  transition:
-    opacity 0.25s,
-    transform 0.25s;
-}
-.os-toast-enter-from,
-.os-toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
 }
 </style>

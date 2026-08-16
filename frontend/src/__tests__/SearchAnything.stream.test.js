@@ -5,6 +5,13 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
+import { clearToasts, useToast } from "../composables/useToast.js";
+
+// 最近一条全局 toast
+function latestToast() {
+  const { items } = useToast();
+  return items[items.length - 1];
+}
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
@@ -66,6 +73,7 @@ let wrapper = null;
 let neteaseCalls = 0;
 
 beforeEach(() => {
+  clearToasts();
   Object.assign(state, {
     songs: [],
     currentIndex: -1,
@@ -161,8 +169,8 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
     expect(state.currentSong.name).toBe("晴天");
     expect(state.currentSong.streamId).toBe("1001");
     expect(FakeAudio.instances[0].src).toBe("http://stream.example.com/1001.mp3");
-    // 试听成功 toast
-    expect(wrapper.find(".sa-toast").text()).toContain("正在试听");
+    // 试听成功 toast（全局 toast）
+    expect(latestToast().text).toContain("正在试听");
     // 搜索层不收起（试听 = 边听边逛）
     expect(isSearchOpen.value).toBe(true);
   });
@@ -194,7 +202,7 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
       coverUrl: "http://img.example.com/1001.jpg",
       duration: "4:29",
     });
-    expect(wrapper.find(".sa-toast").text()).toContain("已添加到曲库");
+    expect(latestToast().text).toContain("已添加到曲库");
   });
 
   it("重复添加（后端 409 幂等）→ 提示已在曲库", async () => {
@@ -214,8 +222,8 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
     await renderWithOnline();
     await wrapper.findAll(".sa-act")[1].trigger("click");
     await flushPromises();
-    expect(wrapper.find(".sa-toast").text()).toContain("已在曲库");
-    expect(wrapper.find(".sa-toast").classes()).toContain("err");
+    expect(latestToast().type).toBe("error");
+    expect(latestToast().text).toContain("已在曲库");
   });
 
   it("响应携带 alreadyExists 标记 → 提示已在曲库", async () => {
@@ -235,7 +243,7 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
     await renderWithOnline();
     await wrapper.findAll(".sa-act")[1].trigger("click");
     await flushPromises();
-    expect(wrapper.find(".sa-toast").text()).toContain("已在曲库");
+    expect(latestToast().text).toContain("已在曲库");
   });
 
   it("下载按钮：走现有下载链路（POST /api/online/download）", async () => {
@@ -258,7 +266,7 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
     await wrapper.findAll(".sa-act")[2].trigger("click");
     await flushPromises();
     expect(dl).toBe(1);
-    expect(wrapper.find(".sa-toast").text()).toContain("已开始下载");
+    expect(latestToast().text).toContain("已开始下载");
   });
 
   it("行点击（非按钮区域）仍 = 下载（保留现有行为）", async () => {

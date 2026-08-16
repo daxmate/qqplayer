@@ -116,6 +116,11 @@
 
 ### 🐛 修复
 
+- **网易云下载接入 aria2 引擎**：设置里选「下载引擎 = aria2」后，网易云源（search anything / 在线搜索）下载仍走内置 httpx（只有歌曲海接入了引擎）；`/api/online/download` 改用 `_download_with_engine`，与歌曲海一致——aria2 不可用/超时自动降级 httpx
+- **最近添加视图按添加时间排序**：原实现取库数组前 N 首（= 路径字典序，语义错误）；后端 `scan_library` 新增 `mtime` 字段（macOS birthtime / 跨平台 mtime，网络曲库条目 = 添加时刻），前端按 mtime 降序「最新在最上」，缺失字段兼容旧数据
+- **最近添加自动刷新**：停留在该视图时曲库变化（下载/导入/删除）→ 自动重算，新添加的歌实时排到最上
+- **下载完成提示改为全局 toast**：search anything / 在线搜索原来用组件内 toast，搜索层/面板收起后提示丢失；改用全局 ToastContainer，任何界面都能看到下载/添加结果提示
+
 - search anything 删光搜索词不再自动退出搜索层：原 query watcher 在空输入分支会顺手 `isSearchOpen=false`（清空=关闭），改为只清结果保持层打开，可继续输入或按 Esc 收起（含输入框右侧 ✕ 清空按钮）
 
 - 跟唱模式歌词对齐不随连播设置生效：`.kline-body` 缺 `flex: 1` 导致宽度收缩到文本内容，`text-align` 无居中空间；补 `flex: 1` + `min-width: 0`，行号仍固定最左，时间戳仍贴最右

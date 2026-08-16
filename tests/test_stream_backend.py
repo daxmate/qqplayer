@@ -248,13 +248,14 @@ def test_api_songs_merge_stream_entries(local_library):
     songs = client.get("/api/songs").json()
     assert len(songs) == 2
     local, stream = songs
-    # 本地歌保持原结构（id/path/folder/ext...，无 type 键）
+    # 本地歌保持原结构（id/path/folder/ext...，无 type 键；新增 mtime 供“最近添加”排序）
     assert local["path"] == str(local_library / "local.mp3")
     assert local["name"] == "本地歌"
     assert "type" not in local
     assert local.get("streamId") is None
+    assert isinstance(local.get("mtime"), int) and local["mtime"] > 0
     # 网络歌字段正确
-    assert stream == {
+    stream_expected = {
         "type": "stream",
         "streamId": "123456",
         "provider": "netease",
@@ -265,6 +266,8 @@ def test_api_songs_merge_stream_entries(local_library):
         "duration": 269,
         "coverUrl": "http://p1.music.126.net/cover.jpg",
     }
+    assert {k: stream[k] for k in stream_expected} == stream_expected
+    assert isinstance(stream.get("mtime"), int) and stream["mtime"] > 0  # 添加时刻（毫秒）
 
 
 def test_api_songs_no_network_entries(local_library):

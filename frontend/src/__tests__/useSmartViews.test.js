@@ -1,5 +1,6 @@
 // 智能视图（最近添加/最近播放/常听排行）数据映射与加载测试
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
@@ -141,10 +142,21 @@ describe("mapTopPlayed（常听排行：播放次数降序，并列按累计时�
   });
 });
 
-describe("mapRecentAdded（最近添加：库数组顺序兜底）", () => {
-  it("取库顺序前 N 首", () => {
+describe("mapRecentAdded（最近添加：按 mtime 降序，最新在前）", () => {
+  it("无 mtime（旧数据）：保持库数组顺序，取前 N 首", () => {
     const rows = mapRecentAdded(lib, 2);
     expect(rows.map((r) => r.song.path)).toEqual(["/lib/a.mp3", "/lib/b.mp3"]);
+  });
+
+  it("有 mtime：按毫秒时间戳降序，最新添加排最上", () => {
+    const lib2 = [
+      { id: "a", path: "/lib/a.mp3", mtime: 1000 },
+      { id: "b", path: "/lib/b.mp3", mtime: 3000 },
+      { id: "c", path: "/lib/c.mp3", mtime: 2000 },
+      { id: "d", path: "/lib/d.mp3" }, // 无 mtime → 排最后（0 兜底）
+    ];
+    const rows = mapRecentAdded(lib2, 2);
+    expect(rows.map((r) => r.song.path)).toEqual(["/lib/b.mp3", "/lib/c.mp3"]);
   });
 
   it("超过库大小时全量返回；空库返回空", () => {
@@ -169,6 +181,18 @@ describe("loadSmartView（进入视图拉取一次）", () => {
       "/lib/c.mp3",
     ]);
     expect(smartViewState.error).toBe("");
+  });
+
+  it("recentAdded 视图打开时曲库变化 → 自动重算，新歌排最上", async () => {
+    await loadSmartView("recentAdded");
+    // 模拟下载新歌后 loadSongs 整体替换 state.songs（新歌 mtime 最大）
+    state.songs = [
+      ...lib.map((s) => ({ ...s, mtime: 1000 })),
+      { id: "new", path: "/lib/new.mp3", name: "新歌", mtime: 9999 },
+    ];
+    await nextTick();
+    expect(smartViewState.rows[0].song.path).toBe("/lib/new.mp3");
+    expect(smartViewState.rows).toHaveLength(4);
   });
 
   it("recentPlayed：拉取 /api/playback 并映射去重", async () => {

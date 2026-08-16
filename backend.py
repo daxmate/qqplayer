@@ -603,6 +603,9 @@ def _full_scan():
         # id 用相对歌曲库的路径（歌曲库可能在 backend 目录之外，不能 relative_to(ROOT)）
         # 提取 ID3 元数据（歌手/标题/专辑），没有就用文件名
         artist, title, album = extract_tags(f)
+        # 最近添加排序用：添加时间（macOS birthtime；跨平台 fallback 文件 mtime），毫秒整数
+        st = f.stat()
+        mtime_ms = int((getattr(st, "st_birthtime", None) or st.st_mtime) * 1000)
         songs.append(
             {
                 "id": str(rel),
@@ -616,6 +619,7 @@ def _full_scan():
                 "cover": cover,
                 "has_lyric": lyric is not None,
                 "duration": get_duration(f),
+                "mtime": mtime_ms,  # 毫秒时间戳；本地歌=birthtime/mtime，网络歌=添加时刻
             }
         )
     return songs
@@ -1226,7 +1230,8 @@ def api_online_download(body: dict):
     try:
         download_dir.mkdir(parents=True, exist_ok=True)
         dest = download_dir / filename
-        _stream_download(url, dest)
+        # 按设置下载引擎下载（engine=aria2 时走本机 aria2 daemon，不可用自动降级 httpx）
+        _download_with_engine(url, dest, load_all_settings())
     except Exception as e:
         return JSONResponse(status_code=404, content={"error": f"下载失败: {e}"})
     return {"ok": True, "path": str(dest)}
@@ -1465,6 +1470,14 @@ def api_playback_stats():
 
 def _network_song_entry(e: dict) -> dict:
     """网络曲库条目 → /api/songs 里的流媒体歌曲结构（path=null/type=stream 供前端判断）"""
+    # 添加时刻转毫秒（与本地歌曲 mtime 同字段，前端"最近添加"统一按 mtime 降序）
+    added_ms = 0
+    added_at = e.get("addedAt")
+    if added_at:
+        try:
+            added_ms = int(datetime.fromisoformat(added_at).timestamp() * 1000)
+        except (ValueError, TypeError):
+            added_ms = 0
     return {
         "type": "stream",
         "streamId": str(e.get("id") or ""),
@@ -1475,6 +1488,7 @@ def _network_song_entry(e: dict) -> dict:
         "album": e.get("album") or "",
         "duration": e.get("duration"),
         "coverUrl": e.get("coverUrl"),
+        "mtime": added_ms,
     }
 
 

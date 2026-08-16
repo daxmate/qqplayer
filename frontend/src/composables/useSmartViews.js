@@ -1,10 +1,10 @@
 // ============ 智能视图（最近添加 / 最近播放 / 常听排行）============
 // 数据源：
-//   - 最近添加：GET /api/songs（歌曲对象无 addTime/mtime 字段，用库数组顺序兜底，取前 N）
+//   - 最近添加：按歌曲 mtime（毫秒，后端 scan 时取 birthtime/mtime；网络歌=添加时刻）降序，最新在前
 //   - 最近播放：GET /api/playback（记录按 ts 倒序，按 path 去重取最新一条，映射到当前库歌曲）
 //   - 常听排行：GET /api/playback/stats（聚合 songs 按播放次数降序，并列按累计时长）
-// 视图进入时拉取一次，不常驻轮询。行点击走全局 selectSong + play 播放链路。
-import { reactive } from "vue";
+// 视图进入时拉取一次；recentAdded 为纯前端计算，曲库变化（添加/删除）时自动重算。
+import { reactive, watch } from "vue";
 import { state, selectSong, play } from "./usePlayer.js";
 import i18n from "../locales/i18n.js";
 
@@ -52,9 +52,13 @@ export function mapTopPlayed(stats, libraryById, limit = SMART_VIEW_LIMIT) {
     .map((s) => ({ song: libraryById.get(s.path), stat: s }));
 }
 
-// 最近添加：歌曲无 addTime/mtime，用库数组顺序兜底，取前 N
+// 最近添加：按添加时间（mtime 毫秒）降序，最新在前；mtime 缺失（旧数据）保持库数组顺序
+// （Array.prototype.sort 稳定：全 0 时维持原序）
 export function mapRecentAdded(library, limit = SMART_VIEW_LIMIT) {
-  return (library || []).slice(0, limit).map((song) => ({ song }));
+  return [...(library || [])]
+    .sort((a, b) => (Number(b.mtime) || 0) - (Number(a.mtime) || 0))
+    .slice(0, limit)
+    .map((song) => ({ song }));
 }
 
 // 库数组 → path 索引 Map
@@ -96,6 +100,17 @@ export function closeSmartView() {
   smartViewState.error = "";
   smartViewState.rows = [];
 }
+
+// 曲库变化（下载/导入/删除后 loadSongs 整体替换 state.songs）→ 正在看"最近添加"时自动重算，
+// 新添加的歌实时排到最上。recentPlayed/topPlayed 依赖后端统计，保持进入时拉取一次（避免轮询风暴）。
+watch(
+  () => state.songs,
+  () => {
+    if (smartViewState.active === "recentAdded") {
+      smartViewState.rows = mapRecentAdded(state.songs);
+    }
+  },
+);
 
 // ============ 播放 ============
 // 点击行：定位到全局队列（state.songs）并播放，与 Playlist/MobileShell 同一链路

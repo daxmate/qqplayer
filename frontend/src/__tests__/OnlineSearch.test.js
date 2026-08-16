@@ -1,5 +1,6 @@
 // OnlineSearch 组件测试：防抖在线搜索 / 本地+在线分组 / 空结果 / 下载交互（POST + loading + toast）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { clearToasts, useToast } from "../composables/useToast.js";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
 
@@ -167,6 +168,7 @@ beforeEach(() => {
   loginFlow = { qrCalls: 0, statusCalls: 0, statuses: [] };
   stubFetch();
   vi.useFakeTimers();
+  clearToasts(); // 全局 toast 隔离，防跨测试污染
 });
 
 afterEach(() => {
@@ -179,6 +181,12 @@ async function typeAndSearch(wrapper, keyword) {
   await wrapper.find(".os-input").setValue(keyword);
   await vi.advanceTimersByTimeAsync(420); // 防抖 400ms 触发请求
   await flushPromises();
+}
+
+// 最近一条全局 toast（下载/登录流程里最后 show 的那条）
+function latestToast() {
+  const { items } = useToast();
+  return items[items.length - 1];
 }
 
 describe("OnlineSearch 防抖与在线搜索", () => {
@@ -363,7 +371,7 @@ describe("OnlineSearch 下载交互", () => {
       title: "晴天",
       artist: "周杰伦",
     });
-    expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
+    expect(latestToast().text).toContain("已下载：晴天");
     expect(wrapper.findAll(".os-download")[0].attributes("disabled")).toBeUndefined();
     wrapper.unmount();
   });
@@ -380,7 +388,7 @@ describe("OnlineSearch 下载交互", () => {
       title: "晴天",
       artist: "周杰伦",
     });
-    expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
+    expect(latestToast().text).toContain("已下载：晴天");
     wrapper.unmount();
   });
 
@@ -390,10 +398,9 @@ describe("OnlineSearch 下载交互", () => {
     await typeAndSearch(wrapper, "周杰伦");
     await wrapper.findAll(".os-download")[0].trigger("click");
     await flushPromises();
-    const toast = wrapper.find(".os-toast");
-    expect(toast.exists()).toBe(true);
-    expect(toast.classes()).toContain("err");
-    expect(toast.text()).toContain("下载失败：网络错误");
+    const toast = latestToast();
+    expect(toast.type).toBe("error");
+    expect(toast.text).toContain("下载失败：网络错误");
     wrapper.unmount();
   });
 
@@ -402,10 +409,10 @@ describe("OnlineSearch 下载交互", () => {
     await typeAndSearch(wrapper, "周杰伦");
     await wrapper.findAll(".os-download")[0].trigger("click");
     await flushPromises();
-    expect(wrapper.find(".os-toast").exists()).toBe(true);
+    expect(useToast().items.length).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(3300);
     await flushPromises();
-    expect(wrapper.find(".os-toast").exists()).toBe(false);
+    expect(useToast().items).toHaveLength(0);
     wrapper.unmount();
   });
 });
@@ -476,7 +483,7 @@ describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
     await flushPromises();
     expect(gequhaiBodies.length).toBe(1);
     expect(gequhaiBodies[0]).toEqual({ id: "gh1", title: "晴天", artist: "周杰伦" });
-    expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
+    expect(latestToast().text).toContain("已下载：晴天");
     expect(document.body.querySelector(".qlm")).toBeFalsy();
     wrapper.unmount();
   });
@@ -505,7 +512,7 @@ describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
     expect(document.body.querySelector(".qlm")).toBeFalsy();
     expect(gequhaiBodies.length).toBe(2);
     expect(gequhaiBodies[1]).toEqual({ id: "gh1", title: "晴天", artist: "周杰伦" });
-    expect(wrapper.find(".os-toast").text()).toContain("已下载：晴天");
+    expect(latestToast().text).toContain("已下载：晴天");
     wrapper.unmount();
   });
 
@@ -522,9 +529,9 @@ describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
     await flushPromises();
     expect(document.body.querySelector(".qlm")).toBeFalsy();
     expect(gequhaiBodies.length).toBe(2);
-    const toast = wrapper.find(".os-toast");
-    expect(toast.classes()).toContain("err");
-    expect(toast.text()).toContain("下载失败");
+    const toast = latestToast();
+    expect(toast.type).toBe("error");
+    expect(toast.text).toContain("下载失败");
     wrapper.unmount();
   });
 
@@ -539,7 +546,7 @@ describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
     await nextTick();
     expect(document.body.querySelector(".qlm")).toBeFalsy();
     expect(gequhaiBodies.length).toBe(1); // 未重试
-    expect(wrapper.find(".os-toast").exists()).toBe(false);
+    expect(useToast().items).toHaveLength(0);
     wrapper.unmount();
   });
 });
