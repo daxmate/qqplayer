@@ -15,9 +15,24 @@ git pull --ff-only
 echo "── 安装后端依赖"
 ./venv/bin/python -m pip install -q -r requirements.txt
 
-# 3. 前端构建
+# 3. 前端构建（失败自动回滚上一版 dist）
+DIST="frontend/dist"
+BACKUP="${TMPDIR:-/tmp}/qqplayer-dist-backup"
+if [ -d "$DIST" ]; then
+  echo "── 备份当前前端构建产物"
+  rm -rf "$BACKUP"
+  cp -R "$DIST" "$BACKUP"
+fi
 echo "── 构建前端"
-(cd frontend && pnpm install && pnpm build)
+if ! (cd frontend && pnpm install && pnpm build); then
+  echo "❌ 前端构建失败"
+  if [ -d "$BACKUP" ]; then
+    echo "── 回滚到上一版 dist"
+    rm -rf "$DIST"
+    cp -R "$BACKUP" "$DIST"
+  fi
+  exit 1
+fi
 
 # 4. 确保 launchd 托管（plist 缺失时自动创建并加载）
 # 之前出现过 plist 丢失导致 pkill 后服务无人拉起的故障，这里做自愈：
@@ -69,13 +84,24 @@ echo "── 重启服务（KeepAlive 自动拉起）"
 pkill -f "backend.py" 2>/dev/null || true
 sleep 2 # 等 KeepAlive 拉起新进程
 
-# 5. 健康检查
+# 5. 健康检查（失败自动回滚上一版 dist 并重启）
 echo "── 健康检查"
 sleep 2
-if curl -sf -o /dev/null http://localhost:17627/; then
+if curl -sf -o /dev/null http://localhost:17627/api/settings; then
     echo "✅ QQPlayer 部署完成: http://localhost:17627"
 else
-    echo "❌ 健康检查失败，日志: ~/Library/Logs/qqplayer/err.log"
-    tail -20 "$HOME/Library/Logs/qqplayer/err.log" 2>/dev/null || true
-    exit 1
+    echo "❌ 健康检查失败，尝试回滚上一版并重启"
+    if [ -d "$BACKUP" ]; then
+      rm -rf "$DIST"
+      cp -R "$BACKUP" "$DIST"
+      pkill -f "backend.py" 2>/dev/null || true
+      sleep 3
+    fi
+    if curl -sf -o /dev/null http://localhost:17627/api/settings; then
+      echo "✅ 回滚成功，服务已恢复: http://localhost:17627"
+    else
+      echo "❌ 回滚后仍失败，日志: ~/Library/Logs/qqplayer/err.log"
+      tail -20 "$HOME/Library/Logs/qqplayer/err.log" 2>/dev/null || true
+      exit 1
+    fi
 fi

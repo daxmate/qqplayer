@@ -19,6 +19,11 @@ desktop-player/assets/icon.iconset/
 # macOS
 .DS_Store
 
+# 运行时凭证/敏感文件（绝不入库）
+*.cookies.json
+.env
+.env.*
+
 # 本地歌词缓存
 .cache/
 frontend/node_modules
