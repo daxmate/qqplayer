@@ -9,3 +9,4 @@ watchdog
 pycryptodome
 qrcode
 pillow
+send2trash

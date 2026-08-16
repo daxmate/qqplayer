@@ -97,6 +97,30 @@ def delete_manual_lyric(path: str) -> bool:
     return False
 
 
+def cleanup_orphan_manual_lyrics(valid_paths: list[str]) -> int:
+    """清理孤儿手动歌词：删除 MANUAL_DIR 下不在 valid_paths 集合内的 .json，返回删除文件数
+
+    手动歌词文件名 = manual_key(绝对路径) + ".json"，哈希不可逆，孤儿判定只能正向索引：
+    valid_paths 逐个算 key 得"应存在"集合，再扫目录删集合外的文件。
+    OSError 容错：单个文件删除失败不影响其他文件。
+    """
+    if not MANUAL_DIR.is_dir():
+        return 0
+    valid_keys = {manual_key(p) for p in valid_paths}
+    removed = 0
+    for f in MANUAL_DIR.iterdir():
+        if not f.is_file() or f.suffix.lower() != ".json":
+            continue
+        if f.stem in valid_keys:
+            continue
+        try:
+            f.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def _save_cache(key: str, lrc: str, source: str, tlyric: str | None = None):
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
