@@ -265,6 +265,7 @@ import {
   setPlaylistOrder,
 } from "../composables/usePlayer.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
+import { toastError } from "../composables/useToast.js";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -488,7 +489,7 @@ async function toggleAdd(pid) {
       await addToPlaylist(pid, path);
     }
   } catch (e) {
-    alert(e.message);
+    toastError(e.message);
   }
 }
 
@@ -508,7 +509,7 @@ function setupSortable() {
     onEnd: ({ oldIndex, newIndex }) => {
       if (oldIndex === newIndex || !state.activePlaylistId) return;
       const paths = [...listEl.value.querySelectorAll(".pl-item")].map((el) => el.dataset.path);
-      setPlaylistOrder(state.activePlaylistId, paths).catch((e) => alert(e.message));
+      setPlaylistOrder(state.activePlaylistId, paths).catch((e) => toastError(e.message));
     },
   });
 }

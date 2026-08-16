@@ -123,7 +123,14 @@ import {
   TrendingUp,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { state, createPlaylist, renamePlaylist, deletePlaylist } from "../composables/usePlayer.js";
+import {
+  state,
+  createPlaylist,
+  renamePlaylist,
+  deletePlaylist,
+  addToPlaylist,
+} from "../composables/usePlayer.js";
+import { showToast, toastError } from "../composables/useToast.js";
 import {
   SMART_VIEWS,
   smartViewState,
@@ -196,7 +203,7 @@ async function commitCreate() {
     const p = await createPlaylist(name);
     state.activePlaylistId = p.id; // 建完直接进入该歌单
   } catch (e) {
-    alert(e.message);
+    toastError(e.message);
   }
 }
 
@@ -222,7 +229,7 @@ async function commitEdit() {
   try {
     await renamePlaylist(pid, name);
   } catch (e) {
-    alert(e.message);
+    toastError(e.message);
   }
 }
 
@@ -231,9 +238,44 @@ function cancelEdit() {
 }
 
 // ============ 删除 ============
-function askDelete(p) {
-  if (window.confirm(t("sidebar.confirmDelete", { name: p.name }))) {
-    deletePlaylist(p.id).catch((e) => alert(e.message));
+// Gmail 式：删除直接执行 + toast 带撤销按钮（duration 窗口期内可恢复）
+const UNDO_DURATION = 5000;
+
+async function askDelete(p) {
+  // 删除前缓存完整歌单数据，供撤销恢复
+  const cached = {
+    id: p.id,
+    name: p.name,
+    songPaths: [...(p.songPaths || [])],
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+  };
+  try {
+    await deletePlaylist(p.id);
+  } catch (e) {
+    // 删除失败：不弹撤销
+    toastError(e.message);
+    return;
+  }
+  showToast(t("sidebar.deletedPlaylist", { name: p.name }), {
+    duration: UNDO_DURATION,
+    action: {
+      label: t("sidebar.undo"),
+      onClick: () => restorePlaylist(cached),
+    },
+  });
+}
+
+// 撤销恢复：后端 POST /api/playlists 不支持指定 id → 重建拿新 id + 批量加回歌曲
+async function restorePlaylist(cached) {
+  try {
+    const p = await createPlaylist(cached.name);
+    for (const path of cached.songPaths || []) {
+      await addToPlaylist(p.id, path);
+    }
+    showToast(t("sidebar.restoredPlaylist", { name: cached.name }));
+  } catch (e) {
+    toastError(e.message || t("errors.restorePlaylist"));
   }
 }
 </script>

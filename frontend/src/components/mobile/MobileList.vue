@@ -141,6 +141,7 @@ import {
   toggleFavorite,
   setPlaylistOrder,
 } from "../../composables/usePlayer.js";
+import { toastError } from "../../composables/useToast.js";
 
 const props = defineProps({
   kind: { type: String, required: true }, // songs | favorites | playlist | artist | album | playlists | artists | albums
@@ -335,7 +336,7 @@ function setupSortable() {
     onEnd: ({ oldIndex, newIndex }) => {
       if (oldIndex === newIndex || !props.payload?.playlist) return;
       const paths = [...listEl.value.querySelectorAll(".ml-item")].map((el) => el.dataset.path);
-      setPlaylistOrder(props.payload.playlist.id, paths).catch((e) => alert(e.message));
+      setPlaylistOrder(props.payload.playlist.id, paths).catch((e) => toastError(e.message));
     },
   });
 }

@@ -10,6 +10,8 @@ export default {
     createPlaceholder: "输入歌单名称，回车创建",
     noPlaylists: "还没有歌单",
     newPlaylist: "新建歌单",
-    confirmDelete: "删除歌单「{name}」？歌曲本身不会删除。",
+    deletedPlaylist: "已删除歌单「{name}」",
+    undo: "撤销",
+    restoredPlaylist: "已恢复歌单「{name}」",
   },
 };

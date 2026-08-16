@@ -159,6 +159,7 @@ import {
   searchLyricCandidates,
   state,
 } from "../composables/usePlayer.js";
+import { toastError } from "../composables/useToast.js";
 
 const { t } = useI18n();
 
@@ -300,7 +301,7 @@ async function save() {
     await afterSaved();
   } catch (err) {
     saving.value = false;
-    window.alert(err.message || t("spec.saveFailed"));
+    toastError(err.message || t("spec.saveFailed"));
   }
 }
 
