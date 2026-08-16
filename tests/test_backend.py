@@ -850,8 +850,14 @@ def test_api_settings_get_all_namespaces():
     # desktopLyric 11 字段
     assert set(s["desktopLyric"]) == set(backend.DESKTOP_LYRIC_DEFAULTS)
     assert s["desktopLyric"]["fontSize"] == 26
-    # player 4 字段
-    assert s["player"] == {"volume": 1.0, "panel": True, "controls": False, "lastPlayed": None}
+    # player 5 字段（含任务：mode 记忆，默认连播）
+    assert s["player"] == {
+        "volume": 1.0,
+        "panel": True,
+        "controls": False,
+        "lastPlayed": None,
+        "mode": "continuous",
+    }
     # download 2 字段
     assert set(s["download"]) == {
         "downloadDir",

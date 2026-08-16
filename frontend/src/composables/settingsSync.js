@@ -27,6 +27,9 @@ import {
 
 const SAVE_DEBOUNCE_MS = 300;
 
+// player.mode 合法值（与 playerCore 启动缓存校验一致；后端老版本不返回该字段时不参与）
+const MODE_VALUES = ["continuous", "karaoke", "books"];
+
 // ---------- player 桥（playerCore 注册；注册前 player 相关逻辑不可用）----------
 let playerBridge = null;
 let stopPlayerWatches = [];
@@ -42,6 +45,7 @@ export function registerPlayerBridge(bridge) {
         () => bridge.state.volume,
         () => bridge.state.musicLibOpen,
         () => bridge.state.controlsHidden,
+        () => bridge.state.mode,
         bridge.lastPlayedState,
       ],
       () => scheduleSave(),
@@ -91,6 +95,7 @@ function buildPayload() {
     const player = {
       panel: state.musicLibOpen, // 即原 PANEL_KEY 的 musicLib 字段
       controls: state.controlsHidden, // 即原 CONTROLS_KEY
+      mode: state.mode, // 模式记忆：始终上传（不受 rememberVolume/resumeLast 开关影响）
     };
     // 开关语义：rememberVolume=false 不 PUT volume；resumeLast=false 不 PUT lastPlayed
     if (playbackSettings.rememberVolume) player.volume = state.volume;
@@ -198,6 +203,7 @@ function applyPlayer(p) {
   }
   if (typeof p.panel === "boolean") state.musicLibOpen = p.panel;
   if (typeof p.controls === "boolean") state.controlsHidden = p.controls;
+  if (MODE_VALUES.includes(p.mode)) state.mode = p.mode;
   if (p.lastPlayed && typeof p.lastPlayed === "object" && p.lastPlayed.path) {
     Object.assign(lastPlayedState, {
       path: p.lastPlayed.path,
@@ -222,6 +228,7 @@ function captureLocalSnapshots() {
       ["panel", playerBridge.keys.PANEL_KEY],
       ["controls", playerBridge.keys.CONTROLS_KEY],
       ["lastPlayed", playerBridge.keys.LAST_PLAYED_KEY],
+      ["mode", playerBridge.keys.MODE_KEY],
     );
   }
   for (const [ns, key] of entries) {
@@ -324,6 +331,10 @@ function collectPlayerDirty(sp, snaps) {
       /* 损坏缓存 */
     }
   }
+  // mode：本地缓存值合法且 ≠ 后端 → 上传；后端没返回该字段（老版本）不参与 diff
+  if (snaps.mode != null && "mode" in sp) {
+    if (MODE_VALUES.includes(snaps.mode) && sp.mode !== snaps.mode) fields.mode = snaps.mode;
+  }
   return Object.keys(fields).length ? fields : null;
 }
 
@@ -345,6 +356,7 @@ function applyDirty(dirty) {
       }
       if (typeof fields.panel === "boolean") state.musicLibOpen = fields.panel;
       if (typeof fields.controls === "boolean") state.controlsHidden = fields.controls;
+      if (MODE_VALUES.includes(fields.mode)) state.mode = fields.mode;
       if (fields.lastPlayed && fields.lastPlayed.path)
         Object.assign(lastPlayedState, fields.lastPlayed);
       continue;
