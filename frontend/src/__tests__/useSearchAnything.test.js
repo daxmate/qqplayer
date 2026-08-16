@@ -123,13 +123,28 @@ afterEach(() => {
 });
 
 describe("query 空值", () => {
-  it("空 query：results=[]、loading=false、isSearchOpen=false", async () => {
+  it("空 query：results=[]、loading=false、不发请求、不改变 isSearchOpen", async () => {
     query.value = "  ";
     await flush();
     expect(results.value).toEqual([]);
     expect(loading.value).toBe(false);
     expect(isSearchOpen.value).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("删光搜索词：结果清空但搜索层保持打开（2026-08-16 修复，不再自动退出编辑框）", async () => {
+    state.songs = [S1];
+    isSearchOpen.value = true;
+    query.value = "晴";
+    await flush();
+    expect(results.value.length).toBeGreaterThan(0);
+    expect(isSearchOpen.value).toBe(true);
+    // 删光 → 结果清空，层保持打开（可继续输入/按 Esc 收起）
+    query.value = "";
+    await flush();
+    expect(results.value).toEqual([]);
+    expect(loading.value).toBe(false);
+    expect(isSearchOpen.value).toBe(true);
   });
 });
 

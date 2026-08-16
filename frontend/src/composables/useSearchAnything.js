@@ -233,7 +233,9 @@ async function runSearch(rawQ) {
   }
 }
 
-// query 变化 → 防抖 250ms；空 → 清空结果
+// query 变化 → 防抖 250ms；空 → 清空结果但**保持搜索层打开**
+// （2026-08-16 修复：之前空输入会 isSearchOpen=false，删光搜索词=自动退出编辑框，
+//   用户反馈 bug；收起只走 Esc / 点空白 / Cmd+K / clear()）
 watch(query, () => {
   searchSeq++;
   if (debounceTimer) {
@@ -244,7 +246,6 @@ watch(query, () => {
   if (!q || !q.trim()) {
     results.value = [];
     loading.value = false;
-    isSearchOpen.value = false;
     return;
   }
   isSearchOpen.value = true;
