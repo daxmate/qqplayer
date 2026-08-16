@@ -38,6 +38,34 @@ export default {
       faved: "已收藏",
       add: "收藏",
       remove: "取消收藏",
+      batchAdded: "已收藏 {n} 首",
+    },
+    // 右键菜单（桌面）
+    ctx: {
+      play: "播放",
+      playNext: "下一首播放",
+      fav: "收藏",
+      unfav: "取消收藏",
+      addToPlaylist: "加歌单",
+      goArtist: "进歌手",
+      goAlbum: "进专辑",
+      deleteToTrash: "移到废纸篓",
+    },
+    // 多选批量（桌面）
+    multi: {
+      selected: "{n} 首已选",
+      fav: "批量收藏",
+      addToPlaylist: "批量加歌单",
+      deleteToTrash: "批量移到废纸篓",
+      clear: "清空选择",
+    },
+    // 移到废纸篓
+    deleteToTrash: {
+      title: "移到废纸篓",
+      confirm: "将删除 {n} 首歌及其磁盘文件，可到废纸篓恢复",
+      deleted: "已删除 {n} 首",
+      missing: "{n} 首不在曲库",
+      failed: "{n} 首删除失败",
     },
     // 未知兜底 / 列表省略
     unknownArtist: "未知歌手",
