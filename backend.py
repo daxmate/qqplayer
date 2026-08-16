@@ -8,6 +8,7 @@ music-player 后端 API
 用法: ./venv/bin/python backend.py [歌曲库路径]
 """
 
+import asyncio
 import json
 import os
 import re
@@ -16,11 +17,13 @@ import threading
 import time
 import uuid
 import webbrowser
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
 import httpx
+import send2trash
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -34,6 +37,7 @@ import quark_provider
 import tag_editor
 import tag_scraper
 from lyric_fetch import (
+    cleanup_orphan_manual_lyrics,
     delete_manual_lyric,
     fetch_online_lyric,
     load_manual_lyric,
@@ -90,13 +94,25 @@ _mini_status: dict = {"running": False}
 _mini_status_lock = threading.Lock()
 # 库变动监听：事件去抖窗口（秒）与扫描缓存
 WATCH_DEBOUNCE_SECONDS = 2.0
+# 孤儿歌词定期清理：每周一 03:00（本次无设置 UI，默认开启即可）
+LYRIC_CLEANUP_ENABLED = True
+LYRIC_CLEANUP_HOUR = 3
 _scan_cache: dict | None = None  # {"library": str, "songs": [...]}
 _scan_version = 0
 _scan_lock = threading.Lock()
 _watch_timer: threading.Timer | None = None
 _watch_observer: Observer | None = None
 
-app = FastAPI(title="music-player")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """启动时挂后台任务：每周一 03:00 清理孤儿手动歌词（不阻塞启动）"""
+    if LYRIC_CLEANUP_ENABLED:
+        asyncio.get_running_loop().create_task(_lyric_cleanup_loop())
+    yield
+
+
+app = FastAPI(title="music-player", lifespan=_lifespan)
 
 # 运行时歌曲库路径（可通过命令行参数修改）
 LIBRARY = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_LIBRARY
@@ -699,6 +715,30 @@ def init_library():
         scan_library()
     if settings["autoRefresh"]:
         start_watcher()
+
+
+async def _lyric_cleanup_loop():
+    """周一轮训：每周一 03:00 清理孤儿手动歌词
+
+    valid_paths = 当前曲库全部歌曲 path（复用扫描逻辑，尊重扩展名过滤/忽略隐藏设置）。
+    首次执行 = 距离下一个周一 03:00 的秒数 sleep，之后循环再排下周一。
+    清理失败不中断循环，下周一重试。
+    """
+    while True:
+        now = datetime.now()
+        days = (0 - now.weekday()) % 7  # 距下个周一的天数（周一当天为 0）
+        if days == 0 and now.hour >= LYRIC_CLEANUP_HOUR:
+            days = 7  # 已过周一 03:00，等下一个周一
+        target = (now + timedelta(days=days)).replace(
+            hour=LYRIC_CLEANUP_HOUR, minute=0, second=0, microsecond=0
+        )
+        await asyncio.sleep((target - now).total_seconds())
+        try:
+            paths = [s["path"] for s in _full_scan()]
+            removed = cleanup_orphan_manual_lyrics(paths)
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 孤儿歌词清理完成: 删除 {removed} 个文件")
+        except Exception as e:
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 孤儿歌词清理失败: {e}")
 
 
 def get_duration(f: Path):
@@ -1551,6 +1591,77 @@ async def api_set_library(body: dict):
         _scan_version += 1
     start_watcher()
     return {"path": str(LIBRARY), "count": len(scan_library())}
+
+
+# ============ 曲库删除（移废纸篓 + 引用清理）============
+
+
+def _remove_paths_from_favorites(paths: list[str]):
+    """从收藏中移除给定路径（无匹配则不动文件）"""
+    favs = _load_favorites()
+    removed = set(paths)
+    new_favs = [p for p in favs if p not in removed]
+    if len(new_favs) != len(favs):
+        _save_favorites(new_favs)
+
+
+def _remove_paths_from_playlists(paths: list[str]):
+    """从所有歌单的 songPaths 中移除给定路径（无匹配则不动文件）"""
+    playlists = _load_playlists()
+    removed = set(paths)
+    changed = False
+    for pl in playlists:
+        song_paths = pl.get("songPaths") or []
+        new_paths = [p for p in song_paths if p not in removed]
+        if len(new_paths) != len(song_paths):
+            pl["songPaths"] = new_paths
+            changed = True
+    if changed:
+        _save_playlists(playlists)
+
+
+@app.delete("/api/library/songs")
+def api_library_songs_delete(body: dict):
+    """批量删除曲库歌曲：移废纸篓（send2trash）+ 清理歌单/收藏引用 + 触发重扫
+
+    body: {"paths": ["/abs/path/a.mp3", ...]}（去重，仅处理当前曲库内路径）
+    返回: {"deleted": n, "missing": [...], "errors": [{"path", "reason"}]}
+    语义：不在库内 → missing 绝不碰磁盘；库内 → send2trash 移废纸篓；
+    磁盘已丢（库内但文件不在）→ 照常清理引用、计入 deleted；
+    send2trash 抛错且文件还在 → errors；网络歌（path 为 null）不参与。
+    """
+    raw = body.get("paths")
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "paths 必须是非空数组")
+    # 去重保序；网络歌 path 为 null 不参与
+    paths = list(dict.fromkeys(str(p) for p in raw if p is not None and str(p).strip()))
+    if not paths:
+        return {"deleted": 0, "missing": [], "errors": []}
+    in_library = {s["path"] for s in scan_library()}
+    missing: list[str] = []
+    errors: list[dict] = []
+    deleted_paths: list[str] = []
+    for p in paths:
+        if p not in in_library:
+            missing.append(p)  # 不在当前曲库内：绝不碰磁盘
+            continue
+        f = Path(p)
+        try:
+            if not f.exists():
+                deleted_paths.append(p)  # 磁盘已丢：照常清理引用，计入 deleted
+                continue
+            send2trash.send2trash(str(f))
+            deleted_paths.append(p)
+        except Exception as e:
+            if f.exists():
+                errors.append({"path": p, "reason": str(e)})  # 移废纸篓失败且文件还在
+            else:
+                deleted_paths.append(p)  # 抛错但文件已不在磁盘
+    if deleted_paths:
+        _remove_paths_from_favorites(deleted_paths)
+        _remove_paths_from_playlists(deleted_paths)
+        _schedule_rescan()  # 复用现有去抖重扫：版本号 +1，前端轮询自动刷新
+    return {"deleted": len(deleted_paths), "missing": missing, "errors": errors}
 
 
 # ============ 曲库导入（拖拽/上传 → 复制进库，不动源文件）============
