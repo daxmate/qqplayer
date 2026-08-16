@@ -58,6 +58,8 @@ DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
+# 网络曲库条目（网易云等在线源登记，播放时实时取直链，不落盘音频）
+NETWORK_SONGS_FILE = DATA_DIR / "network_songs.json"
 # 播放记录滚动保留上限（超了删最旧）
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
@@ -168,6 +170,7 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "abLoopCountOn": True,  # AB 循环计数（防走开安全阀）
     "abLoopMaxCount": 10,  # AB 循环计数上限（1-20）
     "visualizerEnabled": True,  # 频谱可视化开关
+    "streamStats": False,  # 流媒体播放计入播放统计
     "sleepTimerOn": False,  # 睡眠定时器开关（运行中的倒计时不持久化，刷新即取消）
     "sleepTimerMinutes": 30,  # 睡眠定时器时长（分钟，chip 单选 15/30/45/60/90）
 }
@@ -319,6 +322,7 @@ _SETTINGS_SPEC = {
         "abLoopCountOn": (True, _norm_bool),
         "abLoopMaxCount": (10, lambda v, d: _norm_num(v, d, lo=1, hi=20, integer=True)),
         "visualizerEnabled": (True, _norm_bool),
+        "streamStats": (False, _norm_bool),
         "sleepTimerOn": (False, _norm_bool),
         "sleepTimerMinutes": (30, lambda v, d: v if v in {15, 30, 45, 60, 90} else d),
     },
@@ -836,6 +840,93 @@ def api_playlists_order(pid: str, body: dict):
     return p
 
 
+# ============ 网络曲库条目（持久化 network_songs.json，播放时实时取直链）============
+
+
+def _load_network_songs() -> list[dict]:
+    """加载网络曲库条目（文件不存在/损坏返回空列表）"""
+    try:
+        data = json.loads(NETWORK_SONGS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_network_songs(entries: list[dict]):
+    """保存网络曲库条目（原子写：临时文件 + rename；写失败不影响播放功能）"""
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = NETWORK_SONGS_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(NETWORK_SONGS_FILE)
+    except OSError:
+        pass
+
+
+def _norm_network_duration(v):
+    """duration 归一化：数字（秒）保留，非法/缺失置 None"""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return round(float(v), 1)
+
+
+def _find_network_song(entries: list[dict], provider: str, sid: str) -> bool:
+    return any(e.get("provider") == provider and str(e.get("id")) == sid for e in entries)
+
+
+@app.get("/api/network-songs")
+def api_network_songs_list():
+    """全部网络曲库条目（按添加顺序）"""
+    return _load_network_songs()
+
+
+@app.post("/api/network-songs")
+def api_network_songs_add(body: dict):
+    """添加网络歌曲条目：按 provider+id 去重（已存在幂等返回现有列表）；成功 library version +1"""
+    global _scan_version
+    sid = str(body.get("id") or "").strip()
+    title = str(body.get("title") or "").strip()
+    artist = str(body.get("artist") or "").strip()
+    if not sid or not title or not artist:
+        raise HTTPException(400, "id/title/artist 必填")
+    provider = str(body.get("provider") or "netease").strip() or "netease"
+    entries = _load_network_songs()
+    if not _find_network_song(entries, provider, sid):
+        entries.append(
+            {
+                "id": sid,
+                "provider": provider,
+                "title": title,
+                "artist": artist,
+                "album": body.get("album") or None,
+                "coverUrl": body.get("coverUrl") or None,
+                "duration": _norm_network_duration(body.get("duration")),
+                "addedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        _save_network_songs(entries)
+        with _scan_lock:
+            _scan_version += 1  # 前端 3s 轮询 /api/library/version 自动刷新曲库
+    return entries
+
+
+@app.delete("/api/network-songs")
+def api_network_songs_delete(provider: str = "netease", id: str = ""):
+    """删除网络歌曲条目（provider+id 定位）；返回新列表"""
+    sid = str(id or "").strip()
+    if not sid:
+        raise HTTPException(400, "缺少 id")
+    provider = str(provider or "netease").strip() or "netease"
+    entries = _load_network_songs()
+    before = len(entries)
+    entries = [
+        e for e in entries if not (e.get("provider") == provider and str(e.get("id")) == sid)
+    ]
+    if len(entries) != before:
+        _save_network_songs(entries)
+    return entries
+
+
 # ============ 播放记录（完整历史，append-only + 滚动截断）============
 
 # 写锁：避免并发上报时读改写竞争丢数据
@@ -1092,6 +1183,34 @@ def api_online_download(body: dict):
     return {"ok": True, "path": str(dest)}
 
 
+@app.get("/api/stream/url")
+def api_stream_url(id: str, provider: str = "netease", level: str = "exhigh"):
+    """获取流媒体播放直链（当前仅 netease 源）
+
+    直链有时效（几十分钟），调用方每次播放前实时请求，后端不缓存。
+    成功 200 {url, level, ext}；直链获取失败/id 无效 502；缺 id 参数 422。
+    """
+    if provider != "netease":
+        raise HTTPException(400, f"不支持的 provider: {provider}")
+    sid = str(id or "").strip()
+    if not sid:
+        raise HTTPException(422, "缺少 id 参数")
+    level = str(level or "").strip().lower()
+    if level not in netease_provider.VALID_LEVELS:
+        level = netease_provider.DEFAULT_LEVEL  # 非法 level 回落默认 exhigh
+    try:
+        info = netease_provider.get_play_info(sid, level)
+    except Exception as e:
+        raise HTTPException(502, f"直链获取失败: {e}") from None
+    if not isinstance(info, dict) or not info.get("url"):
+        raise HTTPException(502, "直链获取失败")
+    return {
+        "url": info["url"],
+        "level": level,
+        "ext": str(info.get("ext") or "mp3").lstrip(".") or "mp3",
+    }
+
+
 # ============ 歌曲海下载（gequhai_provider + quark_provider + 下载引擎）============
 
 
@@ -1295,9 +1414,25 @@ def api_playback_stats():
     return {"count": len(songs), "songs": songs}
 
 
+def _network_song_entry(e: dict) -> dict:
+    """网络曲库条目 → /api/songs 里的流媒体歌曲结构（path=null/type=stream 供前端判断）"""
+    return {
+        "type": "stream",
+        "streamId": str(e.get("id") or ""),
+        "provider": e.get("provider") or "netease",
+        "path": None,
+        "name": e.get("title") or "未知歌曲",
+        "artist": e.get("artist") or "",
+        "album": e.get("album") or "",
+        "duration": e.get("duration"),
+        "coverUrl": e.get("coverUrl"),
+    }
+
+
 @app.get("/api/songs")
 def api_songs():
-    return scan_library()
+    """本地扫描歌曲 + 网络曲库条目（本地歌在前保持原结构，网络歌 type=stream 追加在末尾）"""
+    return scan_library() + [_network_song_entry(e) for e in _load_network_songs()]
 
 
 @app.get("/api/library")
