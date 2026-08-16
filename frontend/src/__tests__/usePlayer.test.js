@@ -75,6 +75,11 @@ const {
   UI_SETTINGS_KEY,
   playbackSettings,
   PLAYBACK_SETTINGS_KEY,
+  PLAYBACK_SETTINGS_DEFAULTS,
+  SHORTCUTS,
+  SHORTCUT_CATEGORIES,
+  fmtShortcutKey,
+  parseShortcutCombo,
   restoreLastPlayed,
   saveLastPlayed,
   LAST_PLAYED_KEY,
@@ -157,8 +162,15 @@ const RESET = {
 
 beforeEach(() => {
   Object.assign(state, RESET);
-  playbackSettings.karaokeNextKey = "KeyN";
-  playbackSettings.karaokePrevKey = "KeyP";
+  // RESET 里的数组字段是模块级共享引用（旧用例可能 push 过），换成新数组防跨用例残留
+  state.songs = [];
+  state.lyric = [];
+  state.favorites = [];
+  state.playlists = [];
+  // 快捷键配置表默认值复位（含 karaokeNextKey/PrevKey/searchKey，防用例间录制值残留）
+  for (const s of SHORTCUTS) {
+    playbackSettings[s.settingKey] = s.defaultCode;
+  }
   _resetKaraokeAnchor();
   _resetPlayMode();
   _resetPlaybackSession();
@@ -706,6 +718,294 @@ describe("键盘快捷键", () => {
     const ev = fire(h, "KeyN", { tagName: "INPUT" });
     expect(ev.preventDefault).not.toHaveBeenCalled();
     expect(a.currentTime).toBe(0);
+  });
+});
+
+describe("快捷键配置表（任务 G）", () => {
+  const audio = () => FakeAudio.instances[0];
+
+  function captureHandler() {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    setupKeyboardShortcuts();
+    const call = addSpy.mock.calls.find((c) => c[0] === "keydown");
+    return call ? call[1] : null;
+  }
+
+  // mods：{ metaKey, ctrlKey, altKey, shiftKey } 覆盖默认 false
+  function fire(handler, code, target = {}, mods = {}) {
+    const ev = {
+      code,
+      target,
+      preventDefault: vi.fn(),
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      ...mods,
+    };
+    handler(ev);
+    return ev;
+  }
+
+  it("配置表覆盖全部快捷键（21 项），默认值与持久化字段一致", () => {
+    expect(SHORTCUTS).toHaveLength(21);
+    for (const s of SHORTCUTS) {
+      expect(playbackSettings[s.settingKey]).toBe(s.defaultCode);
+      expect(s.id && s.labelKey && s.category && s.defaultCode).toBeTruthy();
+    }
+    // 分类覆盖 6 组（设置弹窗分组渲染顺序）
+    expect(SHORTCUT_CATEGORIES.map((c) => c.key)).toEqual([
+      "playback",
+      "track",
+      "volume",
+      "karaoke",
+      "search",
+      "other",
+    ]);
+    // meta 标记与默认组合一致（⌘ 组合 = "Meta+" 前缀）
+    for (const s of SHORTCUTS) {
+      expect(s.meta).toBe(s.defaultCode.startsWith("Meta+"));
+    }
+  });
+
+  it("PLAYBACK_SETTINGS_DEFAULTS 包含全部快捷键字段", () => {
+    for (const s of SHORTCUTS) {
+      expect(PLAYBACK_SETTINGS_DEFAULTS[s.settingKey]).toBe(s.defaultCode);
+    }
+  });
+
+  it("⌘→ / ⌘← 下一首 / 上一首（自动播放）", async () => {
+    const h = captureHandler();
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    state.currentSong = state.songs[0];
+    fire(h, "ArrowRight", {}, { metaKey: true });
+    await Promise.resolve(); // selectSong 尾部的 loadLyric fetch 异步收尾
+    expect(state.currentIndex).toBe(1);
+    expect(state.currentSong.name).toBe("B");
+    fire(h, "ArrowLeft", {}, { metaKey: true });
+    await Promise.resolve();
+    expect(state.currentIndex).toBe(0);
+  });
+
+  it("M 静音切换", () => {
+    const h = captureHandler();
+    state.volume = 0.8;
+    state.muted = false;
+    const a = audio();
+    fire(h, "KeyM");
+    expect(state.muted).toBe(true);
+    expect(a.volume).toBe(0);
+    fire(h, "KeyM");
+    expect(state.muted).toBe(false);
+    expect(a.volume).toBe(0.8);
+  });
+
+  it("F 收藏 / 取消收藏当前歌（无当前歌忽略）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    const h = captureHandler();
+    state.currentSong = { path: "/a.mp3", name: "A" };
+    fire(h, "KeyF");
+    expect(state.favorites).toContain("/a.mp3");
+    fire(h, "KeyF");
+    expect(state.favorites).not.toContain("/a.mp3");
+    // 无当前歌 / 流媒体歌（path 为 null）：不动作
+    state.currentSong = { type: "stream", streamId: "1", path: null, name: "S" };
+    fire(h, "KeyF");
+    expect(state.favorites).toEqual([]);
+  });
+
+  it("R 播放模式三态切换", () => {
+    const h = captureHandler();
+    state.playMode = "order";
+    fire(h, "KeyR");
+    expect(state.playMode).toBe("shuffle");
+    fire(h, "KeyR");
+    expect(state.playMode).toBe("repeatOne");
+    fire(h, "KeyR");
+    expect(state.playMode).toBe("order");
+    expect(playbackSettings.playMode).toBe("order"); // 同步持久化
+  });
+
+  it("L 中文翻译显示开关", () => {
+    const h = captureHandler();
+    state.zhVisible = true;
+    fire(h, "KeyL");
+    expect(state.zhVisible).toBe(false);
+    fire(h, "KeyL");
+    expect(state.zhVisible).toBe(true);
+  });
+
+  it("G 连播 ↔ 跟唱模式切换", () => {
+    const h = captureHandler();
+    state.mode = "continuous";
+    fire(h, "KeyG");
+    expect(state.mode).toBe("karaoke");
+    fire(h, "KeyG");
+    expect(state.mode).toBe("continuous");
+  });
+
+  it("A / B 设 AB 循环起点 / 终点（无 AB 时 B 忽略）", () => {
+    const h = captureHandler();
+    state.currentSong = { path: "/a.mp3" };
+    state.lyric = [
+      { type: "line", s: 0, e: 10, text: ["第一句"] },
+      { type: "line", s: 10, e: 20, text: ["第二句"] },
+    ]; // 两句：0-10 / 10-20
+    // B 无 AB 区间：忽略
+    fire(h, "KeyB");
+    expect(state.abLoop).toBeNull();
+    // A：锚定第二句（currentTime=12 → line 1）为起点
+    state.currentTime = 12;
+    fire(h, "KeyA");
+    expect(state.abLoop).toEqual({ a: 1, b: null });
+    // B：锚定第一句（currentTime=3 → line 0）为终点 → 自动交换为 {a:0, b:1}
+    state.currentTime = 3;
+    fire(h, "KeyB");
+    expect(state.abLoop).toEqual({ a: 0, b: 1 });
+    // 区间完整后 B 再按：忽略
+    fire(h, "KeyB");
+    expect(state.abLoop).toEqual({ a: 0, b: 1 });
+  });
+
+  it("[ / ] 变速步进（0.75 → 1.0 → 1.25，边界不动作）", () => {
+    const h = captureHandler();
+    const a = audio();
+    state.speed = 1.0;
+    fire(h, "BracketLeft");
+    expect(state.speed).toBe(0.75);
+    expect(a.playbackRate).toBe(0.75);
+    fire(h, "BracketLeft"); // 边界：不再变慢
+    expect(state.speed).toBe(0.75);
+    fire(h, "BracketRight");
+    expect(state.speed).toBe(1.0);
+    fire(h, "BracketRight");
+    expect(state.speed).toBe(1.25);
+    fire(h, "BracketRight"); // 边界：不再变快
+    expect(state.speed).toBe(1.25);
+  });
+
+  it("⌘↑ / ⌘↓ 音量 ±20%（clamp 0~1）", () => {
+    const h = captureHandler();
+    const a = audio();
+    state.volume = 0.5;
+    fire(h, "ArrowUp", {}, { metaKey: true });
+    expect(state.volume).toBeCloseTo(0.7);
+    expect(a.volume).toBeCloseTo(0.7);
+    fire(h, "ArrowDown", {}, { metaKey: true });
+    expect(state.volume).toBeCloseTo(0.5);
+    // clamp 上限
+    state.volume = 0.95;
+    fire(h, "ArrowUp", {}, { metaKey: true });
+    expect(state.volume).toBe(1);
+    // clamp 下限
+    state.volume = 0.05;
+    fire(h, "ArrowDown", {}, { metaKey: true });
+    expect(state.volume).toBe(0);
+  });
+
+  it("修饰键排除：纯键带 ⌘/Ctrl 不触发，⌘ 组合不带 Meta 不触发", () => {
+    const h = captureHandler();
+    state.volume = 0.5;
+    // Ctrl+↑ 不触发任何音量键（volUp 要求无修饰键；volStepUp 要求 Meta）
+    fire(h, "ArrowUp", {}, { ctrlKey: true });
+    expect(state.volume).toBe(0.5);
+    // Meta+M 不触发静音（M 是纯键）
+    state.muted = false;
+    fire(h, "KeyM", {}, { metaKey: true });
+    expect(state.muted).toBe(false);
+    // 纯 M 触发静音
+    fire(h, "KeyM");
+    expect(state.muted).toBe(true);
+    // ⌘→ 不带 Meta：不切歌，走纯键 → 快进 10s
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    state.currentSong = state.songs[0];
+    const a = audio();
+    a.src = "/a.mp3";
+    a.currentTime = 30;
+    a.duration = 100;
+    fire(h, "ArrowRight"); // 纯 → 快进
+    expect(state.currentIndex).toBe(0);
+    expect(a.currentTime).toBe(40);
+  });
+
+  it("录制保存后按新组合生效（旧组合失效）", () => {
+    const h = captureHandler();
+    // 把「上一首」录制成 Meta+ArrowRight（与默认 ⌘← 不同）
+    playbackSettings.shortcutPrevTrack = "Meta+ArrowRight";
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 1;
+    state.currentSong = state.songs[1];
+    fire(h, "ArrowRight", {}, { metaKey: true });
+    expect(state.currentIndex).toBe(0); // 上一首
+    // 默认 ⌘← 已失效：按 ⌘← 不再切歌（⌘← 未绑定任何动作）
+    const a = audio();
+    a.src = "/b.mp3";
+    const ev = fire(h, "ArrowLeft", {}, { metaKey: true });
+    expect(state.currentIndex).toBe(0);
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("搜索快捷键（⌘K）由搜索层独占：播放器层不拦截", () => {
+    const h = captureHandler();
+    state.currentSong = { path: "/a.mp3" };
+    const a = audio();
+    a.paused = true;
+    const ev = fire(h, "KeyK", {}, { metaKey: true });
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+    expect(a.paused).toBe(true);
+  });
+
+  it("parseShortcutCombo：历史 Meta+K 归一为 KeyK", () => {
+    expect(parseShortcutCombo("Meta+K")).toEqual({ meta: true, code: "KeyK" });
+    expect(parseShortcutCombo("Meta+KeyK")).toEqual({ meta: true, code: "KeyK" });
+    expect(parseShortcutCombo("Meta+ArrowLeft")).toEqual({ meta: true, code: "ArrowLeft" });
+    expect(parseShortcutCombo("KeyM")).toEqual({ meta: false, code: "KeyM" });
+    expect(parseShortcutCombo(null)).toBeNull();
+  });
+
+  it("fmtShortcutKey：⌘ 组合与特殊键显示", () => {
+    expect(fmtShortcutKey("Meta+ArrowLeft")).toBe("⌘←");
+    expect(fmtShortcutKey("Meta+K")).toBe("⌘K");
+    expect(fmtShortcutKey("Meta+ArrowUp")).toBe("⌘↑");
+    expect(fmtShortcutKey("Space")).toBe("Space");
+    expect(fmtShortcutKey("KeyM")).toBe("M");
+    expect(fmtShortcutKey("BracketLeft")).toBe("[");
+    expect(fmtShortcutKey("BracketRight")).toBe("]");
+    expect(fmtShortcutKey("Digit5")).toBe("5");
+    expect(fmtShortcutKey("F3")).toBe("F3");
+    expect(fmtShortcutKey("")).toBe("—");
+  });
+
+  it("录制纯键与 ⌘ 组合均能被配置表匹配（模拟 SettingsModal 存值）", () => {
+    const h = captureHandler();
+    // 纯键录制：静音改为 KeyJ
+    playbackSettings.shortcutMute = "KeyJ";
+    state.muted = false;
+    fire(h, "KeyJ");
+    expect(state.muted).toBe(true);
+    fire(h, "KeyM"); // 旧键失效
+    expect(state.muted).toBe(true);
+    // ⌘ 组合录制：翻译开关改为 Meta+KeyT
+    playbackSettings.shortcutZhToggle = "Meta+KeyT";
+    state.zhVisible = true;
+    fire(h, "KeyT", {}, { metaKey: true });
+    expect(state.zhVisible).toBe(false);
+    fire(h, "KeyL"); // 旧键失效
+    expect(state.zhVisible).toBe(false);
   });
 });
 

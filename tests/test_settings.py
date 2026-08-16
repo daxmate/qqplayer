@@ -62,3 +62,66 @@ def test_search_key_valid_preserved():
         "playback"
     ]
     assert s["searchKey"] == ""
+
+
+def test_shortcut_fields_defaults():
+    """任务 G：18 个新快捷键字段进 playback 白名单，默认值随 GET /api/settings 返回"""
+    s = client.get("/api/settings").json()["settings"]["playback"]
+    # 与前端 PLAYBACK_SETTINGS_DEFAULTS 一致（含新旧全部快捷键字段）
+    for k in (
+        "shortcutPlayPause",
+        "shortcutRewind",
+        "shortcutForward",
+        "shortcutVolUp",
+        "shortcutVolDown",
+        "shortcutPrevTrack",
+        "shortcutNextTrack",
+        "shortcutMute",
+        "shortcutFav",
+        "shortcutCycleMode",
+        "shortcutZhToggle",
+        "shortcutKaraokeMode",
+        "shortcutAbA",
+        "shortcutAbB",
+        "shortcutSlower",
+        "shortcutFaster",
+        "shortcutVolStepUp",
+        "shortcutVolStepDown",
+    ):
+        assert k in s, f"playback 白名单缺少字段 {k}"
+    assert s["shortcutPrevTrack"] == "Meta+ArrowLeft"
+    assert s["shortcutNextTrack"] == "Meta+ArrowRight"
+    assert s["shortcutMute"] == "KeyM"
+    assert s["shortcutFav"] == "KeyF"
+    assert s["shortcutFaster"] == "BracketRight"
+    assert s["shortcutVolStepUp"] == "Meta+ArrowUp"
+    assert s["shortcutVolStepDown"] == "Meta+ArrowDown"
+
+
+def test_shortcut_fields_norm():
+    """任务 G：快捷键字段 _norm_str 校验（非法类型回落默认，合法字符串保留并持久化）"""
+    # 非法类型回落默认
+    for bad in (123, None, ["KeyM"], True):
+        s = client.put("/api/settings", json={"playback": {"shortcutMute": bad}}).json()[
+            "settings"
+        ]["playback"]
+        assert s["shortcutMute"] == "KeyM", f"shortcutMute={bad!r} 应回落默认"
+    # 合法字符串保留（用户录制的 ⌘ 组合 / 单键）
+    s = client.put("/api/settings", json={"playback": {"shortcutMute": "KeyX"}}).json()[
+        "settings"
+    ]["playback"]
+    assert s["shortcutMute"] == "KeyX"
+    s = client.put(
+        "/api/settings", json={"playback": {"shortcutPrevTrack": "Meta+ArrowRight"}}
+    ).json()["settings"]["playback"]
+    assert s["shortcutPrevTrack"] == "Meta+ArrowRight"
+    # 模拟重启：持久化值仍在
+    backend._settings = None
+    s = client.get("/api/settings").json()["settings"]["playback"]
+    assert s["shortcutPrevTrack"] == "Meta+ArrowRight"
+    assert s["shortcutMute"] == "KeyX"
+    # 未知字段不进白名单（GET 不返回）
+    s = client.put("/api/settings", json={"playback": {"shortcutHack": "KeyZ"}}).json()[
+        "settings"
+    ]["playback"]
+    assert "shortcutHack" not in s

@@ -1010,61 +1010,29 @@
                   <Keyboard :size="13" />
                   {{ t("settings.keyboardShortcuts") }}
                 </div>
-                <div v-for="s in shortcuts" :key="s.labelKey" class="shortcut-item">
-                  <span class="shortcut-desc">{{ t(s.labelKey) }}</span>
-                  <span class="shortcut-keys">
-                    <kbd v-for="k in s.keys" :key="k">{{ k }}</kbd>
-                  </span>
+                <div v-for="cat in SHORTCUT_CATEGORIES" :key="cat.key" class="shortcut-cat">
+                  <div class="group-title sub-title">
+                    {{ t(cat.labelKey) }}
+                    <span class="sub-note">{{ t("settings.clickToRecord") }}</span>
+                  </div>
+                  <div
+                    v-for="s in shortcutsOf(cat.key)"
+                    :key="s.id"
+                    class="shortcut-item editable"
+                    :class="{ recording: recording === s.id }"
+                    :title="t('settings.clickToSetKey')"
+                    @click="startRecord(s.id)"
+                  >
+                    <span class="shortcut-desc">{{ t(s.labelKey) }}</span>
+                    <span class="shortcut-keys">
+                      <kbd v-if="recording === s.id" class="recording-kbd">{{
+                        t("settings.pressNewKey")
+                      }}</kbd>
+                      <kbd v-else>{{ fmtSetting(s) }}</kbd>
+                    </span>
+                  </div>
                 </div>
-                <div
-                  class="shortcut-item editable"
-                  :class="{ recording: recording === 'search' }"
-                  :title="t('settings.clickToSetKey')"
-                  @click="startRecord('search')"
-                >
-                  <span class="shortcut-desc">{{ t("settings.shortcutSearch") }}</span>
-                  <span class="shortcut-keys">
-                    <kbd v-if="recording === 'search'" class="recording-kbd">{{
-                      t("settings.pressNewKey")
-                    }}</kbd>
-                    <kbd v-else>{{ fmtSearchKey }}</kbd>
-                  </span>
-                </div>
-                <div class="setting-desc hint">{{ t("settings.searchRecordHint") }}</div>
-                <div class="group-title sub-title">
-                  <Music2 :size="13" />
-                  {{ t("settings.karaokeJump") }}
-                  <span class="sub-note">{{ t("settings.clickToRecord") }}</span>
-                </div>
-                <div
-                  class="shortcut-item editable"
-                  :class="{ recording: recording === 'next' }"
-                  :title="t('settings.clickToSetKey')"
-                  @click="startRecord('next')"
-                >
-                  <span class="shortcut-desc">{{ t("settings.karaokeNext") }}</span>
-                  <span class="shortcut-keys">
-                    <kbd v-if="recording === 'next'" class="recording-kbd">{{
-                      t("settings.pressNewKey")
-                    }}</kbd>
-                    <kbd v-else>{{ fmtKey(playbackSettings.karaokeNextKey) }}</kbd>
-                  </span>
-                </div>
-                <div
-                  class="shortcut-item editable"
-                  :class="{ recording: recording === 'prev' }"
-                  :title="t('settings.clickToSetKey')"
-                  @click="startRecord('prev')"
-                >
-                  <span class="shortcut-desc">{{ t("settings.karaokePrev") }}</span>
-                  <span class="shortcut-keys">
-                    <kbd v-if="recording === 'prev'" class="recording-kbd">{{
-                      t("settings.pressNewKey")
-                    }}</kbd>
-                    <kbd v-else>{{ fmtKey(playbackSettings.karaokePrevKey) }}</kbd>
-                  </span>
-                </div>
-                <div class="setting-desc hint">{{ t("settings.recordHint") }}</div>
+                <div class="setting-desc hint">{{ t("settings.recordHintAll") }}</div>
               </div>
               <div class="group">
                 <div class="group-title">
@@ -1192,7 +1160,12 @@ import {
   DESKTOP_LYRIC_SCHEMES,
   LYRIC_SCHEMES,
   ACCENT_OPTIONS,
+  SHORTCUTS,
+  SHORTCUT_CATEGORIES,
+  fmtShortcutKey,
+  parseShortcutCombo,
 } from "../composables/usePlayer.js";
+import { showToast } from "../composables/useToast.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import {
   SLEEP_TIMER_OPTIONS,
@@ -1377,34 +1350,22 @@ const fmtOffset = computed(() => {
   const v = lyricSettings.offset;
   return (v > 0 ? "+" : "") + v.toFixed(1) + "s";
 });
-const shortcuts = [
-  { keys: ["Space"], labelKey: "settings.shortcutPlayPause" },
-  { keys: ["←"], labelKey: "settings.shortcutRewind" },
-  { keys: ["→"], labelKey: "settings.shortcutForward" },
-  { keys: ["↑"], labelKey: "settings.shortcutVolUp" },
-  { keys: ["↓"], labelKey: "settings.shortcutVolDown" },
-];
+// 快捷键 tab：配置表驱动（SHORTCUTS/SHORTCUT_CATEGORIES 来自 playerCore；全部行可录制）
+const recording = ref(null); // 正在录制的快捷键 id（null = 未录制）
 
-// 跟唱句跳转 + search anything 快捷键录制（默认 N/P 下一句上一句；Cmd+K 打开搜索）
-const recording = ref(null); // null | 'next' | 'prev' | 'search'
-function startRecord(which) {
-  recording.value = which;
+function startRecord(id) {
+  recording.value = id;
 }
-function fmtKey(code) {
-  if (!code) return "—";
-  if (code === "Space") return "Space";
-  const arrows = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
-  if (arrows[code]) return arrows[code];
-  if (code.startsWith("Key")) return code.slice(3);
-  if (code.startsWith("Digit")) return code.slice(5);
-  return code;
+
+// 当前组合显示（录制值 → 展示文本；⌘ 组合显示 ⌘← 等）
+function fmtSetting(s) {
+  return fmtShortcutKey(playbackSettings[s.settingKey] || s.defaultCode);
 }
-// search anything 快捷键显示：默认 Meta+K → ⌘K；录制单键 → 键名
-const fmtSearchKey = computed(() => {
-  const k = playbackSettings.searchKey || "Meta+K";
-  if (k === "Meta+K") return "⌘K";
-  return fmtKey(k);
-});
+
+function shortcutsOf(catKey) {
+  return SHORTCUTS.filter((s) => s.category === catKey);
+}
+
 // capture 阶段拦截：录制时按键不触发播放快捷键（stopImmediatePropagation 挡住 bubble 阶段的 SHORTCUT_HANDLER）
 function onRecordKeydown(e) {
   if (!recording.value) return;
@@ -1415,11 +1376,33 @@ function onRecordKeydown(e) {
     recording.value = null; // 取消录制，保留原键
     return;
   }
-  if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab"].includes(e.code)) return; // 纯修饰键不绑定
-  if (recording.value === "next") playbackSettings.karaokeNextKey = e.code;
-  else if (recording.value === "prev") playbackSettings.karaokePrevKey = e.code;
-  else if (recording.value === "search") playbackSettings.searchKey = e.code;
+  if (["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab"].includes(e.key)) return; // 纯修饰键不绑定（e.key 匹配 MetaLeft/ControlLeft 等）
+  const target = SHORTCUTS.find((s) => s.id === recording.value);
+  if (!target) {
+    recording.value = null;
+    return;
+  }
+  const combo = (e.metaKey ? "Meta+" : "") + e.code;
+  // 冲突检测：组合已绑定其他快捷键 → toast 拒绝保存（“Meta+K”与“Meta+KeyK”视作同一组合）
+  const conflict = SHORTCUTS.find((s) => {
+    if (s.id === target.id) return false;
+    return comboEq(combo, playbackSettings[s.settingKey] || s.defaultCode);
+  });
+  if (conflict) {
+    showToast(t("settings.shortcutConflict", { name: t(conflict.labelKey) }), { type: "error" });
+    recording.value = null;
+    return;
+  }
+  playbackSettings[target.settingKey] = combo;
   recording.value = null;
+}
+
+// 组合等价比较（parseShortcutCombo 归一化，兼容历史 "Meta+K" 格式）
+function comboEq(a, b) {
+  const pa = parseShortcutCombo(a);
+  const pb = parseShortcutCombo(b);
+  if (!pa || !pb) return a === b;
+  return pa.meta === pb.meta && pa.code === pb.code;
 }
 
 function toggleFade() {
@@ -2202,6 +2185,9 @@ onBeforeUnmount(() => {
 }
 .sub-title {
   margin-top: 14px;
+}
+.shortcut-cat + .shortcut-cat {
+  margin-top: 10px;
 }
 .sub-note {
   margin-left: auto;

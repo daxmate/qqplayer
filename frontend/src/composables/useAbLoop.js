@@ -76,6 +76,22 @@ export function exitAbLoop() {
   resetAbLoopCount(); // 退出循环：计数清零
 }
 
+// ============ AB 循环：快捷键设点（任务 G，A 设起点 / B 设终点） ============
+// A：当前句为起点（已有区间则重设起点，等待选终点）
+export function setAbPointA() {
+  const cur = currentLineIndex.value;
+  if (cur < 0) return; // 无当前句（前奏/间隙）→ 忽略
+  state.abLoop = { a: cur, b: null }; // b=null 等待选终点
+  resetAbLoopCount(); // 新一轮循环：计数清零
+}
+
+// B：等选终点（b=null）时设为终点；无 AB 区间 / 区间已完整 → 忽略
+// （起点/终点自动交换逻辑与 setAbEnd 一致）
+export function setAbPointB() {
+  if (!state.abLoop || state.abLoop.b !== null) return;
+  setAbEnd(currentLineIndex.value);
+}
+
 // 歌词点击统一入口（跟唱面板）
 // 无 AB → 直接播放该句；等选终点（b=null）→ 点击设为终点；
 // 区间内 → 跳到该句播放（区间不变）；区间外 → 退出 AB 循环并播放该句

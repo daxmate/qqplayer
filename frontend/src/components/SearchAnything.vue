@@ -246,6 +246,8 @@ import {
   play,
   playPreview,
   playbackSettings,
+  fmtShortcutKey,
+  parseShortcutCombo,
 } from "../composables/usePlayer.js";
 import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
@@ -279,23 +281,16 @@ function entriesOf(categoryKey) {
   return settingsIndex.filter((e) => e.category === categoryKey);
 }
 
-// 当前快捷键显示（默认 Meta+K → ⌘K；用户录的单键 → 键名）
-const fmtSearchKey = computed(() => {
-  const k = playbackSettings.searchKey || "Meta+K";
-  if (k === "Meta+K") return "⌘K";
-  const arrows = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
-  if (arrows[k]) return arrows[k];
-  if (k.startsWith("Key")) return k.slice(3);
-  if (k.startsWith("Digit")) return k.slice(5);
-  return k;
-});
+// 当前快捷键显示（默认 ⌘K；录制值含 "Meta+" 前缀 → ⌘ 组合）
+const fmtSearchKey = computed(() => fmtShortcutKey(playbackSettings.searchKey));
 
-// Cmd+K（或用户录制键）匹配：默认 Meta+K = Cmd+K；录制单键则纯单键触发。
+// Cmd+K（或用户录制键）匹配："Meta+<code>" = ⌘ 组合；纯 <code> = 单键触发。
 // 单键快捷在输入框/文本域聚焦时不触发（防止打字误唤/误关）；组合键（Cmd+K）不受限。
 function matchSearchShortcut(e) {
-  const k = playbackSettings.searchKey || "Meta+K";
-  if (k === "Meta+K") return e.metaKey && e.code === "KeyK";
-  if (e.code !== k) return false;
+  const p = parseShortcutCombo(playbackSettings.searchKey || "Meta+K");
+  if (!p) return false;
+  if (p.meta) return e.metaKey && e.code === p.code;
+  if (e.code !== p.code) return false;
   if (
     e.target &&
     (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)

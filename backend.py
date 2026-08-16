@@ -155,7 +155,7 @@ LYRIC_SETTINGS_DEFAULTS = {
     "jpColor": "",  # 主行文字颜色（自定义）
     "zhColor": "",  # 翻译行文字颜色（自定义）
 }
-# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 16 字段
+# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 34 字段
 PLAYBACK_SETTINGS_DEFAULTS = {
     "playMode": "order",  # 'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
     "resumeLast": True,  # 启动时恢复上次播放的歌曲与进度
@@ -164,6 +164,25 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "karaokeNextKey": "KeyN",  # 跟唱：下一句快捷键
     "karaokePrevKey": "KeyP",  # 跟唱：上一句快捷键
     "searchKey": "Meta+K",  # 搜索：打开 search anything（Cmd+K；存 e.code 风格）
+    # 任务 G：快捷键全量可录制（默认值 e.code 风格；⌘ 组合存 "Meta+<code>"）
+    "shortcutPlayPause": "Space",  # 播放 / 暂停
+    "shortcutRewind": "ArrowLeft",  # 快退 10 秒
+    "shortcutForward": "ArrowRight",  # 快进 10 秒
+    "shortcutVolUp": "ArrowUp",  # 音量 +10%
+    "shortcutVolDown": "ArrowDown",  # 音量 -10%
+    "shortcutPrevTrack": "Meta+ArrowLeft",  # 上一首（⌘←）
+    "shortcutNextTrack": "Meta+ArrowRight",  # 下一首（⌘→）
+    "shortcutMute": "KeyM",  # 静音切换
+    "shortcutFav": "KeyF",  # 收藏 / 取消收藏当前歌
+    "shortcutCycleMode": "KeyR",  # 播放模式切换
+    "shortcutZhToggle": "KeyL",  # 中文翻译显示开关
+    "shortcutKaraokeMode": "KeyG",  # 连播 ↔ 跟唱模式切换
+    "shortcutAbA": "KeyA",  # AB 循环：设起点
+    "shortcutAbB": "KeyB",  # AB 循环：设终点
+    "shortcutSlower": "BracketLeft",  # 变速 -
+    "shortcutFaster": "BracketRight",  # 变速 +
+    "shortcutVolStepUp": "Meta+ArrowUp",  # 音量 +20%（⌘↑）
+    "shortcutVolStepDown": "Meta+ArrowDown",  # 音量 -20%（⌘↓）
     "eqEnabled": False,  # 均衡器开关
     "eqPreset": "flat",  # 均衡器预设 key（'custom' = 用户自定义）
     "eqGains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 自定义增益（dB，-12~12，10 段）
@@ -309,6 +328,25 @@ _SETTINGS_SPEC = {
         "karaokeNextKey": ("KeyN", _norm_str),
         "karaokePrevKey": ("KeyP", _norm_str),
         "searchKey": ("Meta+K", _norm_str),
+        # 任务 G：18 个新快捷键字段（全量可录制，字符串归一化）
+        "shortcutPlayPause": ("Space", _norm_str),
+        "shortcutRewind": ("ArrowLeft", _norm_str),
+        "shortcutForward": ("ArrowRight", _norm_str),
+        "shortcutVolUp": ("ArrowUp", _norm_str),
+        "shortcutVolDown": ("ArrowDown", _norm_str),
+        "shortcutPrevTrack": ("Meta+ArrowLeft", _norm_str),
+        "shortcutNextTrack": ("Meta+ArrowRight", _norm_str),
+        "shortcutMute": ("KeyM", _norm_str),
+        "shortcutFav": ("KeyF", _norm_str),
+        "shortcutCycleMode": ("KeyR", _norm_str),
+        "shortcutZhToggle": ("KeyL", _norm_str),
+        "shortcutKaraokeMode": ("KeyG", _norm_str),
+        "shortcutAbA": ("KeyA", _norm_str),
+        "shortcutAbB": ("KeyB", _norm_str),
+        "shortcutSlower": ("BracketLeft", _norm_str),
+        "shortcutFaster": ("BracketRight", _norm_str),
+        "shortcutVolStepUp": ("Meta+ArrowUp", _norm_str),
+        "shortcutVolStepDown": ("Meta+ArrowDown", _norm_str),
         "eqEnabled": (False, _norm_bool),
         "eqPreset": (
             "flat",

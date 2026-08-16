@@ -8,8 +8,10 @@ import {
   currentLineIndex,
   nextLine,
   prevLine,
+  toggleZh,
 } from "./useLyric.js";
-import { handleKaraokeTick, resetAbLoopCount } from "./useAbLoop.js";
+import { handleKaraokeTick, resetAbLoopCount, setAbPointA, setAbPointB } from "./useAbLoop.js";
+import { toggleFavorite } from "./useLibrary.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
 import { isSearchOpen } from "./searchState.js";
 import i18n from "../locales/i18n.js";
@@ -74,6 +76,25 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   karaokeNextKey: "KeyN", // 跟唱：下一句快捷键（设置可改）
   karaokePrevKey: "KeyP", // 跟唱：上一句快捷键（设置可改）
   searchKey: "Meta+K", // 搜索：打开 search anything（Cmd+K；设置可改，存 e.code 风格）
+  // 任务 G：快捷键全量可录制（默认值 e.code 风格；⌘ 组合存 "Meta+<code>"）
+  shortcutPlayPause: "Space", // 播放 / 暂停
+  shortcutRewind: "ArrowLeft", // 快退 10 秒
+  shortcutForward: "ArrowRight", // 快进 10 秒
+  shortcutVolUp: "ArrowUp", // 音量 +10%
+  shortcutVolDown: "ArrowDown", // 音量 -10%
+  shortcutPrevTrack: "Meta+ArrowLeft", // 上一首（⌘←）
+  shortcutNextTrack: "Meta+ArrowRight", // 下一首（⌘→）
+  shortcutMute: "KeyM", // 静音切换
+  shortcutFav: "KeyF", // 收藏 / 取消收藏当前歌
+  shortcutCycleMode: "KeyR", // 播放模式切换
+  shortcutZhToggle: "KeyL", // 中文翻译显示开关
+  shortcutKaraokeMode: "KeyG", // 连播 ↔ 跟唱模式切换
+  shortcutAbA: "KeyA", // AB 循环：设起点
+  shortcutAbB: "KeyB", // AB 循环：设终点
+  shortcutSlower: "BracketLeft", // 变速 -（0.75 → 1.0 → 1.25）
+  shortcutFaster: "BracketRight", // 变速 +
+  shortcutVolStepUp: "Meta+ArrowUp", // 音量 +20%（⌘↑）
+  shortcutVolStepDown: "Meta+ArrowDown", // 音量 -20%（⌘↓）
   eqEnabled: false, // 均衡器开关（false = 全部 0dB 直通）
   eqPreset: "flat", // 均衡器预设：EQ_PRESETS 的 key；'custom' = 用户自定义
   eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 自定义增益（dB，-12~12，10 段，与 EQ_BANDS 对齐）
@@ -385,12 +406,269 @@ export function _resetPlaybackSession() {
   playbackSession = null;
 }
 
-// ============ 键盘快捷键 ============
-// 空格播放/暂停，←/→ 快退/快进 10s，↑/↓ 音量 ±10%
+// ============ 键盘快捷键（配置表驱动，全量可录制） ============
+// 空格播放/暂停，←/→ 快退/快进 10s，↑/↓ 音量 ±10%，⌘←/⌘→ 上下曲，M 静音，F 收藏，
+// R 播放模式，L 翻译开关，G 连播↔跟唱，A/B AB 循环，[ ] 变速，⌘↑/⌘↓ 音量 ±20%
 // 媒体键（MediaPlayPause 等）仅在无 MediaSession 的环境兜底处理（键盘事件），
-// 有 MediaSession 时交给系统（避免双重触发）
+// 有 MediaSession 时交给系统（避免双重触发）；媒体键不进配置表（不可录制，设置里仍展示说明）
 const HAS_MEDIA_SESSION = typeof navigator !== "undefined" && "mediaSession" in navigator;
 const MEDIA_KEY_CODES = ["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious", "MediaStop"];
+
+// 快捷键分类（设置弹窗快捷键 tab 分组渲染顺序）
+export const SHORTCUT_CATEGORIES = [
+  { key: "playback", labelKey: "settings.shortcutCatPlayback" },
+  { key: "track", labelKey: "settings.shortcutCatTrack" },
+  { key: "volume", labelKey: "settings.shortcutCatVolume" },
+  { key: "karaoke", labelKey: "settings.shortcutCatKaraoke" },
+  { key: "search", labelKey: "settings.shortcutCatSearch" },
+  { key: "other", labelKey: "settings.shortcutCatOther" },
+];
+
+// 快捷键配置表：{ id, labelKey, category, settingKey, defaultCode, meta, handler }
+// - settingKey：playbackSettings 持久化字段（录制/加载均读写该字段；defaultCode 为出厂值）
+// - defaultCode：默认组合（"Meta+<code>" = ⌘ 组合；否则纯键，e.code 风格）
+// - meta：默认组合是否带 ⌘（展示/测试参考；实际匹配以当前 settingKey 值为准）
+// - handler：null = 不进播放器处理（搜索快捷键由 SearchAnything 独占，避免双重触发）
+export const SHORTCUTS = [
+  // ---- 播放控制 ----
+  {
+    id: "playPause",
+    labelKey: "settings.shortcutPlayPause",
+    category: "playback",
+    settingKey: "shortcutPlayPause",
+    defaultCode: "Space",
+    meta: false,
+    handler: () => togglePlay(),
+  },
+  {
+    id: "rewind",
+    labelKey: "settings.shortcutRewind",
+    category: "playback",
+    settingKey: "shortcutRewind",
+    defaultCode: "ArrowLeft",
+    meta: false,
+    handler: () => seek(Math.max(0, (audio.currentTime || 0) - 10)),
+  },
+  {
+    id: "forward",
+    labelKey: "settings.shortcutForward",
+    category: "playback",
+    settingKey: "shortcutForward",
+    defaultCode: "ArrowRight",
+    meta: false,
+    handler: () => seek(Math.min(audio.duration || 0, (audio.currentTime || 0) + 10)),
+  },
+  {
+    id: "cycleMode",
+    labelKey: "settings.shortcutCycleMode",
+    category: "playback",
+    settingKey: "shortcutCycleMode",
+    defaultCode: "KeyR",
+    meta: false,
+    handler: () => cyclePlayMode(),
+  },
+  {
+    id: "abA",
+    labelKey: "settings.shortcutAbA",
+    category: "playback",
+    settingKey: "shortcutAbA",
+    defaultCode: "KeyA",
+    meta: false,
+    handler: () => setAbPointA(),
+  },
+  {
+    id: "abB",
+    labelKey: "settings.shortcutAbB",
+    category: "playback",
+    settingKey: "shortcutAbB",
+    defaultCode: "KeyB",
+    meta: false,
+    handler: () => setAbPointB(),
+  },
+  // ---- 曲目 ----
+  {
+    id: "prevTrack",
+    labelKey: "settings.shortcutPrevTrack",
+    category: "track",
+    settingKey: "shortcutPrevTrack",
+    defaultCode: "Meta+ArrowLeft",
+    meta: true,
+    handler: () => prevSong({ autoPlay: true }),
+  },
+  {
+    id: "nextTrack",
+    labelKey: "settings.shortcutNextTrack",
+    category: "track",
+    settingKey: "shortcutNextTrack",
+    defaultCode: "Meta+ArrowRight",
+    meta: true,
+    handler: () => nextSong({ autoPlay: true }),
+  },
+  {
+    id: "fav",
+    labelKey: "settings.shortcutFav",
+    category: "track",
+    settingKey: "shortcutFav",
+    defaultCode: "KeyF",
+    meta: false,
+    handler: () => {
+      const p = state.currentSong?.path;
+      if (p) toggleFavorite(p);
+    },
+  },
+  // ---- 音量 ----
+  {
+    id: "volUp",
+    labelKey: "settings.shortcutVolUp",
+    category: "volume",
+    settingKey: "shortcutVolUp",
+    defaultCode: "ArrowUp",
+    meta: false,
+    handler: () => setVolume(state.volume + 0.1),
+  },
+  {
+    id: "volDown",
+    labelKey: "settings.shortcutVolDown",
+    category: "volume",
+    settingKey: "shortcutVolDown",
+    defaultCode: "ArrowDown",
+    meta: false,
+    handler: () => setVolume(state.volume - 0.1),
+  },
+  {
+    id: "volStepUp",
+    labelKey: "settings.shortcutVolStepUp",
+    category: "volume",
+    settingKey: "shortcutVolStepUp",
+    defaultCode: "Meta+ArrowUp",
+    meta: true,
+    handler: () => setVolume(state.volume + 0.2),
+  },
+  {
+    id: "volStepDown",
+    labelKey: "settings.shortcutVolStepDown",
+    category: "volume",
+    settingKey: "shortcutVolStepDown",
+    defaultCode: "Meta+ArrowDown",
+    meta: true,
+    handler: () => setVolume(state.volume - 0.2),
+  },
+  {
+    id: "mute",
+    labelKey: "settings.shortcutMute",
+    category: "volume",
+    settingKey: "shortcutMute",
+    defaultCode: "KeyM",
+    meta: false,
+    handler: () => toggleMute(),
+  },
+  // ---- 跟唱 ----
+  {
+    id: "karaokeNext",
+    labelKey: "settings.karaokeNext",
+    category: "karaoke",
+    settingKey: "karaokeNextKey",
+    defaultCode: "KeyN",
+    meta: false,
+    handler: () => {
+      if (state.mode === "karaoke") nextLine();
+    },
+  },
+  {
+    id: "karaokePrev",
+    labelKey: "settings.karaokePrev",
+    category: "karaoke",
+    settingKey: "karaokePrevKey",
+    defaultCode: "KeyP",
+    meta: false,
+    handler: () => {
+      if (state.mode === "karaoke") prevLine();
+    },
+  },
+  {
+    id: "karaokeMode",
+    labelKey: "settings.shortcutKaraokeMode",
+    category: "karaoke",
+    settingKey: "shortcutKaraokeMode",
+    defaultCode: "KeyG",
+    meta: false,
+    handler: () => toggleMode(),
+  },
+  // ---- 搜索（handler 为空：SearchAnything 独占处理，播放器层不拦截）----
+  {
+    id: "search",
+    labelKey: "settings.shortcutSearch",
+    category: "search",
+    settingKey: "searchKey",
+    defaultCode: "Meta+K",
+    meta: true,
+    handler: null,
+  },
+  // ---- 其他 ----
+  {
+    id: "zhToggle",
+    labelKey: "settings.shortcutZhToggle",
+    category: "other",
+    settingKey: "shortcutZhToggle",
+    defaultCode: "KeyL",
+    meta: false,
+    handler: () => toggleZh(),
+  },
+  {
+    id: "slower",
+    labelKey: "settings.shortcutSlower",
+    category: "other",
+    settingKey: "shortcutSlower",
+    defaultCode: "BracketLeft",
+    meta: false,
+    handler: () => stepSpeed(-1),
+  },
+  {
+    id: "faster",
+    labelKey: "settings.shortcutFaster",
+    category: "other",
+    settingKey: "shortcutFaster",
+    defaultCode: "BracketRight",
+    meta: false,
+    handler: () => stepSpeed(1),
+  },
+];
+
+// 组合解析："Meta+<code>" → { meta: true, code }；纯 <code> → { meta: false, code }
+// 历史格式兼容：searchKey 默认 "Meta+K"（省略 Key 前缀）→ code 归一为 KeyK
+// 导出供 SettingsModal 冲突检测 / SearchAnything 匹配复用
+export function parseShortcutCombo(combo) {
+  if (!combo) return null;
+  const meta = combo.startsWith("Meta+");
+  let code = meta ? combo.slice(5) : combo;
+  if (meta && code.length === 1) code = "Key" + code;
+  return { meta, code };
+}
+
+// 组合匹配：meta=true 要求 e.metaKey；meta=false 要求无 meta/ctrl/alt（避免修饰键误触发）
+function matchShortcutCombo(e, combo) {
+  const p = parseShortcutCombo(combo);
+  if (!p) return false;
+  if (e.code !== p.code) return false;
+  if (p.meta) return !!e.metaKey;
+  return !e.metaKey && !e.ctrlKey && !e.altKey;
+}
+
+// 组合 → 展示文本（⌘← / Space / M / [ 等）；设置弹窗与搜索层共用
+export function fmtShortcutKey(code) {
+  if (!code) return "—";
+  const meta = code.startsWith("Meta+");
+  const rest = meta ? code.slice(5) : code;
+  const mod = meta ? "⌘" : "";
+  const arrows = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+  if (rest === "Space") return mod + "Space";
+  if (arrows[rest]) return mod + arrows[rest];
+  if (rest.startsWith("Key")) return mod + rest.slice(3);
+  if (rest.startsWith("Digit")) return mod + rest.slice(5);
+  if (rest === "BracketLeft") return mod + "[";
+  if (rest === "BracketRight") return mod + "]";
+  return mod + rest;
+}
 
 // 输入框/文本域聚焦时不拦截（媒体键除外：即使输入框聚焦也应全局响应）
 // search anything 搜索层打开时屏蔽播放快捷键（isSearchOpen 来自零依赖 searchState，避免循环依赖）
@@ -406,53 +684,33 @@ const SHORTCUT_HANDLER = (e) => {
   ) {
     return;
   }
-  // 跟唱模式句跳转快捷键（设置可配置，默认 N 下一句 / P 上一句；仅跟唱模式生效）
-  if (
-    state.mode === "karaoke" &&
-    (e.code === playbackSettings.karaokeNextKey || e.code === playbackSettings.karaokePrevKey)
-  ) {
+  // 媒体键兜底（无 MediaSession 环境；不参与录制）
+  if (isMediaKey) {
     e.preventDefault();
-    if (e.code === playbackSettings.karaokeNextKey) nextLine();
-    else prevLine();
+    switch (e.code) {
+      case "MediaPlayPause":
+        togglePlay();
+        break;
+      case "MediaTrackNext":
+        nextSong({ autoPlay: true, source: "media" });
+        break;
+      case "MediaTrackPrevious":
+        prevSong({ autoPlay: true, source: "media" });
+        break;
+      case "MediaStop":
+        pause();
+        break;
+    }
     return;
   }
-  switch (e.code) {
-    case "Space":
+  // 配置表匹配：命中执行 handler + preventDefault（一次只处理一个快捷键）
+  for (const s of SHORTCUTS) {
+    if (!s.handler) continue;
+    if (matchShortcutCombo(e, playbackSettings[s.settingKey] || s.defaultCode)) {
       e.preventDefault();
-      togglePlay();
-      break;
-    case "MediaPlayPause":
-      e.preventDefault();
-      togglePlay();
-      break;
-    case "MediaTrackNext":
-      e.preventDefault();
-      nextSong({ autoPlay: true, source: "media" });
-      break;
-    case "MediaTrackPrevious":
-      e.preventDefault();
-      prevSong({ autoPlay: true, source: "media" });
-      break;
-    case "MediaStop":
-      e.preventDefault();
-      pause();
-      break;
-    case "ArrowLeft":
-      e.preventDefault();
-      seek(Math.max(0, (audio.currentTime || 0) - 10));
-      break;
-    case "ArrowRight":
-      e.preventDefault();
-      seek(Math.min(audio.duration || 0, (audio.currentTime || 0) + 10));
-      break;
-    case "ArrowUp":
-      e.preventDefault();
-      setVolume(state.volume + 0.1);
-      break;
-    case "ArrowDown":
-      e.preventDefault();
-      setVolume(state.volume - 0.1);
-      break;
+      s.handler();
+      return;
+    }
   }
 };
 
@@ -1154,6 +1412,21 @@ export function cycleSpeed() {
   const i = SPEEDS.indexOf(state.speed);
   state.speed = SPEEDS[(i + 1) % SPEEDS.length];
   audio.playbackRate = state.speed;
+}
+
+// 变速步进（任务 G 快捷键 [ / ]）：delta=-1 减速 / +1 加速；边界（0.75 最低 / 1.25 最高）不动作
+// cycleSpeed 保持循环语义兼容（ControlBar 按钮仍用循环）
+export function stepSpeed(delta) {
+  const i = SPEEDS.indexOf(state.speed);
+  const next = i + delta;
+  if (next < 0 || next >= SPEEDS.length) return;
+  state.speed = SPEEDS[next];
+  audio.playbackRate = state.speed;
+}
+
+// 连播 ↔ 跟唱模式切换（任务 G 快捷键 G；模式切换触发现有 watch → 上报播放会话）
+export function toggleMode() {
+  state.mode = state.mode === "continuous" ? "karaoke" : "continuous";
 }
 
 // ============ 桌面歌词/迷你窗：当前播放状态上报（悬浮窗轮询读取）============
