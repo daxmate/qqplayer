@@ -25,6 +25,7 @@ export default {
     // 无歌词占位
     noLyric: "暂无歌词",
     specifyLyric: "指定歌词",
+    coverDragHint: "拖动调整封面/歌词区大小",
     // 封面
     coverAlt: "封面",
     // 活动栏（ActivityBar.vue）

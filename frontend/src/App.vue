@@ -75,10 +75,18 @@
         </button>
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
         <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
-        <section class="center">
+        <section ref="centerRef" class="center">
           <!-- 氛围背景层（封面取色光晕，absolute 铺满 center；Cover/LyricPanel 在其上） -->
           <Visualizer class="ambient-layer" />
-          <Cover :song="state.currentSong" />
+          <Cover v-if="uiSettings.showCover" :song="state.currentSong" :size="coverSizePx" />
+          <!-- 拖拽分隔条（桌面 + 封面开启时）：上下调整封面/歌词区大小，松手记忆 -->
+          <div
+            v-if="uiSettings.showCover && !isMobile"
+            class="cover-divider"
+            :class="{ dragging }"
+            :title="t('app.coverDragHint')"
+            @pointerdown="startCoverDrag"
+          />
           <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
           <div v-else class="no-lyric">
             <Music2 :size="40" class="no-lyric-icon" />
@@ -179,6 +187,12 @@ import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import {
+  coverSizePx,
+  startCoverDrag,
+  dragging,
+  observeCoverArea,
+} from "./composables/useCoverSize.js";
+import {
   state,
   loadSongs,
   loadFavorites,
@@ -206,6 +220,8 @@ import {
 const { t } = useI18n();
 
 const settingsOpen = ref(false);
+const centerRef = ref(null);
+let cleanupCoverObserve = null;
 
 // 封面模糊背景：当前歌曲封面 URL（开关 + 有歌时显示；流媒体歌用 coverUrl 网络图）
 const blurCoverUrl = computed(() => {
@@ -293,11 +309,15 @@ onMounted(() => {
   setupMiniStatus();
   // 桌面全局拖拽导入：window 级监听，卸载时清理
   cleanupDragImport = setupDragImport();
+  // 封面/歌词区尺寸：RO 量 center 高度（自适应保底 + 拖拽范围硬保护依赖）
+  cleanupCoverObserve = observeCoverArea(centerRef.value);
 });
 
 onUnmounted(() => {
   cleanupDragImport?.();
   cleanupDragImport = null;
+  cleanupCoverObserve?.();
+  cleanupCoverObserve = null;
 });
 </script>
 
@@ -578,6 +598,22 @@ onUnmounted(() => {
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+/* 拖拽分隔条：封面与歌词之间，hover 高亮；拖拽中全宽高亮 */
+.cover-divider {
+  flex-shrink: 0;
+  height: 6px;
+  margin: -9px 0; /* 视觉细条 + 扩大命中区（盖住 gap 12px，两侧各露 3px） */
+  border-radius: 3px;
+  cursor: ns-resize;
+  transition: background 0.15s;
+  z-index: 2;
+}
+.cover-divider:hover {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.cover-divider.dragging {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 /* 氛围背景层在底层；其余内容（封面/歌词/空态）抬升一层 */
 .center > :not(.ambient-layer) {

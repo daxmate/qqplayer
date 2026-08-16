@@ -1,6 +1,6 @@
 <template>
   <div class="cover-wrap" :class="{ small, 'no-cover': !showCover }">
-    <div class="cover-box">
+    <div class="cover-box" :style="boxStyle">
       <img
         v-if="coverUrl"
         :src="coverUrl"
@@ -24,16 +24,22 @@ import { state, uiSettings } from "../composables/usePlayer.js";
 
 const { t } = useI18n();
 
-// 显示封面开关（设置 → 界面）：关闭时隐藏封面图片但保留占位。
-// 选 visibility:hidden 而非 v-if/v-show：v-if 会换成 v-else 的回退图标（不是想要的效果），
-// v-show（display:none）会折叠掉固定尺寸的 cover-box，破坏父级 flex 布局（列表行高/播放器封面区）；
-// visibility:hidden 保留盒子尺寸与占位，small/大图两种变体都不影响布局。
+// 显示封面开关（设置 → 界面）：关闭时封面完全不占位（display:none），歌词区/氛围背景自动扩充铺满。
+// 2026-08-16（任务 E）由 visibility:hidden 改为 display:none——旧方案保留占位会把封面区空一块；
+// 用户明确要「歌词区自动扩充封面区」。Cover 当前仅两处使用（桌面主区 / 移动端全屏播放器），
+// 均无固定高度容器依赖，display:none 不破坏其他布局（small 变体为预留，暂无调用方）。
 const showCover = computed(() => !!uiSettings.showCover);
 
 const props = defineProps({
   song: { type: Object, default: null },
   small: { type: Boolean, default: false },
+  // 显式尺寸 px（0/缺省 = 走 CSS 默认：桌面 min(46vh,340px)，移动端 mobile.css 覆盖 min(52vw,300px)）
+  // 桌面传入 coverSizePx（自适应计算/拖拽值）；移动端传入 mobileCoverSize（记忆值比例映射）
+  size: { type: Number, default: 0 },
 });
+
+// 封面方形：只设宽，aspect-ratio:1 带出高
+const boxStyle = computed(() => (props.size > 0 ? { width: `${props.size}px` } : null));
 
 const coverUrl = ref("");
 const cache = new Map(); // path -> url
@@ -79,7 +85,7 @@ function onCoverError() {
   flex-shrink: 0;
 }
 .cover-wrap.no-cover {
-  visibility: hidden; /* 隐藏封面但保留占位（不折叠布局，见 showCover 注释） */
+  display: none; /* 封面关闭 → 完全不占位（歌词/氛围背景自动扩充；见 showCover 注释） */
 }
 .cover-box {
   width: min(46vh, 340px);

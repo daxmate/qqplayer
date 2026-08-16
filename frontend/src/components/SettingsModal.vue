@@ -995,6 +995,31 @@
                     <span class="switch" :class="{ on: uiSettings.showCover }"><i /></span>
                   </div>
                 </div>
+                <!-- 封面区域大小：自适应（0）或手动固定值（140~420）；滑块联动 + 恢复默认回自适应 -->
+                <div v-if="uiSettings.showCover && !isMobile" class="setting-item">
+                  <div class="setting-label">
+                    {{ t("settings.coverSize") }}
+                    <span class="val-badge">
+                      {{ coverSizeLabel }}
+                    </span>
+                    <button
+                      v-if="uiSettings.coverSize !== 0"
+                      class="mini-btn"
+                      @click="resetCoverSize()"
+                    >
+                      {{ t("settings.resetCoverSize") }}
+                    </button>
+                  </div>
+                  <div class="setting-desc">{{ t("settings.coverSizeDesc") }}</div>
+                  <input
+                    v-model.number="coverSizeSlider"
+                    class="slider"
+                    type="range"
+                    :min="COVER_MIN"
+                    :max="COVER_MAX"
+                    step="10"
+                  />
+                </div>
                 <div class="setting-item">
                   <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
                     <div>
@@ -1223,6 +1248,12 @@ import {
 import { showToast } from "../composables/useToast.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import {
+  COVER_MIN,
+  COVER_MAX,
+  COVER_DEFAULT,
+  resetCoverSize,
+} from "../composables/useCoverSize.js";
+import {
   SLEEP_TIMER_OPTIONS,
   toggleSleepTimer,
   setSleepTimerMinutes,
@@ -1404,6 +1435,17 @@ const sourceOptions = [
 const fmtOffset = computed(() => {
   const v = lyricSettings.offset;
   return (v > 0 ? "+" : "") + v.toFixed(1) + "s";
+});
+// 封面区域大小：0 = 自适应（显示「自适应」），固定值显示 px
+const coverSizeLabel = computed(() =>
+  uiSettings.coverSize === 0 ? t("settings.coverSizeAuto") : `${uiSettings.coverSize}px`,
+);
+// 滑块 v-model：0 时落滑块到默认锚点（340），拖动立即写固定值
+const coverSizeSlider = computed({
+  get: () => (uiSettings.coverSize === 0 ? COVER_DEFAULT : uiSettings.coverSize),
+  set: (v) => {
+    uiSettings.coverSize = Math.round(v);
+  },
 });
 // 快捷键 tab：配置表驱动（SHORTCUTS/SHORTCUT_CATEGORIES 来自 playerCore；全部行可录制）
 const recording = ref(null); // 正在录制的快捷键 id（null = 未录制）

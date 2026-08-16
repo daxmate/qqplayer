@@ -46,7 +46,7 @@
       <!-- 连播模式：封面大图 + 歌名/歌手（控制条在底部） -->
       <template v-if="state.mode === 'continuous'">
         <div class="mp-cover-area">
-          <Cover :song="state.currentSong" />
+          <Cover :song="state.currentSong" :size="mobileCoverSize" />
         </div>
         <Visualizer small />
         <div class="mp-song-info">
@@ -85,6 +85,7 @@ import Visualizer from "../Visualizer.vue";
 import KaraokePanel from "../KaraokePanel.vue";
 import ControlBar from "../ControlBar.vue";
 import { sleepTimerText } from "../../composables/useSleepTimer.js";
+import { mobileCoverSize } from "../../composables/useCoverSize.js";
 
 defineEmits(["back"]);
 
