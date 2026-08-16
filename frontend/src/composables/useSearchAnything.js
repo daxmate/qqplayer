@@ -5,6 +5,7 @@
 import { ref, watch } from "vue";
 import { state } from "./usePlayer.js";
 import { isSearchOpen } from "./searchState.js";
+import { history, loadHistory, addHistory, removeHistory, clearHistory } from "./searchHistory.js";
 import { matchScore, kindRank } from "../utils/score.js";
 import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex.js";
 import i18n from "../locales/i18n.js";
@@ -233,6 +234,11 @@ async function runSearch(rawQ) {
   }
 }
 
+// 打开时刷新历史（从 localStorage 重载；组件聚焦输入框后即可见）
+watch(isSearchOpen, (open) => {
+  if (open) loadHistory();
+});
+
 // query 变化 → 防抖 250ms；空 → 清空结果但**保持搜索层打开**
 // （2026-08-16 修复：之前空输入会 isSearchOpen=false，删光搜索词=自动退出编辑框，
 //   用户反馈 bug；收起只走 Esc / 点空白 / Cmd+K / clear()）
@@ -276,5 +282,18 @@ function clear() {
 }
 
 export function useSearchAnything() {
-  return { query, results, loading, isSearchOpen, onlineSource, setOnlineSource, clear };
+  return {
+    query,
+    results,
+    loading,
+    isSearchOpen,
+    onlineSource,
+    history,
+    setOnlineSource,
+    clear,
+    loadHistory,
+    addHistory,
+    removeHistory,
+    clearHistory,
+  };
 }

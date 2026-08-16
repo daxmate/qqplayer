@@ -50,6 +50,9 @@ export const UI_SETTINGS_DEFAULTS = {
   // 后端 settings 白名单未收录该字段（PUT 被丢弃、GET 不返回）→ 仅前端本地持久化（localStorage 写透缓存），跨设备不同步
   coverSize: 0,
   compact: false, // 紧凑模式（减小间距与尺寸，提高信息密度）
+  // 搜索历史（任务 D）：字符串数组，最新在前，最多 10 条；存后端统一设置（settings.json 跨引擎同步），
+  // settingsSync deep watch 自动防抖 PUT，无需自行调 API
+  searchHistory: [],
 };
 
 export const uiSettings = reactive({ ...UI_SETTINGS_DEFAULTS });

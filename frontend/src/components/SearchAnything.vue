@@ -42,6 +42,8 @@
             spellcheck="false"
             autocomplete="off"
             aria-label="search anything"
+            @focus="inputFocused = true"
+            @blur="inputFocused = false"
           />
           <Loader2 v-if="loading" :size="16" class="sa-spin" />
           <button
@@ -168,6 +170,48 @@
             </div>
           </template>
 
+          <!-- 空 query + 聚焦 + 有历史：历史列表（Spotlight 式；点击/回车直接搜索，✕ 单删） -->
+          <div v-else-if="showHistory" class="sa-history">
+            <div class="sa-history-head">
+              <span class="sa-history-title">{{ t("search.searchHistory") }}</span>
+              <button
+                type="button"
+                class="sa-history-clear"
+                :title="t('search.searchHistoryClear')"
+                @mousedown.prevent
+                @click="clearHistory"
+              >
+                {{ t("search.searchHistoryClear") }}
+              </button>
+            </div>
+            <div
+              v-for="(item, i) in history"
+              :key="item"
+              class="sa-row sa-history-row"
+              :class="{ active: i === activeIndex }"
+              role="button"
+              tabindex="0"
+              @mousedown.prevent
+              @mousemove="activeIndex = i"
+              @click="activateHistory(item)"
+            >
+              <History :size="14" class="sa-history-ic" />
+              <span class="sa-info">
+                <span class="sa-title">{{ item }}</span>
+              </span>
+              <button
+                type="button"
+                class="sa-act sa-history-del"
+                :title="t('search.clear')"
+                :aria-label="t('search.clear')"
+                @mousedown.prevent
+                @click.stop="removeHistory(item)"
+              >
+                <X :size="13" />
+              </button>
+            </div>
+          </div>
+
           <!-- 空态（未输入）：提示输入（不展示任何结果/设置目录） -->
           <div v-else class="sa-empty">
             <Search :size="16" class="sa-empty-ic" />
@@ -194,7 +238,7 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { Search, X, Loader2, Play, Plus, Download, ChevronRight } from "@lucide/vue";
+import { Search, X, Loader2, Play, Plus, Download, ChevronRight, History } from "@lucide/vue";
 import {
   selectSong,
   play,
@@ -219,14 +263,31 @@ const emit = defineEmits(["pick"]); // 歌手/专辑点击 → 分组浏览（st
 
 const { t } = useI18n();
 
-const { query, results, loading, isSearchOpen, onlineSource, setOnlineSource, clear } =
-  useSearchAnything();
+const {
+  query,
+  results,
+  loading,
+  isSearchOpen,
+  onlineSource,
+  history,
+  setOnlineSource,
+  clear,
+  addHistory,
+  removeHistory,
+  clearHistory,
+} = useSearchAnything();
 
 const inputEl = ref(null);
-const activeIndex = ref(-1); // 结果高亮行索引
+const inputFocused = ref(false); // 输入框聚焦态：空 query + 聚焦才显示历史列表
+const activeIndex = ref(-1); // 高亮行索引（有输入=结果行；空输入=历史行，复用同一索引）
 const expandedId = ref(null); // 当前展开内联控件的设置条目 id（互斥单开）
 const downloading = reactive({}); // 在线条目 id → 下载中
 const adding = reactive({}); // 在线条目 id → 添加到曲库中
+
+// 空 query + 输入框聚焦 + 有历史 → 显示历史列表（否则提示输入）
+const showHistory = computed(
+  () => !String(query.value).trim() && inputFocused.value && history.value.length > 0,
+);
 
 const expandedEntry = computed(() => settingsIndex.find((e) => e.id === expandedId.value) || null);
 
@@ -267,13 +328,31 @@ function onWindowKeydown(e) {
   }
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault(); // 输入框内防止光标移动
-    if (!results.value.length) return;
     const dir = e.key === "ArrowDown" ? 1 : -1;
+    if (!String(query.value).trim()) {
+      // 空 query：高亮在历史列表内循环移动（复用 activeIndex）
+      if (!showHistory.value) return;
+      const n = history.value.length;
+      const next = activeIndex.value + dir;
+      activeIndex.value = next < 0 ? n - 1 : next % n;
+      return;
+    }
+    if (!results.value.length) return;
     const next = activeIndex.value + dir;
     activeIndex.value = next < 0 ? results.value.length - 1 : next % results.value.length;
     return;
   }
   if (e.key === "Enter") {
+    const q = String(query.value).trim();
+    if (!q) {
+      // 空 query：Enter 执行高亮的历史项（无高亮忽略；Esc 收起行为不变）
+      if (showHistory.value && activeIndex.value >= 0) {
+        e.preventDefault();
+        activateHistory(history.value[activeIndex.value]);
+      }
+      return;
+    }
+    addHistory(q); // 显式 Enter 提交才记录（防抖自动搜索不记录）
     const idx = activeIndex.value >= 0 ? activeIndex.value : 0;
     const item = results.value[idx];
     if (item) {
@@ -303,6 +382,14 @@ function close() {
 
 function clearQuery() {
   query.value = "";
+}
+
+// 点击/回车历史项：填入 query（走现有 watch→防抖搜索链路）并去重置顶
+function activateHistory(term) {
+  const q = String(term ?? "").trim();
+  if (!q) return;
+  query.value = q;
+  addHistory(q); // 已在历史中则移到最前（去重）
 }
 
 // ============ 结果行交互 ============
@@ -786,6 +873,54 @@ onBeforeUnmount(() => {
   border-radius: 5px;
   padding: 1px 5px;
   margin-right: 4px;
+}
+
+/* 历史列表 */
+.sa-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px 6px 14px;
+}
+.sa-history-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text3);
+}
+.sa-history-clear {
+  font-size: 11px;
+  color: var(--text3);
+  padding: 3px 8px;
+  border-radius: 7px;
+  transition: all 0.12s;
+}
+@media (hover: hover) {
+  .sa-history-clear:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+}
+.sa-history-row {
+  cursor: pointer;
+}
+.sa-history-ic {
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.sa-history-row .sa-title {
+  font-weight: 500;
+}
+.sa-history-del {
+  opacity: 0.55;
+  transition: all 0.12s;
+}
+@media (hover: hover) {
+  .sa-history-del:hover {
+    opacity: 1;
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
 }
 
 /* 淡入 */

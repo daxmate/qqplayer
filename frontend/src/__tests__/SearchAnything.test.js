@@ -35,6 +35,7 @@ vi.stubGlobal("Audio", FakeAudio);
 const SearchAnything = (await import("../components/SearchAnything.vue")).default;
 const { useSearchAnything } = await import("../composables/useSearchAnything.js");
 const { settingsIndex } = await import("../settingsIndex.js");
+const { clearHistory } = await import("../composables/searchHistory.js");
 const { state, playbackSettings, setupKeyboardShortcuts } =
   await import("../composables/usePlayer.js");
 
@@ -61,6 +62,8 @@ function makeItem(over) {
 let wrapper = null;
 
 beforeEach(() => {
+  // 重置搜索历史模块内存态（jsdom 无 localStorage：Enter 用例只写内存，不跨用例残留）
+  clearHistory();
   Object.assign(state, {
     songs: SONGS,
     currentIndex: -1,

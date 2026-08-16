@@ -274,6 +274,14 @@ def _norm_exts(v, default):
     return default
 
 
+def _norm_search_history(v, default):
+    """searchHistory：搜索历史字符串数组（最新在前）；过滤非字符串/空白，截断 10 条，空列表合法"""
+    if isinstance(v, list):
+        items = [str(s).strip() for s in v if isinstance(s, str) and s.strip()]
+        return items[:10]
+    return default
+
+
 def _norm_eq_gains(v):
     """eqGains：必须是长度 10 数字数组（clamp ±12）；非法回落全 0"""
     default = list(PLAYBACK_SETTINGS_DEFAULTS["eqGains"])
@@ -319,6 +327,8 @@ _SETTINGS_SPEC = {
         "coverBlur": (UI_SETTINGS_DEFAULTS["coverBlur"], _norm_bool),
         "compact": (UI_SETTINGS_DEFAULTS["compact"], _norm_bool),
         "showCover": (UI_SETTINGS_DEFAULTS["showCover"], _norm_bool),
+        # 任务 D：搜索历史（字符串数组，最新在前，最多 10 条）——后端统一设置存储，跨引擎同步
+        "searchHistory": ([], lambda v, d: _norm_search_history(v, d)),
     },
     "lyric": {
         "fontFamily": (
