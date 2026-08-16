@@ -217,15 +217,12 @@ describe("search anything 全屏搜索层", () => {
     expect(isSearchOpen.value).toBe(false);
   });
 
-  it("空态（未输入）显示设置目录：分类标题 + 设置项", async () => {
+  it("空态（未输入）不显示设置目录，显示输入提示", async () => {
     mountOverlay();
     isSearchOpen.value = true;
     await nextTick();
-    expect(wrapper.find(".sa-dir").exists()).toBe(true);
-    expect(wrapper.text()).toContain("播放"); // settings.category.playback
-    expect(wrapper.text()).toContain("音乐库"); // settings.category.library
-    expect(wrapper.text()).toContain("频谱可视化"); // settings.visualizer
-    expect(wrapper.text()).toContain("切歌淡入淡出"); // settings.fade
+    expect(wrapper.find(".sa-dir").exists()).toBe(false);
+    expect(wrapper.text()).toContain("输入关键词开始搜索");
   });
 
   it("设置行展开内联控件（互斥单开）+ 开关切换生效", async () => {

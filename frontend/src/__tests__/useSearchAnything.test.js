@@ -252,8 +252,9 @@ describe("打分排序", () => {
     expect(results.value[0].score).toBeGreaterThan(results.value[1].score);
   });
 
-  it("同分优先级：本地 > 在线 > 设置", async () => {
+  it("同分优先级：本地先出，在线追加末尾", async () => {
     // 三者同分 120：song 专辑字段完全相等 / online title 完全相等 / album 聚合完全相等 / setting 文案完全相等
+    // 新语义（2026-08-16 用户拍板）：本地结果先出，在线结果到达后追加末尾，不参与全局混排
     state.songs = [{ id: 9, path: "/x.mp3", name: "xx", artist: "yy", album: "播放模式" }];
     fetchMock.mockResolvedValue({
       ok: true,
@@ -275,7 +276,40 @@ describe("打分排序", () => {
     await flush();
 
     const top = results.value.filter((r) => r.score === 120).map((r) => r.kind);
-    expect(top).toEqual(["song", "online", "album", "setting"]);
+    expect(top).toEqual(["song", "album", "setting", "online"]);
+  });
+
+  it("本地结果先行渲染，在线到达后追加末尾", async () => {
+    state.songs = [{ id: 1, path: "/a.mp3", name: "本地歌", artist: "A", album: "B" }];
+    let resolveOnline;
+    fetchMock.mockReturnValue(
+      new Promise((res) => {
+        resolveOnline = res;
+      }),
+    );
+    query.value = "本地歌";
+    await flush(); // 防抖后本地立即渲染（在线未返回）
+    expect(results.value.map((r) => r.kind)).toEqual(["song"]);
+    resolveOnline({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: "o1",
+            title: "本地歌",
+            artist: "X",
+            album: "Y",
+            cover: "",
+            duration: "1:00",
+            quality: "low",
+          },
+        ],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(0); // drain promise 微任务（续体在 await fetch 之后）
+    await nextTick();
+    expect(results.value.map((r) => r.kind)).toEqual(["song", "online"]);
+    expect(results.value[1].title).toBe("本地歌");
   });
 
   it("字段权重：歌名命中排在歌手命中前", async () => {

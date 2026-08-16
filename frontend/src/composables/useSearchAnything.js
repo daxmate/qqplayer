@@ -215,21 +215,19 @@ function sortResults(a, b) {
 async function runSearch(rawQ) {
   const q = String(rawQ).trim();
   const seq = searchSeq;
+  // 本地来源（歌曲/歌手/专辑/设置）同步立即出结果，不等在线
+  const local = collectSongs(q)
+    .concat(collectArtists(q), collectAlbums(q), collectSettings(q))
+    .sort(sortResults);
+  if (seq !== searchSeq) return; // 期间又有新输入：本批作废
+  results.value = local;
+  // 在线结果异步到达后追加到末尾（本地保持先出，不重新全局混排）
   try {
-    const [songs, online, artists, albums, settings] = await Promise.all([
-      Promise.resolve(collectSongs(q)),
-      fetchOnline(q, seq),
-      Promise.resolve(collectArtists(q)),
-      Promise.resolve(collectAlbums(q)),
-      Promise.resolve(collectSettings(q)),
-    ]);
-    if (seq !== searchSeq) return; // 期间又有新输入：本批作废
-    const all = songs.concat(online, artists, albums, settings);
-    all.sort(sortResults);
-    results.value = all;
+    const online = await fetchOnline(q, seq);
+    if (seq !== searchSeq) return;
+    results.value = local.concat(online);
   } catch {
-    // 防御：任何来源异常都不应中断搜索（在线失败已静默，这里兜底其余来源）
-    if (seq === searchSeq) results.value = [];
+    // 在线失败已静默：本地结果保留，不中断
   } finally {
     if (seq === searchSeq) loading.value = false;
   }

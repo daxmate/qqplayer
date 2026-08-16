@@ -168,43 +168,10 @@
             </div>
           </template>
 
-          <!-- 空态（未输入）：设置目录 —— 全部设置项按分类分组 -->
-          <div v-else class="sa-dir">
-            <div class="sa-dir-head">
-              <SlidersHorizontal :size="13" />
-              {{ t("search.dirTitle") }}
-            </div>
-            <div v-for="cat in categories" :key="cat.key" class="sa-dir-group">
-              <div class="sa-dir-title">{{ t(cat.labelKey) }}</div>
-              <template v-if="entriesOf(cat.key).length">
-                <template v-for="e in entriesOf(cat.key)" :key="e.id">
-                  <button
-                    type="button"
-                    class="sa-row sa-dir-row"
-                    :class="{ active: expandedId === e.id }"
-                    @click="toggleEntry(e)"
-                  >
-                    <span class="sa-badge sa-badge-setting">{{ t("search.badge.setting") }}</span>
-                    <span class="sa-info">
-                      <span class="sa-title">{{ t(e.labelKey) }}</span>
-                    </span>
-                    <ChevronRight
-                      :size="14"
-                      class="sa-chevron"
-                      :class="{ open: expandedId === e.id }"
-                    />
-                  </button>
-                  <div
-                    v-if="expandedId === e.id && expandedEntry"
-                    class="sa-inline"
-                    @mousedown.stop
-                  >
-                    <InlineControl :entry="expandedEntry" />
-                  </div>
-                </template>
-              </template>
-              <div v-else class="sa-dir-empty">{{ t("search.dirEmpty") }}</div>
-            </div>
+          <!-- 空态（未输入）：提示输入（不展示任何结果/设置目录） -->
+          <div v-else class="sa-empty">
+            <Search :size="16" class="sa-empty-ic" />
+            {{ t("search.typeToSearch") }}
           </div>
         </div>
 
@@ -230,16 +197,7 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  Search,
-  X,
-  Loader2,
-  Play,
-  Plus,
-  Download,
-  ChevronRight,
-  SlidersHorizontal,
-} from "@lucide/vue";
+import { Search, X, Loader2, Play, Plus, Download, ChevronRight } from "@lucide/vue";
 import {
   state,
   selectSong,
@@ -251,7 +209,7 @@ import {
 } from "../composables/usePlayer.js";
 import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
-import { SETTING_CATEGORIES, settingsIndex } from "../settingsIndex.js";
+import { settingsIndex } from "../settingsIndex.js";
 import InlineControl from "./InlineControl.vue";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 
@@ -274,12 +232,7 @@ const adding = reactive({}); // 在线条目 id → 添加到曲库中
 const toast = ref("");
 const toastErr = ref(false);
 
-const categories = SETTING_CATEGORIES;
 const expandedEntry = computed(() => settingsIndex.find((e) => e.id === expandedId.value) || null);
-
-function entriesOf(categoryKey) {
-  return settingsIndex.filter((e) => e.category === categoryKey);
-}
 
 // 当前快捷键显示（默认 ⌘K；录制值含 "Meta+" 前缀 → ⌘ 组合）
 const fmtSearchKey = computed(() => fmtShortcutKey(playbackSettings.searchKey));
@@ -550,9 +503,12 @@ onBeforeUnmount(() => {
 
 /* ============ 全屏搜索层 ============ */
 .sa-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 200; /* 高于顶栏(2)/弹窗(100)，盖住一切 */
+  /* !important：App.vue 的 `.app > :not(.bg-blur)`（specificity 0,3,0）会覆盖本组件 scoped
+     的 position:fixed（0,2,0）→ 遮罩变 relative 锚到底部，内容高度变化时整个搜索层位移
+     （2026-08-16 用户反馈“输入时搜索框位置跳动”的根因） */
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 200 !important; /* 高于顶栏(2)/弹窗(100)，盖住一切 */
   display: flex;
   justify-content: center;
   align-items: flex-start;
