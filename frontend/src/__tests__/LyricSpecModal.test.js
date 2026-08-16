@@ -386,6 +386,47 @@ describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
     expect(w.find(".paste-area").element.value).toBe("一行歌词"); // 原文本保留
     w.unmount();
   });
+
+  it("无粘贴文本时，自动用当前已加载歌词（state.lyric）对齐", async () => {
+    mockFetch();
+    let resolveAlign;
+    alignLyric.mockImplementation(() => new Promise((r) => (resolveAlign = r)));
+    // 模拟当前歌曲已加载歌词（在线拉取/本地文件）
+    state.lyric = [
+      { type: "line", s: 1, e: 5, text: ["夜に駆ける", "", ""] },
+      { type: "line", s: 6, e: 9, text: ["君と見た景色", "", ""] },
+    ];
+    const w = await openModal();
+    await nextTick();
+    // 不切粘贴 tab、不输入任何内容：按钮可直接点（foot 区通用按钮）
+    await waitFor(() => !w.find(".align-btn").attributes("disabled"));
+    await w.find(".align-btn").trigger("click");
+    await nextTick();
+    // 用当前歌词纯文本（日文原文拼接）调用 API
+    expect(alignLyric).toHaveBeenCalledWith({
+      path: SONG.path,
+      text: "夜に駆ける\n君と見た景色",
+    });
+    resolveAlign({ lrc: "[00:01.00]夜に駆ける\n[00:06.00]君と見た景色", lines: 2, duration: 30 });
+    await tick();
+    await nextTick();
+    // 自动切回粘贴 tab，结果填入粘贴区，可保存
+    expect(w.find(".paste-area").element.value).toContain("[00:01.00]夜に駆ける");
+    expect(w.find(".btn-primary").attributes("disabled")).toBeUndefined();
+    state.lyric = [];
+    w.unmount();
+  });
+
+  it("既无粘贴文本也无现有歌词 → 按钮禁用（无法对齐）", async () => {
+    mockFetch();
+    state.lyric = [];
+    const w = await openModal();
+    await nextTick();
+    await w.findAll(".spec-tab")[2].trigger("click"); // 切到粘贴 tab 也保持禁用
+    await nextTick();
+    expect(w.find(".align-btn").attributes("disabled")).toBeDefined();
+    w.unmount();
+  });
 });
 
 describe("LyricSpecModal 清除指定歌词（toast + 撤销）", () => {

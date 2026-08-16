@@ -30,6 +30,7 @@ export default {
     aligning: "AI 对齐中…",
     alignDone: "AI 对齐完成，请确认后保存",
     alignFailed: "AI 对齐失败，请检查音频与歌词内容",
+    alignUsesCurrent: "将使用当前已加载的歌词（{lines} 行）重新对齐时间轴，无需粘贴",
     footHint: "指定后优先使用该歌词（不受来源优先级影响），可随时清除恢复自动",
     searchTitleRequired: "请输入歌名",
     searchFailed: "搜索失败，请重试",

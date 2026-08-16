@@ -116,18 +116,6 @@
             :placeholder="t('spec.pastePlaceholder')"
             spellcheck="false"
           />
-          <div class="paste-tools">
-            <button
-              class="align-btn"
-              :disabled="aligning || !pasteText.trim()"
-              :title="t('spec.align')"
-              @click="doAlign"
-            >
-              <Loader2 v-if="aligning" :size="14" class="spin" />
-              <Sparkles v-else :size="14" />
-              {{ aligning ? t("spec.aligning") : t("spec.align") }}
-            </button>
-          </div>
           <div v-if="pasteText.trim()" class="paste-meta">
             {{ t("spec.detectFormatLabel")
             }}<b>{{ pasteFormat ? pasteFormat.toUpperCase() : t("spec.unrecognized") }}</b>
@@ -139,8 +127,24 @@
       </div>
 
       <div class="modal-foot">
-        <div class="foot-hint">{{ t("spec.footHint") }}</div>
+        <div class="foot-hint">
+          <template v-if="alignSourceText.trim() && !pasteText.trim()">
+            {{ t("spec.alignUsesCurrent", { lines: currentLyricLineCount }) }}
+          </template>
+          <template v-else>{{ t("spec.footHint") }}</template>
+        </div>
         <div class="foot-actions">
+          <!-- AI 对齐（通用区）：自动用当前已加载歌词；无歌词时用粘贴文本 -->
+          <button
+            class="align-btn"
+            :disabled="aligning || !alignSourceText.trim()"
+            :title="t('spec.align')"
+            @click="doAlign"
+          >
+            <Loader2 v-if="aligning" :size="14" class="spin" />
+            <Sparkles v-else :size="14" />
+            {{ aligning ? t("spec.aligning") : t("spec.align") }}
+          </button>
           <button v-if="manualSpecified" class="btn-danger" @click="clearSpec">
             <Trash2 :size="13" />{{ t("spec.clear") }}
           </button>
@@ -287,17 +291,33 @@ async function pickResult(r, i) {
 const pasteText = ref("");
 const pasteFormat = computed(() => (pasteText.value ? detectFormat(pasteText.value) : null));
 
-// ---- AI 对齐（粘贴 tab）：纯歌词文本 → 本地 ForcedAligner 生成时间戳 → 填入 LRC ----
+// ---- AI 对齐（通用区）：优先自动用当前已加载歌词（state.lyric），无歌词时用粘贴文本 ----
+// state.lyric 行结构：[{type:'line', s, e, text:[日文, 罗马音, 中文]}]；只取日文原文（text[0]）
+const currentLyricLineCount = computed(
+  () => (state.lyric || []).filter((l) => l.type === "line" && l.text?.[0]).length,
+);
+const alignSourceText = computed(() => {
+  if (pasteText.value.trim()) return pasteText.value; // 粘贴优先（用户主动粘的内容）
+  const lines = state.lyric || [];
+  return lines
+    .filter((l) => l.type === "line" && l.text?.[0])
+    .map((l) => l.text[0])
+    .join("\n");
+});
+
+// ---- AI 对齐：本地 ForcedAligner 生成时间戳 → 填入 LRC ----
 const aligning = ref(false);
 
 async function doAlign() {
-  if (aligning.value || !song.value || !pasteText.value.trim()) return;
+  const text = alignSourceText.value.trim();
+  if (aligning.value || !song.value || !text) return;
   aligning.value = true;
   try {
-    const data = await alignLyric({ path: song.value.path, text: pasteText.value });
+    const data = await alignLyric({ path: song.value.path, text });
     // 对齐耗时较长，期间用户可能已关弹窗/切歌：结果只在弹窗仍打开时填入
     if (!state.specLyricOpen || !song.value) return;
     pasteText.value = data.lrc; // 填入后 detectFormat 自动识别为 lrc，canSave 通过
+    tab.value = "paste"; // 切回粘贴 tab 展示结果（用户可能停在别的 tab）
     showToast(t("spec.alignDone"));
   } catch (err) {
     toastError(err.message || t("spec.alignFailed"));
@@ -782,10 +802,6 @@ watch(
 .paste-area:focus {
   border-color: var(--accent);
   outline: none;
-}
-.paste-tools {
-  display: flex;
-  align-items: center;
 }
 .align-btn {
   display: inline-flex;
