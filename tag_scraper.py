@@ -1,7 +1,10 @@
 """多源标签刮削：网易云 + MusicBrainz recording 搜索 + 封面 fallback 链
 
 - 网易云复用 netease_provider.search()（签名/返回结构不变）
-- MusicBrainz ws/2 recording 搜索（自定义 User-Agent，低频调用前 sleep 1s）
+- MusicBrainz ws/2 recording 搜索（自定义 User-Agent，低频调用前 sleep 1s）：
+  查询用 title 降级链（精确短语 → fuzzy → title 关键词，最多 3 阶段，任一阶段有结果即返回），
+  artist 不再是查询硬条件（文件 tag 歌手名与 MB 写法不一致——别名/繁简/大小写/标点/feat. 部分——
+  会导致整条查询 0 结果），改为结果排序加分（artist 归一化后相等/包含的排前面）
 - 封面 fallback 链：网易云 cover → iTunes Search API → Cover Art Archive → None，
   在 scrape 返回前补好，前端不感知 fallback
 - 任何外部源挂掉都不影响其他源：单源失败返回空数组，整体不抛异常
@@ -9,6 +12,7 @@
 测试通过注入 FakeClient / fake netease_search / sleep_fn 全 mock 网络。
 """
 
+import re
 from time import sleep as _sleep
 
 import httpx
@@ -21,6 +25,25 @@ COVERARTARCHIVE_FRONT = "https://coverartarchive.org/release/{mbid}/front"
 ITUNES_SEARCH_API = "https://itunes.apple.com/search"
 TIMEOUT = 10.0
 SEARCH_LIMIT = 20
+
+
+def _mb_query_stages(query: str) -> list[str]:
+    """MusicBrainz recording 查询降级链（title 优先，最多 3 个阶段）。
+
+    1. recording:"title" —— 精确短语（相关性最好）
+    2. recording:"title"~ —— Lucene fuzzy（抓拼写/大小写/标点/繁简差异）
+    3. title:title —— 关键词形式（最宽松兜底）
+
+    artist 故意不放进来：作为硬条件时，文件 tag 歌手名与 MB 写法不一致
+    （别名/繁简/大小写/标点/feat. 部分）会让整条查询 0 结果，
+    因此 artist 只参与结果排序加分（见 TagScraper._artist_matches）。
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    # 转义 Lucene 特殊字符：短语内容里只可能被引号/反斜杠破坏
+    esc = q.replace("\\", "\\\\").replace('"', '\\"')
+    return [f'recording:"{esc}"', f'recording:"{esc}"~', f"title:{esc}"]
 
 
 class TagScraper:
@@ -61,24 +84,60 @@ class TagScraper:
         return results
 
     # ---- MusicBrainz ----
+    def _mb_search(self, query: str, limit: int = SEARCH_LIMIT) -> list[dict]:
+        """MB recording 降级查询链：精确短语 → fuzzy → title 关键词。
+
+        任一阶段有结果即返回（不再降级）；异常（限流/网络挂）直接返回空，
+        不继续打下一个阶段（避免对不可用的 API 反复请求）。每阶段调用前 sleep 1s。
+        """
+        for mb_query in _mb_query_stages(query):
+            try:
+                self._sleep(1)
+                resp = self._client.get(
+                    MUSICBRAINZ_API,
+                    params={"query": mb_query, "fmt": "json", "limit": limit},
+                    headers={"User-Agent": MUSICBRAINZ_UA, "Accept": "application/json"},
+                )
+                resp.raise_for_status()
+                recordings = (resp.json() or {}).get("recordings") or []
+            except Exception:
+                return []
+            recordings = [r for r in recordings if isinstance(r, dict)]
+            if recordings:
+                return recordings
+        return []
+
+    @staticmethod
+    def _norm(s: str) -> str:
+        """artist 匹配用归一化：小写 + 去标点/空白/下划线（保留 CJK 等字母数字）"""
+        return re.sub(r"[\W_]+", "", (s or "").lower(), flags=re.UNICODE)
+
+    @classmethod
+    def _artist_matches(cls, credit: str, artist: str) -> bool:
+        """传入 artist 与 MB artist-credit 归一化后相等/互相包含 → 排序加分"""
+        if not artist:
+            return False
+        a, b = cls._norm(credit), cls._norm(artist)
+        return bool(a and b) and (a == b or a in b or b in a)
+
     def _scrape_musicbrainz(self, query: str, artist: str) -> list[dict]:
-        mb_query = f'recording:"{query}"'
+        """MB 搜索：title 降级链取结果；artist 仅用于排序加分（匹配的排前面，
+        MB score 序保持——Python sort 稳定）"""
+        recordings = self._mb_search(query)
         if artist:
-            mb_query += f' AND artist:"{artist}"'
-        try:
-            self._sleep(1)
-            resp = self._client.get(
-                MUSICBRAINZ_API,
-                params={"query": mb_query, "fmt": "json", "limit": SEARCH_LIMIT},
-                headers={"User-Agent": MUSICBRAINZ_UA, "Accept": "application/json"},
+            recordings = sorted(
+                recordings,
+                key=lambda rec: (
+                    0
+                    if self._artist_matches(
+                        self._join_artist_credit(rec.get("artist-credit") or []), artist
+                    )
+                    else 1
+                ),
             )
-            resp.raise_for_status()
-            recordings = (resp.json() or {}).get("recordings") or []
-        except Exception:
-            return []
         results = []
         for rec in recordings:
-            if not isinstance(rec, dict) or not rec.get("id") or not rec.get("title"):
+            if not rec.get("id") or not rec.get("title"):
                 continue
             release = next(
                 (r for r in (rec.get("releases") or []) if isinstance(r, dict) and r.get("id")),
@@ -139,24 +198,25 @@ class TagScraper:
         return None
 
     def _musicbrainz_release_mbid(self, title: str, artist: str) -> str | None:
-        """MusicBrainz 搜 recording，取第一个有 id 的 release MBID（低频 sleep 1s）"""
-        mb_query = f'recording:"{title}"'
+        """MusicBrainz 搜 recording，取第一个有 id 的 release MBID（封面 fallback）。
+        同样走 title 降级链（精确→fuzzy→关键词），artist 不作为硬条件；
+        artist 仅用于排序加分（匹配的 recording 先被取 release）。"""
+        recordings = self._mb_search(title, limit=5)
         if artist:
-            mb_query += f' AND artist:"{artist}"'
-        try:
-            self._sleep(1)
-            resp = self._client.get(
-                MUSICBRAINZ_API,
-                params={"query": mb_query, "fmt": "json", "limit": 5},
-                headers={"User-Agent": MUSICBRAINZ_UA, "Accept": "application/json"},
+            recordings = sorted(
+                recordings,
+                key=lambda rec: (
+                    0
+                    if self._artist_matches(
+                        self._join_artist_credit(rec.get("artist-credit") or []), artist
+                    )
+                    else 1
+                ),
             )
-            resp.raise_for_status()
-            for rec in (resp.json() or {}).get("recordings") or []:
-                for release in rec.get("releases") or []:
-                    if isinstance(release, dict) and release.get("id"):
-                        return release["id"]
-        except Exception:
-            pass
+        for rec in recordings:
+            for release in rec.get("releases") or []:
+                if isinstance(release, dict) and release.get("id"):
+                    return release["id"]
         return None
 
     def _coverartarchive_front(self, release_mbid: str) -> str | None:

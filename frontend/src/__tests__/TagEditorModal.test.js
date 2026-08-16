@@ -145,6 +145,61 @@ describe("TagEditorModal 自动刮削", () => {
     w.unmount();
   });
 
+  it("网易云与 MusicBrainz 两组候选各自独立容器渲染、互不串组（重叠修复回归）", async () => {
+    mockFetch({
+      scrape: () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({
+            query: "安静 周杰伦",
+            netease: [
+              {
+                id: "1",
+                title: "安静 (Live)",
+                artist: "周杰伦",
+                album: "演唱会",
+                cover: null,
+                duration: "04:30",
+              },
+              {
+                id: "2",
+                title: "安静",
+                artist: "周杰伦",
+                album: "范特西",
+                cover: null,
+                duration: "04:20",
+              },
+            ],
+            musicbrainz: [
+              { title: "安静", artist: "周杰伦", album: "范特西", cover: null, mbid: "m1" },
+            ],
+          }),
+        }),
+    });
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    let root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="scrape-btn"]').click();
+    await tick();
+    root = document.body.querySelector(".modal");
+    // 两个独立分组容器（并列兄弟），每组标题 + 自己的行
+    const groups = root.querySelectorAll(".candidates > .cand-group");
+    expect(groups.length).toBe(2);
+    expect(groups[0].querySelector(".cand-group-title").textContent).toBe("网易云");
+    expect(groups[0].querySelectorAll('[data-testid="cand-netease"]').length).toBe(2);
+    expect(groups[0].querySelectorAll('[data-testid="cand-musicbrainz"]').length).toBe(0);
+    expect(groups[1].querySelector(".cand-group-title").textContent).toBe("MusicBrainz");
+    expect(groups[1].querySelectorAll('[data-testid="cand-musicbrainz"]').length).toBe(1);
+    expect(groups[1].querySelectorAll('[data-testid="cand-netease"]').length).toBe(0);
+    // 全量行数与分组内一致（不重复渲染）
+    expect(root.querySelectorAll('[data-testid="cand-netease"]').length).toBe(2);
+    expect(root.querySelectorAll('[data-testid="cand-musicbrainz"]').length).toBe(1);
+    // 两组标题都渲染，行内容归属正确
+    expect(root.querySelectorAll(".cand-group-title")[0].textContent).toBe("网易云");
+    expect(root.querySelectorAll(".cand-group-title")[1].textContent).toBe("MusicBrainz");
+    w.unmount();
+  });
+
   it("两组都搜不到时显示空态文案（搜不到是正常）", async () => {
     mockFetch({
       scrape: () =>

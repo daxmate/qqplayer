@@ -522,12 +522,21 @@ onBeforeUnmount(() => {
    高度：桌面弹窗 max 680px 时正文可视约 534px，去掉封面/表单/刮削行后候选区约 340px；
    矮视口（<740px）跟随弹窗收缩（弹窗 max-height = 100dvh - 60px），
    因此取 min(340px, 100dvh - 400px) 恰好不触发外层 .tag-body 滚动。
-   移动端（<1024px 弹窗全屏 100dvh）同样限高可滚动，外层 .tag-body 兜底。 */
+   移动端（<1024px 弹窗全屏 100dvh）同样限高可滚动，外层 .tag-body 兜底。
+
+   ⚠️ flex 压缩陷阱（网易云/MusicBrainz 两组重叠根因）：
+   .candidates 是 flex column，.cand-group 默认 flex-shrink: 1 + min-height: 0，
+   候选多时两组会被压扁，而子项（.cand-item 固定高度）溢出组盒（overflow 默认 visible），
+   直接画到下一组/底栏上 → 两组视觉重叠。必须 flex-shrink: 0（且不要 min-height: 0），
+   让组保持完整高度，由 .candidates 的 overflow-y: auto 负责滚动。
+   .candidates 自身也 flex-shrink: 0：候选少时容器按内容自适应（两组都能完整露出），
+   候选多时顶到 max-height 内滚；超出弹窗正文时由外层 .tag-body 滚动兜底。 */
 .candidates {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  flex-shrink: 0; /* 防被 .tag-body 压缩（压缩会把下一组挤出可视区） */
   max-height: min(340px, calc(100dvh - 400px));
   overflow-y: auto;
 }
@@ -535,7 +544,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 0;
+  flex-shrink: 0; /* 防 flex 压缩：压缩后子项溢出会叠到下一组（重叠根因） */
 }
 .cand-group-title {
   font-size: 11px;

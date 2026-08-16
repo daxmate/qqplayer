@@ -81,9 +81,10 @@ CAA_URL = tag_scraper.COVERARTARCHIVE_FRONT.format(mbid="mb-rel-1")
 
 # ============ scrape 返回形状 ============
 def test_scrape_netease_shape_and_no_extra_fields():
-    """网易云候选只暴露契约 6 字段（无 level 等内部字段）；有 cover 不触发 fallback"""
+    """网易云候选只暴露契约 6 字段（无 level 等内部字段）；有 cover 不触发 fallback。
+    主 MB 搜索走降级链（3 阶段全空才算空），但不会因此触发 iTunes/CAA。"""
     scraper, client, _ = make_scraper(
-        gets=[FakeResponse({"recordings": []})],
+        gets=[FakeResponse({"recordings": []})] * 3,  # 精确/fuzzy/关键词三阶段全空
         netease_items=[NETEASE_ITEM],
     )
     result = scraper.scrape("安静", "周杰伦")
@@ -93,9 +94,157 @@ def test_scrape_netease_shape_and_no_extra_fields():
     cand = result["netease"][0]
     assert set(cand) == {"id", "title", "artist", "album", "cover", "duration"}
     assert cand["cover"] == NETEASE_ITEM["cover"]
-    # 唯一一次 HTTP 调用是主 MusicBrainz 搜索（网易云 cover 存在，不走 fallback）
-    assert len(client.calls) == 1
-    assert client.calls[0][0] == tag_scraper.MUSICBRAINZ_API
+    # 3 次 HTTP 调用全是主 MB 搜索降级链（网易云 cover 存在，不走 fallback）
+    assert len(client.calls) == 3
+    assert all(c[0] == tag_scraper.MUSICBRAINZ_API for c in client.calls)
+
+
+def test_mb_query_never_contains_artist_condition():
+    """降级链三个阶段的查询都不含 artist 硬条件（旧版 AND artist: 是刮削不全根因）"""
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": []})] * 3,
+        netease_items=[],
+    )
+    scraper._scrape_musicbrainz("安静", "周杰伦")
+    assert len(client.calls) == 3
+    for _, kw in client.calls:
+        q = kw["params"]["query"]
+        assert "artist:" not in q
+        assert "AND" not in q
+
+
+def _mb_queries(client):
+    """只取 MusicBrainz API 调用的查询串（CAA 调用无 params）"""
+    return [kw["params"]["query"] for url, kw in client.calls if url == tag_scraper.MUSICBRAINZ_API]
+
+
+def test_mb_exact_empty_fuzzy_hit():
+    """精确短语无结果 → 降级到 fuzzy 命中（首阶段有结果即停）"""
+    scraper, client, sleeps = make_scraper(
+        gets=[
+            FakeResponse({"recordings": []}),  # recording:"t" 无结果
+            FakeResponse({"recordings": [MB_RECORDING]}),  # recording:"t"~ 命中
+            FakeResponse(status_code=302),  # CAA front
+        ],
+        netease_items=[],
+    )
+    result = scraper._scrape_musicbrainz("安静", "周杰伦")
+    assert len(result) == 1
+    assert result[0]["mbid"] == "mb-rec-1"
+    assert _mb_queries(client) == ['recording:"安静"', 'recording:"安静"~']
+    assert sleeps == [1, 1]  # 每阶段调用前 sleep 1s
+
+
+def test_mb_exact_fuzzy_empty_title_keyword_hit():
+    """精确 + fuzzy 都无结果 → 降级到 title 关键词命中（最多 3 阶段）"""
+    scraper, client, sleeps = make_scraper(
+        gets=[
+            FakeResponse({"recordings": []}),
+            FakeResponse({"recordings": []}),
+            FakeResponse({"recordings": [MB_RECORDING]}),  # title:安静 命中
+            FakeResponse(status_code=302),  # CAA front
+        ],
+        netease_items=[],
+    )
+    result = scraper._scrape_musicbrainz("安静", "周杰伦")
+    assert len(result) == 1
+    assert _mb_queries(client) == ['recording:"安静"', 'recording:"安静"~', "title:安静"]
+    assert sleeps == [1, 1, 1]
+
+
+def test_mb_all_stages_empty_returns_empty():
+    """三阶段全空 → 空数组，且正好 3 次 MB 请求（不无限降级）"""
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": []})] * 3,
+        netease_items=[],
+    )
+    result = scraper._scrape_musicbrainz("安静", "周杰伦")
+    assert result == []
+    assert len(client.calls) == 3
+
+
+def test_mb_artist_mismatch_title_ok_has_results():
+    """artist 与 MB 写法不一致（别名/大小写/标点）但 title 对 → 有结果（旧版整条 0 结果）"""
+    scraper, client, _ = make_scraper(
+        gets=[
+            FakeResponse(
+                {
+                    "recordings": [
+                        {**MB_RECORDING, "artist-credit": [{"name": "Jay Chou"}]},
+                    ]
+                }
+            )
+        ],
+        netease_items=[],
+    )
+    result = scraper._scrape_musicbrainz("安静", "周杰伦")
+    assert len(result) == 1
+    assert result[0]["artist"] == "Jay Chou"
+    assert "artist" not in client.calls[0][1]["params"]["query"]
+
+
+def test_mb_artist_match_sort_bonus():
+    """artist 归一化后匹配的 recording 排前面（score 序保持），不匹配的排后面"""
+    rec_other = {
+        **MB_RECORDING,
+        "id": "mb-rec-other",
+        "artist-credit": [{"name": "Someone Else"}],
+        "releases": [{"id": "mb-rel-other", "title": "其他专辑"}],
+    }
+    rec_match = {
+        **MB_RECORDING,
+        "id": "mb-rec-match",
+        "artist-credit": [{"name": "jay chou"}],  # 传入 '周杰伦' 之外的匹配样例：'Jay Chou'
+        "releases": [{"id": "mb-rel-match", "title": "Fantasy"}],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[
+            FakeResponse({"recordings": [rec_other, rec_match]}),
+            FakeResponse(status_code=302),  # CAA mb-rel-other
+            FakeResponse(status_code=302),  # CAA mb-rel-match
+        ],
+        netease_items=[],
+    )
+    result = scraper._scrape_musicbrainz("安静", "Jay Chou")
+    assert [r["mbid"] for r in result] == ["mb-rec-match", "mb-rec-other"]
+
+
+def test_mb_release_mbid_degrades_without_artist():
+    """封面 fallback 的 release MBID 查询同样走降级链，artist 不是硬条件"""
+    scraper, client, _ = make_scraper(
+        gets=[
+            FakeResponse({"recordings": []}),
+            FakeResponse({"recordings": [MB_RECORDING]}),
+        ],
+        netease_items=[],
+    )
+    mbid = scraper._musicbrainz_release_mbid("安静", "周杰伦")
+    assert mbid == "mb-rel-1"
+    queries = [kw["params"]["query"] for _, kw in client.calls]
+    assert queries == ['recording:"安静"', 'recording:"安静"~']
+    assert all("artist" not in q for q in queries)
+
+
+def test_mb_norm_and_artist_matches():
+    """归一化匹配：大小写/标点/空白差异算匹配；空 artist 不匹配"""
+    assert TagScraper._norm("  Jay Chou! ") == "jaychou"
+    assert TagScraper._norm("周杰伦") == "周杰伦"
+    assert TagScraper._artist_matches("Jay Chou", "jaychou")
+    assert TagScraper._artist_matches("A feat. B", "A")  # 互相包含
+    assert TagScraper._artist_matches("周杰伦", "周杰伦")
+    assert not TagScraper._artist_matches("周杰倫", "周杰伦")  # 繁简差异：不加分但也不挡结果
+    assert not TagScraper._artist_matches("Someone Else", "")
+
+
+def test_mb_query_escapes_quotes_in_title():
+    """标题含引号/反斜杠时转义，不破坏 Lucene 短语语法"""
+    stages = tag_scraper._mb_query_stages('say "hi" \\ x')
+    assert stages == [
+        'recording:"say \\"hi\\" \\\\ x"',
+        'recording:"say \\"hi\\" \\\\ x"~',
+        'title:say \\"hi\\" \\\\ x',
+    ]
+    assert tag_scraper._mb_query_stages("   ") == []  # 空标题 → 无阶段
 
 
 def test_scrape_musicbrainz_shape_ua_and_sleep():
