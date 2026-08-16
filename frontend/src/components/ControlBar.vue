@@ -10,6 +10,8 @@
     </button>
     <!-- 进度条 -->
     <div class="progress-row">
+      <!-- 迷你频谱条（桌面端；移动端由 MobilePlayer 中部小频谱承担，避免重复） -->
+      <MiniSpectrum v-if="!isMobile" class="mini-spectrum-slot" />
       <span class="time">{{ fmt(state.currentTime) }}</span>
       <input
         v-if="state.duration > 0"
@@ -211,6 +213,7 @@ import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
 import { sleepTimerText } from "../composables/useSleepTimer.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import TagEditorModal from "./TagEditorModal.vue";
+import MiniSpectrum from "./MiniSpectrum.vue";
 import {
   togglePlay,
   nextSong,
@@ -358,6 +361,9 @@ function fmt(t) {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.mini-spectrum-slot {
+  margin-right: 2px; /* 与时间戳轻微拉开，频谱不贴死 */
 }
 .time {
   font-size: 12px;

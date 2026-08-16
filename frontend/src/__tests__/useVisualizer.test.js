@@ -64,6 +64,9 @@ const {
   drawPulse,
   drawMirror,
   drawParticle,
+  drawAmbient,
+  extractCoverColor,
+  _resetColorCache,
   FFT_SIZE,
   _resetVisualizer,
   _resetParticles,
@@ -487,5 +490,76 @@ describe("开关持久化", () => {
     loadPlaybackSettings();
     expect(playbackSettings.visualizerStyle).toBe("wave");
     playbackSettings.visualizerStyle = "bars";
+  });
+
+  it("任务 C：ambientEnabled / miniSpectrumEnabled 默认开启，写入 PLAYBACK_SETTINGS_KEY", async () => {
+    expect(playbackSettings.ambientEnabled).toBe(true);
+    expect(playbackSettings.miniSpectrumEnabled).toBe(true);
+    playbackSettings.ambientEnabled = false;
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    expect(saved.ambientEnabled).toBe(false);
+    playbackSettings.ambientEnabled = true;
+    await nextTick();
+  });
+});
+
+// ============ 任务 C：drawAmbient（氛围背景渲染器）============
+describe("drawAmbient（封面取色氛围背景）", () => {
+  it("播放中：双径向渐变光晕 + 呼吸/能量脉动（createRadialGradient + fillRect），不抛错", () => {
+    const g = fullCtx2d();
+    drawAmbient(g, 800, 400, {
+      color: "#3355aa",
+      color2: "#ff7e5f",
+      playing: true,
+      energy: 0.6,
+    });
+    expect(g.clearRect).toHaveBeenCalledWith(0, 0, 800, 400);
+    expect(g.createRadialGradient.mock.calls.length).toBe(2); // 主光晕 + 次级光晕
+    expect(g.fillRect.mock.calls.length).toBe(2); // 两层光晕铺满
+  });
+
+  it("暂停：能量 0 仍呼吸（不抛错）", () => {
+    const g = fullCtx2d();
+    expect(() => drawAmbient(g, 200, 100, { color: "#ff7e5f", color2: "#feb47b" })).not.toThrow();
+    expect(g.createRadialGradient).toHaveBeenCalled();
+    expect(g.fillRect).toHaveBeenCalled();
+  });
+
+  it("非法颜色回落默认强调色，不抛错", () => {
+    const g = fullCtx2d();
+    expect(() => drawAmbient(g, 100, 50, { color: "x", color2: "" })).not.toThrow();
+  });
+
+  it("极窄画布（<2px）直接返回不画（负半径防护）", () => {
+    const g = fullCtx2d();
+    drawAmbient(g, 0, 0, {});
+    expect(g.clearRect).toHaveBeenCalled();
+    expect(g.createRadialGradient).not.toHaveBeenCalled();
+  });
+});
+
+// ============ 任务 C：extractCoverColor（封面取色）============
+describe("extractCoverColor（封面取色）", () => {
+  it("空 src / 无 window → resolve(null)，不抛错", async () => {
+    _resetColorCache();
+    expect(await extractCoverColor("")).toBe(null);
+    expect(await extractCoverColor(null)).toBe(null);
+  });
+
+  it("同 src 并发调用共享同一 Promise（缓存，不重复建 Image）", () => {
+    _resetColorCache();
+    // jsdom 无资源加载 → 图片 onload/onerror 不触发，promise 挂起；缓存命中返回同一对象
+    const p1 = extractCoverColor("/api/cover?path=a");
+    const p2 = extractCoverColor("/api/cover?path=a");
+    expect(p1).toBe(p2);
+    expect(p1).toBeInstanceOf(Promise);
+  });
+
+  it("不同 src 各自独立（缓存按 src 区分）", () => {
+    _resetColorCache();
+    const p1 = extractCoverColor("/api/cover?path=a");
+    const p2 = extractCoverColor("/api/cover?path=b");
+    expect(p1).not.toBe(p2);
   });
 });

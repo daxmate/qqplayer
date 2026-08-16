@@ -9,6 +9,12 @@
 
 ### ✨ 新功能
 
+- **播放视觉化改版：封面取色氛围背景 + ControlBar 迷你频谱**（路线 C 混合方案）
+  - 主区域（封面与歌词之间）从 64px 频谱横条改为「封面取色氛围背景」：本地歌 /api/cover 同源 canvas 采样提取主色（饱和度加权平均，跳过灰/黑/白；网络封面 crossOrigin 失败 / 全灰图降级主题色 --accent），结果按 src 缓存；渲染为封面主色径向渐变光晕（双层，主光晕 + accent2 次级纵深光）+ 呼吸动画（透明度/半径随帧时钟正弦微动，暂停不"死"）+ 播放时低频能量律动（亮度/半径额外放大）；克制大面积、absolute 铺满 .center 背景层，不再画频谱条
+  - ControlBar 进度条左侧新增迷你频谱条（MiniSpectrum 组件，150×36px，桌面端；移动端由 MobilePlayer 中部小频谱承担避免重复）：沿用 6 样式渲染器 small 变体，bars 为频率分色渐变 + 峰值保持亮帽 + 圆角发光（路线 B 技法），半透明低调作"正在播放"节奏指示
+  - 设置面板：视觉化总开关下新增「氛围背景」「迷你频谱」两个子开关（sub-toggle 缩进样式）；6 样式 chips 语义变为「迷你频谱样式」（主区域已无样式概念）；settingsIndex 同步收录两个新开关
+  - 持久化：ambientEnabled / miniSpectrumEnabled 为前端本地持久化字段——后端 settings 白名单未收录，PUT 时被 _norm_namespace 丢弃，仅存 localStorage（PLAYBACK_SETTINGS_KEY），跨设备不同步（报告已说明）
+  - 测试：前端 +31（848 全绿，含 drawAmbient / extractCoverColor / MiniSpectrum / 子开关新用例）
 - **曲库列头点击排序**（第二批收尾）
   - 歌曲列表上方新增列头行「歌名 / 歌手 / 时长」，点击排序，三态循环：升序 → 降序 → 默认顺序（第三次点击回到曲库原始顺序）
   - 激活列头高亮（强调色）+ 方向箭头（↑/↓），切换列自动重置为升序

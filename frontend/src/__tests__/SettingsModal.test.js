@@ -37,6 +37,8 @@ function resolveKey(lang, key) {
 
 beforeEach(() => {
   playbackSettings.visualizerEnabled = true;
+  playbackSettings.ambientEnabled = true;
+  playbackSettings.miniSpectrumEnabled = true;
   playbackSettings.visualizerStyle = "bars";
   uiSettings.showCover = true;
   // 弹窗 watch(open) 会触发 loadLibrary / loadLibrarySettings（fetch），stub 掉
@@ -81,6 +83,51 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     row.click();
     await nextTick();
     expect(playbackSettings.visualizerEnabled).toBe(true);
+    w.unmount();
+  });
+
+  it("任务 C：总开关下显示「氛围背景 / 迷你频谱」子开关，点击各自切换", async () => {
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    const subRows = [...root.querySelectorAll(".sub-toggle-row")];
+    expect(subRows.length).toBe(2);
+    const ambientRow = subRows.find((el) => el.textContent.includes("氛围背景"));
+    const miniRow = subRows.find((el) => el.textContent.includes("迷你频谱"));
+    expect(ambientRow).toBeTruthy();
+    expect(miniRow).toBeTruthy();
+    // 默认开
+    expect(ambientRow.querySelector(".switch.on")).toBeTruthy();
+    expect(miniRow.querySelector(".switch.on")).toBeTruthy();
+    // 各自独立切换
+    ambientRow.click();
+    await nextTick();
+    expect(playbackSettings.ambientEnabled).toBe(false);
+    expect(ambientRow.querySelector(".switch.on")).toBeFalsy();
+    expect(playbackSettings.miniSpectrumEnabled).toBe(true); // 不受影响
+    miniRow.click();
+    await nextTick();
+    expect(playbackSettings.miniSpectrumEnabled).toBe(false);
+    w.unmount();
+  });
+
+  it("任务 C：迷你频谱关闭时样式 chips 隐藏（主开关仍开）", async () => {
+    playbackSettings.miniSpectrumEnabled = false;
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    expect(root.querySelector(".viz-style-grid")).toBeFalsy();
+    expect(root.querySelector(".sub-toggle-row")).toBeTruthy(); // 子开关仍在
+    w.unmount();
+  });
+
+  it("任务 C：主开关关闭 → 子开关与 chips 都隐藏", async () => {
+    playbackSettings.visualizerEnabled = false;
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    expect(root.querySelector(".viz-style-grid")).toBeFalsy();
+    expect(root.querySelector(".sub-toggle-row")).toBeFalsy();
     w.unmount();
   });
 });

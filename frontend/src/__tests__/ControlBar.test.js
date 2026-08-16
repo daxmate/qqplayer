@@ -26,7 +26,7 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const ControlBar = (await import("../components/ControlBar.vue")).default;
-const { state } = await import("../composables/usePlayer.js");
+const { state, playbackSettings } = await import("../composables/usePlayer.js");
 
 const SONG = { path: "/music/a.mp3", name: "A", artist: "X", album: "Y" };
 
@@ -37,6 +37,10 @@ beforeEach(() => {
     currentSong: null,
     lyricFormat: null,
   });
+  playbackSettings.visualizerEnabled = true;
+  playbackSettings.miniSpectrumEnabled = true;
+  // jsdom 无 canvas 2d → MiniSpectrum paint 静默返回（不抛错即可）
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ({ ok: true, json: async () => ({}) })),
@@ -44,8 +48,38 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.body.querySelectorAll(".modal-mask, .tag-toast").forEach((n) => n.remove());
+});
+
+describe("ControlBar 迷你频谱条（任务 C）", () => {
+  it("桌面端默认渲染迷你频谱（data-testid 存在且可见）", () => {
+    const w = mount(ControlBar);
+    const el = w.find('[data-testid="mini-spectrum"]');
+    expect(el.exists()).toBe(true);
+    expect(el.isVisible()).toBe(true);
+    w.unmount();
+  });
+
+  it("迷你频谱子开关关闭 → v-show 隐藏", async () => {
+    const w = mount(ControlBar);
+    playbackSettings.miniSpectrumEnabled = false;
+    await nextTick();
+    const el = w.find('[data-testid="mini-spectrum"]');
+    expect(el.exists()).toBe(true);
+    expect(el.element.style.display).toBe("none");
+    w.unmount();
+  });
+
+  it("视觉化总开关关闭 → 迷你频谱隐藏", async () => {
+    const w = mount(ControlBar);
+    playbackSettings.visualizerEnabled = false;
+    await nextTick();
+    const el = w.find('[data-testid="mini-spectrum"]');
+    expect(el.element.style.display).toBe("none");
+    w.unmount();
+  });
 });
 
 describe("ControlBar 歌曲编辑入口", () => {

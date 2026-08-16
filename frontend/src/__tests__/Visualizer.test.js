@@ -1,5 +1,6 @@
-// Visualizer 组件测试（频谱可视化）
-// 覆盖：渲染/降级（无 AudioContext 静默）、开关隐藏、播放态 rAF 绘制不抛错
+// Visualizer 组件测试（任务 C：主区域 = 封面取色氛围背景；small = 迷你频谱条）
+// 覆盖：氛围背景渲染/降级（无 AudioContext 静默）、开关隐藏、播放态 rAF 绘制不抛错、
+//       small 变体 6 样式分发（移动端 / 迷你频谱共用渲染器）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
@@ -29,7 +30,7 @@ vi.stubGlobal("Audio", FakeAudio);
 const Visualizer = (await import("../components/Visualizer.vue")).default;
 const { state, playbackSettings, PLAYBACK_SETTINGS_KEY, _resetEqGraph } =
   await import("../composables/usePlayer.js");
-const { _resetVisualizer, _resetParticles, _resetPeaks } =
+const { _resetVisualizer, _resetParticles, _resetPeaks, _resetColorCache } =
   await import("../composables/useVisualizer.js");
 
 // jsdom 无 canvas 2d 实现 → stub 一个假 2d context（并让绘制路径真实执行）
@@ -76,11 +77,15 @@ beforeEach(() => {
   _resetVisualizer();
   _resetParticles();
   _resetPeaks();
+  _resetColorCache();
   vi.stubGlobal("localStorage", localStorageStub);
   for (const k of Object.keys(lsStore)) delete lsStore[k];
   playbackSettings.visualizerEnabled = true;
+  playbackSettings.ambientEnabled = true;
+  playbackSettings.miniSpectrumEnabled = true;
   playbackSettings.visualizerStyle = "bars";
   state.isPlaying = false;
+  state.currentSong = null;
   fakeCtx = fakeCtx2d();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(fakeCtx);
 });
@@ -94,21 +99,20 @@ function mountViz(props = {}) {
   return mount(Visualizer, { props });
 }
 
-describe("Visualizer 渲染", () => {
-  it("默认渲染 canvas（无 AudioContext 静默降级，不抛错）", () => {
-    // 不 stub AudioContext：jsdom 无 → ensureAnalyser 返回 null → 画设计感静态态
+describe("Visualizer 主区域（氛围背景，任务 C）", () => {
+  it("默认渲染 canvas + ambient 类（无 AudioContext 静默降级，不抛错）", () => {
     const w = mountViz();
     expect(w.find('[data-testid="viz-canvas"]').exists()).toBe(true);
     expect(w.find('[data-testid="visualizer"]').isVisible()).toBe(true);
-    // 挂载即画一帧（圆角鼓包静态轮廓）
-    expect(fakeCtx.roundRect).toHaveBeenCalled();
+    expect(w.find(".visualizer.ambient").exists()).toBe(true);
+    // 挂载即画一帧：氛围背景走径向渐变光晕（不再画频谱条 roundRect）
+    expect(fakeCtx.createRadialGradient).toHaveBeenCalled();
+    expect(fakeCtx.roundRect).not.toHaveBeenCalled();
     w.unmount();
   });
 
   it("开关关闭 → v-show 隐藏画布", async () => {
     const w = mountViz();
-    // 注：jsdom 的 getComputedStyle 有缓存 bug——先查 visible 再改 inline style 会读到旧值，
-    // 所以隐藏断言直接查 v-show 实际写入的 inline style（比 isVisible 更贴近实现）
     playbackSettings.visualizerEnabled = false;
     await nextTick();
     const root = w.find('[data-testid="visualizer"]');
@@ -129,38 +133,58 @@ describe("Visualizer 渲染", () => {
     w.unmount();
   });
 
-  it("播放中启动 rAF 绘制，暂停停掉；全程不抛错", async () => {
+  it("氛围背景子开关关闭 → 主区域隐藏（总开关仍开）", async () => {
     const w = mountViz();
-    const drawsBefore = fakeCtx.roundRect.mock.calls.length;
+    expect(w.find('[data-testid="visualizer"]').isVisible()).toBe(true);
+    playbackSettings.ambientEnabled = false;
+    await nextTick();
+    const root = w.find('[data-testid="visualizer"]');
+    expect(root.element.style.display).toBe("none");
+    w.unmount();
+  });
+
+  it("播放中启动 rAF 绘制氛围背景（径向渐变 + 光晕填充），暂停停掉；全程不抛错", async () => {
+    const w = mountViz();
+    const drawsBefore = fakeCtx.createRadialGradient.mock.calls.length;
     state.isPlaying = true;
     await nextTick();
-    // 等一帧 rAF（jsdom 有 rAF）
-    await new Promise((r) => requestAnimationFrame(r));
-    expect(fakeCtx.roundRect.mock.calls.length).toBeGreaterThan(drawsBefore);
+    await new Promise((r) => requestAnimationFrame(r)); // 等一帧 rAF（jsdom 有 rAF）
+    expect(fakeCtx.createRadialGradient.mock.calls.length).toBeGreaterThan(drawsBefore);
+    expect(fakeCtx.fillRect).toHaveBeenCalled(); // 光晕铺满
     state.isPlaying = false;
     await nextTick();
     w.unmount();
   });
 
-  it("small 模式同样渲染（移动端）", () => {
-    const w = mountViz({ small: true });
-    expect(w.find('[data-testid="viz-canvas"]').exists()).toBe(true);
-    expect(w.find(".visualizer.small").exists()).toBe(true);
+  it("封面取色失败/未完成 → 降级主题色画光晕（不抛错，不依赖封面）", async () => {
+    // jsdom 中 Image 不加载（无资源加载器）→ 取色 promise 挂起 → 用 --accent 兜底
+    state.currentSong = { path: "/fake/song.mp3", name: "Fake" };
+    const w = mountViz();
+    await nextTick();
+    await new Promise((r) => requestAnimationFrame(r));
+    expect(fakeCtx.createRadialGradient).toHaveBeenCalled(); // 兜底色照常渲染
     w.unmount();
   });
 });
 
-describe("Visualizer 6 样式分发（任务 K）", () => {
+describe("Visualizer small（迷你频谱，移动端/渲染器共用）", () => {
+  it("small 模式同样渲染（移动端）+ 画频谱条", async () => {
+    const w = mountViz({ small: true });
+    expect(w.find('[data-testid="viz-canvas"]').exists()).toBe(true);
+    expect(w.find(".visualizer.small").exists()).toBe(true);
+    expect(w.find(".visualizer.ambient").exists()).toBe(false);
+    w.unmount();
+  });
+
   it.each(["bars", "radial", "wave", "pulse", "mirror", "particle"])(
     "样式 %s：播放中 rAF 绘制不抛错",
     async (s) => {
       playbackSettings.visualizerStyle = s;
-      const w = mountViz();
+      const w = mountViz({ small: true });
       state.isPlaying = true;
       await nextTick();
       await new Promise((r) => requestAnimationFrame(r)); // 等一帧 rAF
-      // 每种样式都调用了 clearRect（至少画了一帧），全程不抛错
-      expect(fakeCtx.clearRect).toHaveBeenCalled();
+      expect(fakeCtx.clearRect).toHaveBeenCalled(); // 每帧都画
       state.isPlaying = false;
       await nextTick();
       w.unmount();
@@ -168,7 +192,7 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
   );
 
   it("bars 样式：画圆角频谱条（roundRect 多次）", async () => {
-    const w = mountViz();
+    const w = mountViz({ small: true });
     state.isPlaying = true;
     await nextTick();
     await new Promise((r) => requestAnimationFrame(r));
@@ -180,7 +204,7 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
 
   it("radial 样式：走圆弧描边路径（arc/stroke）", async () => {
     playbackSettings.visualizerStyle = "radial";
-    const w = mountViz();
+    const w = mountViz({ small: true });
     state.isPlaying = true;
     await nextTick();
     await new Promise((r) => requestAnimationFrame(r));
@@ -191,9 +215,9 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
     w.unmount();
   });
 
-  it("wave 样式：读时域数据（getByteTimeDomainData）走折线", async () => {
+  it("wave 样式：读时域数据走波形路径（moveTo + lineTo）", async () => {
     playbackSettings.visualizerStyle = "wave";
-    const w = mountViz();
+    const w = mountViz({ small: true });
     state.isPlaying = true;
     await nextTick();
     await new Promise((r) => requestAnimationFrame(r));
@@ -204,11 +228,10 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
     w.unmount();
   });
 
-  it("暂停/无 analyser：各样式画静态不抛错（wave 画中线）", async () => {
+  it("暂停/无 analyser：各样式画静态不抛错", async () => {
     playbackSettings.visualizerStyle = "wave";
-    const w = mountViz();
-    // state.isPlaying 保持 false，无 analyser → drawWave 静态中线
-    expect(fakeCtx.moveTo).toHaveBeenCalled(); // 挂载首帧已画
+    const w = mountViz({ small: true });
+    expect(fakeCtx.moveTo).toHaveBeenCalled(); // 挂载首帧已画（静态正弦）
     playbackSettings.visualizerStyle = "radial";
     await nextTick();
     expect(() => w.find('[data-testid="viz-canvas"]')).toBeTruthy();
@@ -217,18 +240,28 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
 
   it("非法样式值回落默认 bars（画圆角条不抛错）", async () => {
     playbackSettings.visualizerStyle = "spiral";
-    const w = mountViz();
+    const w = mountViz({ small: true });
     state.isPlaying = true;
     await nextTick();
     await new Promise((r) => requestAnimationFrame(r));
-    // bars 用 roundRect 画条（radial/particle 用 arc/fill，wave 用 lineTo）
     expect(fakeCtx.roundRect.mock.calls.length).toBeGreaterThan(1);
-    expect(fakeCtx.arc).not.toHaveBeenCalled(); // 静态态无峰值亮帽
     state.isPlaying = false;
     await nextTick();
     w.unmount();
   });
 
+  it("迷你频谱子开关关闭 → small 隐藏（移动端对应 ControlBar 迷你频谱开关）", async () => {
+    const w = mountViz({ small: true });
+    expect(w.find('[data-testid="visualizer"]').isVisible()).toBe(true);
+    playbackSettings.miniSpectrumEnabled = false;
+    await nextTick();
+    const root = w.find('[data-testid="visualizer"]');
+    expect(root.element.style.display).toBe("none");
+    w.unmount();
+  });
+});
+
+describe("开关持久化", () => {
   it("visualizerStyle 切换写入 PLAYBACK_SETTINGS_KEY", async () => {
     localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
     playbackSettings.visualizerStyle = "pulse";
@@ -236,6 +269,19 @@ describe("Visualizer 6 样式分发（任务 K）", () => {
     const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
     expect(saved.visualizerStyle).toBe("pulse");
     playbackSettings.visualizerStyle = "bars";
+    await nextTick();
+  });
+
+  it("ambientEnabled / miniSpectrumEnabled 写入 PLAYBACK_SETTINGS_KEY（前端本地持久化）", async () => {
+    localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
+    playbackSettings.ambientEnabled = false;
+    playbackSettings.miniSpectrumEnabled = false;
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    expect(saved.ambientEnabled).toBe(false);
+    expect(saved.miniSpectrumEnabled).toBe(false);
+    playbackSettings.ambientEnabled = true;
+    playbackSettings.miniSpectrumEnabled = true;
     await nextTick();
   });
 });

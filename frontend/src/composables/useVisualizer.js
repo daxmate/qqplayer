@@ -715,3 +715,104 @@ export function _resetVisualizer() {
   attached = false;
   failed = false;
 }
+
+// ============ 封面取色（主区域氛围背景，任务 C）============
+// 从封面图提取主色：缩到 32px 采样，饱和度加权平均（跳过近灰/近黑/近白像素）。
+// 本地歌 /api/cover?path=（同源）canvas 直接读像素；网络图 coverUrl 需 crossOrigin=anonymous
+// （服务端要允许 CORS），跨域污染 / 404 / 全灰图 → null，调用方降级主题色 --accent。
+// 结果缓存（src → Promise<{r,g,b}|null>，失败也缓存，避免反复请求）。
+const colorCache = new Map();
+
+export function _resetColorCache() {
+  colorCache.clear();
+}
+
+// 异步提取封面主色；无 window（SSR）/空 src 直接 resolve(null)，不抛错。
+// 返回 { r, g, b }（0~255）或 null；缓存返回同一 Promise（同 src 并发共享，不重复建 Image）。
+export function extractCoverColor(src) {
+  if (typeof window === "undefined" || !src) return Promise.resolve(null);
+  if (colorCache.has(src)) return colorCache.get(src);
+  const p = new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous"; // 同源不受影响；跨域无 CORS 头时 onload 但 getImageData 抛错 → 降级
+    const done = (v) => resolve(v);
+    img.onload = () => {
+      try {
+        const size = 32;
+        const cv = document.createElement("canvas");
+        cv.width = size;
+        cv.height = size;
+        const g = cv.getContext("2d", { willReadFrequently: true });
+        if (!g) return done(null);
+        g.drawImage(img, 0, 0, size, size);
+        const d = g.getImageData(0, 0, size, size).data;
+        let r = 0;
+        let gg = 0;
+        let b = 0;
+        let wsum = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const rr = d[i];
+          const gv = d[i + 1];
+          const bv = d[i + 2];
+          const max = Math.max(rr, gv, bv);
+          const min = Math.min(rr, gv, bv);
+          const sat = max === 0 ? 0 : (max - min) / max;
+          const lum = 0.299 * rr + 0.587 * gv + 0.114 * bv;
+          if (sat < 0.12 || lum < 18 || lum > 242) continue; // 跳过灰/黑/白像素
+          const w = sat * (0.5 + lum / 255); // 饱和度优先 + 亮度微调
+          r += rr * w;
+          gg += gv * w;
+          b += bv * w;
+          wsum += w;
+        }
+        if (!wsum) return done(null); // 全灰/全暗图：无主色
+        done({ r: Math.round(r / wsum), g: Math.round(gg / wsum), b: Math.round(b / wsum) });
+      } catch {
+        done(null); // 跨域污染 getImageData 抛错 → 降级主题色
+      }
+    };
+    img.onerror = () => done(null);
+    img.src = src;
+  });
+  colorCache.set(src, p);
+  return p;
+}
+
+// ============ 主区域氛围背景渲染器（任务 C 混合方案）============
+// 封面主色径向光晕 + 呼吸动画（透明度/半径随 vizClock 正弦微动）+ 播放时低频能量律动。
+// 克制、大面积、低透明度：中心略偏上（视觉重心在封面），边缘全透明；不画频谱条（频谱移到 ControlBar）。
+// 统一签名 drawAmbient(ctx, w, h, opts)；opts = { color, color2, playing, energy }。
+// color = 封面主色（取色失败由组件降级 --accent）；energy = 低频均值 0~1（播放律动用，暂停 0）。
+export function drawAmbient(ctx, w, h, opts = {}) {
+  vizClock++;
+  ctx.clearRect(0, 0, w, h);
+  if (w < 2 || h < 2) return; // 极窄画布（初始化/收起）不画，避免负半径
+  const color = opts.color || "#ff7e5f";
+  const color2 = opts.color2 || "#feb47b";
+  const playing = !!opts.playing;
+  const energy = clamp01(opts.energy || 0);
+  // 呼吸：透明度/半径随 vizClock 正弦微动（暂停也活着，不"死"）
+  const breathe = 1 + 0.08 * Math.sin(vizClock * 0.028);
+  // 能量律动：播放时低频均值 → 光晕亮度/半径额外放大（峰值 ~35%）
+  const pulse = playing ? 0.72 + 0.36 * energy : 0;
+  const baseR = Math.max(w, h) * 0.62;
+  const cx = w * 0.5;
+  const cy = h * 0.4;
+  // 主光晕：封面主色，中心较亮 → 边缘全透明
+  const r1 = baseR * breathe * (1 + 0.16 * pulse);
+  const g1 = ctx.createRadialGradient(cx, cy, 1, cx, cy, r1);
+  g1.addColorStop(0, withAlpha(color, 0.5 * (0.5 + 0.5 * pulse)));
+  g1.addColorStop(0.55, withAlpha(color, 0.16 * (0.55 + 0.45 * pulse)));
+  g1.addColorStop(1, withAlpha(color, 0));
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+  // 次级光晕：accent2 偏右下（纵深层次，低透明度），呼吸同频
+  const cx2 = w * 0.78;
+  const cy2 = h * 0.68;
+  const r2 = baseR * 0.52 * breathe;
+  const g2 = ctx.createRadialGradient(cx2, cy2, 1, cx2, cy2, r2);
+  g2.addColorStop(0, withAlpha(color2, 0.22 * (0.5 + 0.5 * pulse)));
+  g2.addColorStop(1, withAlpha(color2, 0));
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+}

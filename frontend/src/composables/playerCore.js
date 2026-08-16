@@ -102,8 +102,13 @@ export const PLAYBACK_SETTINGS_DEFAULTS = {
   abVisual: true, // AB 循环区间可视化（起点 A / 终点 B 徽标 + 区间进度条）
   abLoopCountOn: true, // AB 循环计数（防走开安全阀）：B 句播完算一遍，满 N 遍停回 A 句首暂停
   abLoopMaxCount: 10, // AB 循环计数上限（1-20）
-  visualizerEnabled: true, // 频谱可视化开关（默认开；仅播放中活跃，暂停静止平线）
-  visualizerStyle: "bars", // 视觉化样式：'bars' 频谱条 | 'radial' 圆环 | 'wave' 波形 | 'pulse' 脉冲环 | 'mirror' 镜像 | 'particle' 粒子（见 VISUALIZER_STYLES）
+  visualizerEnabled: true, // 视觉化总开关（主区域氛围背景 + ControlBar 迷你频谱；仅播放中活跃，暂停呼吸静止）
+  visualizerStyle: "bars", // 迷你频谱样式：'bars' 频谱条 | 'radial' 圆环 | 'wave' 波形 | 'pulse' 脉冲环 | 'mirror' 镜像 | 'particle' 粒子（见 VISUALIZER_STYLES）
+  // 任务 C（混合方案）：主区域改封面取色氛围背景、频谱移入 ControlBar 迷你条。
+  // 注：ambientEnabled / miniSpectrumEnabled 为「前端本地持久化」字段——后端 settings 白名单未收录，
+  // PUT /api/settings 时会被 _norm_namespace 丢弃，仅存 localStorage（PLAYBACK_SETTINGS_KEY），跨设备不同步。
+  ambientEnabled: true, // 主区域氛围背景（封面取色光晕 + 呼吸/能量律动）
+  miniSpectrumEnabled: true, // ControlBar 迷你频谱条（桌面端进度条左侧；移动端对应 MobilePlayer 中间小频谱）
   sleepTimerOn: false, // 睡眠定时器开关（统一层持久化；运行中的倒计时不持久化，页面刷新即取消）
   sleepTimerMinutes: 30, // 睡眠定时器时长（分钟，chip 单选）
   streamStats: false, // 流媒体统计开关：true = 试听 / URL 播放计入播放统计（曲库网络条目始终计入）

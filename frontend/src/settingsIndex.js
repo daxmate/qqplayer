@@ -262,6 +262,30 @@ export const settingsIndex = [
     },
   },
   {
+    id: "ambientEnabled",
+    category: "playback",
+    subTab: null,
+    labelKey: "settings.ambient",
+    keywords: ["氛围背景", "光晕", "封面取色", "ambient", "呼吸"],
+    type: "toggle",
+    get: () => playbackSettings.ambientEnabled,
+    set: (v) => {
+      playbackSettings.ambientEnabled = v;
+    },
+  },
+  {
+    id: "miniSpectrumEnabled",
+    category: "playback",
+    subTab: null,
+    labelKey: "settings.miniSpectrum",
+    keywords: ["迷你频谱", "频谱条", "mini", "spectrum"],
+    type: "toggle",
+    get: () => playbackSettings.miniSpectrumEnabled,
+    set: (v) => {
+      playbackSettings.miniSpectrumEnabled = v;
+    },
+  },
+  {
     id: "visualizerStyle",
     category: "playback",
     subTab: null,

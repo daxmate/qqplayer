@@ -154,18 +154,51 @@
                       ><i
                     /></span>
                   </div>
-                  <!-- 视觉化 6 样式（任务 K）：chips 单选，跟随开关显示（同 EQ 预设模式） -->
-                  <div v-if="playbackSettings.visualizerEnabled" class="ext-grid viz-style-grid">
-                    <button
-                      v-for="s in VISUALIZER_STYLES"
-                      :key="s.id"
-                      class="ext-chip"
-                      :class="{ on: playbackSettings.visualizerStyle === s.id }"
-                      @click="playbackSettings.visualizerStyle = s.id"
+                  <template v-if="playbackSettings.visualizerEnabled">
+                    <!-- 主区域：封面取色氛围背景（任务 C 混合方案） -->
+                    <div
+                      class="sub-toggle-row"
+                      @click="playbackSettings.ambientEnabled = !playbackSettings.ambientEnabled"
                     >
-                      {{ t(s.labelKey) }}
-                    </button>
-                  </div>
+                      <div>
+                        <div class="setting-label sub">{{ t("settings.ambient") }}</div>
+                        <div class="setting-desc sub">{{ t("settings.ambientDesc") }}</div>
+                      </div>
+                      <span class="switch sm" :class="{ on: playbackSettings.ambientEnabled }">
+                        <i
+                      /></span>
+                    </div>
+                    <!-- ControlBar：迷你频谱条 -->
+                    <div
+                      class="sub-toggle-row"
+                      @click="
+                        playbackSettings.miniSpectrumEnabled = !playbackSettings.miniSpectrumEnabled
+                      "
+                    >
+                      <div>
+                        <div class="setting-label sub">{{ t("settings.miniSpectrum") }}</div>
+                        <div class="setting-desc sub">{{ t("settings.miniSpectrumDesc") }}</div>
+                      </div>
+                      <span class="switch sm" :class="{ on: playbackSettings.miniSpectrumEnabled }">
+                        <i
+                      /></span>
+                    </div>
+                    <!-- 6 样式 chips：现在语义 = ControlBar 迷你频谱样式（主区域已是氛围背景，不再有样式） -->
+                    <div
+                      v-if="playbackSettings.miniSpectrumEnabled"
+                      class="ext-grid viz-style-grid"
+                    >
+                      <button
+                        v-for="s in VISUALIZER_STYLES"
+                        :key="s.id"
+                        class="ext-chip"
+                        :class="{ on: playbackSettings.visualizerStyle === s.id }"
+                        @click="playbackSettings.visualizerStyle = s.id"
+                      >
+                        {{ t(s.labelKey) }}
+                      </button>
+                    </div>
+                  </template>
                 </div>
                 <div class="setting-item">
                   <div
@@ -2163,6 +2196,37 @@ onBeforeUnmount(() => {
   gap: 12px;
   cursor: pointer;
   padding: 2px 0;
+}
+/* 子开关（任务 C：氛围背景 / 迷你频谱）：缩进、小号字号、小号 switch */
+.sub-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  padding: 3px 0 3px 14px;
+  border-left: 2px solid var(--border);
+  margin-left: 2px;
+}
+.setting-label.sub {
+  font-size: 13px;
+}
+.setting-desc.sub {
+  font-size: 11.5px;
+}
+.switch.sm {
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+}
+.switch.sm i {
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+}
+.switch.sm.on i {
+  transform: translateX(18px);
 }
 .switch {
   flex-shrink: 0;

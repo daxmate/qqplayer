@@ -76,8 +76,9 @@
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
         <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
         <section class="center">
+          <!-- 氛围背景层（封面取色光晕，absolute 铺满 center；Cover/LyricPanel 在其上） -->
+          <Visualizer class="ambient-layer" />
           <Cover :song="state.currentSong" />
-          <Visualizer />
           <LyricPanel v-if="state.lyric.length" :lyric="state.lyric" :current="currentLineIndex" />
           <div v-else class="no-lyric">
             <Music2 :size="40" class="no-lyric-icon" />
@@ -570,12 +571,18 @@ onUnmounted(() => {
   background: var(--border);
 }
 .center {
+  position: relative; /* 氛围背景层 absolute 定位锚点（Visualizer ambient 模式铺满） */
   grid-area: center;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+/* 氛围背景层在底层；其余内容（封面/歌词/空态）抬升一层 */
+.center > :not(.ambient-layer) {
+  position: relative;
+  z-index: 1;
 }
 .controls {
   grid-area: controls;
