@@ -37,11 +37,15 @@ beforeEach(() => {
   (fetchOnlineSubtitles as ReturnType<typeof vi.fn>).mockResolvedValue(CUES);
   // jsdom 的 play()/pause() 是 noop 且 paused 只读 getter：
   // 用实例级 defineProperty 覆盖，让 paused 反映播放状态（play→false, pause→true）
-  playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
+  playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
+    this: HTMLMediaElement,
+  ) {
     Object.defineProperty(this, "paused", { value: false, writable: true, configurable: true });
     return Promise.resolve();
   });
-  pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) {
+  pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (
+    this: HTMLMediaElement,
+  ) {
     Object.defineProperty(this, "paused", { value: true, writable: true, configurable: true });
   });
 });
