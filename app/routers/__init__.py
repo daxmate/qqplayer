@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from . import (
     books,
+    dict,
     favorites,
     library,
     lyrics,
@@ -28,6 +29,7 @@ _ROUTER_MODULES = (
     tags,
     media,
     books,
+    dict,
 )
 
 

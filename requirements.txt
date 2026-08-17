@@ -10,3 +10,8 @@ pycryptodome
 qrcode
 pillow
 send2trash
+# 阅读器 V2 词典域：MDX/MDD 解析（readmdict 只读库，依赖 python-lzo；
+# python-lzo 本机编译：brew install lzo 后 LDFLAGS="-L$(brew --prefix lzo)/lib"
+# CPPFLAGS="-I$(brew --prefix lzo)/include" pip install python-lzo）
+readmdict
+python-lzo

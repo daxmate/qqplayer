@@ -825,6 +825,7 @@ def test_api_settings_get_all_namespaces():
         "player",
         "download",
         "books",
+        "dict",
     }
     # library 4 字段
     assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
@@ -1071,6 +1072,7 @@ def test_migrate_legacy_settings_idempotent():
         "player",
         "download",
         "books",
+        "dict",
     }
     state._settings = None
     backend.migrate_legacy_settings()  # 再跑一次
