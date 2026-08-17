@@ -568,6 +568,8 @@ watch(
 .kline.active .kline-num.ab-badge {
   background: linear-gradient(135deg, var(--green-grad1), var(--green));
   color: #fff;
+  /* 不跟随焦点句下移：A/B 徽标与普通数字标号保持同一水平线 */
+  margin-top: 6px;
 }
 .kp-empty {
   text-align: center;
