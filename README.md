@@ -3,6 +3,7 @@
 本地音乐播放器 + 跟唱练习器。FastAPI + Vue 3 + Vite。
 
 ![QQPlayer 界面](docs/screenshot.png)
+![QQPlayer 界面2](docs/screenshot2.png)
 
 ## 功能
 
