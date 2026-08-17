@@ -61,10 +61,15 @@ async def transcribe(media_path: str, language: str | None = None) -> list[dict]
 ```python
 class VideoProvider:
     name: str
-    def search(self, query: str, limit: int = 20) -> list[dict]: ...          # 搜索视频（yt-dlp 不支持搜索，需站点 API 或搜索页解析）
-    def get_stream(self, video_id: str) -> dict: ...                            # yt-dlp -g 拿直链，防盗链/时效由后端代理
-    def get_subtitles(self, video_id: str) -> list[dict] | None: ...            # yt-dlp 自动字幕（CC / auto-subs）
-    def download(self, url: str, dest: str) -> str: ...                         # yt-dlp 下载到本地曲库/视频库
+
+    def search(
+        self, query: str, limit: int = 20
+    ) -> list[dict]: ...  # 搜索视频（yt-dlp 不支持搜索，需站点 API 或搜索页解析）
+    def get_stream(self, video_id: str) -> dict: ...  # yt-dlp -g 拿直链，防盗链/时效由后端代理
+    def get_subtitles(
+        self, video_id: str
+    ) -> list[dict] | None: ...  # yt-dlp 自动字幕（CC / auto-subs）
+    def download(self, url: str, dest: str) -> str: ...  # yt-dlp 下载到本地曲库/视频库
 ```
 
 - **yt-dlp 调用方式**：`pip install yt-dlp` 进项目 venv（版本可锁），subprocess 调 CLI（`--dump-json` / `-g` / `--write-auto-subs`），输出 JSON 解析，稳定可靠；✅ 08-17 细节（coco 定）：锁版本后定期升级，网站改版会导致解析失效
