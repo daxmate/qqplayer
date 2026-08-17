@@ -2,7 +2,8 @@
 
 - ``VideoProvider``：name + resolve/search/get_stream/get_subtitles/download；
   search 默认抛 NotImplementedError（yt-dlp 不做搜索，B站 wbi 签名等搜索入口后置）。
-- ``BiliProvider``（B站）：get_stream 用 yt-dlp resolve 后选最佳合并格式直链；
+- ``BiliProvider``（B站）：get_stream 自动带 settings.video.bilibiliCookie（匿名拿不到
+  音视频合并格式，DASH 分离流无声）resolve 后选最佳合并格式直链；
   直链防盗链需要 Referer（由代理层经 stream_headers 附加）。
 - ``GenericProvider``（自定义源）：任意链接走 yt-dlp 通用解析（resolve 支持什么就返回什么）。
 
@@ -11,6 +12,7 @@
 
 from urllib.parse import urlparse
 
+from app.services import settings as settings_service
 from app.services import video_ytdlp
 
 
@@ -53,16 +55,24 @@ class GenericProvider(VideoProvider):
 
 
 class BiliProvider(VideoProvider):
-    """B站：get_stream 走 resolve 后选最佳合并格式直链（防盗链 Referer 由代理层附加）"""
+    """B站：get_stream 带 Cookie（来自设置）resolve 后选最佳合并格式直链；防盗链 Referer 由代理层附加"""
 
     name = "bilibili"
     display_name = "B站"
     _REFERER = "https://www.bilibili.com"
 
+    def _cookie(self) -> str:
+        """settings.video.bilibiliCookie：B站匿名拿不到音视频合并格式（DASH 分离流无声），带 Cookie 才有"""
+        return (settings_service.load_all_settings().get("video") or {}).get("bilibiliCookie") or ""
+
     def get_stream(self, url: str, format_hint: str | None = "best") -> str:
-        info = video_ytdlp.resolve(url)
+        cookie = self._cookie()
+        info = video_ytdlp.resolve(url, cookie=cookie)
         best = video_ytdlp.pick_best_format(info.get("formats") or [], format_hint)
-        return best["url"]
+        # 直链按所选 format_id 现取（带 cookie：直链可能也需要 cookie 校验，且比 resolve 里的 url 更新鲜）
+        return video_ytdlp.get_stream(
+            url, format_hint=best.get("format_id") or "best", cookie=cookie
+        )
 
     def stream_headers(self, url: str) -> dict:
         return {"Referer": self._REFERER}

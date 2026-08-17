@@ -289,6 +289,9 @@ _SETTINGS_SPEC = {
     "video": {
         # 本地视频目录（多目录字符串数组，空数组 = 未配置，/api/videos 返回空列表）
         "videoDirs": ([], _norm_str_array),
+        # B站 Cookie：匿名访问拿不到音视频合并格式（DASH 分离流无声），填 Cookie 后
+        # yt-dlp 解析可拿合并直链；空串 = 未设置；敏感信息只存本地 settings.json，不进日志/API 响应
+        "bilibiliCookie": ("", _norm_str),
     },
 }
 

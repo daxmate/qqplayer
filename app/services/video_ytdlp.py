@@ -54,12 +54,21 @@ def _stderr_summary(stderr: str) -> str:
     return text[:_STDERR_SUMMARY_LIMIT]
 
 
-def _run(args: list[str], timeout: float, what: str) -> subprocess.CompletedProcess:
-    """subprocess 边界：执行 yt-dlp CLI；非零退出/超时抛 RuntimeError（带 stderr 摘要）"""
+def _run(
+    args: list[str], timeout: float, what: str, cookie: str | None = None
+) -> subprocess.CompletedProcess:
+    """subprocess 边界：执行 yt-dlp CLI；非零退出/超时抛 RuntimeError（带 stderr 摘要）
+
+    cookie 非空时附加 ``--add-header "Cookie: <cookie>"``（list 传参，无 shell 注入；
+    值只进 subprocess argv，不进日志/错误信息/返回数据）。
+    """
     if not YTDLP_BIN:
         raise RuntimeError("未找到 yt-dlp CLI，请先 pip install yt-dlp")
+    cmd = [YTDLP_BIN, *args]
+    if cookie:
+        cmd += ["--add-header", f"Cookie: {cookie}"]
     try:
-        proc = subprocess.run([YTDLP_BIN, *args], capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"yt-dlp {what}超时（>{timeout:.0f}s）") from None
     except OSError as e:
@@ -69,9 +78,9 @@ def _run(args: list[str], timeout: float, what: str) -> subprocess.CompletedProc
     return proc
 
 
-def _dump_info(url: str, timeout: float, what: str) -> dict:
+def _dump_info(url: str, timeout: float, what: str, cookie: str | None = None) -> dict:
     """--dump-json 拿单个视频完整信息（--no-playlist，最后一个非空行为 JSON）"""
-    proc = _run(["--dump-json", "--no-playlist", "--no-warnings", url], timeout, what)
+    proc = _run(["--dump-json", "--no-playlist", "--no-warnings", url], timeout, what, cookie)
     lines = [ln for ln in proc.stdout.strip().splitlines() if ln.strip()]
     if not lines:
         raise RuntimeError(f"yt-dlp {what}失败: 输出为空")
@@ -84,13 +93,14 @@ def _dump_info(url: str, timeout: float, what: str) -> dict:
 # ============ 对外 API ============
 
 
-def resolve(url: str, timeout: float = RESOLVE_TIMEOUT) -> dict:
+def resolve(url: str, timeout: float = RESOLVE_TIMEOUT, cookie: str | None = None) -> dict:
     """解析单个视频（--no-playlist），返回元信息摘要 {title, webpage_url, duration, thumbnail, formats}。
 
     formats 为可播放格式摘要列表（只含有 url 的格式，字段：
     format_id/ext/height/width/fps/vcodec/acodec/note/filesize）。
+    cookie 可选：B站等站点匿名访问拿不到音视频合并格式（DASH 分离），带 Cookie 才有。
     """
-    info = _dump_info(url, timeout, "解析")
+    info = _dump_info(url, timeout, "解析", cookie)
     formats = []
     for f in info.get("formats") or []:
         if not f.get("url"):
@@ -126,11 +136,19 @@ def _select_format(format_hint: str | None) -> str:
     return hint
 
 
-def get_stream(url: str, format_hint: str | None = "best", timeout: float = STREAM_TIMEOUT) -> str:
-    """yt-dlp -g -f <format> 拿播放直链（第一行）；直链有时效，失效需重新调用"""
+def get_stream(
+    url: str,
+    format_hint: str | None = "best",
+    timeout: float = STREAM_TIMEOUT,
+    cookie: str | None = None,
+) -> str:
+    """yt-dlp -g -f <format> 拿播放直链（第一行）；直链有时效，失效需重新调用
+
+    cookie 可选：直链生成带 Cookie（部分站点直链校验 cookie）。
+    """
     fmt = _select_format(format_hint)
     proc = _run(
-        ["--get-url", "-f", fmt, "--no-playlist", "--no-warnings", url], timeout, "直链获取"
+        ["--get-url", "-f", fmt, "--no-playlist", "--no-warnings", url], timeout, "直链获取", cookie
     )
     lines = [ln for ln in proc.stdout.strip().splitlines() if ln.strip()]
     if not lines:
@@ -165,13 +183,15 @@ def pick_best_format(formats: list[dict], format_hint: str | None = "best") -> d
     return max(pool, key=_key)
 
 
-def get_subtitles(url: str, timeout: float = SUBS_TIMEOUT) -> list[dict] | None:
+def get_subtitles(
+    url: str, timeout: float = SUBS_TIMEOUT, cookie: str | None = None
+) -> list[dict] | None:
     """可用字幕列表 [{lang, name, url, data, automatic}]（站点字幕 + 自动生成字幕）；无字幕返回 None
 
     data：部分站点（如 B站 CC）字幕内容由 yt-dlp 内嵌（SRT 文本）而非独立 url，
-    有 data 时无需再拉取字幕文件。
+    有 data 时无需再拉取字幕文件。cookie 可选：部分站点字幕接口需登录态。
     """
-    info = _dump_info(url, timeout, "字幕获取")
+    info = _dump_info(url, timeout, "字幕获取", cookie)
     subs: list[dict] = []
     for automatic, source in (
         (False, info.get("subtitles")),

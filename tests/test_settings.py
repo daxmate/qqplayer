@@ -182,3 +182,34 @@ def test_books_last_read_id_valid_preserved():
     assert s["lastReadId"] == "abc123"
     # 清理：恢复空值，避免影响其他用例
     client.put("/api/settings", json={"books": {"lastReadId": ""}})
+
+
+# ============ video.bilibiliCookie（B站 Cookie）============
+def test_video_bilibili_cookie_default():
+    """video.bilibiliCookie 默认空串（未设置），随 GET /api/settings 返回"""
+    s = client.get("/api/settings").json()["settings"]["video"]
+    assert s["bilibiliCookie"] == ""
+
+
+def test_video_bilibili_cookie_invalid_falls_back():
+    """非字符串值回落默认空串（cookie 只接受字符串；空串 = 未设置）"""
+    for bad in (123, None, ["SESSDATA=x"], True, {"c": "x"}):
+        s = client.put("/api/settings", json={"video": {"bilibiliCookie": bad}}).json()["settings"][
+            "video"
+        ]
+        assert s["bilibiliCookie"] == "", f"bilibiliCookie={bad!r} 应回落默认"
+
+
+def test_video_bilibili_cookie_valid_preserved():
+    """合法字符串保留并落盘持久化（模拟重启后仍读到）"""
+    cookie = "SESSDATA=abc123; bili_jct=def456; DedeUserID=10000"
+    s = client.put("/api/settings", json={"video": {"bilibiliCookie": cookie}}).json()["settings"][
+        "video"
+    ]
+    assert s["bilibiliCookie"] == cookie
+    # 模拟重启：重置缓存后仍读到持久化值
+    state._settings = None
+    s = client.get("/api/settings").json()["settings"]["video"]
+    assert s["bilibiliCookie"] == cookie
+    # 清理：恢复空值，避免影响其他用例
+    client.put("/api/settings", json={"video": {"bilibiliCookie": ""}})

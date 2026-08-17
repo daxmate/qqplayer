@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
+from app import state  # noqa: E402
 from app.routers import video_online  # noqa: E402
 from app.services import video_providers as vp  # noqa: E402
 from app.services import video_ytdlp  # noqa: E402
@@ -34,6 +35,15 @@ GENERIC_URL = "https://example.com/watch?v=abc123"
 def _ytdlp_bin(monkeypatch):
     """固定 CLI 查找结果：subprocess 全部 mock，不依赖环境是否安装 yt-dlp（CI 无 yt-dlp 也能跑）"""
     monkeypatch.setattr(video_ytdlp, "YTDLP_BIN", "/usr/bin/false")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings(tmp_path, monkeypatch):
+    """设置存储隔离：BiliProvider 从 settings 读 bilibiliCookie，测试不碰真实用户 settings.json"""
+    monkeypatch.setattr(state, "SETTINGS_FILE", tmp_path / "settings.json")
+    state._settings = None
+    yield
+    state._settings = None
 
 
 SAMPLE_INFO = {
@@ -130,8 +140,8 @@ def fake_run(monkeypatch):
     """mock video_ytdlp._run：记录调用，返回可配置 FakeProc（state[\"proc\"] 可为 callable）"""
     state = {"calls": [], "proc": FakeProc()}
 
-    def run_fn(args, timeout, what):
-        state["calls"].append((args, timeout, what))
+    def run_fn(args, timeout, what, cookie=None):
+        state["calls"].append((args, timeout, what, cookie))
         if callable(state["proc"]):
             return state["proc"](args, timeout, what)
         return state["proc"]
@@ -143,9 +153,11 @@ def fake_run(monkeypatch):
 @pytest.fixture
 def fake_ytdlp_fns(monkeypatch):
     """mock 路由依赖的 video_ytdlp 三个顶层函数（resolve/get_stream/get_subtitles）"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url: dict(SAMPLE_INFO))
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
     monkeypatch.setattr(
-        video_ytdlp, "get_stream", lambda url, format_hint="best": "http://up.test/1080.mp4"
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: "http://up.test/1080.mp4",
     )
     monkeypatch.setattr(
         video_ytdlp,
@@ -229,6 +241,66 @@ def test_get_stream_custom_hint(fake_run):
     video_ytdlp.get_stream(BILI_URL, format_hint="32")
     args = fake_run["calls"][0][0]
     assert args[2] == "32"
+
+
+# ============ video_ytdlp cookie 传参（--add-header）============
+
+
+@pytest.fixture
+def fake_subprocess_run(monkeypatch):
+    """mock video_ytdlp.subprocess.run：记录真实 cmd（走真实 _run，验证 --add-header 拼装）"""
+    state = {"calls": [], "proc": FakeProc()}
+
+    def run_fn(cmd, **kw):
+        state["calls"].append(cmd)
+        return state["proc"]
+
+    monkeypatch.setattr(video_ytdlp.subprocess, "run", run_fn)
+    return state
+
+
+def test_ytdlp_get_stream_with_cookie(fake_subprocess_run):
+    """get_stream 带 cookie → subprocess cmd 尾部含 --add-header "Cookie: <cookie>"（list 传参无 shell 注入）"""
+    fake_subprocess_run["proc"] = FakeProc(stdout="http://up.test/1080.mp4\n")
+    url = video_ytdlp.get_stream(BILI_URL, cookie="SESSDATA=abc123; bili_jct=def")
+    assert url == "http://up.test/1080.mp4"
+    cmd = fake_subprocess_run["calls"][0]
+    assert cmd[0] == "/usr/bin/false"  # YTDLP_BIN 固定假路径
+    assert cmd[-2] == "--add-header"
+    assert cmd[-1] == "Cookie: SESSDATA=abc123; bili_jct=def"
+    # list 传参：cookie 是独立 argv 元素（无 shell 拼接），且整条命令只有这一处出现
+    assert cmd.count("Cookie: SESSDATA=abc123; bili_jct=def") == 1
+
+
+def test_ytdlp_get_stream_without_cookie_no_header(fake_subprocess_run):
+    """不带 cookie → subprocess cmd 无 --add-header（空串/None 都不加）"""
+    for cookie in (None, ""):
+        fake_subprocess_run["calls"].clear()
+        fake_subprocess_run["proc"] = FakeProc(stdout="http://up.test/1080.mp4\n")
+        video_ytdlp.get_stream(BILI_URL, cookie=cookie)
+        cmd = fake_subprocess_run["calls"][0]
+        assert "--add-header" not in cmd, f"cookie={cookie!r} 不应加头"
+        assert not any("Cookie:" in a for a in cmd), f"cookie={cookie!r} 不应出现 Cookie 头"
+
+
+def test_ytdlp_resolve_with_cookie(fake_subprocess_run):
+    """resolve 带 cookie → --dump-json 调用附加 Cookie 头"""
+    fake_subprocess_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    info = video_ytdlp.resolve(BILI_URL, cookie="SESSDATA=abc123")
+    assert info["title"] == "测试视频"
+    cmd = fake_subprocess_run["calls"][0]
+    assert cmd[0] == "/usr/bin/false"  # YTDLP_BIN 固定假路径
+    assert cmd[1] == "--dump-json"
+    assert cmd[-2] == "--add-header" and cmd[-1] == "Cookie: SESSDATA=abc123"
+
+
+def test_ytdlp_get_subtitles_with_cookie(fake_subprocess_run):
+    """get_subtitles 带 cookie → 附加 Cookie 头"""
+    fake_subprocess_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    subs = video_ytdlp.get_subtitles(BILI_URL, cookie="SESSDATA=abc123")
+    assert subs is not None and subs[0]["lang"] == "zh-Hans"
+    cmd = fake_subprocess_run["calls"][0]
+    assert cmd[-2] == "--add-header" and cmd[-1] == "Cookie: SESSDATA=abc123"
 
 
 def test_get_stream_empty_output_raises(fake_run):
@@ -413,11 +485,56 @@ def test_provider_search_not_implemented():
 
 
 def test_bili_provider_stream_uses_resolve_pick(monkeypatch, fake_run):
-    """B站 get_stream：resolve 后选最佳合并格式直链（-g 不被调用）"""
-    fake_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    """B站 get_stream：resolve 拿格式信息（--dump-json）→ pick 最佳合并格式 → get_stream -f <id> 现取直链"""
+
+    def proc(args, timeout, what):
+        if args[0] == "--dump-json":
+            return FakeProc(stdout=json.dumps(SAMPLE_INFO))
+        return FakeProc(stdout="http://up.test/1080.mp4\n")
+
+    fake_run["proc"] = proc
     url = vp.get_provider("bilibili").get_stream(BILI_URL)
     assert url == "http://up.test/1080.mp4"
     assert fake_run["calls"][0][0][0] == "--dump-json"
+    # 第二次调用：--get-url -f <最佳合并 format_id>
+    args2 = fake_run["calls"][1][0]
+    assert args2[0] == "--get-url"
+    assert args2[args2.index("-f") + 1] == "80"
+
+
+def test_bili_provider_stream_with_settings_cookie(fake_run):
+    """settings.video.bilibiliCookie 已设置 → resolve 与 get_stream 两次调用都自动把 cookie 传给 _run"""
+    state._settings = {"video": {"bilibiliCookie": "SESSDATA=abc; bili_jct=def"}}
+
+    def proc(args, timeout, what):
+        if args[0] == "--dump-json":
+            return FakeProc(stdout=json.dumps(SAMPLE_INFO))
+        return FakeProc(stdout="http://up.test/1080.mp4\n")
+
+    fake_run["proc"] = proc
+    url = vp.get_provider("bilibili").get_stream(BILI_URL)
+    assert url == "http://up.test/1080.mp4"
+    assert len(fake_run["calls"]) == 2  # resolve(--dump-json) + get_stream(--get-url)
+    for i, (_args, _, _, cookie) in enumerate(fake_run["calls"]):
+        assert cookie == "SESSDATA=abc; bili_jct=def", f"第 {i} 次调用应带 cookie"
+    # resolve 调用不带 --add-header（那是 _run 内部拼装的，由 fake_subprocess_run 用例覆盖）
+    assert "--add-header" not in fake_run["calls"][0][0]
+
+
+def test_bili_provider_stream_no_cookie_when_unset(fake_run):
+    """settings 未设置 cookie（空串）→ 传给 _run 的 cookie 为空，不加头"""
+    state._settings = {"video": {"bilibiliCookie": ""}}
+
+    def proc(args, timeout, what):
+        if args[0] == "--dump-json":
+            return FakeProc(stdout=json.dumps(SAMPLE_INFO))
+        return FakeProc(stdout="http://up.test/1080.mp4\n")
+
+    fake_run["proc"] = proc
+    vp.get_provider("bilibili").get_stream(BILI_URL)
+    for args, _, _, cookie in fake_run["calls"]:
+        assert cookie in (None, ""), "未设置 cookie 时不应传值"
+        assert "--add-header" not in args
 
 
 def test_bili_provider_referer_header():
@@ -527,9 +644,11 @@ def fake_proxy_stream(monkeypatch):
 
 def test_stream_ok_range_206(fake_proxy_stream, monkeypatch):
     """Range 透传 + 206 + content-range/accept-ranges 透传；UA 头默认带"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url: dict(SAMPLE_INFO))
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
     monkeypatch.setattr(
-        video_ytdlp, "get_stream", lambda url, format_hint="best": "http://up.test/1080.mp4"
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: "http://up.test/1080.mp4",
     )
     fake_proxy_stream["resp"] = _FakeUpstream(
         chunks=[b"x" * 1024],
@@ -557,9 +676,9 @@ def test_stream_403_retry_once(fake_proxy_stream, monkeypatch):
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best": f"http://up.test/{calls['n']}.mp4",
+        lambda url, format_hint="best", cookie=None: f"http://up.test/{calls['n']}.mp4",
     )
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url: dict(SAMPLE_INFO))
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
 
     def resp_fn():
         calls["n"] += 1
@@ -579,9 +698,11 @@ def test_stream_403_retry_once(fake_proxy_stream, monkeypatch):
 def test_stream_403_twice_502(fake_proxy_stream, monkeypatch):
     """重试后仍 403 → 502"""
     monkeypatch.setattr(
-        video_ytdlp, "get_stream", lambda url, format_hint="best": "http://up.test/x.mp4"
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: "http://up.test/x.mp4",
     )
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url: dict(SAMPLE_INFO))
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
     fake_proxy_stream["resp"] = lambda: _FakeUpstream(status_code=403, error=_status_error(403))
     r = client.get("/api/video-online/stream", params={"url": BILI_URL})
     assert r.status_code == 502
@@ -591,9 +712,11 @@ def test_stream_403_twice_502(fake_proxy_stream, monkeypatch):
 def test_stream_connect_error_502(fake_proxy_stream, monkeypatch):
     """上游连接失败（httpx.stream 抛错）→ 502"""
     monkeypatch.setattr(
-        video_ytdlp, "get_stream", lambda url, format_hint="best": "http://up.test/x.mp4"
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: "http://up.test/x.mp4",
     )
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url: dict(SAMPLE_INFO))
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
 
     def boom(method, url, **kw):
         raise httpx.ConnectError("connection refused")
@@ -615,9 +738,11 @@ def test_stream_bad_url_400(fake_proxy_stream):
 
 def test_stream_bilibili_referer(fake_proxy_stream, monkeypatch):
     """B站直链代理附加 Referer: https://www.bilibili.com（host 自动推断 provider）"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url: dict(SAMPLE_INFO))
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
     monkeypatch.setattr(
-        video_ytdlp, "get_stream", lambda url, format_hint="best": "http://up.test/bili.mp4"
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: "http://up.test/bili.mp4",
     )
     fake_proxy_stream["resp"] = _FakeUpstream(chunks=b"b", headers={"content-type": "video/mp4"})
     r = client.get("/api/video-online/stream", params={"url": BILI_URL})
