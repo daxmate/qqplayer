@@ -32,6 +32,14 @@
             <BookOpen :size="13" />
             {{ t("app.mode.books") }}
           </button>
+          <button
+            class="tab"
+            :class="{ on: state.mode === 'videos' }"
+            @click="switchMode('videos')"
+          >
+            <Video :size="13" />
+            {{ t("app.mode.videos") }}
+          </button>
         </div>
         <div class="topbar-search">
           <SearchAnything entry />
@@ -134,6 +142,20 @@
         </button>
       </main>
 
+      <!-- 主体：视频模式（视频库/播放器；ControlBar 保留，背景音乐可继续播） -->
+      <main v-else-if="state.mode === 'videos'" class="main videos">
+        <VideosView class="videos-area" />
+        <ControlBar v-show="!state.controlsHidden" class="panel controls" />
+        <button
+          v-if="state.controlsHidden"
+          class="expand-controls-btn"
+          :title="t('app.expandControls')"
+          @click="toggleControls()"
+        >
+          <ChevronUp :size="18" />
+        </button>
+      </main>
+
       <!-- 主体：图书模式（书架/阅读器；ControlBar 保留，背景音乐可继续播） -->
       <main v-else class="main books">
         <BooksView class="books-area" />
@@ -190,6 +212,7 @@ import {
   PictureInPicture2,
   Upload,
   BookOpen,
+  Video,
 } from "@lucide/vue";
 import Playlist from "./components/Playlist.vue";
 import Sidebar from "./components/Sidebar.vue";
@@ -203,6 +226,7 @@ import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import SearchAnything from "./components/SearchAnything.vue";
 import BooksView from "./books/BooksView.vue";
+import VideosView from "./videos/VideosView.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
@@ -563,6 +587,18 @@ onUnmounted(() => {
   position: relative;
 }
 .books-area {
+  flex: 1;
+  min-height: 0;
+}
+/* 视频模式：与图书一致（视频库/播放器 + 底部控制条） */
+.main.videos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  position: relative;
+}
+.videos-area {
   flex: 1;
   min-height: 0;
 }

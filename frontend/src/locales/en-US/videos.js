@@ -1,0 +1,26 @@
+// 视频模块（英文包；其余命名空间回退 zh-CN fallbackLocale）
+export default {
+  videos: {
+    title: "Videos",
+    loadFile: "Load file",
+    loadDone: 'Loaded "{name}" — playing locally (not added to library)',
+    loadInvalid: "Please pick a video file",
+    empty: "No videos in library",
+    emptyHint: 'Click "Load file" to play a local video, or wait for the backend library',
+    loadError: "Failed to load video library",
+    back: "Back",
+    subCount: "{n} cues",
+    subEmpty: "No subtitles",
+    subLoadError: "Failed to load subtitles",
+    playPause: "Play / Pause",
+    prevLine: "Previous line",
+    nextLine: "Next line",
+    speed: "Speed",
+    karaoke: "Follow",
+    karaokeToggle: "Follow-pause (auto stop at each line end)",
+    singleLine: "Loop line",
+    abHint: "Click: loop current line; long-press: AB loop (needs follow on)",
+    abWaitEnd: "AB loop: start line {n}, click a subtitle to pick end (click to exit)",
+    abSet: "AB loop: lines {a} ~ {b} (click to exit)",
+  },
+};

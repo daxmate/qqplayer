@@ -20,6 +20,7 @@ import search from "./search.js";
 import importMessages from "./import.js";
 import queue from "./queue.js";
 import books from "./books.js";
+import videos from "./videos.js";
 
 export default {
   ...common,
@@ -41,4 +42,5 @@ export default {
   ...importMessages,
   ...queue,
   ...books,
+  ...videos,
 };

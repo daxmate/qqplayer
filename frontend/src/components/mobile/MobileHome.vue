@@ -131,6 +131,17 @@
           </span>
         </button>
 
+        <!-- 视频入口：视频库 + 跟唱播放器 -->
+        <button class="mh-card" @click="$emit('open', { name: 'videos' })">
+          <span class="mh-tile" style="--tile: #f43f5e; --tile2: #fb7185">
+            <Video :size="22" />
+          </span>
+          <span class="mh-card-meta">
+            <span class="mh-card-name">{{ t("mobile.home.videos") }}</span>
+            <span class="mh-card-count">{{ t("videos.title") }}</span>
+          </span>
+        </button>
+
         <!-- 智能视图入口：最近添加 / 最近播放 / 常听排行 -->
         <button class="mh-card" @click="openSmartView('recentAdded')">
           <span class="mh-tile" style="--tile: #06b6d4; --tile2: #22d3ee">
@@ -207,6 +218,7 @@ import {
   TrendingUp,
   RefreshCw,
   BookOpen,
+  Video,
 } from "@lucide/vue";
 import { state, isFavorite, loadSongs } from "../../composables/usePlayer.js";
 import { useSearchAnything } from "../../composables/useSearchAnything.js";

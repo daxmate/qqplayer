@@ -19,6 +19,7 @@
         @open="push"
       />
       <MobileBooks v-else-if="top.name === 'books'" :key="'books-' + stack.length" @back="pop" />
+      <MobileVideos v-else-if="top.name === 'videos'" :key="'videos-' + stack.length" @back="pop" />
       <div v-else key="void" class="mp-void"></div>
     </Transition>
 
@@ -40,6 +41,7 @@ import MobileHome from "./MobileHome.vue";
 import MobileList from "./MobileList.vue";
 import MobilePlayer from "./MobilePlayer.vue";
 import MobileBooks from "../../books/MobileBooks.vue";
+import MobileVideos from "../../videos/MobileVideos.vue";
 import MiniPlayerBar from "./MiniPlayerBar.vue";
 
 const shellEl = ref(null);

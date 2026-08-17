@@ -1,4 +1,4 @@
-// 图书模式（App 集成）：顶栏第三个 tab「图书」→ 书架/阅读器主区 + ControlBar 保留
+// 视频模式（App 集成）：顶栏第四个 tab「视频」→ 视频库主区 + ControlBar 保留
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { installMatchMedia } from "./helpers/matchMedia.js";
@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url) => {
-      if (url === "/api/songs" || url === "/api/books") {
+      if (url === "/api/songs" || url === "/api/books" || url === "/api/videos") {
         return { ok: true, json: async () => [] };
       }
       return { ok: false, json: async () => ({}) };
@@ -60,39 +60,38 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("App 图书模式", () => {
-  it("顶栏有「图书」tab：点击切到 books 模式并渲染 BooksView 主区", async () => {
+describe("App 视频模式", () => {
+  it("顶栏有「视频」tab：四个 tab；点击切到 videos 模式并渲染 VideosView 主区", async () => {
     const wrapper = mount(App);
     await flushPromises();
 
-    // 第三个 tab
     const tabs = wrapper.findAll(".mode-tabs .tab");
     expect(tabs).toHaveLength(4);
-    const booksTab = tabs.find((b) => b.text().includes("图书"));
-    expect(booksTab).toBeTruthy();
-    expect(booksTab.classes()).not.toContain("on");
+    const videosTab = tabs.find((b) => b.text().includes("视频"));
+    expect(videosTab).toBeTruthy();
+    expect(videosTab.classes()).not.toContain("on");
 
-    await booksTab.trigger("click");
+    await videosTab.trigger("click");
     await flushPromises();
 
-    expect(state.mode).toBe("books");
-    expect(booksTab.classes()).toContain("on");
-    expect(wrapper.find("main.books").exists()).toBe(true);
-    expect(wrapper.find(".bookshelf").exists()).toBe(true);
+    expect(state.mode).toBe("videos");
+    expect(videosTab.classes()).toContain("on");
+    expect(wrapper.find("main.videos").exists()).toBe(true);
+    expect(wrapper.find(".video-library").exists()).toBe(true);
 
     wrapper.unmount();
   });
 
-  it("books 模式：ControlBar 保留（背景音乐可继续）；切回连播恢复原布局", async () => {
+  it("videos 模式：ControlBar 保留；切回连播恢复原布局", async () => {
     const wrapper = mount(App);
     await flushPromises();
 
     await wrapper
       .findAll(".mode-tabs .tab")
-      .find((b) => b.text().includes("图书"))
+      .find((b) => b.text().includes("视频"))
       .trigger("click");
     await flushPromises();
-    expect(wrapper.find("main.books .controls").exists()).toBe(true);
+    expect(wrapper.find("main.videos .controls").exists()).toBe(true);
 
     // 切回连播
     await wrapper
@@ -102,7 +101,7 @@ describe("App 图书模式", () => {
     await flushPromises();
     expect(state.mode).toBe("continuous");
     expect(wrapper.find("main.continuous").exists()).toBe(true);
-    expect(wrapper.find("main.books").exists()).toBe(false);
+    expect(wrapper.find("main.videos").exists()).toBe(false);
 
     wrapper.unmount();
   });

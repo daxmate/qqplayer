@@ -1,0 +1,26 @@
+// 视频模块（src/videos/：VideoLibrary.vue / VideoPlayer.vue / VideosView.vue / MobileVideos.vue）
+export default {
+  videos: {
+    title: "视频",
+    loadFile: "加载文件",
+    loadDone: "已加载《{name}》，本地播放（不进视频库）",
+    loadInvalid: "请选择视频文件",
+    empty: "视频库为空",
+    emptyHint: "点击「加载文件」直接播本地视频，或等后端视频库就绪",
+    loadError: "视频库加载失败",
+    back: "返回",
+    subCount: "{n} 条字幕",
+    subEmpty: "暂无字幕",
+    subLoadError: "字幕加载失败",
+    playPause: "播放 / 暂停",
+    prevLine: "上一句",
+    nextLine: "下一句",
+    speed: "变速",
+    karaoke: "跟读",
+    karaokeToggle: "跟读暂停（每句播完自动停）",
+    singleLine: "单句循环",
+    abHint: "单击：单句循环；长按：AB 区间循环（需开启跟读）",
+    abWaitEnd: "AB 循环：起点第 {n} 句，请点击字幕选终点（单击退出）",
+    abSet: "AB 循环：第 {a} ~ {b} 句（单击退出）",
+  },
+};

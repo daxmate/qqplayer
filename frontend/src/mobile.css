@@ -163,3 +163,16 @@
     background: var(--card2);
   }
 }
+
+/* 视频全屏播放层：卡片视觉压平（仿 MobileBooks 阅读器全屏层） */
+.mv-player-overlay .video-player {
+  border-radius: 0;
+  border: none;
+}
+.mv-player-overlay .vp-video {
+  max-height: 50vh;
+}
+.mv-player-overlay .vp-controls .vc-btn {
+  min-width: 40px;
+  height: 40px;
+}
