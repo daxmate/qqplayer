@@ -4,6 +4,7 @@
 
 ![QQPlayer 界面](docs/screenshot.png)
 ![QQPlayer 界面2](docs/screenshot2.png)
+![QQPlayer 界面3](docs/screenshot3.png)
 
 ## 功能
 
