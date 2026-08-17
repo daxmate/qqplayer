@@ -29,6 +29,12 @@ BILI_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
 # 非 bilibili 域名的通用链接（走 generic provider）
 GENERIC_URL = "https://example.com/watch?v=abc123"
 
+
+@pytest.fixture(autouse=True)
+def _ytdlp_bin(monkeypatch):
+    """固定 CLI 查找结果：subprocess 全部 mock，不依赖环境是否安装 yt-dlp（CI 无 yt-dlp 也能跑）"""
+    monkeypatch.setattr(video_ytdlp, "YTDLP_BIN", "/usr/bin/false")
+
 SAMPLE_INFO = {
     "title": "测试视频",
     "webpage_url": "https://www.bilibili.com/video/BV1xx411c7mD",

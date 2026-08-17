@@ -10,6 +10,8 @@ pycryptodome
 qrcode
 pillow
 send2trash
+# 视频模块在线源：yt-dlp 引擎（锁版本，与系统 CLI 2026.07.04 一致）
+yt-dlp==2026.07.04
 # 阅读器 V2 词典域：MDX/MDD 解析（readmdict 只读库，依赖 python-lzo；
 # python-lzo 本机编译：brew install lzo 后 LDFLAGS="-L$(brew --prefix lzo)/lib"
 # CPPFLAGS="-I$(brew --prefix lzo)/include" pip install python-lzo）
