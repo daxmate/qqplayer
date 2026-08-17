@@ -2,9 +2,13 @@
 
 本地音乐播放器 + 跟唱练习器。FastAPI + Vue 3 + Vite。
 
-![QQPlayer 界面](docs/screenshot.png)
-![QQPlayer 界面2](docs/screenshot2.png)
-![QQPlayer 界面3](docs/screenshot3.png)
+<p align="center">
+  <img src="docs/screenshot.png" width="32%" alt="连播模式"/>
+  <img src="docs/screenshot3.png" width="32%" alt="跟唱模式"/>
+  <img src="docs/screenshot2.png" width="32%" alt="图书阅读"/>
+</p>
+
+<p align="center">连播 · 跟唱 · 图书阅读</p>
 
 ## 功能
 
