@@ -5,14 +5,20 @@
     @dragleave="onDragLeave"
     @drop.prevent="onDrop"
   >
-    <!-- 工具栏：导入入口 -->
+    <!-- 工具栏：导入入口 + 词典管理 -->
     <div class="bs-toolbar">
       <h2 class="bs-title">{{ t("books.title") }}</h2>
-      <button class="bs-import-btn" :disabled="importing" @click="openFilePicker">
-        <Loader2 v-if="importing" :size="15" class="bs-spin" />
-        <Upload v-else :size="15" />
-        {{ importing ? t("books.importing") : t("books.import") }}
-      </button>
+      <div class="bs-toolbar-actions">
+        <button class="bs-dict-btn" :title="t('books.dictManage')" @click="dictManagerOpen = true">
+          <BookMarked :size="15" />
+          {{ t("books.dict") }}
+        </button>
+        <button class="bs-import-btn" :disabled="importing" @click="openFilePicker">
+          <Loader2 v-if="importing" :size="15" class="bs-spin" />
+          <Upload v-else :size="15" />
+          {{ importing ? t("books.importing") : t("books.import") }}
+        </button>
+      </div>
     </div>
 
     <!-- 书架网格 -->
@@ -96,16 +102,20 @@
       multiple
       @change="onFilePicked"
     />
+
+    <!-- 词典管理弹窗 -->
+    <DictManagerModal v-if="dictManagerOpen" @close="dictManagerOpen = false" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import { BookOpen, Trash2, Upload, Loader2 } from "@lucide/vue";
+import { BookMarked, BookOpen, Trash2, Upload, Loader2 } from "@lucide/vue";
 import type { BookView } from "./types";
 import { fetchBooks, importBook, deleteBook } from "./api";
 import { showToast, toastError } from "../composables/useToast.js";
+import DictManagerModal from "./DictManagerModal.vue";
 
 const emit = defineEmits<{ open: [book: BookView] }>();
 const { t } = useI18n();
@@ -113,6 +123,7 @@ const { t } = useI18n();
 const books = ref<BookView[]>([]);
 const importing = ref(false);
 const dragging = ref(false);
+const dictManagerOpen = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 // 待删除的书（确认弹窗）；null = 未在确认中
 const pendingDelete = ref<BookView | null>(null);
@@ -218,6 +229,30 @@ onMounted(load);
 .bs-title {
   font-size: 16px;
   font-weight: 700;
+}
+.bs-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.bs-dict-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.bs-dict-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .bs-import-btn {
   display: inline-flex;

@@ -1,5 +1,5 @@
 <template>
-  <div class="reader">
+  <div ref="rootRef" class="reader">
     <!-- 顶栏：返回 / 书名 / 目录 / 字号 / 翻页 -->
     <header class="reader-topbar">
       <button class="reader-btn" :title="t('books.back')" @click="emit('close')">
@@ -12,7 +12,7 @@
           class="reader-btn icon"
           :class="{ on: tocOpen }"
           :title="t('books.toc')"
-          @click="tocOpen = !tocOpen"
+          @click="toggleToc"
         >
           <List :size="18" />
         </button>
@@ -32,6 +32,22 @@
           @click="toggleSettings"
         >
           <Settings2 :size="18" />
+        </button>
+        <button
+          class="reader-btn icon"
+          :class="{ on: isCurrentBookmarked }"
+          :title="t('books.bookmark')"
+          @click="toggleBookmark"
+        >
+          <Bookmark :size="18" />
+        </button>
+        <button
+          class="reader-btn icon"
+          :class="{ on: panelOpen }"
+          :title="t('books.annotations')"
+          @click="togglePanel"
+        >
+          <Highlighter :size="18" />
         </button>
         <button class="reader-btn icon" :title="t('books.prevPage')" @click="prevPage">
           <ChevronLeft :size="18" />
@@ -102,6 +118,60 @@
           />
         </div>
       </Transition>
+
+      <!-- 标注侧栏（标注 + 生词本；与设置抽屉同遮罩模式） -->
+      <Transition name="toc-fade">
+        <div v-if="panelOpen" class="reader-settings-mask" @click.self="panelOpen = false">
+          <AnnotationPanel
+            :annotations="annotations"
+            :vocab="vocabList"
+            @close="panelOpen = false"
+            @jump="jumpTo"
+            @delete-highlight="removeHighlight"
+            @delete-bookmark="(id) => removeBookmark(id, false)"
+            @delete-note="removeNote"
+            @edit-note="openNoteEdit"
+            @delete-vocab="removeVocab"
+          />
+        </div>
+      </Transition>
+
+      <!-- 选中工具栏（选区上方/下方悬浮） -->
+      <SelectionToolbar
+        v-if="toolbar.visible"
+        :x="toolbar.x"
+        :y="toolbar.y"
+        :visible="toolbar.visible"
+        :text="currentSelection?.text ?? ''"
+        @lookup="onToolbarLookup"
+        @highlight="onToolbarHighlight"
+        @note="onToolbarNote"
+      />
+
+      <!-- 查词弹窗 -->
+      <DictLookupModal
+        v-if="lookupState.open"
+        :word="lookupState.word"
+        :context="lookupState.context"
+        :book-id="book.id"
+        :book-title="book.title"
+        :cfi="lookupState.cfi"
+        @close="onLookupClose"
+        @open-dict-manager="onOpenDictManager"
+      />
+
+      <!-- 笔记编辑（创建/编辑共用） -->
+      <NoteEditorModal
+        v-if="noteModal.open"
+        :excerpt="noteModal.excerpt"
+        :initial-text="noteModal.mode === 'edit' ? (noteModal.note?.text ?? '') : ''"
+        :saving="noteModal.saving"
+        @save="saveNote"
+        @cancel="onNoteCancel"
+      />
+
+      <!-- 词典管理（查词空态跳转入口同用） -->
+      <DictManagerModal v-if="dictManagerOpen" @close="dictManagerOpen = false" />
     </div>
   </div>
 </template>
@@ -110,21 +180,51 @@
 import { ref, shallowRef, computed, reactive, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  Bookmark,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
+  Highlighter,
   List,
+  Loader2,
   Minus,
   Plus,
-  Loader2,
-  BookOpen,
   Settings2,
 } from "@lucide/vue";
 import ePub from "epubjs";
 import type { Book, Rendition, Location, NavItem } from "epubjs";
-import type { BookView, ReaderSettings } from "./types";
+import type {
+  BookAnnotations,
+  BookView,
+  HighlightColor,
+  NoteAnnotation,
+  ReaderSelection,
+  ReaderSettings,
+  VocabEntry,
+} from "./types";
 import { saveBookProgress } from "./api";
+import {
+  createBookmark,
+  createHighlight,
+  createNote,
+  deleteBookmark,
+  deleteHighlight,
+  deleteNote,
+  deleteVocab,
+  fetchAnnotations,
+  fetchVocab,
+  HIGHLIGHT_COLOR_STYLES,
+  isDarkBackground,
+  updateNote,
+} from "./annotations";
+import { showToast, toastError } from "../composables/useToast.js";
 import { uiSettings } from "../composables/useSettings.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
+import SelectionToolbar from "./SelectionToolbar.vue";
+import AnnotationPanel from "./AnnotationPanel.vue";
+import DictLookupModal from "./DictLookupModal.vue";
+import NoteEditorModal from "./NoteEditorModal.vue";
+import DictManagerModal from "./DictManagerModal.vue";
 import {
   READER_SETTINGS_DEFAULTS,
   getReaderSettings,
@@ -137,6 +237,7 @@ const emit = defineEmits<{ close: [] }>();
 
 const { t } = useI18n();
 
+const rootRef = ref<HTMLElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
 const bookRef = shallowRef<Book | null>(null);
 const renditionRef = shallowRef<Rendition | null>(null);
@@ -198,13 +299,403 @@ function onSettingsPatch(patch: Partial<ReaderSettings>) {
 
 function toggleSettings() {
   settingsOpen.value = !settingsOpen.value;
-  if (settingsOpen.value) tocOpen.value = false;
+  if (settingsOpen.value) {
+    tocOpen.value = false;
+    panelOpen.value = false;
+  }
+}
+
+function toggleToc() {
+  tocOpen.value = !tocOpen.value;
+  if (tocOpen.value) {
+    settingsOpen.value = false;
+    panelOpen.value = false;
+  }
 }
 
 function bumpFontSize(delta: number) {
   const next = Math.min(200, Math.max(70, readerSettings.fontSize + delta));
   if (next === readerSettings.fontSize) return;
   onSettingsPatch({ fontSize: next });
+}
+
+// ============ 标注：高亮 / 书签 / 笔记 + 生词本 + 选中工具栏（V2） ============
+const annotations = ref<BookAnnotations>({ highlights: [], bookmarks: [], notes: [] });
+const vocabList = ref<VocabEntry[]>([]);
+const panelOpen = ref(false);
+const dictManagerOpen = ref(false);
+const curCfi = ref("");
+
+/** 选中工具栏位置（相对 .reader 根，px） */
+const toolbar = reactive({ x: 0, y: 0, visible: false });
+/** 当前选中（工具栏操作的数据源；工具栏收起时保留到操作完成） */
+const currentSelection = ref<ReaderSelection | null>(null);
+
+/** 查词弹窗状态 */
+const lookupState = reactive({
+  open: false,
+  word: "",
+  context: "",
+  cfi: "",
+});
+
+/** 笔记弹窗：create（选中新建）/ edit（面板编辑）共用 */
+const noteModal = reactive({
+  open: false,
+  mode: "create" as "create" | "edit",
+  excerpt: "",
+  note: null as NoteAnnotation | null,
+  saving: false,
+});
+
+/** 当前页是否已加书签（顶栏 active 态；按 cfi 路径前缀匹配，容忍滚动偏移） */
+const isCurrentBookmarked = computed(() => {
+  const cur = cfiPath(curCfi.value);
+  return annotations.value.bookmarks.some((b) => cfiPath(b.cfi) === cur);
+});
+
+/** cfi 去掉末尾 :offset（书签定位锚点比对用） */
+function cfiPath(cfi: string): string {
+  const i = cfi.lastIndexOf(":");
+  return i > 0 ? cfi.slice(0, i) : cfi;
+}
+
+function hideToolbar() {
+  toolbar.visible = false;
+}
+
+/** 清空 iframe 选区 + 收起工具栏（工具栏操作后调用） */
+function clearSelection() {
+  hideToolbar();
+  try {
+    const contents = renditionRef.value?.getContents?.();
+    const list = contents ? (Array.isArray(contents) ? contents : [contents]) : [];
+    for (const c of list) {
+      c.window?.getSelection?.()?.removeAllRanges();
+    }
+  } catch {
+    /* 清选区失败不影响主流程 */
+  }
+  currentSelection.value = null;
+}
+
+/** 选区收起（selectionchange）→ 收起工具栏；同一函数引用重复 add 自动去重 */
+function onContentsSelectionChange(e: Event) {
+  const doc = e.target as Document;
+  const sel = doc.defaultView?.getSelection?.();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) hideToolbar();
+}
+
+/** 选中句子提取：选区在全文中的前后句边界（查词/生词本 context 用） */
+function extractSentence(text: string, contents: unknown): string {
+  try {
+    const c = contents as { document?: { body?: { innerText?: string; textContent?: string } } };
+    const full = c.document?.body?.innerText ?? c.document?.body?.textContent ?? "";
+    const i = full.indexOf(text);
+    if (i < 0) return text.slice(0, 200);
+    let start = i;
+    while (start > 0 && !/[.!?。！？…\n]/.test(full[start - 1])) start--;
+    let end = i + text.length;
+    while (end < full.length && !/[.!?。！？…\n]/.test(full[end])) end++;
+    if (end < full.length) end++; // 带上结尾标点
+    return full.slice(start, end).trim().slice(0, 300);
+  } catch {
+    return text.slice(0, 200);
+  }
+}
+
+/** epub.js selected 事件（选区非空，250ms 防抖后触发）：定位工具栏 + 记录选中 */
+function onSelected(cfi: string, contents: unknown) {
+  const c = contents as { window?: Window };
+  const sel = c.window?.getSelection?.();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+  const text = sel.toString().trim();
+  if (!text) return;
+  const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
+  const iframe = containerRef.value?.querySelector("iframe");
+  const root = rootRef.value;
+  if (!iframe || !root) return;
+  const iframeRect = iframe.getBoundingClientRect();
+  const rootRect = root.getBoundingClientRect();
+  toolbar.x = iframeRect.left + rangeRect.left + rangeRect.width / 2 - rootRect.left;
+  toolbar.y = iframeRect.top + rangeRect.top - rootRect.top;
+  toolbar.visible = true;
+  currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
+  // 挂载选区收起监听（contents 每次新建都会触发 selected，函数引用去重）
+  (contents as { document?: Document }).document?.addEventListener(
+    "selectionchange",
+    onContentsSelectionChange,
+  );
+}
+
+/** 高亮 SVG 样式：深色主题用 screen 混合（multiply 在深底几乎不可见） */
+function highlightStyles(color: HighlightColor): Record<string, string> {
+  const { bg } = resolveReaderThemeColors(readerSettings);
+  const base = HIGHLIGHT_COLOR_STYLES[color];
+  return isDarkBackground(bg) ? { ...base, "mix-blend-mode": "screen" } : base;
+}
+
+/** 标注重放：后端高亮逐条 add 到 epub.js（切章自动重放由 annotations hooks.render 负责） */
+function replayHighlights() {
+  const rendition = renditionRef.value;
+  if (!rendition?.annotations) return;
+  for (const h of annotations.value.highlights) {
+    try {
+      rendition.annotations.add(
+        "highlight",
+        h.cfi,
+        { id: h.id, text: h.text, color: h.color },
+        undefined,
+        "epubjs-hl",
+        highlightStyles(h.color),
+      );
+    } catch {
+      /* 单条重放失败忽略（cfi 过期等） */
+    }
+  }
+}
+
+/** 读标注 + 重放高亮（书加载后调用一次；此后本地增量维护） */
+async function loadAnnotations() {
+  try {
+    annotations.value = await fetchAnnotations(props.book.id);
+  } catch {
+    annotations.value = { highlights: [], bookmarks: [], notes: [] };
+  }
+  replayHighlights();
+}
+
+async function refreshVocab() {
+  try {
+    vocabList.value = await fetchVocab();
+  } catch {
+    /* 生词本拉取失败不阻断阅读 */
+  }
+}
+
+// ---- 高亮 ----
+function addHighlight(color: HighlightColor) {
+  const sel = currentSelection.value;
+  if (!sel) return;
+  if (annotations.value.highlights.some((h) => h.cfi === sel.cfi)) {
+    toastError(t("books.highlightExists"));
+    clearSelection();
+    return;
+  }
+  createHighlight(props.book.id, { cfi: sel.cfi, text: sel.text, color })
+    .then(({ id }) => {
+      annotations.value.highlights.push({
+        id,
+        cfi: sel.cfi,
+        text: sel.text,
+        color,
+        createdAt: Date.now(),
+      });
+      try {
+        renditionRef.value?.annotations.add(
+          "highlight",
+          sel.cfi,
+          { id },
+          undefined,
+          "epubjs-hl",
+          highlightStyles(color),
+        );
+      } catch {
+        /* 渲染失败不影响持久化 */
+      }
+      showToast(t("books.highlightDone"));
+    })
+    .catch(() => toastError(t("books.loadError")))
+    .finally(() => clearSelection());
+}
+
+function removeHighlight(id: string) {
+  const h = annotations.value.highlights.find((x) => x.id === id);
+  deleteHighlight(props.book.id, id)
+    .then(() => {
+      if (h) {
+        try {
+          renditionRef.value?.annotations.remove(h.cfi, "highlight");
+        } catch {
+          /* 本地移除失败忽略 */
+        }
+      }
+      annotations.value.highlights = annotations.value.highlights.filter((x) => x.id !== id);
+      showToast(t("books.highlightDeleteDone"));
+    })
+    .catch(() => toastError(t("books.loadError")));
+}
+
+// ---- 书签 ----
+function toggleBookmark() {
+  // epub.js 类型把 currentLocation() 标为 DisplayedLocation，运行时实为 {start,end}（Location 形状）
+  const loc = renditionRef.value?.currentLocation?.() as unknown as Location | undefined;
+  const cfi = loc?.start?.cfi;
+  if (!cfi) return;
+  const existing = annotations.value.bookmarks.find((b) => cfiPath(b.cfi) === cfiPath(cfi));
+  if (existing) {
+    removeBookmark(existing.id, true);
+    return;
+  }
+  const page =
+    typeof loc.start.location === "number" && loc.start.location >= 0 ? loc.start.location + 1 : 1;
+  const text = t("books.bookmarkLabel", { page });
+  createBookmark(props.book.id, { cfi, text })
+    .then(({ id }) => {
+      annotations.value.bookmarks.push({ id, cfi, text, createdAt: Date.now() });
+      showToast(t("books.bookmarkDone"));
+    })
+    .catch(() => toastError(t("books.loadError")));
+}
+
+function removeBookmark(id: string, fromToggle: boolean) {
+  deleteBookmark(props.book.id, id)
+    .then(() => {
+      annotations.value.bookmarks = annotations.value.bookmarks.filter((b) => b.id !== id);
+      showToast(t(fromToggle ? "books.bookmarkRemoved" : "books.bookmarkDeleteDone"));
+    })
+    .catch(() => toastError(t("books.loadError")));
+}
+
+// ---- 笔记 ----
+function openNoteCreate() {
+  const sel = currentSelection.value;
+  if (!sel) return;
+  noteModal.mode = "create";
+  noteModal.excerpt = sel.text;
+  noteModal.note = null;
+  noteModal.saving = false;
+  noteModal.open = true;
+}
+
+function openNoteEdit(note: NoteAnnotation) {
+  noteModal.mode = "edit";
+  noteModal.excerpt = note.excerpt;
+  noteModal.note = note;
+  noteModal.saving = false;
+  noteModal.open = true;
+}
+
+function onNoteCancel() {
+  const wasCreate = noteModal.mode === "create";
+  noteModal.open = false;
+  if (wasCreate) clearSelection();
+}
+
+function saveNote(text: string) {
+  if (noteModal.saving) return;
+  noteModal.saving = true;
+  if (noteModal.mode === "create") {
+    const sel = currentSelection.value;
+    if (!sel) {
+      noteModal.saving = false;
+      noteModal.open = false;
+      return;
+    }
+    createNote(props.book.id, { cfi: sel.cfi, excerpt: sel.text, text })
+      .then(({ id }) => {
+        const now = Date.now();
+        annotations.value.notes.push({
+          id,
+          cfi: sel.cfi,
+          excerpt: sel.text,
+          text,
+          createdAt: now,
+          updatedAt: now,
+        });
+        showToast(t("books.noteDone"));
+      })
+      .catch(() => toastError(t("books.loadError")))
+      .finally(() => {
+        noteModal.saving = false;
+        noteModal.open = false;
+        clearSelection();
+      });
+  } else {
+    const note = noteModal.note;
+    if (!note) {
+      noteModal.saving = false;
+      noteModal.open = false;
+      return;
+    }
+    updateNote(props.book.id, note.id, text)
+      .then((updated) => {
+        const i = annotations.value.notes.findIndex((n) => n.id === note.id);
+        if (i >= 0) annotations.value.notes[i] = updated;
+        showToast(t("books.noteDone"));
+      })
+      .catch(() => toastError(t("books.loadError")))
+      .finally(() => {
+        noteModal.saving = false;
+        noteModal.open = false;
+      });
+  }
+}
+
+function removeNote(id: string) {
+  deleteNote(props.book.id, id)
+    .then(() => {
+      annotations.value.notes = annotations.value.notes.filter((n) => n.id !== id);
+      showToast(t("books.noteDeleteDone"));
+    })
+    .catch(() => toastError(t("books.loadError")));
+}
+
+// ---- 生词本 ----
+function removeVocab(id: string) {
+  deleteVocab(id)
+    .then(() => {
+      vocabList.value = vocabList.value.filter((v) => v.id !== id);
+      showToast(t("books.vocabDeleteDone"));
+    })
+    .catch(() => toastError(t("books.loadError")));
+}
+
+// ---- 工具栏动作 ----
+function onToolbarLookup(text: string) {
+  const sel = currentSelection.value;
+  if (!sel) return;
+  lookupState.open = true;
+  lookupState.word = text.slice(0, 60);
+  lookupState.context = sel.context || text.slice(0, 200);
+  lookupState.cfi = sel.cfi;
+  clearSelection();
+}
+
+function onToolbarHighlight(_text: string, color: HighlightColor) {
+  addHighlight(color);
+}
+
+function onToolbarNote(_text: string) {
+  openNoteCreate();
+}
+
+function onLookupClose() {
+  lookupState.open = false;
+  void refreshVocab(); // 弹窗内可能加入了生词
+}
+
+function onOpenDictManager() {
+  lookupState.open = false;
+  dictManagerOpen.value = true;
+}
+
+function togglePanel() {
+  panelOpen.value = !panelOpen.value;
+  if (panelOpen.value) {
+    tocOpen.value = false;
+    settingsOpen.value = false;
+    void refreshVocab();
+  }
+}
+
+/** 跳转到标注锚点（书签点 cfi / 高亮与笔记范围 cfi 均可 display） */
+function jumpTo(cfi: string) {
+  try {
+    void renditionRef.value?.display(cfi)?.catch?.(() => {});
+  } catch {
+    /* 跳转失败静默 */
+  }
 }
 
 // ============ 设置应用到 epub.js（themes.override 作用到 iframe body 的 inline 样式） ============
@@ -292,6 +783,8 @@ function nextPage() {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onRelocated(loc: Location) {
+  curCfi.value = loc.start.cfi ?? "";
+  hideToolbar();
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -313,7 +806,19 @@ function onKeydown(e: KeyboardEvent) {
     return;
   }
   if (e.key === "Escape") {
-    if (tocOpen.value) {
+    if (lookupState.open) {
+      lookupState.open = false;
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (noteModal.open) {
+      noteModal.open = false;
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (panelOpen.value) {
+      panelOpen.value = false;
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (tocOpen.value) {
       tocOpen.value = false;
       e.preventDefault();
       e.stopPropagation();
@@ -333,6 +838,13 @@ function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
     nextPage();
   }
+}
+
+// 点击应用其它区域（非工具栏）→ 收起选中工具栏
+function onWindowMouseDown(e: MouseEvent) {
+  const target = e.target as HTMLElement | null;
+  if (target?.closest?.(".sel-toolbar")) return;
+  if (toolbar.visible) hideToolbar();
 }
 
 // ============ 尺寸跟随（窗口变化 → rendition.resize；内容盒尺寸 = 容器 - 页边距 padding） ============
@@ -366,6 +878,12 @@ async function loadBook() {
   errorMsg.value = "";
   tocOpen.value = false;
   settingsOpen.value = false;
+  panelOpen.value = false;
+  dictManagerOpen.value = false;
+  lookupState.open = false;
+  noteModal.open = false;
+  hideToolbar();
+  annotations.value = { highlights: [], bookmarks: [], notes: [] };
   try {
     // 先取 ArrayBuffer 再喂 epub.js：绕开 URL 语义（非 .epub 后缀被当书库目录）
     // 与 request/XHR 兼容问题（参考 ~/codes/qq 成功案例：ePub(arrayBuffer) 直接解析）
@@ -385,7 +903,10 @@ async function loadBook() {
     renditionRef.value = rendition;
     applyReaderSettings();
     rendition.on("relocated", onRelocated);
+    rendition.on("selected", onSelected);
     await rendition.display(props.book.progress?.cfi ?? undefined);
+    await loadAnnotations();
+    void refreshVocab();
   } catch {
     errorMsg.value = t("books.loadError");
   } finally {
@@ -404,6 +925,7 @@ watch(
 onMounted(() => {
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("resize", onResize);
+  window.addEventListener("mousedown", onWindowMouseDown, true);
   loadReaderSettings();
   loadBook();
 });
@@ -411,6 +933,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown, true);
   window.removeEventListener("resize", onResize);
+  window.removeEventListener("mousedown", onWindowMouseDown, true);
   teardown();
 });
 </script>
