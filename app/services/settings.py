@@ -17,6 +17,7 @@ _SETTINGS_NAMESPACES = (
     "player",
     "download",
     "books",
+    "dict",
 )
 
 
@@ -72,6 +73,24 @@ def _norm_eq_gains(v):
             return default
         gains.append(min(12.0, max(-12.0, float(g))))
     return gains
+
+
+def _norm_dict_list(v, default):
+    """dictionaries：词典配置数组；每项必须含 id/name/path（str 非空），非法项丢弃，保留原顺序，空列表合法"""
+    if isinstance(v, list):
+        out = []
+        for item in v:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("id"), str)
+                and item.get("id")
+                and isinstance(item.get("name"), str)
+                and isinstance(item.get("path"), str)
+                and item.get("path")
+            ):
+                out.append(dict(item))
+        return out
+    return default
 
 
 def _norm_last_played(v):
@@ -239,6 +258,11 @@ _SETTINGS_SPEC = {
         # 自定义颜色覆盖：非空 = 用户颜色选择器写入，前端解释，后端只存值
         "textColor": (state.READER_SETTINGS_DEFAULTS["textColor"], _norm_str),
         "bgColor": (state.READER_SETTINGS_DEFAULTS["bgColor"], _norm_str),
+    },
+    "dict": {
+        # 词典配置数组（见 state.DICT_SETTINGS_DEFAULTS 注释）与当前激活词典 id
+        "dictionaries": (state.DICT_SETTINGS_DEFAULTS["dictionaries"], _norm_dict_list),
+        "activeDictId": (state.DICT_SETTINGS_DEFAULTS["activeDictId"], _norm_str),
     },
     "download": {
         # 在线下载目录：非空用该路径，空 = 当前歌曲库

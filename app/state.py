@@ -199,6 +199,11 @@ PLAYER_SETTINGS_DEFAULTS = {
     "controls": False,
     "lastPlayed": None,
 }
+# dict：词典域默认值（任务 B 只加这个 namespace，不动其他）
+DICT_SETTINGS_DEFAULTS = {
+    "dictionaries": [],  # 词典配置数组（id/name/path/kind/role/enabled/addedAt）
+    "activeDictId": "",  # 当前激活释义词典 id（空 = 未激活）
+}
 
 # ============ 曲库导入 ============
 # 单文件导入大小上限（超出报 error 不写盘）
@@ -212,6 +217,9 @@ ALIGN_SCRIPT = str(ROOT / "scripts" / "lyric-align")
 ALIGN_TIMEOUT = 600
 # 模型手动下载指引（自动下载失败时附进错误 detail）
 ALIGN_MODEL_URL = "https://modelscope.cn/models/mlx-community/Qwen3-ForcedAligner-0.6B-5bit"
+
+# 词典上传目录：上传的 MDX/MDD 文件（<uuid>.mdx / <uuid>.mdd，同 uuid 自动配对）
+DICTS_DIR = DATA_DIR / "dicts"
 
 # ============ 播放记录写锁（避免并发上报时读改写竞争丢数据）============
 _playback_lock = threading.Lock()

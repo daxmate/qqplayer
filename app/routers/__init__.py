@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from . import (
     annotations,
     books,
+    dict,
     favorites,
     library,
     lyrics,
@@ -32,6 +33,7 @@ _ROUTER_MODULES = (
     annotations,
     vocab,
     books,
+    dict,
 )
 
 
