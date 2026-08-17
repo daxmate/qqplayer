@@ -30,6 +30,10 @@ NETWORK_SONGS_FILE = DATA_DIR / "network_songs.json"
 # 电子书书架：书籍目录（books/<id>/ 下 book.epub + cover + index.json）与书架元数据
 BOOKS_DIR = DATA_DIR / "books"
 BOOKS_FILE = DATA_DIR / "books.json"
+# 阅读器 V2 标注：按书分组的高亮/书签/笔记（annotations.json）
+ANNOTATIONS_FILE = DATA_DIR / "annotations.json"
+# 阅读器 V2 生词本：全局跨书生词（vocab.json）
+VOCAB_FILE = DATA_DIR / "vocab.json"
 # 播放记录滚动保留上限（超了删最旧）
 PLAYBACK_LIMIT = 5000
 # 播放时长少于该秒数视为误触，不记录
@@ -178,6 +182,16 @@ DESKTOP_LYRIC_DEFAULTS = {
     "jpColor": "#ffffff",
     "zhColor": "#ffffff",
 }
+# books：阅读器 V2 阅读设置默认值（settings.py _SETTINGS_SPEC["books"] 从这里引用，单一来源）
+READER_SETTINGS_DEFAULTS = {
+    "fontFamily": "default",  # 正文字体：'default' | 'serif' | 'sans' | 'rounded'
+    "fontSize": 100,  # 字号（基准百分比 %），70~200
+    "lineHeight": 1.6,  # 行距倍率，1.0~2.0
+    "margin": 4,  # 页边距，0~15
+    "theme": "light",  # 主题：'light' | 'sepia' | 'dark' | 'auto'
+    "textColor": "",  # 自定义文字颜色（非空覆盖主题）
+    "bgColor": "",  # 自定义背景颜色（非空覆盖主题）
+}
 # player：播放器运行时状态（volume 数字 0~1；panel/controls 布尔；lastPlayed 对象或 null）
 PLAYER_SETTINGS_DEFAULTS = {
     "volume": 1.0,
@@ -211,3 +225,5 @@ queue_order_store = JsonStore(lambda: QUEUE_ORDER_FILE, default=[])
 network_songs_store = JsonStore(lambda: NETWORK_SONGS_FILE, default=[])
 playback_store = JsonStore(lambda: PLAYBACK_FILE, default=[])
 books_store = JsonStore(lambda: BOOKS_FILE, default=[])
+annotations_store = JsonStore(lambda: ANNOTATIONS_FILE, default={})
+vocab_store = JsonStore(lambda: VOCAB_FILE, default=[])
