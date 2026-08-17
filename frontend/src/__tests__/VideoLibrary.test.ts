@@ -85,7 +85,7 @@ describe("VideoLibrary", () => {
     expect(payload).toBeTruthy();
     expect(payload.name).toBe("clip.mp4");
     expect(payload.localUrl).toBe("blob:mock-local");
-    expect(payload.path).toBeUndefined(); // 不传后端
+    expect((payload as { path?: string }).path).toBeUndefined(); // 不传后端
     expect(URL.createObjectURL).toHaveBeenCalledWith(file);
     expect(items.some((i) => i.text.includes("clip.mp4"))).toBe(true);
 

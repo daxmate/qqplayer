@@ -128,6 +128,17 @@ export const DOWNLOAD_ENGINE_OPTIONS = [
 
 export const downloadSettings = reactive({ ...DOWNLOAD_SETTINGS_DEFAULTS });
 
+// ============ 视频设置（后端存储：settings video namespace）============
+export const VIDEO_SETTINGS_KEY = "qqplayer.videoSettings.v1";
+
+export const VIDEO_SETTINGS_DEFAULTS = {
+  // B站 Cookie（浏览器登录 B站后复制 Cookie 头）：后端 settings.video.bilibiliCookie；
+  // 配合在线源 B站 provider 防盗链，让在线播放有声。空 = 未配置。
+  bilibiliCookie: "",
+};
+
+export const videoSettings = reactive({ ...VIDEO_SETTINGS_DEFAULTS });
+
 // 桌面歌词设置并入统一 Settings 层（settingsSync.js）：load/save 走 GET/PUT /api/settings 的
 // desktopLyric namespace（主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享，localStorage 不通）
 // Swift 壳内歌词面板被原生关闭（✕/双击）时回写状态，主页面开关保持同步

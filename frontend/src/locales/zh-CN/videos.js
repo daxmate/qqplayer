@@ -22,5 +22,17 @@ export default {
     abHint: "单击：单句循环；长按：AB 区间循环（需开启跟读）",
     abWaitEnd: "AB 循环：起点第 {n} 句，请点击字幕选终点（单击退出）",
     abSet: "AB 循环：第 {a} ~ {b} 句（单击退出）",
+    // ============ 在线源（地址栏 + 解析 + 点播） ============
+    localTab: "本地库",
+    onlineTab: "在线",
+    onlinePlaceholder: "粘贴视频链接（B站 / YouTube 等）",
+    resolve: "解析",
+    resolving: "解析中…",
+    resolveEmpty: "粘贴链接点「解析」，在线直接播放",
+    resolveError: "解析失败",
+    invalidUrl: "请输入 http(s) 链接",
+    untitled: "未命名视频",
+    onlinePlayHint: "点击卡片在线播放（流由后端代理）",
+    cc: "字幕",
   },
 };

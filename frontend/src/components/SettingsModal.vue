@@ -381,6 +381,30 @@
               </div>
             </section>
 
+            <!-- ============ 视频 ============ -->
+            <section v-else-if="tab === 'video'" class="settings-scroll">
+              <div class="group">
+                <div class="group-title">
+                  <Video :size="13" />
+                  {{ t("settings.video") }}
+                </div>
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.bilibiliCookie") }}</div>
+                  <div class="setting-desc">{{ t("settings.bilibiliCookieDesc") }}</div>
+                  <div class="setting-control">
+                    <input
+                      v-model="videoSettings.bilibiliCookie"
+                      class="lib-input"
+                      type="text"
+                      :placeholder="t('settings.bilibiliCookiePlaceholder')"
+                      spellcheck="false"
+                      autocomplete="off"
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <!-- ============ 下载 ============ -->
             <section v-else-if="tab === 'download'" class="settings-scroll">
               <div class="group">
@@ -1212,6 +1236,7 @@ import {
   Palette,
   Repeat2,
   Download,
+  Video,
 } from "@lucide/vue";
 import {
   state,
@@ -1232,6 +1257,8 @@ import {
   QUARK_QUALITY_OPTIONS,
   DOWNLOAD_ENGINE_OPTIONS,
   DOWNLOAD_SETTINGS_DEFAULTS,
+  videoSettings,
+  VIDEO_SETTINGS_DEFAULTS,
   LYRIC_SETTINGS_DEFAULTS,
   UI_SETTINGS_DEFAULTS,
   PLAYBACK_SETTINGS_DEFAULTS,
@@ -1392,6 +1419,7 @@ function toggleSetting(key) {
 const categories = [
   { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
   { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
+  { key: "video", labelKey: "settings.category.video", icon: Video },
   { key: "download", labelKey: "settings.category.download", icon: Download },
   { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
   { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
@@ -1519,6 +1547,7 @@ function resetAll() {
   Object.assign(lyricSettings, LYRIC_SETTINGS_DEFAULTS);
   Object.assign(uiSettings, UI_SETTINGS_DEFAULTS);
   Object.assign(downloadSettings, DOWNLOAD_SETTINGS_DEFAULTS);
+  Object.assign(videoSettings, VIDEO_SETTINGS_DEFAULTS);
   saveLib({
     audioExts: audioExtOptions,
     ignoreHidden: true,

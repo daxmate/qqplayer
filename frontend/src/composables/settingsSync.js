@@ -19,10 +19,12 @@ import {
   lyricSettings,
   desktopLyricSettings,
   downloadSettings,
+  videoSettings,
   DOWNLOAD_SETTINGS_DEFAULTS,
   UI_SETTINGS_KEY,
   LYRIC_SETTINGS_KEY,
   DOWNLOAD_SETTINGS_KEY,
+  VIDEO_SETTINGS_KEY,
 } from "./useSettings.js";
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -88,6 +90,7 @@ function buildPayload() {
     lyric: { ...lyricSettings },
     desktopLyric: { ...desktopLyricSettings },
     download: { ...downloadSettings },
+    video: { ...videoSettings },
   };
   if (playerBridge) {
     const { state, playbackSettings, lastPlayedState } = playerBridge;
@@ -124,6 +127,11 @@ function writeLocalCache() {
   } catch {
     /* 忽略写入失败 */
   }
+  try {
+    localStorage.setItem(VIDEO_SETTINGS_KEY, JSON.stringify(videoSettings));
+  } catch {
+    /* 忽略写入失败 */
+  }
   playerBridge?.persistPlayerCache();
 }
 
@@ -150,6 +158,7 @@ async function loadSettings() {
     applyNamespace(s.lyric, lyricSettings);
     applyNamespace(s.desktopLyric, desktopLyricSettings);
     applyNamespace(s.download, downloadSettings);
+    applyNamespace(s.video, videoSettings);
     normalizeDownloadSettings();
     if (playerBridge) {
       applyNamespace(s.playback, playerBridge.playbackSettings);
@@ -220,6 +229,7 @@ function captureLocalSnapshots() {
     ["ui", UI_SETTINGS_KEY],
     ["lyric", LYRIC_SETTINGS_KEY],
     ["download", DOWNLOAD_SETTINGS_KEY],
+    ["video", VIDEO_SETTINGS_KEY],
   ];
   if (playerBridge) {
     entries.push(
@@ -250,6 +260,7 @@ async function importLocalDiffs(server, snaps) {
   collectDirty(dirty, "ui", snaps.ui, server.ui, uiSettings);
   collectDirty(dirty, "lyric", snaps.lyric, server.lyric, lyricSettings);
   collectDirty(dirty, "download", snaps.download, server.download, downloadSettings);
+  collectDirty(dirty, "video", snaps.video, server.video, videoSettings);
   if (playerBridge) {
     collectDirty(dirty, "playback", snaps.playback, server.playback, playerBridge.playbackSettings);
     const playerDirty = collectPlayerDirty(server.player, snaps);
@@ -344,6 +355,7 @@ function applyDirty(dirty) {
     ui: uiSettings,
     lyric: lyricSettings,
     download: downloadSettings,
+    video: videoSettings,
     playback: playerBridge?.playbackSettings,
   };
   for (const [ns, fields] of Object.entries(dirty)) {
@@ -370,6 +382,8 @@ function applyDirty(dirty) {
 }
 
 // 统一 watch：四个设置对象任意变化 → 防抖 PUT + 写透缓存
-watch([uiSettings, lyricSettings, desktopLyricSettings, downloadSettings], () => scheduleSave(), {
-  deep: true,
-});
+watch(
+  [uiSettings, lyricSettings, desktopLyricSettings, downloadSettings, videoSettings],
+  () => scheduleSave(),
+  { deep: true },
+);

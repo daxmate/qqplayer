@@ -12,6 +12,7 @@ export default {
     category: {
       playback: "播放",
       library: "音乐库",
+      video: "视频",
       download: "下载",
       lyric: "歌词",
       ui: "界面",
@@ -92,6 +93,12 @@ export default {
     autoRefreshDesc: "监听文件夹变动，新增 / 删除歌曲自动更新列表",
     autoScanOnStart: "启动时自动扫描",
     autoScanOnStartDesc: "应用启动时立即扫描歌曲库，首屏秒开",
+
+    // ============ 视频 ============
+    video: "视频",
+    bilibiliCookie: "B站 Cookie",
+    bilibiliCookieDesc: "浏览器登录 B站后复制 Cookie 头，让 B站在线播放有声（存后端 settings）",
+    bilibiliCookiePlaceholder: "SESSDATA=…; bili_jct=…",
 
     // ============ 下载 ============
     download: "在线下载",

@@ -5,8 +5,12 @@
       <button class="vp-back" :title="t('videos.back')" @click="$emit('close')">
         <ChevronLeft :size="18" />
       </button>
-      <span class="vp-title" :title="video.name">{{ video.name }}</span>
-      <span v-if="subtitles.length" class="vp-sub-count">
+      <span v-if="isOnlineVideo(video)" class="vp-provider">{{ video.provider }}</span>
+      <span class="vp-title" :title="displayName">{{ displayName }}</span>
+      <span v-if="isOnlineVideo(video)" class="vp-sub-count" :class="{ dim: !subtitles.length }">
+        {{ video.subtitles?.[0]?.name || t("videos.subEmpty") }}
+      </span>
+      <span v-else-if="subtitles.length" class="vp-sub-count">
         {{ t("videos.subCount", { n: subtitles.length }) }}
       </span>
       <span v-else class="vp-sub-count dim">{{ t("videos.subEmpty") }}</span>
@@ -121,7 +125,14 @@ import {
   Captions,
 } from "@lucide/vue";
 import type { SubtitleCue, VideoSource } from "./types";
-import { fetchSubtitles, streamUrl, isLibraryVideo } from "./api";
+import {
+  fetchSubtitles,
+  fetchOnlineSubtitles,
+  streamUrl,
+  onlineStreamUrl,
+  isLibraryVideo,
+  isOnlineVideo,
+} from "./api";
 import { toastError } from "../composables/useToast.js";
 
 const props = defineProps<{ video: VideoSource }>();
@@ -136,10 +147,19 @@ const currentTime = ref(0);
 const duration = ref(0);
 const isPlaying = ref(false);
 
-// 播放地址：库内视频走后端流接口；本地加载直接用 object URL
-const src = computed(() =>
-  isLibraryVideo(props.video) ? streamUrl(props.video.path) : props.video.localUrl,
-);
+// 播放地址：库内视频走后端流接口；在线视频走防盗链代理（原始页链接）；本地加载直接用 object URL
+const src = computed(() => {
+  const v = props.video;
+  if (isLibraryVideo(v)) return streamUrl(v.path);
+  if (isOnlineVideo(v)) return onlineStreamUrl(v.url);
+  return v.localUrl;
+});
+
+// 标题：在线视频用 title，本地/库内用 name
+const displayName = computed(() => {
+  const v = props.video;
+  return isOnlineVideo(v) ? v.title || t("videos.untitled") : v.name;
+});
 
 // ============ 字幕 ============
 const subtitles = ref<SubtitleCue[]>([]);
@@ -394,16 +414,31 @@ watch(highlightIdx, async () => {
 // 本地加载视频：object URL 卸载时释放
 onUnmounted(() => {
   if (pressTimer) clearTimeout(pressTimer);
-  if (props.video.localUrl) URL.revokeObjectURL(props.video.localUrl);
+  const v = props.video;
+  if ("localUrl" in v) URL.revokeObjectURL(v.localUrl);
 });
 
-// 库内视频：加载字幕（无字幕 items 空数组 → 单语种/纯播放）；本地加载无字幕，纯播放
+// 字幕加载：库内视频拉同名字幕；在线视频拉 resolve 返回的第一个可用字幕 lang（无则纯播放）；
+// 本地加载无字幕，纯播放
 onMounted(async () => {
-  if (!isLibraryVideo(props.video)) return;
-  try {
-    subtitles.value = await fetchSubtitles(props.video.path);
-  } catch {
-    toastError(t("videos.subLoadError"));
+  const v = props.video;
+  if (isLibraryVideo(v)) {
+    try {
+      subtitles.value = await fetchSubtitles(v.path);
+    } catch {
+      toastError(t("videos.subLoadError"));
+    }
+    return;
+  }
+  if (isOnlineVideo(v)) {
+    // 无可选字幕（resolve 未返回字幕信息）→ 不请求字幕接口，纯播放
+    const lang = v.subtitles?.[0]?.lang;
+    if (!lang) return;
+    try {
+      subtitles.value = await fetchOnlineSubtitles(v.url, lang);
+    } catch {
+      toastError(t("videos.subLoadError"));
+    }
   }
 });
 </script>
@@ -451,6 +486,16 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 在线视频 provider 徽标（bilibili / youtube 等） */
+.vp-provider {
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
 }
 .vp-sub-count {
   flex-shrink: 0;

@@ -28,6 +28,7 @@ import {
   uiSettings,
   desktopLyricSettings,
   downloadSettings,
+  videoSettings,
   saveLibrarySettings,
   EQ_PRESETS,
   LYRIC_SCHEMES,
@@ -44,6 +45,7 @@ import { sleepTimer, toggleSleepTimer, cancelSleepTimer } from "./composables/us
 export const SETTING_CATEGORIES = [
   { key: "playback", labelKey: "settings.category.playback" },
   { key: "library", labelKey: "settings.category.library" },
+  { key: "video", labelKey: "settings.category.video" },
   { key: "download", labelKey: "settings.category.download" },
   { key: "lyric", labelKey: "settings.category.lyric", subTabs: ["app", "desktop"] },
   { key: "ui", labelKey: "settings.category.ui" },
@@ -380,6 +382,21 @@ export const settingsIndex = [
     type: "toggle",
     get: () => libGet("autoScanOnStart"),
     set: (v) => libSet("autoScanOnStart", v),
+  },
+
+  // ==================== 视频 ====================
+  {
+    id: "bilibiliCookie",
+    category: "video",
+    subTab: null,
+    labelKey: "settings.bilibiliCookie",
+    keywords: ["B站", "bilibili", "哔哩哔哩", "cookie", "Cookie", "在线播放", "视频有声"],
+    type: "text",
+    placeholder: "settings.bilibiliCookiePlaceholder",
+    get: () => videoSettings.bilibiliCookie,
+    set: (v) => {
+      videoSettings.bilibiliCookie = v;
+    },
   },
 
   // ==================== 下载 ====================

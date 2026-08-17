@@ -4,11 +4,15 @@ import { mount, flushPromises } from "@vue/test-utils";
 
 // 只 mock 字幕接口；streamUrl / isLibraryVideo 用真实实现
 vi.mock("../videos/api", async (importOriginal) => {
-  const actual = await importOriginal();
-  return { ...actual, fetchSubtitles: vi.fn() };
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    fetchSubtitles: vi.fn(),
+    fetchOnlineSubtitles: vi.fn(),
+  };
 });
 
-import { fetchSubtitles } from "../videos/api";
+import { fetchSubtitles, fetchOnlineSubtitles } from "../videos/api";
 import VideoPlayer from "../videos/VideoPlayer.vue";
 import { useToast, clearToasts } from "../composables/useToast.js";
 
@@ -30,13 +34,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   clearToasts();
   (fetchSubtitles as ReturnType<typeof vi.fn>).mockResolvedValue(CUES);
+  (fetchOnlineSubtitles as ReturnType<typeof vi.fn>).mockResolvedValue(CUES);
   // jsdom 的 play()/pause() 是 noop 且 paused 只读 getter：
   // 用实例级 defineProperty 覆盖，让 paused 反映播放状态（play→false, pause→true）
-  playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function () {
+  playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
     Object.defineProperty(this, "paused", { value: false, writable: true, configurable: true });
     return Promise.resolve();
   });
-  pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function () {
+  pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) {
     Object.defineProperty(this, "paused", { value: true, writable: true, configurable: true });
   });
 });
@@ -276,6 +281,59 @@ describe("VideoPlayer 无字幕 / 本地加载", () => {
 
     expect(fetchSubtitles).not.toHaveBeenCalled();
     expect(video.getAttribute("src")).toBe("blob:mock-local");
+    expect(wrapper.find(".vp-sub-empty").exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+});
+
+describe("VideoPlayer 在线视频源", () => {
+  const ONLINE = {
+    title: "B站示例视频",
+    url: "https://www.bilibili.com/video/BV1xx411c7mD",
+    provider: "bilibili",
+    duration: 125,
+    subtitles: [{ lang: "zh-Hans", name: "中文（自动生成）" }],
+  };
+
+  it("在线视频：src 走 /api/video-online/stream 代理；字幕拉 resolve 返回的第一个 lang", async () => {
+    const wrapper = mount(VideoPlayer, { props: { video: ONLINE } });
+    await flushPromises();
+
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    expect(videoEl.getAttribute("src")).toBe(
+      `/api/video-online/stream?url=${encodeURIComponent(ONLINE.url)}`,
+    );
+    expect(fetchOnlineSubtitles).toHaveBeenCalledWith(ONLINE.url, "zh-Hans");
+    expect(fetchSubtitles).not.toHaveBeenCalled();
+    // 标题用 title，provider 徽标展示
+    expect(wrapper.find(".vp-title").text()).toBe("B站示例视频");
+    expect(wrapper.find(".vp-provider").text()).toBe("bilibili");
+    // 字幕渲染 + 双字幕布局（翻译有值在上原文下）不受在线源影响
+    expect(wrapper.findAll(".vline")).toHaveLength(3);
+    expect(wrapper.find(".vline-text").text()).toBe("Hello");
+
+    wrapper.unmount();
+  });
+
+  it("在线视频无字幕信息：不请求字幕接口，纯播放", async () => {
+    const wrapper = mount(VideoPlayer, {
+      props: { video: { ...ONLINE, subtitles: [] } },
+    });
+    await flushPromises();
+
+    expect(fetchOnlineSubtitles).not.toHaveBeenCalled();
+    expect(wrapper.find(".vp-sub-empty").exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("在线视频字幕加载失败 → 错误 toast，不阻塞播放", async () => {
+    (fetchOnlineSubtitles as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
+    const wrapper = mount(VideoPlayer, { props: { video: ONLINE } });
+    await flushPromises();
+
+    expect(items.some((i) => i.type === "error" && i.text === "字幕加载失败")).toBe(true);
     expect(wrapper.find(".vp-sub-empty").exists()).toBe(true);
 
     wrapper.unmount();

@@ -35,6 +35,7 @@ const {
   uiSettings,
   desktopLyricSettings,
   downloadSettings,
+  videoSettings,
 } = await import("../composables/usePlayer.js");
 
 const VALID_TYPES = ["toggle", "slider", "select", "text"];
@@ -69,14 +70,15 @@ afterEach(() => {
 });
 
 describe("settingsIndex 结构", () => {
-  it("SETTING_CATEGORIES 为 7 分类且 key 唯一", () => {
-    expect(SETTING_CATEGORIES).toHaveLength(7);
+  it("SETTING_CATEGORIES 为 8 分类且 key 唯一", () => {
+    expect(SETTING_CATEGORIES).toHaveLength(8);
     const keys = SETTING_CATEGORIES.map((c) => c.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toEqual(
       expect.arrayContaining([
         "playback",
         "library",
+        "video",
         "download",
         "lyric",
         "ui",
@@ -103,6 +105,22 @@ describe("settingsIndex 结构", () => {
 
   it("收录 30+ 项", () => {
     expect(settingsIndex.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("视频分类：bilibiliCookie 为 text 项，get/set 读写 videoSettings，语言包 key 齐全", () => {
+    const entry = settingsIndex.find((e) => e.id === "bilibiliCookie");
+    expect(entry).toBeTruthy();
+    expect(entry.category).toBe("video");
+    expect(entry.type).toBe("text");
+    expect(entry.subTab).toBeNull();
+    // get/set 读写 videoSettings.bilibiliCookie
+    videoSettings.bilibiliCookie = "SESSDATA=abc";
+    expect(entry.get()).toBe("SESSDATA=abc");
+    entry.set("SESSDATA=xyz");
+    expect(videoSettings.bilibiliCookie).toBe("SESSDATA=xyz");
+    // 语言包 key 齐全（labelKey + placeholder）
+    expect(resolveKey(zhCN, entry.labelKey)).toBeTruthy();
+    expect(resolveKey(zhCN, entry.placeholder)).toBeTruthy();
   });
 
   it("category 都在 SETTING_CATEGORIES 内", () => {

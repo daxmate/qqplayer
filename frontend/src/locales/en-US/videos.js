@@ -22,5 +22,17 @@ export default {
     abHint: "Click: loop current line; long-press: AB loop (needs follow on)",
     abWaitEnd: "AB loop: start line {n}, click a subtitle to pick end (click to exit)",
     abSet: "AB loop: lines {a} ~ {b} (click to exit)",
+    // ============ Online source (address bar + resolve + play) ============
+    localTab: "Library",
+    onlineTab: "Online",
+    onlinePlaceholder: "Paste a video link (Bilibili / YouTube …)",
+    resolve: "Resolve",
+    resolving: "Resolving…",
+    resolveEmpty: "Paste a link and hit Resolve to play online",
+    resolveError: "Failed to resolve",
+    invalidUrl: "Please enter an http(s) link",
+    untitled: "Untitled video",
+    onlinePlayHint: "Click the card to play online (stream is proxied by backend)",
+    cc: "CC",
   },
 };
