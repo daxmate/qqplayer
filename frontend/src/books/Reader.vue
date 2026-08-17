@@ -20,11 +20,19 @@
           <button class="reader-btn icon" :title="t('books.fontSize')" @click="bumpFontSize(-10)">
             <Minus :size="15" />
           </button>
-          <span class="reader-font-val">{{ fontSize }}%</span>
+          <span class="reader-font-val">{{ readerSettings.fontSize }}%</span>
           <button class="reader-btn icon" :title="t('books.fontSize')" @click="bumpFontSize(10)">
             <Plus :size="15" />
           </button>
         </span>
+        <button
+          class="reader-btn icon"
+          :class="{ on: settingsOpen }"
+          :title="t('books.settings')"
+          @click="toggleSettings"
+        >
+          <Settings2 :size="18" />
+        </button>
         <button class="reader-btn icon" :title="t('books.prevPage')" @click="prevPage">
           <ChevronLeft :size="18" />
         </button>
@@ -34,9 +42,9 @@
       </div>
     </header>
 
-    <!-- 阅读区（epubjs 挂载点 + 左右点击翻页热区） -->
+    <!-- 阅读区（epubjs 挂载点 + 左右点击翻页热区；容器 padding 实现页边距设置） -->
     <div class="reader-body">
-      <div ref="containerRef" class="reader-container">
+      <div ref="containerRef" class="reader-container" :style="readerContainerStyle">
         <div v-if="loading" class="reader-status">
           <Loader2 :size="28" class="reader-spin" />
           <span>{{ t("books.loading") }}</span>
@@ -83,19 +91,46 @@
           </aside>
         </div>
       </Transition>
+
+      <!-- 阅读设置抽屉（右侧滑出；改动由 Reader 防抖写回后端；遮罩点击关闭） -->
+      <Transition name="toc-fade">
+        <div v-if="settingsOpen" class="reader-settings-mask" @click.self="settingsOpen = false">
+          <ReaderSettingsPanel
+            :settings="readerSettings"
+            @patch="onSettingsPatch"
+            @close="settingsOpen = false"
+          />
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, shallowRef, computed, reactive, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { ChevronLeft, ChevronRight, List, Minus, Plus, Loader2, BookOpen } from "@lucide/vue";
+import {
+  ChevronLeft,
+  ChevronRight,
+  List,
+  Minus,
+  Plus,
+  Loader2,
+  BookOpen,
+  Settings2,
+} from "@lucide/vue";
 import ePub from "epubjs";
 import type { Book, Rendition, Location, NavItem } from "epubjs";
-import type { BookView } from "./types";
+import type { BookView, ReaderSettings } from "./types";
 import { saveBookProgress } from "./api";
 import { uiSettings } from "../composables/useSettings.js";
+import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
+import {
+  READER_SETTINGS_DEFAULTS,
+  getReaderSettings,
+  saveReaderSettings,
+  resolveReaderThemeColors,
+} from "./settings";
 
 const props = defineProps<{ book: BookView }>();
 const emit = defineEmits<{ close: [] }>();
@@ -110,68 +145,116 @@ const loading = ref(true);
 const errorMsg = ref("");
 const tocOpen = ref(false);
 
-// ============ 字号（localStorage 记忆，70% ~ 200%） ============
-const FONT_KEY = "qqplayer.books.fontSize";
-const fontSize = ref(100);
-try {
-  const saved = Number(localStorage.getItem(FONT_KEY));
-  if (Number.isFinite(saved) && saved >= 70 && saved <= 200) fontSize.value = saved;
-} catch {
-  /* 隐私模式等场景 localStorage 不可用，用默认 */
+// ============ 阅读设置（后端 /api/settings books namespace；localStorage 只读不写） ============
+// 旧字号 localStorage 键（V1 遗留，仅一次性迁移读取，迁移成功后清除）
+const LEGACY_FONT_KEY = "qqplayer.books.fontSize";
+const settingsOpen = ref(false);
+const readerSettings = reactive<ReaderSettings>({ ...READER_SETTINGS_DEFAULTS });
+let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 旧字号：localStorage 读取（70~200 合法才认），读不到返回 null */
+function readLegacyFontSize(): number | null {
+  try {
+    const saved = Number(localStorage.getItem(LEGACY_FONT_KEY));
+    return Number.isFinite(saved) && saved >= 70 && saved <= 200 ? saved : null;
+  } catch {
+    return null; // 隐私模式等场景 localStorage 不可用
+  }
 }
 
-function applyFontSize() {
-  renditionRef.value?.themes.fontSize(fontSize.value + "%");
+/** 初始化：读后端设置；若后端 fontSize 仍是默认 100 且 localStorage 有旧值 → 一次性迁移（PUT + 清除） */
+async function loadReaderSettings() {
+  const saved = await getReaderSettings();
+  const legacy = readLegacyFontSize();
+  const migrated =
+    legacy !== null && saved.fontSize === READER_SETTINGS_DEFAULTS.fontSize
+      ? { ...saved, fontSize: legacy }
+      : saved;
+  Object.assign(readerSettings, migrated);
+  applyReaderSettings();
+  if (migrated.fontSize !== saved.fontSize) {
+    // 迁移：旧值写回后端，成功后清除 localStorage；失败保留旧值下次再迁
+    saveReaderSettings({ fontSize: migrated.fontSize }).then((ok) => {
+      if (ok) {
+        try {
+          localStorage.removeItem(LEGACY_FONT_KEY);
+        } catch {
+          /* 忽略清除失败 */
+        }
+      }
+    });
+  }
+}
+
+/** 用户改设置：合并进 reactive（watch 即时应用）+ 防抖 300ms 写回后端（深合并） */
+function onSettingsPatch(patch: Partial<ReaderSettings>) {
+  Object.assign(readerSettings, patch);
+  if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => {
+    settingsSaveTimer = null;
+    saveReaderSettings({ ...readerSettings });
+  }, 300);
+}
+
+function toggleSettings() {
+  settingsOpen.value = !settingsOpen.value;
+  if (settingsOpen.value) tocOpen.value = false;
 }
 
 function bumpFontSize(delta: number) {
-  const next = Math.min(200, Math.max(70, fontSize.value + delta));
-  if (next === fontSize.value) return;
-  fontSize.value = next;
-  try {
-    localStorage.setItem(FONT_KEY, String(next));
-  } catch {
-    /* 忽略写入失败 */
-  }
-  applyFontSize();
+  const next = Math.min(200, Math.max(70, readerSettings.fontSize + delta));
+  if (next === readerSettings.fontSize) return;
+  onSettingsPatch({ fontSize: next });
 }
 
-// ============ 主题跟随（light/dark 两套 body 样式，auto 读 html data-theme） ============
-const LIGHT_BODY = {
-  body: {
-    background: "#ffffff !important",
-    color: "#24292f !important",
-  },
-  a: { color: "#0969da !important" },
-};
-const DARK_BODY = {
-  body: {
-    background: "#16181d !important",
-    color: "#d6d9e0 !important",
-  },
-  a: { color: "#58a6ff !important" },
+// ============ 设置应用到 epub.js（themes.override 作用到 iframe body 的 inline 样式） ============
+const FONT_FAMILY_CSS: Record<"serif" | "sans" | "rounded", string> = {
+  serif: "Georgia, serif",
+  sans: "Helvetica, Arial, sans-serif",
+  rounded: "Avenir Next Rounded, 'Arial Rounded MT Bold', sans-serif",
 };
 
-function applyTheme() {
+function applyReaderSettings() {
   const rendition = renditionRef.value;
   if (!rendition) return;
-  rendition.themes.register("light", LIGHT_BODY);
-  rendition.themes.register("dark", DARK_BODY);
-  let resolved: "light" | "dark";
-  if (uiSettings.theme === "auto") {
-    resolved =
-      typeof document !== "undefined" && document.documentElement.dataset.theme === "light"
-        ? "light"
-        : "dark";
-  } else {
-    resolved = uiSettings.theme === "light" ? "light" : "dark";
-  }
-  rendition.themes.select(resolved);
+  const themes = rendition.themes;
+  const s = readerSettings;
+  // 字体族：default → 空值 override（epubjs 运行时对空值走 removeProperty，等同移除覆盖）
+  if (s.fontFamily === "default") themes.override("font-family", "");
+  else themes.font(FONT_FAMILY_CSS[s.fontFamily]);
+  // 字号（百分比，相对 iframe 默认字号）
+  themes.fontSize(s.fontSize + "%");
+  // 行距（body 无单位值，子元素按倍数继承）
+  themes.override("line-height", String(s.lineHeight));
+  // 主题色：预设 + textColor/bgColor 自定义覆盖；!important 压过 EPUB 自带 body 样式
+  const { text, bg } = resolveReaderThemeColors(s);
+  themes.override("color", text, true);
+  themes.override("background", bg, true);
+  // 页边距不在这里做：epub.js 分页布局（columns()）会强制写 body padding-left/right !important，
+  // themes.override 会被覆盖。改为容器 padding（readerContainerStyle）+ renderTo/resize 用内容盒尺寸。
 }
 
+// 页边距：容器 padding（iframe 外部，不受 epub.js 内部布局影响）
+const readerContainerStyle = computed(() => ({ padding: `${readerSettings.margin}px` }));
+// 页边距变化时 iframe 尺寸跟随（容器 padding 改变 → 内容盒宽度改变）
+let lastMargin = READER_SETTINGS_DEFAULTS.margin;
+
+// 阅读设置变化 → 即时应用到当前渲染（保存走 onSettingsPatch 的防抖）
+watch(
+  () => ({ ...readerSettings }),
+  () => {
+    applyReaderSettings();
+    if (readerSettings.margin !== lastMargin) {
+      lastMargin = readerSettings.margin;
+      onResize();
+    }
+  },
+);
+
+// App 主题变化 → 阅读主题 auto 时需重算（非 auto 重跑无副作用）
 watch(
   () => uiSettings.theme,
-  () => applyTheme(),
+  () => applyReaderSettings(),
 );
 
 // ============ 目录（tree 展平为带缩进列表） ============
@@ -234,6 +317,10 @@ function onKeydown(e: KeyboardEvent) {
       tocOpen.value = false;
       e.preventDefault();
       e.stopPropagation();
+    } else if (settingsOpen.value) {
+      settingsOpen.value = false;
+      e.preventDefault();
+      e.stopPropagation();
     }
     return;
   }
@@ -248,12 +335,13 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-// ============ 尺寸跟随（窗口变化 → rendition.resize） ============
+// ============ 尺寸跟随（窗口变化 → rendition.resize；内容盒尺寸 = 容器 - 页边距 padding） ============
 function onResize() {
   const container = containerRef.value;
   const rendition = renditionRef.value;
   if (!container || !rendition) return;
-  rendition.resize(container.clientWidth, container.clientHeight);
+  const m = readerSettings.margin;
+  rendition.resize(container.clientWidth - m * 2, container.clientHeight - m * 2);
 }
 
 // ============ 加载 / 销毁 ============
@@ -261,6 +349,10 @@ function teardown() {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
+  }
+  if (settingsSaveTimer) {
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = null;
   }
   renditionRef.value?.destroy();
   renditionRef.value = null;
@@ -273,6 +365,7 @@ async function loadBook() {
   loading.value = true;
   errorMsg.value = "";
   tocOpen.value = false;
+  settingsOpen.value = false;
   try {
     // 先取 ArrayBuffer 再喂 epub.js：绕开 URL 语义（非 .epub 后缀被当书库目录）
     // 与 request/XHR 兼容问题（参考 ~/codes/qq 成功案例：ePub(arrayBuffer) 直接解析）
@@ -284,13 +377,13 @@ async function loadBook() {
     await book.ready;
     const container = containerRef.value;
     if (!container) return;
+    const m = readerSettings.margin;
     const rendition = book.renderTo(container, {
-      width: container.clientWidth,
-      height: container.clientHeight,
+      width: container.clientWidth - m * 2,
+      height: container.clientHeight - m * 2,
     });
     renditionRef.value = rendition;
-    applyTheme();
-    applyFontSize();
+    applyReaderSettings();
     rendition.on("relocated", onRelocated);
     await rendition.display(props.book.progress?.cfi ?? undefined);
   } catch {
@@ -311,6 +404,7 @@ watch(
 onMounted(() => {
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("resize", onResize);
+  loadReaderSettings();
   loadBook();
 });
 
@@ -460,6 +554,13 @@ onBeforeUnmount(() => {
 }
 .reader-tap.right {
   right: 0;
+}
+/* 阅读设置抽屉遮罩（与目录抽屉同模式） */
+.reader-settings-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: rgba(0, 0, 0, 0.35);
 }
 /* 目录抽屉 */
 .reader-toc-mask {

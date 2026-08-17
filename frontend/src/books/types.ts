@@ -50,3 +50,24 @@ export interface BookIndex {
   chapters: BookChapterIndex[];
   generatedAt: number;
 }
+
+/**
+ * 阅读设置（后端 settings.json books namespace，V2 追加 7 字段）。
+ * 持久化在后端（GET/PUT /api/settings 深合并），localStorage 只读不写。
+ */
+export interface ReaderSettings {
+  /** 字体族：default 系统默认 | serif 衬线 | sans 无衬线 | rounded 圆体 */
+  fontFamily: "default" | "serif" | "sans" | "rounded";
+  /** 字号百分比 70~200，默认 100 */
+  fontSize: number;
+  /** 行距 1.0~2.0，默认 1.6 */
+  lineHeight: number;
+  /** 页边距 px 0~15，默认 4 */
+  margin: number;
+  /** 主题：light 浅色 | sepia 米黄 | dark 深色 | auto 跟随 App 主题 */
+  theme: "light" | "sepia" | "dark" | "auto";
+  /** 正文颜色（#rrggbb），空 = 主题默认 */
+  textColor: string;
+  /** 背景颜色（#rrggbb），空 = 主题默认 */
+  bgColor: string;
+}
