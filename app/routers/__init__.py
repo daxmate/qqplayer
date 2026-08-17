@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from . import (
+    annotations,
     books,
     favorites,
     library,
@@ -14,6 +15,7 @@ from . import (
     settings,
     stream,
     tags,
+    vocab,
 )
 
 _ROUTER_MODULES = (
@@ -27,6 +29,8 @@ _ROUTER_MODULES = (
     lyrics,
     tags,
     media,
+    annotations,
+    vocab,
     books,
 )
 
