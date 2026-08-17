@@ -33,8 +33,13 @@ _UA = download_service.DOWNLOAD_UA
 
 
 def _find_ytdlp_bin() -> str | None:
-    """定位 yt-dlp 可执行文件：优先 venv 脚本，其次 PATH（macOS 常见 /opt/homebrew/bin/yt-dlp）"""
-    venv_candidate = Path(sys.executable).resolve().parent / "yt-dlp"
+    """定位 yt-dlp 可执行文件：优先 venv 脚本，其次 PATH（macOS 常见 /opt/homebrew/bin/yt-dlp）。
+
+    ⚠️ 不能对 sys.executable 用 .resolve()：venv/bin/python 是 symlink，resolve 后 parent
+    指向 base python 的 MacOS/ 目录，会漏掉 venv/bin/yt-dlp；launchd 环境 PATH 无
+    homebrew，shutil.which 兜底也找不到 → 整体误判无 CLI（2026-08-17 线上实测）。
+    """
+    venv_candidate = Path(sys.executable).parent / "yt-dlp"
     if venv_candidate.is_file():
         return str(venv_candidate)
     return shutil.which("yt-dlp")
