@@ -9,6 +9,33 @@ vi.mock("../books/api", () => ({
   saveBookProgress: vi.fn(),
 }));
 
+vi.mock("../books/annotations", () => ({
+  fetchAnnotations: vi.fn(),
+  createHighlight: vi.fn(),
+  deleteHighlight: vi.fn(),
+  createBookmark: vi.fn(),
+  deleteBookmark: vi.fn(),
+  createNote: vi.fn(),
+  updateNote: vi.fn(),
+  deleteNote: vi.fn(),
+  fetchVocab: vi.fn(),
+  addVocab: vi.fn(),
+  deleteVocab: vi.fn(),
+  fetchDictSettings: vi.fn(),
+  scanDictPath: vi.fn(),
+  addDict: vi.fn(),
+  uploadDictFile: vi.fn(),
+  activateDict: vi.fn(),
+  setDictEnabled: vi.fn(),
+  deleteDict: vi.fn(),
+  queryDict: vi.fn(),
+  rewriteDictHtml: vi.fn((html: string) => html),
+  HIGHLIGHT_COLOR_STYLES: { yellow: {}, green: {}, blue: {}, pink: {} },
+  HIGHLIGHT_COLOR_HEX: { yellow: "#f6d32d", green: "#7bc47f", blue: "#64b5f6", pink: "#f28bb0" },
+  isDarkBackground: vi.fn(() => false),
+  VOCAB_EXPORT_URL: "/api/vocab/export",
+}));
+
 import { fetchBooks, importBook, deleteBook } from "../books/api";
 import Bookshelf from "../books/Bookshelf.vue";
 import { useToast, clearToasts } from "../composables/useToast.js";
@@ -151,6 +178,29 @@ describe("Bookshelf", () => {
     expect(deleteBook).toHaveBeenCalledWith("b1");
     expect(fetchBooks).toHaveBeenCalledTimes(2);
     expect(items.some((i) => i.text === "已删除《三体》")).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("词典：顶栏按钮打开词典管理弹窗，不破坏书架结构", async () => {
+    (fetchBooks as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const wrapper = mount(Bookshelf);
+    await flushPromises();
+
+    // 词典按钮在导入按钮旁边，标题区结构不变
+    const dictBtn = wrapper.find(".bs-dict-btn");
+    expect(dictBtn.exists()).toBe(true);
+    expect(dictBtn.text()).toContain("词典");
+    expect(wrapper.find(".bs-title").text()).toBe("图书");
+
+    await dictBtn.trigger("click");
+    expect(wrapper.find(".dictmgr").exists()).toBe(true);
+    expect(wrapper.find(".dictmgr-title").text()).toContain("词典管理");
+
+    // 关闭弹窗 → 书架仍在
+    await wrapper.find(".dictmgr-close").trigger("click");
+    expect(wrapper.find(".dictmgr").exists()).toBe(false);
+    expect(wrapper.find(".bs-empty").exists()).toBe(true);
 
     wrapper.unmount();
   });

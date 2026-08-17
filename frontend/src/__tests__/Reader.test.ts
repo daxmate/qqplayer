@@ -25,6 +25,11 @@ const mocks = vi.hoisted(() => {
     prev: vi.fn(),
     destroy: vi.fn(),
     resize: vi.fn(),
+    annotations: { add: vi.fn(), remove: vi.fn() },
+    currentLocation: vi.fn(() => ({
+      start: { cfi: "epubcfi(/6/8!/4/2/2/1:0)", location: 2, percentage: 0.5 },
+    })),
+    getContents: vi.fn(() => []),
   };
   return { rendition, ePub: vi.fn() };
 });
@@ -36,6 +41,33 @@ vi.mock("../books/api", () => ({
   importBook: vi.fn(),
   deleteBook: vi.fn(),
   saveBookProgress: vi.fn(),
+}));
+
+vi.mock("../books/annotations", () => ({
+  fetchAnnotations: vi.fn().mockResolvedValue({ highlights: [], bookmarks: [], notes: [] }),
+  createHighlight: vi.fn(),
+  deleteHighlight: vi.fn(),
+  createBookmark: vi.fn(),
+  deleteBookmark: vi.fn(),
+  createNote: vi.fn(),
+  updateNote: vi.fn(),
+  deleteNote: vi.fn(),
+  fetchVocab: vi.fn().mockResolvedValue([]),
+  addVocab: vi.fn(),
+  deleteVocab: vi.fn(),
+  fetchDictSettings: vi.fn(),
+  scanDictPath: vi.fn(),
+  addDict: vi.fn(),
+  uploadDictFile: vi.fn(),
+  activateDict: vi.fn(),
+  setDictEnabled: vi.fn(),
+  deleteDict: vi.fn(),
+  queryDict: vi.fn(),
+  rewriteDictHtml: vi.fn((html: string) => html),
+  HIGHLIGHT_COLOR_STYLES: { yellow: {}, green: {}, blue: {}, pink: {} },
+  HIGHLIGHT_COLOR_HEX: { yellow: "#f6d32d", green: "#7bc47f", blue: "#64b5f6", pink: "#f28bb0" },
+  isDarkBackground: vi.fn(() => false),
+  VOCAB_EXPORT_URL: "/api/vocab/export",
 }));
 
 import { saveBookProgress } from "../books/api";

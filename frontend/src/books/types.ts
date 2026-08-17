@@ -51,6 +51,16 @@ export interface BookIndex {
   generatedAt: number;
 }
 
+/** 阅读选中信息（Reader 内部，选中工具栏/查词/笔记共用） */
+export interface ReaderSelection {
+  /** epub.js CFI 范围（如 epubcfi(/6/8!/4/2/2/1:0,1:10)） */
+  cfi: string;
+  /** 选中的纯文本 */
+  text: string;
+  /** 选中所在句子（生词本 context 用） */
+  context: string;
+}
+
 /**
  * 阅读设置（后端 settings.json books namespace，V2 追加 7 字段）。
  * 持久化在后端（GET/PUT /api/settings 深合并），localStorage 只读不写。
@@ -70,4 +80,96 @@ export interface ReaderSettings {
   textColor: string;
   /** 背景颜色（#rrggbb），空 = 主题默认 */
   bgColor: string;
+}
+
+/**
+ * 高亮颜色（V2 标注，契约指定四色）
+ */
+export type HighlightColor = "yellow" | "green" | "blue" | "pink";
+
+/** 高亮条目（annotations.json highlights[]） */
+export interface HighlightAnnotation {
+  id: string;
+  cfi: string;
+  text: string;
+  color: HighlightColor;
+  createdAt: number;
+}
+
+/** 书签条目（annotations.json bookmarks[]） */
+export interface BookmarkAnnotation {
+  id: string;
+  cfi: string;
+  text: string;
+  createdAt: number;
+}
+
+/** 笔记条目（annotations.json notes[]） */
+export interface NoteAnnotation {
+  id: string;
+  cfi: string;
+  excerpt: string;
+  text: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 单本书的完整标注对象（GET /api/books/{bid}/annotations） */
+export interface BookAnnotations {
+  highlights: HighlightAnnotation[];
+  bookmarks: BookmarkAnnotation[];
+  notes: NoteAnnotation[];
+}
+
+/** 生词条目（vocab.json，全局跨书） */
+export interface VocabEntry {
+  id: string;
+  word: string;
+  context: string;
+  bookId: string;
+  bookTitle: string;
+  cfi: string;
+  addedAt: number;
+}
+
+/** 词典配置项（settings dict.dictionaries[]） */
+export interface DictConfig {
+  id: string;
+  name: string;
+  path: string;
+  kind: "local" | "uploaded";
+  role: "define" | "frequency";
+  enabled: boolean;
+  addedAt: number;
+}
+
+/** 词典设置（GET /api/dict） */
+export interface DictSettings {
+  dictionaries: DictConfig[];
+  activeDictId: string;
+}
+
+/** 扫描候选（POST /api/dict/scan） */
+export interface DictScanCandidate {
+  path: string;
+  name: string;
+  size: number;
+  mddExists: boolean;
+}
+
+/** 词频信息（查词响应 frequency / GET /api/dict/frequency） */
+export interface WordFrequency {
+  rank: number | null;
+  total: number | null;
+}
+
+/** 查词结果（GET /api/dict/query） */
+export interface DictQueryResult {
+  word: string;
+  found: boolean;
+  html: string;
+  source: string;
+  audio: { label: string; url: string }[];
+  frequency: WordFrequency | null;
+  error?: string;
 }
