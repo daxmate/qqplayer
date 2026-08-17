@@ -214,6 +214,31 @@ _SETTINGS_SPEC = {
     "books": {
         # 阅读模式：上次打开的书 id（重进阅读模式自动打开并恢复进度）；空 = 未读过
         "lastReadId": ("", _norm_str),
+        # 阅读器 V2 阅读设置 7 字段（默认值单一来源 state.READER_SETTINGS_DEFAULTS；
+        # 前端 ReaderSettingsPanel 消费，禁止 localStorage 存设置）
+        "fontFamily": (
+            state.READER_SETTINGS_DEFAULTS["fontFamily"],
+            lambda v, d: _norm_str(v, d, allowed={"default", "serif", "sans", "rounded"}),
+        ),
+        "fontSize": (
+            state.READER_SETTINGS_DEFAULTS["fontSize"],
+            lambda v, d: _norm_num(v, d, lo=70, hi=200, integer=True),
+        ),
+        "lineHeight": (
+            state.READER_SETTINGS_DEFAULTS["lineHeight"],
+            lambda v, d: _norm_num(v, d, lo=1.0, hi=2.0),
+        ),
+        "margin": (
+            state.READER_SETTINGS_DEFAULTS["margin"],
+            lambda v, d: _norm_num(v, d, lo=0, hi=15, integer=True),
+        ),
+        "theme": (
+            state.READER_SETTINGS_DEFAULTS["theme"],
+            lambda v, d: _norm_str(v, d, allowed={"light", "sepia", "dark", "auto"}),
+        ),
+        # 自定义颜色覆盖：非空 = 用户颜色选择器写入，前端解释，后端只存值
+        "textColor": (state.READER_SETTINGS_DEFAULTS["textColor"], _norm_str),
+        "bgColor": (state.READER_SETTINGS_DEFAULTS["bgColor"], _norm_str),
     },
     "download": {
         # 在线下载目录：非空用该路径，空 = 当前歌曲库

@@ -178,6 +178,16 @@ DESKTOP_LYRIC_DEFAULTS = {
     "jpColor": "#ffffff",
     "zhColor": "#ffffff",
 }
+# books：阅读器 V2 阅读设置默认值（settings.py _SETTINGS_SPEC["books"] 从这里引用，单一来源）
+READER_SETTINGS_DEFAULTS = {
+    "fontFamily": "default",  # 正文字体：'default' | 'serif' | 'sans' | 'rounded'
+    "fontSize": 100,  # 字号（基准百分比 %），70~200
+    "lineHeight": 1.6,  # 行距倍率，1.0~2.0
+    "margin": 4,  # 页边距，0~15
+    "theme": "light",  # 主题：'light' | 'sepia' | 'dark' | 'auto'
+    "textColor": "",  # 自定义文字颜色（非空覆盖主题）
+    "bgColor": "",  # 自定义背景颜色（非空覆盖主题）
+}
 # player：播放器运行时状态（volume 数字 0~1；panel/controls 布尔；lastPlayed 对象或 null）
 PLAYER_SETTINGS_DEFAULTS = {
     "volume": 1.0,
