@@ -164,3 +164,20 @@ def test_parse_rank():
     assert dict_reader.parse_rank('<div class="word">the</div><span class="rank">1</span>') == 1
     assert dict_reader.parse_rank('<span class="rank">18253</span>') == 18253
     assert dict_reader.parse_rank("<b>no rank</b>") is None
+
+
+def test_resource_fallback_sidecar(tmp_path, monkeypatch):
+    """mdd 没有的资源回退到词典同目录实体文件（外置 css 场景）"""
+    from app.services import dict_reader
+
+    (tmp_path / "fake.mdx").write_bytes(b"x")
+    (tmp_path / "fake.mdd").write_bytes(b"x")
+    (tmp_path / "style.css").write_bytes(b"body{color:red}")
+
+    d = dict_reader.MdxDict(str(tmp_path / "fake.mdx"))
+    monkeypatch.setattr(d, "_ensure_mdd_loaded", lambda: None)
+    monkeypatch.setattr(d, "_mdd_index", None)
+    assert d.resource("style.css") == b"body{color:red}"
+    assert d.resource("nope.css") is None
+    # 路径穿越防护
+    assert d.resource("../secret.txt") is None

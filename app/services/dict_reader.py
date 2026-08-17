@@ -224,20 +224,29 @@ class MdxDict:
 
     # ---------- 资源 ----------
     def resource(self, relpath: str) -> bytes | None:
-        """mdd 内资源字节（css/js/img/音频等）；无 mdd 或无该资源返回 None"""
+        """资源字节：优先 mdd 内，其次词典同目录实体文件（外置 css/图片等）；都没有返回 None"""
+        norm = _normalize_relpath(relpath)
         self._ensure_mdd_loaded()
-        if self._mdd_index is None:
+        if self._mdd_index is not None:
+            key_id = self._mdd_index.get(norm)
+            if key_id is not None:
+                return self._extract_bytes(
+                    self._mdd_path,
+                    self._mdd_record_blocks,
+                    self._mdd_block_ends,
+                    self._mdd_record_ids,
+                    key_id,
+                )
+        # 回退：词典同目录实体文件（很多词典 css/图片外置，如 ldoce6ec.css）
+        if not norm or ".." in norm.split("/"):
             return None
-        key_id = self._mdd_index.get(_normalize_relpath(relpath))
-        if key_id is None:
+        side = self._path.parent / norm
+        try:
+            if side.is_file():
+                return side.read_bytes()
+        except OSError:
             return None
-        return self._extract_bytes(
-            self._mdd_path,
-            self._mdd_record_blocks,
-            self._mdd_block_ends,
-            self._mdd_record_ids,
-            key_id,
-        )
+        return None
 
     def _extract_bytes(
         self,
