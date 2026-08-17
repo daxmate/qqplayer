@@ -1,4 +1,4 @@
-"""设置服务：统一设置（单一 settings.json · 7 namespace）读写/迁移 + 字段校验。
+"""设置服务：统一设置（单一 settings.json · 9 namespace）读写/迁移 + 字段校验。
 
 路径/内存缓存全部走 app.state（state.SETTINGS_FILE 等，延迟解析）——
 测试 patch app.state.XXX 后这里读到的就是临时路径。
@@ -18,6 +18,7 @@ _SETTINGS_NAMESPACES = (
     "download",
     "books",
     "dict",
+    "video",
 )
 
 
@@ -51,6 +52,13 @@ def _norm_exts(v, default):
         exts = [str(e).lower() for e in v if isinstance(e, str) and e.startswith(".")]
         if exts:
             return exts
+    return default
+
+
+def _norm_str_array(v, default):
+    """字符串数组：过滤非字符串/空白项；空数组合法（videoDirs 默认即空数组）"""
+    if isinstance(v, list):
+        return [str(s).strip() for s in v if isinstance(s, str) and s.strip()]
     return default
 
 
@@ -277,6 +285,10 @@ _SETTINGS_SPEC = {
         "engine": ("httpx", lambda v, d: _norm_str(v, d, allowed={"httpx", "aria2"})),
         "aria2Rpc": ("http://localhost:6800/jsonrpc", _norm_str),
         "aria2Secret": ("dax", _norm_str),
+    },
+    "video": {
+        # 本地视频目录（多目录字符串数组，空数组 = 未配置，/api/videos 返回空列表）
+        "videoDirs": ([], _norm_str_array),
     },
 }
 

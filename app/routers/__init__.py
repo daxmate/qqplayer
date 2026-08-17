@@ -16,6 +16,8 @@ from . import (
     settings,
     stream,
     tags,
+    video_online,
+    videos,
     vocab,
 )
 
@@ -34,6 +36,8 @@ _ROUTER_MODULES = (
     vocab,
     books,
     dict,
+    video_online,
+    videos,
 )
 
 

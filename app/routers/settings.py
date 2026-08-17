@@ -9,7 +9,7 @@ router = APIRouter()
 
 @router.get("/api/settings")
 def api_settings_get():
-    """返回统一设置：7 namespace 全量（每 namespace 合并默认值后返回）"""
+    """返回统一设置：9 namespace 全量（每 namespace 合并默认值后返回）"""
     return {"settings": settings_service.load_all_settings()}
 
 

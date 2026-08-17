@@ -82,12 +82,15 @@ DEFAULT_AUDIO_EXTS = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"]
 AUDIO_EXTS = set(DEFAULT_AUDIO_EXTS)
 LYRIC_EXTS = {".srt", ".lrc"}
 
-# ============ 统一设置文件路径（单一 settings.json · 7 namespace）============
+# 本地视频格式白名单（视频模块：/api/videos 列表扫描 + stream/subtitle 服务）
+VIDEO_EXTS = [".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".ts"]
+
+# ============ 统一设置文件路径（单一 settings.json · 9 namespace）============
 SETTINGS_FILE = DATA_DIR / "settings.json"
 # 遗留单文件设置（一次性迁移数据源；迁移后只读保留作备份，不再写入）
 UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
 DESKTOP_LYRIC_FILE = DATA_DIR / "desktop_lyric.json"
-# 内存缓存：完整 7 namespace 结构
+# 内存缓存：完整 9 namespace 结构
 _settings: dict | None = None
 
 # ---- 各 namespace 默认值 ----

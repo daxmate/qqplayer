@@ -810,9 +810,9 @@ def test_init_library_respects_settings(song_library, monkeypatch):
     assert calls == {"scan": 1, "watch": 1}  # 不再额外调用
 
 
-# ============ 统一设置（6 namespace Settings API）============
+# ============ 统一设置（9 namespace Settings API）============
 def test_api_settings_get_all_namespaces():
-    """GET /api/settings 返回 8 namespace 全量，每 namespace 合并默认值"""
+    """GET /api/settings 返回 9 namespace 全量，每 namespace 合并默认值"""
     r = client.get("/api/settings")
     assert r.status_code == 200
     s = r.json()["settings"]
@@ -826,6 +826,7 @@ def test_api_settings_get_all_namespaces():
         "download",
         "books",
         "dict",
+        "video",
     }
     # library 4 字段
     assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
@@ -880,6 +881,8 @@ def test_api_settings_get_all_namespaces():
     assert s["download"]["downloadDir"] == ""
     assert s["download"]["defaultQuality"] == "exhigh"
     assert s["download"]["quarkQuality"] == "mp3"
+    # video 1 字段（视频模块：本地视频目录数组，默认空）
+    assert s["video"] == {"videoDirs": []}
 
 
 def test_api_settings_put_deep_merge():
@@ -1073,6 +1076,7 @@ def test_migrate_legacy_settings_idempotent():
         "download",
         "books",
         "dict",
+        "video",
     }
     state._settings = None
     backend.migrate_legacy_settings()  # 再跑一次
