@@ -10,7 +10,8 @@ import "@applemusic-like-lyrics/core/style.css";
 // 全局取消浏览器默认右键菜单（input/textarea/contenteditable 输入框保留系统菜单：复制/粘贴/拼写）。
 // 自定义右键菜单组件用 @contextmenu.prevent 自行 preventDefault 弹菜单，与此监听不冲突。
 document.addEventListener("contextmenu", (e) => {
-  const el = e.target instanceof Element ? e.target.closest("input, textarea, [contenteditable]") : null;
+  const el =
+    e.target instanceof Element ? e.target.closest("input, textarea, [contenteditable]") : null;
   if (!el) e.preventDefault();
 });
 
