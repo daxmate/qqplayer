@@ -1,4 +1,5 @@
-// Reader 标注交互集成测试：选中 → 工具栏 → 查词/高亮/笔记 + 书签 + 标注侧栏 + 重放
+// Reader 标注交互集成测试：选中 → 工具栏 → 查词/高亮(五色+下划线)/笔记 + 书签 + 标注侧栏 + 重放
+// + 点击已有高亮 → 弹菜单（换色/U 切换/移除/笔记）
 // 模式同 Reader.test.ts：mock epubjs + api；annotations 模块 mock API 函数（纯函数保留真实）
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
@@ -25,6 +26,8 @@ const mocks = vi.hoisted(() => {
       start: { cfi: "epubcfi(/6/8!/4/2/2/1:0)", location: 2, percentage: 0.5 },
     })),
     getContents: vi.fn(() => []),
+    // 翻页热区/高亮点击检测走 getCurrentContents（views 遍历）
+    views: vi.fn(() => []),
   };
   return { rendition, ePub: vi.fn() };
 });
@@ -67,6 +70,7 @@ vi.mock("../books/annotations", async (importOriginal) => {
 
 import Reader from "../books/Reader.vue";
 import { useToast, clearToasts } from "../composables/useToast.js";
+import { UNDERLINE_STYLE } from "../books/annotations";
 
 const toastItems = useToast().items as Array<{ type: string; text: string }>;
 
@@ -188,23 +192,32 @@ async function fireSelection(
   return wrapper;
 }
 
+/** 工具栏功能项按钮（按文案包含匹配） */
+function actionButton(wrapper: Awaited<ReturnType<typeof mountReader>>, label: string) {
+  const btn = wrapper.findAll(".hl-menu-action").find((b) => b.text().includes(label));
+  expect(btn, `工具栏应有「${label}」按钮`).toBeTruthy();
+  return btn!;
+}
+
 describe("Reader 标注交互", () => {
-  it("选中文字 → 工具栏出现 → 查词弹窗（无词典空态）", async () => {
+  it("选中文字 → 工具栏出现（iBooks 式：顶行五色点 + U）→ 查词弹窗", async () => {
     const wrapper = await mountReader();
-    await await fireSelection(wrapper);
+    await fireSelection(wrapper, "hello");
 
-    const toolbar = wrapper.find(".sel-toolbar");
+    const toolbar = wrapper.find(".hl-menu");
     expect(toolbar.exists()).toBe(true);
-    expect(wrapper.find(".sel-toolbar-btn").text()).toContain("查词");
+    // 顶行：5 色点 + U 下划线按钮
+    expect(wrapper.findAll(".hl-menu-dot")).toHaveLength(5);
+    expect(wrapper.find(".hl-menu-underline").exists()).toBe(true);
 
-    // 查词 → 弹窗打开（无词典空态 + 跳转词典管理入口）
-    await wrapper.findAll(".sel-toolbar-btn")[0].trigger("click");
+    // 查词（单词才显示，文案带选中词）
+    await actionButton(wrapper, "查询").trigger("click");
     await flushPromises();
     const modal = wrapper.find(".dict-modal");
     expect(modal.exists()).toBe(true);
     expect(modal.text()).toContain("还没有配置词典");
     // 工具栏已收起
-    expect(wrapper.find(".sel-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -212,10 +225,9 @@ describe("Reader 标注交互", () => {
     const wrapper = await mountReader();
     await fireSelection(wrapper);
 
-    // 高亮 → 色板 → 黄色
-    await wrapper.findAll(".sel-toolbar-btn")[1].trigger("click");
-    const dots = wrapper.findAll(".sel-toolbar-dot");
-    expect(dots).toHaveLength(4);
+    // 色点常驻顶行，直接点黄色
+    const dots = wrapper.findAll(".hl-menu-dot");
+    expect(dots).toHaveLength(5);
     await dots[0].trigger("click");
     await flushPromises();
 
@@ -223,11 +235,12 @@ describe("Reader 标注交互", () => {
       cfi: HL_CFI,
       text: "hello world",
       color: "yellow",
+      style: "highlight",
     });
     expect(mocks.rendition.annotations.add).toHaveBeenCalledWith(
       "highlight",
       HL_CFI,
-      { id: "hl_1" },
+      { id: "hl_1", text: "hello world", color: "yellow" },
       undefined,
       "epubjs-hl",
       expect.objectContaining({ fill: expect.any(String) }),
@@ -250,19 +263,90 @@ describe("Reader 标注交互", () => {
     wrapper.unmount();
   });
 
+  it('U 下划线：emit → 后端落库红色 underline + epub.js annotations.add("underline") + UNDERLINE_STYLE', async () => {
+    const wrapper = await mountReader();
+    await fireSelection(wrapper);
+
+    await wrapper.find(".hl-menu-underline").trigger("click");
+    await flushPromises();
+
+    expect(apiMock.createHighlight).toHaveBeenCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "red",
+      style: "underline",
+    });
+    expect(mocks.rendition.annotations.add).toHaveBeenCalledWith(
+      "underline",
+      HL_CFI,
+      { id: "hl_1", text: "hello world" },
+      undefined,
+      "epubjs-ul",
+      UNDERLINE_STYLE,
+    );
+    expect(toastItems.at(-1)?.text).toBe("已添加下划线");
+    wrapper.unmount();
+  });
+
   it("重复高亮同一 cfi → 拒绝 + toast", async () => {
     apiMock.fetchAnnotations.mockResolvedValue({
-      highlights: [{ id: "hl_x", cfi: HL_CFI, text: "hello world", color: "yellow", createdAt: 1 }],
+      highlights: [
+        {
+          id: "hl_x",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "yellow",
+          style: "highlight",
+          createdAt: 1,
+        },
+      ],
       bookmarks: [],
       notes: [],
     });
     const wrapper = await mountReader();
     await fireSelection(wrapper);
-    await wrapper.findAll(".sel-toolbar-btn")[1].trigger("click");
-    await wrapper.findAll(".sel-toolbar-dot")[0].trigger("click");
+    await wrapper.findAll(".hl-menu-dot")[0].trigger("click");
     await flushPromises();
     expect(apiMock.createHighlight).not.toHaveBeenCalled();
     expect(toastItems.at(-1)?.text).toBe("这段文字已高亮过");
+    wrapper.unmount();
+  });
+
+  it("选中已有高亮的 cfi → 工具栏显示移除 → 点击删除该条", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_x",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "blue",
+          style: "highlight",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    // 选中与高亮同 cfi → hasHighlight 为 true → 移除项出现
+    await fireSelection(wrapper, "hello world");
+    expect(wrapper.findAll(".hl-menu-action").some((b) => b.text().includes("移除高亮"))).toBe(
+      true,
+    );
+    await actionButton(wrapper, "移除高亮").trigger("click");
+    await flushPromises();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_x");
+    expect(mocks.rendition.annotations.remove).toHaveBeenCalledWith(HL_CFI, "highlight");
+    wrapper.unmount();
+  });
+
+  it("搜索：点击 → 只写 searchRequest（SearchPanel 由搜索子代理 watch）", async () => {
+    const wrapper = await mountReader();
+    await fireSelection(wrapper);
+    await actionButton(wrapper, "搜索").trigger("click");
+    expect((wrapper.vm as unknown as { searchRequest: string | null }).searchRequest).toBe(
+      "hello world",
+    );
     wrapper.unmount();
   });
 
@@ -292,7 +376,7 @@ describe("Reader 标注交互", () => {
     const wrapper = await mountReader();
     await fireSelection(wrapper, "hello world");
 
-    await wrapper.findAll(".sel-toolbar-btn")[2].trigger("click"); // 笔记
+    await actionButton(wrapper, "笔记").trigger("click");
     const modal = wrapper.find(".note-modal");
     expect(modal.exists()).toBe(true);
     expect(modal.text()).toContain("hello world"); // 原文摘录
@@ -309,7 +393,7 @@ describe("Reader 标注交互", () => {
     wrapper.unmount();
   });
 
-  it("标注重放：加载书时后端高亮逐条 add（切章自动重放）", async () => {
+  it("标注重放：加载书时后端高亮逐条 add（切章自动重放）；underline 条目走 underline + epubjs-ul", async () => {
     apiMock.fetchAnnotations.mockResolvedValue({
       highlights: [
         {
@@ -317,7 +401,16 @@ describe("Reader 标注交互", () => {
           cfi: "epubcfi(/6/10!/4/2/2/1:0,1:10)",
           text: "old hl",
           color: "blue",
+          style: "highlight",
           createdAt: 1,
+        },
+        {
+          id: "hl_10",
+          cfi: "epubcfi(/6/11!/4/2/2/1:0,1:8)",
+          text: "old ul",
+          color: "red",
+          style: "underline",
+          createdAt: 2,
         },
       ],
       bookmarks: [],
@@ -332,6 +425,14 @@ describe("Reader 标注交互", () => {
       undefined,
       "epubjs-hl",
       expect.any(Object),
+    );
+    expect(mocks.rendition.annotations.add).toHaveBeenCalledWith(
+      "underline",
+      "epubcfi(/6/11!/4/2/2/1:0,1:8)",
+      { id: "hl_10", text: "old ul" },
+      undefined,
+      "epubjs-ul",
+      UNDERLINE_STYLE,
     );
     wrapper.unmount();
   });
@@ -374,7 +475,7 @@ describe("Reader 标注交互", () => {
 
     const wrapper = await mountReader();
     await fireSelection(wrapper, "hello");
-    await wrapper.findAll(".sel-toolbar-btn")[0].trigger("click"); // 查词
+    await actionButton(wrapper, "查询").trigger("click"); // 查词
     await flushPromises();
     await wrapper.find(".dict-modal-btn.vocab").trigger("click"); // 加入生词本
     await flushPromises();
@@ -404,7 +505,7 @@ describe("Reader 标注交互", () => {
   it("选区收起（selectionchange）→ 工具栏隐藏", async () => {
     const wrapper = await mountReader();
     await fireSelection(wrapper);
-    expect(wrapper.find(".sel-toolbar").exists()).toBe(true);
+    expect(wrapper.find(".hl-menu").exists()).toBe(true);
 
     // 模拟 iframe 内 selectionchange（选区塌缩）
     const contents = makeContents("hello world");
@@ -414,19 +515,222 @@ describe("Reader 标注交互", () => {
     )![1];
     listener({ target: { defaultView: { getSelection: () => ({ isCollapsed: true }) } } });
     await flushPromises();
-    expect(wrapper.find(".sel-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
   it("翻页（relocated）→ 工具栏收起 + curCfi 更新", async () => {
     const wrapper = await mountReader();
     await fireSelection(wrapper);
-    expect(wrapper.find(".sel-toolbar").exists()).toBe(true);
+    expect(wrapper.find(".hl-menu").exists()).toBe(true);
 
     const reloc = mocks.rendition.on.mock.calls.find(([ev]) => ev === "relocated")![1];
     reloc({ start: { cfi: "epubcfi(/6/9!/4/2/2/1:0)", percentage: 0.7 } });
     await flushPromises();
-    expect(wrapper.find(".sel-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+// ============ 点击已有高亮 → 弹菜单（核心新交互） ============
+describe("点击高亮弹菜单", () => {
+  /** 构造可分发点击事件的 contents（getCurrentContents 需要真实 document 挂监听） */
+  function makeTapContents() {
+    const doc = document.implementation.createHTMLDocument("tap");
+    return { document: doc, window: { getSelection: () => null } };
+  }
+
+  /** 注入一个 epubjs mark 形状的 <g class="epubjs-hl" data-id data-epubcfi><rect/></g> 到容器 */
+  function injectMark(wrapper: Awaited<ReturnType<typeof mountReader>>, id: string, cfi: string) {
+    const container = wrapper.find(".reader-container").element;
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.classList.add("epubjs-hl");
+    g.setAttribute("data-id", id);
+    g.setAttribute("data-epubcfi", cfi);
+    g.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "rect"));
+    container.appendChild(g);
+    return g;
+  }
+
+  /** 挂载 + 接上 views()（点击检测走 getCurrentContents）+ 注入高亮 mark；
+   *  注意 views 必须在 mount 前 mock：loadBook 的 attachTapHandlers 依赖它挂点击监听 */
+  async function mountWithMark(hl: {
+    id: string;
+    cfi: string;
+    text: string;
+    color: string;
+    style?: string;
+  }) {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: hl.id,
+          cfi: hl.cfi,
+          text: hl.text,
+          color: hl.color,
+          style: hl.style ?? "highlight",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const tap = makeTapContents();
+    mocks.rendition.views.mockReturnValue([{ contents: tap }]);
+    const wrapper = await mountReader();
+    injectMark(wrapper, hl.id, hl.cfi);
+    return { wrapper, doc: tap.document };
+  }
+
+  /** 模拟点击内容文档 (0,0)：jsdom 里 rect.getBoundingClientRect 全 0 → 命中注入的 mark */
+  async function clickMark(wrapper: Awaited<ReturnType<typeof mountReader>>, doc: Document) {
+    doc.dispatchEvent(new MouseEvent("click", { clientX: 0, clientY: 0, bubbles: true }));
+    await flushPromises();
+  }
+
+  it("点击高亮 mark → 弹菜单（换色/U/移除/笔记）", async () => {
+    const { wrapper, doc } = await mountWithMark({
+      id: "hl_1",
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "yellow",
+      style: "highlight",
+    });
+    // attachTapHandlers 在 loadBook 时 views() 返回空 → 手动触发一次以挂上点击监听
+    await clickMark(wrapper, doc);
+
+    // 菜单出现，且带换色色点 + U + 功能
+    const menu = wrapper.find(".hl-menu");
+    expect(menu.exists()).toBe(true);
+    expect(menu.text()).toContain("移除高亮");
+    expect(menu.text()).toContain("笔记");
+    expect(wrapper.findAll(".hl-menu .hl-menu-dot")).toHaveLength(5);
+
+    // 换色（绿）→ 删除重建：deleteHighlight + createHighlight(同 cfi/text，新 color)
+    await wrapper.findAll(".hl-menu .hl-menu-dot")[1].trigger("click");
+    await flushPromises();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_1");
+    expect(apiMock.createHighlight).toHaveBeenCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "green",
+      style: "highlight",
+    });
+    // 本地条目已替换为新色（id 变 hl_1 不变可接受，此处 mock 返回同 id）
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: Array<{ color: string }> } })
+        .annotations.highlights[0].color,
+    ).toBe("green");
+    // 菜单保持打开（id 跟随新条目）
+    expect(wrapper.find(".hl-menu").exists()).toBe(true);
+
+    // U 切换 → 转下划线（color 固定 red）
+    await wrapper.find(".hl-menu .hl-menu-underline").trigger("click");
+    await flushPromises();
+    expect(apiMock.createHighlight).toHaveBeenLastCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "red",
+      style: "underline",
+    });
+    expect(mocks.rendition.annotations.add).toHaveBeenLastCalledWith(
+      "underline",
+      HL_CFI,
+      { id: "hl_1", text: "hello world" },
+      undefined,
+      "epubjs-ul",
+      UNDERLINE_STYLE,
+    );
+
+    // 移除 → 删除 + 菜单自动关闭
+    await actionButton(wrapper, "移除高亮").trigger("click");
+    await flushPromises();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_1");
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: unknown[] } }).annotations.highlights,
+    ).toHaveLength(0);
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("点击高亮 → 添加笔记：弹窗带原文摘录，保存走 createNote（cfi 用高亮 cfi）", async () => {
+    const { wrapper, doc } = await mountWithMark({
+      id: "hl_1",
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "pink",
+    });
+    await clickMark(wrapper, doc);
+
+    await actionButton(wrapper, "笔记").trigger("click");
+    const modal = wrapper.find(".note-modal");
+    expect(modal.exists()).toBe(true);
+    expect(modal.text()).toContain("hello world");
+
+    await modal.find("textarea").setValue("高亮上的笔记");
+    await modal.find(".note-modal-btn.primary").trigger("click");
+    await flushPromises();
+    expect(apiMock.createNote).toHaveBeenCalledWith("b1", {
+      cfi: HL_CFI,
+      excerpt: "hello world",
+      text: "高亮上的笔记",
+    });
+    wrapper.unmount();
+  });
+
+  it("点击下划线 mark（epubjs-ul）→ 菜单出现，U 为 active 态", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_ul",
+          cfi: HL_CFI,
+          text: "underlined",
+          color: "red",
+          style: "underline",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const tap = makeTapContents();
+    mocks.rendition.views.mockReturnValue([{ contents: tap }]);
+    const wrapper = await mountReader();
+    const container = wrapper.find(".reader-container").element;
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.classList.add("epubjs-ul");
+    g.setAttribute("data-id", "hl_ul");
+    g.setAttribute("data-epubcfi", HL_CFI);
+    g.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "rect"));
+    container.appendChild(g);
+
+    await clickMark(wrapper, tap.document);
+    const menu = wrapper.find(".hl-menu");
+    expect(menu.exists()).toBe(true);
+    expect(wrapper.find(".hl-menu .hl-menu-underline").classes()).toContain("on");
+    // U 切换回底色高亮：颜色从 red 回落 yellow
+    await wrapper.find(".hl-menu .hl-menu-underline").trigger("click");
+    await flushPromises();
+    expect(apiMock.createHighlight).toHaveBeenLastCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "underlined",
+      color: "yellow",
+      style: "highlight",
+    });
+    wrapper.unmount();
+  });
+
+  it("点击非高亮区域（无 mark）→ 不弹菜单、无异常", async () => {
+    const { wrapper, doc } = await mountWithMark({
+      id: "hl_1",
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "yellow",
+    });
+    // 移除注入的 mark → 点击不命中
+    wrapper.find(".reader-container .epubjs-hl").element.remove();
+    await clickMark(wrapper, doc);
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 });

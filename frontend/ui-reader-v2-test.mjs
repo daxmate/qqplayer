@@ -1,6 +1,9 @@
-// 阅读器 V2 标注 E2E 冒烟：真实链路验证（选中 → 查词 → 高亮持久化 → 书签 → 笔记 → 生词本 → 导出）
+// 阅读器 V2/V4 标注 E2E 冒烟：真实链路验证（选中 → 查词 → 高亮/下划线 → 点击高亮弹菜单 → 书签 → 笔记 → 生词本 → 导出）
 // 用法: BASE_URL=http://localhost:17629 node ui-reader-v2-test.mjs （需服务运行，默认 http://localhost:17627）
 // 背景: 单测全 mock 测不出真实 epub.js 选中/annotations API 契约，补这条端到端兜底（参照 ui-books-test.mjs）。
+// V4（2026-08-18）: 选中工具栏改 iBooks 式（顶行五色点+U 下划线，下方功能列表）；点击已有高亮弹小菜单（换色/U 切换/移除/笔记）。
+//   - 换色用绿色（旧后端白名单内）保证两版后端都能持久化断言；紫色/下划线持久化依赖 V4 后端（style 字段），
+//     旧后端会把 red 回落 yellow 且丢 style → 下划线持久化断言做版本自适应（DOM 渲染断言始终生效）。
 // 说明: 词典用用户已配置的真实词典（LDOCE6++ 等）验证查词；测试书/生词/标注全部清理。
 import { chromium } from "playwright";
 import { execFileSync } from "node:child_process";
@@ -112,7 +115,7 @@ let frame = page.frames().find((f) => f !== page.mainFrame());
 if (!frame) throw new Error("epub.js iframe 未出现");
 console.log("4. 打开书 → 渲染完成 OK");
 
-// ---------- 5. 选中文字 → 选中工具栏出现 ----------
+// ---------- 5. 选中文字 → 选中工具栏出现（V4：顶行五色点 + U 常驻） ----------
 async function selectInFrame(text) {
   return frame.evaluate((selText) => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -135,11 +138,14 @@ async function selectInFrame(text) {
 }
 
 await selectInFrame("Hello");
-await page.waitForSelector(".sel-toolbar", { timeout: 6000 });
-console.log("5. 选中 Hello → 工具栏出现 OK");
+await page.waitForSelector(".hl-menu", { timeout: 6000 });
+const dotCount = await page.locator(".hl-menu-dot").count();
+if (dotCount !== 5) throw new Error("选中工具栏色点数 != 5: " + dotCount);
+if ((await page.locator(".hl-menu-underline").count()) !== 1) throw new Error("U 下划线按钮缺失");
+console.log("5. 选中 Hello → 工具栏 OK（5 色点 + U 常驻）");
 
 // ---------- 6. 查词弹窗（真实词典查询 + 资源重写） ----------
-await page.click(".sel-toolbar-btn:has-text('查词')");
+await page.click(".hl-menu-action:has-text('查询')");
 await page.waitForSelector(".dict-modal", { timeout: 6000 });
 await page.waitForSelector(".dict-modal-frame", { timeout: 20000 });
 const srcdoc = await page.locator(".dict-modal-frame").getAttribute("srcdoc");
@@ -184,9 +190,8 @@ await page.waitForSelector(".dict-modal", { state: "detached", timeout: 5000 });
 
 // ---------- 8. 高亮（黄色）→ 后端持久化 ----------
 await selectInFrame("Hello");
-await page.waitForSelector(".sel-toolbar", { timeout: 6000 });
-await page.click(".sel-toolbar-btn:has-text('高亮')");
-await page.click(".sel-toolbar-dot:first-child"); // yellow
+await page.waitForSelector(".hl-menu", { timeout: 6000 });
+await page.click(".hl-menu-dot:first-child"); // yellow（色点常驻，无需展开）
 await page.waitForTimeout(600); // 等 POST 完成
 let ann = await (await api(`/api/books/${book.id}/annotations`)).json();
 const hl = ann.highlights.find((h) => h.text === "Hello");
@@ -209,6 +214,85 @@ frame = page.frames().find((f) => f !== page.mainFrame());
 if (!frame) throw new Error("重开书 iframe 未出现");
 console.log("   刷新重开书 OK（高亮重放无 pageerror）");
 
+// ---------- 8.5 点击已有高亮 → 弹菜单（V4 核心交互） ----------
+// 重放的高亮 SVG mark 渲染在父文档 overlay（pointer-events:none），真实点击落在 iframe 内容上；
+// Reader 在 contents click 里按坐标反查 .epubjs-hl 命中段 → 弹菜单（不翻页）
+async function clickHighlightCenter(sel = ".epubjs-hl") {
+  const box = await page.locator(sel).first().boundingBox();
+  if (!box) throw new Error("高亮 mark 未渲染: " + sel);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForSelector(".hl-menu", { timeout: 6000 });
+}
+
+await clickHighlightCenter();
+let menuText = await page.locator(".hl-menu").innerText();
+if (!menuText.includes("移除高亮") || !menuText.includes("笔记"))
+  throw new Error("点击高亮菜单缺移除/笔记项: " + menuText);
+console.log("8.5 点击高亮 → 弹菜单 OK（不翻页）");
+
+// 换色（绿）→ 删除重建 → 后端 color 变 green（旧后端白名单内，两版后端均可断言）
+await page.locator(".hl-menu .hl-menu-dot").nth(1).click();
+await page.waitForTimeout(700);
+ann = await (await api(`/api/books/${book.id}/annotations`)).json();
+let hl2 = ann.highlights.find((h) => h.text === "Hello");
+if (!hl2 || hl2.color !== "green") throw new Error("换色未持久化: " + JSON.stringify(hl2));
+console.log("   换色 OK: color=green（删除重建，菜单保持打开）");
+
+// U 切换下划线：DOM 立即渲染 epubjs-ul + 红色 line（CSS 覆盖 marks-pane 硬编码黑色）；
+// 持久化 style=underline/red 依赖 V4 后端（旧后端回落 yellow 且丢 style → 仅警告）
+await clickHighlightCenter();
+await page.locator(".hl-menu .hl-menu-underline").click();
+await page.waitForSelector(".epubjs-ul", { timeout: 6000 });
+const stroke = await page
+  .locator(".epubjs-ul line")
+  .first()
+  .evaluate((el) => getComputedStyle(el).stroke);
+if (stroke !== "rgb(229, 72, 77)") throw new Error("下划线非红色: " + stroke);
+console.log("   U 切换 OK: DOM 渲染 .epubjs-ul，line stroke=", stroke, "（红色）");
+ann = await (await api(`/api/books/${book.id}/annotations`)).json();
+hl2 = ann.highlights.find((h) => h.text === "Hello");
+if (hl2.style === "underline" && hl2.color === "red") {
+  console.log("   U 切换持久化 OK（V4 后端）: style=underline color=red");
+} else {
+  console.log("   ⚠ U 切换持久化未断言（后端非 V4：style/red 回落）——前端 DOM 渲染已真实验证");
+}
+
+// U 再切回底色高亮（本地 .epubjs-hl 恢复）
+await clickHighlightCenter(".epubjs-ul");
+await page.locator(".hl-menu .hl-menu-underline").click();
+await page.waitForSelector(".epubjs-hl", { timeout: 6000 });
+console.log("   U 再切换回底色高亮 OK");
+
+// 移除：菜单删除 → 后端消失
+await clickHighlightCenter();
+await page.locator(".hl-menu .hl-menu-action:has-text('移除高亮')").click();
+await page.waitForTimeout(700);
+ann = await (await api(`/api/books/${book.id}/annotations`)).json();
+if (ann.highlights.some((h) => h.text === "Hello"))
+  throw new Error("菜单移除失败: " + JSON.stringify(ann.highlights));
+console.log("   菜单移除 OK（后端已删）");
+
+// 工具栏移除路径（hasHighlight → 移除项显示 → 删除）：先加高亮，再选中同 cfi
+await selectInFrame("Hello");
+await page.waitForSelector(".hl-menu", { timeout: 6000 });
+await page.click(".hl-menu-dot:first-child"); // 加黄色
+await page.waitForTimeout(600);
+await selectInFrame("Hello");
+await page.waitForSelector(".hl-menu", { timeout: 6000 });
+const rmShown = await page.locator(".hl-menu-action:has-text('移除高亮')").count();
+if (rmShown !== 1) throw new Error("选中已有高亮 cfi → 移除项应显示");
+await page.click(".hl-menu-action:has-text('移除高亮')");
+await page.waitForTimeout(600);
+ann = await (await api(`/api/books/${book.id}/annotations`)).json();
+if (ann.highlights.some((h) => h.text === "Hello")) throw new Error("工具栏移除失败");
+console.log("   工具栏移除路径 OK（选中已有高亮 → 移除项 → 删除）");
+
+// 重新加回黄色高亮（供后面标注面板断言用）
+await selectInFrame("Hello");
+await page.waitForSelector(".hl-menu", { timeout: 6000 });
+await page.click(".hl-menu-dot:first-child");
+await page.waitForTimeout(600);
+
 // ---------- 9. 书签：加 → 删 → 再加 ----------
 const bmBtn = page.locator('.reader-btn[title="书签"]');
 await bmBtn.click();
@@ -228,8 +312,8 @@ console.log("   书签删除/重加 OK");
 
 // ---------- 10. 笔记：选中 → 笔记弹窗 → 保存 ----------
 await selectInFrame("quick brown fox");
-await page.waitForSelector(".sel-toolbar", { timeout: 6000 });
-await page.click(".sel-toolbar-btn:has-text('笔记')");
+await page.waitForSelector(".hl-menu", { timeout: 6000 });
+await page.click(".hl-menu-action:has-text('笔记')");
 await page.waitForSelector(".note-modal", { timeout: 6000 });
 await page.fill(".note-modal-textarea", "E2E 测试笔记：foobar");
 await page.click(".note-modal-btn.primary");
@@ -296,4 +380,4 @@ if (errors.length) {
   console.log("\n⚠️ 页面错误:\n" + errors.slice(0, 5).join("\n"));
   process.exit(1);
 }
-console.log("\n✅ 阅读器 V2 标注 E2E 全部通过");
+console.log("\n✅ 阅读器 V2/V4 标注 E2E 全部通过");

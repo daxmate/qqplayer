@@ -37,7 +37,18 @@
             class="anno-panel-item"
             :title="h.text"
           >
-            <span class="anno-panel-dot" :style="{ background: HIGHLIGHT_COLOR_HEX[h.color] }" />
+            <span
+              v-if="h.style === 'underline'"
+              class="anno-panel-dot ul"
+              :title="t('books.underline')"
+            >
+              <Underline :size="11" />
+            </span>
+            <span
+              v-else
+              class="anno-panel-dot"
+              :style="{ background: HIGHLIGHT_COLOR_HEX[h.color] ?? '#e5484d' }"
+            />
             <span class="anno-panel-text">{{ h.text }}</span>
             <button class="anno-panel-action" :title="t('books.jump')" @click="emit('jump', h.cfi)">
               <CornerDownRight :size="14" />
@@ -162,6 +173,7 @@ import {
   Pencil,
   StickyNote,
   Trash2,
+  Underline,
   X,
 } from "@lucide/vue";
 import type { BookAnnotations, NoteAnnotation, VocabEntry } from "./types";
@@ -323,6 +335,17 @@ function exportVocab() {
   height: 12px;
   border-radius: 3px;
   box-shadow: 0 0 0 1px var(--border);
+}
+/* 下划线条目：色点换下划线图标（红色，与渲染色一致） */
+.anno-panel-dot.ul {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 14px;
+  background: transparent;
+  box-shadow: none;
+  color: #e5484d;
 }
 .anno-panel-type-icon {
   flex-shrink: 0;

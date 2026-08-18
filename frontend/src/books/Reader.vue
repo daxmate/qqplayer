@@ -59,7 +59,7 @@
     </header>
 
     <!-- 阅读区（epubjs 挂载点 + 左右点击翻页热区；容器 padding 实现页边距设置） -->
-    <div class="reader-body">
+    <div ref="bodyRef" class="reader-body">
       <div ref="containerRef" class="reader-container" :style="readerContainerStyle">
         <div v-if="loading" class="reader-status">
           <Loader2 :size="28" class="reader-spin" />
@@ -126,17 +126,45 @@
         </div>
       </Transition>
 
-      <!-- 选中工具栏（选区上方/下方悬浮）；Swift 壳内隐藏（壳用系统右键菜单，见 installNativeMenuApi），浏览器照旧 -->
+      <!-- 选中工具栏（选区上方/下方悬浮，iBooks 式：顶行五色点 + U，下方功能列表）；Swift 壳内隐藏（壳用系统右键菜单，见 installNativeMenuApi），浏览器照旧 -->
       <SelectionToolbar
         v-if="toolbar.visible && !isNativeShell"
         :x="toolbar.x"
         :y="toolbar.y"
         :visible="toolbar.visible"
         :text="currentSelection?.text ?? ''"
+        :has-highlight="toolbarHasHighlight"
         @lookup="onToolbarLookup"
         @highlight="onToolbarHighlight"
         @note="onToolbarNote"
+        @search="onToolbarSearch"
+        @remove="onToolbarRemove"
       />
+
+      <!-- 点击已有高亮/下划线 → 小菜单（换色 + U 切换 + 移除 + 添加笔记；复用 HighlightMenu 壳） -->
+      <HighlightMenu
+        v-if="hlMenu.visible && hlMenuHighlight"
+        :x="hlMenu.x"
+        :y="hlMenu.y"
+        :visible="hlMenu.visible"
+        :color="hlMenuHighlight.style === 'underline' ? null : hlMenuHighlight.color"
+        :underline-active="hlMenuHighlight.style === 'underline'"
+        @color="changeMenuColor"
+        @underline="toggleMenuStyle"
+      >
+        <button
+          class="hl-menu-action danger"
+          :title="t('books.removeHighlight')"
+          @click="removeMenuHighlight"
+        >
+          <Trash2 :size="14" />
+          <span>{{ t("books.removeHighlight") }}</span>
+        </button>
+        <button class="hl-menu-action" :title="t('books.note')" @click="openMenuNote">
+          <StickyNote :size="14" />
+          <span>{{ t("books.note") }}</span>
+        </button>
+      </HighlightMenu>
 
       <!-- 查词弹窗 -->
       <DictLookupModal
@@ -180,13 +208,17 @@ import {
   Minus,
   Plus,
   Settings2,
+  StickyNote,
+  Trash2,
 } from "@lucide/vue";
 import ePub from "epubjs";
 import type { Book, Rendition, Location, NavItem } from "epubjs";
 import type {
   BookAnnotations,
   BookView,
+  HighlightAnnotation,
   HighlightColor,
+  HighlightStyle,
   NoteAnnotation,
   ReaderSelection,
   ReaderSettings,
@@ -205,12 +237,15 @@ import {
   fetchVocab,
   HIGHLIGHT_COLOR_STYLES,
   isDarkBackground,
+  UNDERLINE_COLOR,
+  UNDERLINE_STYLE,
   updateNote,
 } from "./annotations";
 import { showToast, toastError } from "../composables/useToast.js";
 import { uiSettings } from "../composables/useSettings.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
+import HighlightMenu from "./HighlightMenu.vue";
 import AnnotationPanel from "./AnnotationPanel.vue";
 import DictLookupModal from "./DictLookupModal.vue";
 import NoteEditorModal from "./NoteEditorModal.vue";
@@ -229,6 +264,7 @@ const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 
 const rootRef = ref<HTMLElement | null>(null);
+const bodyRef = ref<HTMLElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
 const bookRef = shallowRef<Book | null>(null);
 const renditionRef = shallowRef<Rendition | null>(null);
@@ -332,6 +368,26 @@ const curCfi = ref("");
 const toolbar = reactive({ x: 0, y: 0, visible: false });
 /** 当前选中（工具栏操作的数据源；工具栏收起时保留到操作完成） */
 const currentSelection = ref<ReaderSelection | null>(null);
+
+/** 书内搜索请求（V4）：菜单"搜索"只写这个 ref；SearchPanel 由搜索子代理挂载并 watch（本文件不建面板） */
+const searchRequest = ref<string | null>(null);
+
+/** 选中 cfi 是否已有高亮（工具栏"移除"项显示条件；与 addHighlight 的重复判断同思路） */
+const toolbarHasHighlight = computed(() => {
+  const sel = currentSelection.value;
+  return sel ? annotations.value.highlights.some((h) => h.cfi === sel.cfi) : false;
+});
+
+/** 点击已有高亮弹菜单状态（位置 + 目标高亮 id；条目被删则菜单自动关闭） */
+const hlMenu = reactive({ x: 0, y: 0, visible: false, id: null as string | null });
+const hlMenuHighlight = computed(
+  () => annotations.value.highlights.find((h) => h.id === hlMenu.id) ?? null,
+);
+
+function closeHighlightMenu() {
+  hlMenu.visible = false;
+  hlMenu.id = null;
+}
 
 /** 查词弹窗状态 */
 const lookupState = reactive({
@@ -484,6 +540,7 @@ function onSelected(cfi: string, contents: unknown) {
   toolbar.x = iframeRect.left + rangeRect.left + rangeRect.width / 2 - rootRect.left;
   toolbar.y = iframeRect.top + rangeRect.top - rootRect.top;
   toolbar.visible = true;
+  closeHighlightMenu(); // 新选区优先：收起点击高亮菜单
   currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
   // 挂载选区收起监听（contents 每次新建都会触发 selected，函数引用去重）
   (contents as { document?: Document }).document?.addEventListener(
@@ -499,20 +556,43 @@ function highlightStyles(color: HighlightColor): Record<string, string> {
   return isDarkBackground(bg) ? { ...base, "mix-blend-mode": "screen" } : base;
 }
 
-/** 标注重放：后端高亮逐条 add 到 epub.js（切章自动重放由 annotations hooks.render 负责） */
-function replayHighlights() {
+/** 单条高亮渲染到 epub.js（style=highlight 用底色 SVG，underline 用下划线 + UNDERLINE_STYLE） */
+function renderHighlight(h: HighlightAnnotation) {
   const rendition = renditionRef.value;
   if (!rendition?.annotations) return;
-  for (const h of annotations.value.highlights) {
-    try {
+  try {
+    if (h.style === "underline") {
+      rendition.annotations.add(
+        "underline",
+        h.cfi,
+        { id: h.id, text: h.text },
+        undefined,
+        "epubjs-ul",
+        UNDERLINE_STYLE,
+      );
+    } else {
+      const color: HighlightColor = h.color === "red" ? "yellow" : h.color;
       rendition.annotations.add(
         "highlight",
         h.cfi,
         { id: h.id, text: h.text, color: h.color },
         undefined,
         "epubjs-hl",
-        highlightStyles(h.color),
+        highlightStyles(color),
       );
+    }
+  } catch {
+    /* 渲染失败不影响持久化 */
+  }
+}
+
+/** 标注重放：后端高亮逐条 add 到 epub.js（切章自动重放由 annotations hooks.render 负责） */
+function replayHighlights() {
+  const rendition = renditionRef.value;
+  if (!rendition?.annotations) return;
+  for (const h of annotations.value.highlights) {
+    try {
+      renderHighlight(h);
     } catch {
       /* 单条重放失败忽略（cfi 过期等） */
     }
@@ -538,7 +618,7 @@ async function refreshVocab() {
 }
 
 // ---- 高亮 ----
-function addHighlight(color: HighlightColor) {
+function addHighlight(color: HighlightColor, style: HighlightStyle = "highlight") {
   const sel = currentSelection.value;
   if (!sel) return;
   if (annotations.value.highlights.some((h) => h.cfi === sel.cfi)) {
@@ -546,28 +626,21 @@ function addHighlight(color: HighlightColor) {
     clearSelection();
     return;
   }
-  createHighlight(props.book.id, { cfi: sel.cfi, text: sel.text, color })
+  // 下划线固定红色落库（V4 契约）；底色高亮用用户选色
+  const payloadColor: HighlightColor | "red" = style === "underline" ? UNDERLINE_COLOR : color;
+  createHighlight(props.book.id, { cfi: sel.cfi, text: sel.text, color: payloadColor, style })
     .then(({ id }) => {
-      annotations.value.highlights.push({
+      const h: HighlightAnnotation = {
         id,
         cfi: sel.cfi,
         text: sel.text,
-        color,
+        color: payloadColor,
+        style,
         createdAt: Date.now(),
-      });
-      try {
-        renditionRef.value?.annotations.add(
-          "highlight",
-          sel.cfi,
-          { id },
-          undefined,
-          "epubjs-hl",
-          highlightStyles(color),
-        );
-      } catch {
-        /* 渲染失败不影响持久化 */
-      }
-      showToast(t("books.highlightDone"));
+      };
+      annotations.value.highlights.push(h);
+      renderHighlight(h);
+      showToast(t(style === "underline" ? "books.underlineDone" : "books.highlightDone"));
     })
     .catch(() => toastError(t("books.loadError")))
     .finally(() => clearSelection());
@@ -579,15 +652,106 @@ function removeHighlight(id: string) {
     .then(() => {
       if (h) {
         try {
-          renditionRef.value?.annotations.remove(h.cfi, "highlight");
+          renditionRef.value?.annotations.remove(
+            h.cfi,
+            h.style === "underline" ? "underline" : "highlight",
+          );
         } catch {
           /* 本地移除失败忽略 */
         }
       }
       annotations.value.highlights = annotations.value.highlights.filter((x) => x.id !== id);
+      if (hlMenu.id === id) closeHighlightMenu();
       showToast(t("books.highlightDeleteDone"));
     })
     .catch(() => toastError(t("books.loadError")));
+}
+
+/**
+ * 换色 / 样式切换：后端无 PATCH，删除重建（先删后建）。
+ * 只在创建成功后才动本地列表 —— 删除成功但创建失败时本地原条目原样保留（含渲染），无数据丢失。
+ */
+function replaceHighlight(
+  h: HighlightAnnotation,
+  next: { color: HighlightColor; style: HighlightStyle },
+) {
+  const payloadColor: HighlightColor | "red" =
+    next.style === "underline" ? UNDERLINE_COLOR : next.color;
+  deleteHighlight(props.book.id, h.id)
+    .then(() =>
+      createHighlight(props.book.id, {
+        cfi: h.cfi,
+        text: h.text,
+        color: payloadColor,
+        style: next.style,
+      }),
+    )
+    .then(({ id }) => {
+      const nh: HighlightAnnotation = {
+        id,
+        cfi: h.cfi,
+        text: h.text,
+        color: payloadColor,
+        style: next.style,
+        createdAt: Date.now(),
+      };
+      annotations.value.highlights = annotations.value.highlights.map((x) =>
+        x.id === h.id ? nh : x,
+      );
+      try {
+        renditionRef.value?.annotations.remove(
+          h.cfi,
+          h.style === "underline" ? "underline" : "highlight",
+        );
+      } catch {
+        /* 本地移除失败忽略 */
+      }
+      renderHighlight(nh);
+      if (hlMenu.id === h.id) hlMenu.id = nh.id; // 菜单目标 id 跟随新条目（保持菜单打开）
+      showToast(t("books.highlightDone"));
+    })
+    .catch(() => toastError(t("books.loadError")));
+}
+
+/** 换色：色点永远产出底色高亮（下划线条目点色点 → 转为该色高亮，iBooks 行为） */
+function changeHighlightColor(h: HighlightAnnotation, color: HighlightColor) {
+  replaceHighlight(h, { color, style: "highlight" });
+}
+
+/** U 切换：highlight ↔ underline 互转（下划线固定红色；转回底色时原色是 red 则回落 yellow） */
+function toggleHighlightStyle(h: HighlightAnnotation) {
+  const next: HighlightStyle = h.style === "underline" ? "highlight" : "underline";
+  const color: HighlightColor =
+    next === "highlight" ? (h.color === "red" ? "yellow" : (h.color as HighlightColor)) : "yellow";
+  replaceHighlight(h, { color, style: next });
+}
+
+/** 点击高亮菜单动作（内部取当前菜单目标，模板无需空值断言） */
+function changeMenuColor(color: HighlightColor) {
+  const h = hlMenuHighlight.value;
+  if (h) changeHighlightColor(h, color);
+}
+
+function toggleMenuStyle() {
+  const h = hlMenuHighlight.value;
+  if (h) toggleHighlightStyle(h);
+}
+
+function removeMenuHighlight() {
+  const h = hlMenuHighlight.value;
+  if (h) removeHighlight(h.id);
+}
+
+function openMenuNote() {
+  const h = hlMenuHighlight.value;
+  if (h) openNoteForHighlight(h);
+}
+
+/** 从高亮条目建笔记：借 currentSelection 数据源（openNoteCreate/saveNote 共用读取），菜单先收起 */
+function openNoteForHighlight(h: HighlightAnnotation) {
+  closeHighlightMenu();
+  currentSelection.value = { cfi: h.cfi, text: h.text, context: h.text };
+  openNoteCreate();
 }
 
 // ---- 书签 ----
@@ -726,8 +890,21 @@ function onToolbarLookup(text: string) {
   clearSelection();
 }
 
-function onToolbarHighlight(_text: string, color: HighlightColor) {
-  addHighlight(color);
+function onToolbarHighlight(_text: string, color: HighlightColor, style?: HighlightStyle) {
+  addHighlight(color, style ?? "highlight");
+}
+
+/** 书内搜索：只写 searchRequest（SearchPanel 由搜索子代理挂载并 watch 该 ref） */
+function onToolbarSearch(text: string) {
+  searchRequest.value = text;
+}
+
+/** 移除：选中 cfi 已有高亮时删除该条（hasHighlight 显示条件同源） */
+function onToolbarRemove() {
+  const sel = currentSelection.value;
+  if (!sel) return;
+  const h = annotations.value.highlights.find((x) => x.cfi === sel.cfi);
+  if (h) removeHighlight(h.id);
 }
 
 function onToolbarNote(_text: string) {
@@ -996,7 +1173,72 @@ function onTapMouseDown(e: MouseEvent) {
   tapDownY = e.clientY;
 }
 
+/**
+ * 命中检测：epub.js marks 渲染在父文档的 SVG overlay（marks-pane，pointer-events:none），
+ * 不在 iframe 内容文档里 —— contents click 的 e.target 是文字本身，closest(".epubjs-hl") 永远不中。
+ * 真实验证（0.3.93 + 浏览器实测）：marks-pane 在 iframe 内容文档上监听 click，命中坐标后向父文档的
+ * <g class="epubjs-hl|epubjs-ul"> 派发克隆事件（bubbles:false），epubjs 再转发 markClicked ——
+ * 顺序依赖 pane 创建时机（首次高亮 vs attachTapHandlers 先后不定），不可靠。
+ * 改为在 onTapClick 里按坐标反查父文档 mark：取 <g> 子元素（rect/line）逐段命中。
+ * 坐标系：点击事件 clientX/Y 是 iframe 内容文档视口坐标（0 在 iframe 左上），而 mark rect 的
+ * getBoundingClientRect 是父文档视口坐标 → 比较前先减去 iframe 偏移（浏览器实测确认）。
+ * cfi/id 从 dataset 拿（epubjs 会把 data 和 epubcfi 写进 <g> 的 data-* 属性）。
+ */
+function findMarkAt(
+  clientX: number,
+  clientY: number,
+): { el: Element; id: string | null; cfi: string | null; rect: DOMRect } | null {
+  const container = containerRef.value;
+  if (!container) return null;
+  const iframe = container.querySelector("iframe");
+  const iframeRect = iframe?.getBoundingClientRect();
+  const offX = iframeRect?.left ?? 0;
+  const offY = iframeRect?.top ?? 0;
+  const marks = container.querySelectorAll(".epubjs-hl, .epubjs-ul");
+  for (const g of marks) {
+    const gEl = g as Element & { dataset?: DOMStringMap };
+    for (const child of Array.from(g.children)) {
+      const r = (child as SVGGraphicsElement).getBoundingClientRect();
+      // 内容文档坐标 = 父文档坐标 - iframe 偏移
+      const rx = r.left - offX;
+      const ry = r.top - offY;
+      if (clientX >= rx && clientX <= rx + r.width && clientY >= ry && clientY <= ry + r.height) {
+        return { el: g, id: gEl.dataset?.id ?? null, cfi: gEl.dataset?.epubcfi ?? null, rect: r };
+      }
+    }
+  }
+  return null;
+}
+
+/** 点击高亮：按命中段定位菜单（默认高亮上方，靠上翻转），优先 id 反查、cfi 兜底 */
+function openHighlightMenu(mark: { id: string | null; cfi: string | null; rect: DOMRect }) {
+  let h = mark.id ? (annotations.value.highlights.find((x) => x.id === mark.id) ?? null) : null;
+  if (!h && mark.cfi) h = annotations.value.highlights.find((x) => x.cfi === mark.cfi) ?? null;
+  if (!h) return;
+  // mark 的 rect 是父文档 viewport 坐标（marks-pane 渲染在父文档，与工具栏的 iframe 内容坐标不同）。
+  // 菜单挂在 .reader-body 内（position:absolute 以它为包含块）→ 用 body 的 rect 换算，不能用 .reader（
+  // 两者相差顶栏高度，浏览器实测：算错会导致菜单盖住高亮、点不到 mark）。
+  const bodyEl = bodyRef.value;
+  if (!bodyEl) return;
+  const bodyRect = bodyEl.getBoundingClientRect();
+  const r = mark.rect;
+  hlMenu.x = r.left + r.width / 2 - bodyRect.left;
+  hlMenu.y = r.top - bodyRect.top;
+  hlMenu.id = h.id;
+  hlMenu.visible = true;
+  hideToolbar();
+}
+
 function onTapClick(e: MouseEvent) {
+  // 点击已有高亮/下划线 → 弹菜单（不翻页、不触发链接）
+  const mark = findMarkAt(e.clientX, e.clientY);
+  if (mark) {
+    e.preventDefault();
+    openHighlightMenu(mark);
+    return;
+  }
+  // 菜单开着时点击内容其它区域 → 收起（iframe 内点击不冒泡到父窗口，onWindowMouseDown 收不到）
+  if (hlMenu.visible) closeHighlightMenu();
   // 链接点击交给 epubjs 默认处理，不翻页
   const target = e.target as HTMLElement | null;
   if (target?.closest?.("a")) return;
@@ -1028,6 +1270,7 @@ function onRelocated(loc: Location) {
   // epubjs 翻页会重建 contents → 重新挂翻页热区监听（防重复：attach 内部去重）
   attachTapHandlers();
   hideToolbar();
+  closeHighlightMenu();
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -1057,6 +1300,10 @@ function onKeydown(e: KeyboardEvent) {
       noteModal.open = false;
       e.preventDefault();
       e.stopPropagation();
+    } else if (hlMenu.visible) {
+      closeHighlightMenu();
+      e.preventDefault();
+      e.stopPropagation();
     } else if (panelOpen.value) {
       panelOpen.value = false;
       e.preventDefault();
@@ -1083,11 +1330,12 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-// 点击应用其它区域（非工具栏）→ 收起选中工具栏
+// 点击应用其它区域（非工具栏/高亮菜单）→ 收起
 function onWindowMouseDown(e: MouseEvent) {
   const target = e.target as HTMLElement | null;
-  if (target?.closest?.(".sel-toolbar")) return;
+  if (target?.closest?.(".sel-toolbar, .hl-menu")) return;
   if (toolbar.visible) hideToolbar();
+  if (hlMenu.visible) closeHighlightMenu();
 }
 
 // ============ 尺寸跟随（窗口变化 → rendition.resize；内容盒尺寸 = 容器 - 页边距 padding） ============
@@ -1096,7 +1344,11 @@ function onResize() {
   const rendition = renditionRef.value;
   if (!container || !rendition) return;
   const m = readerSettings.margin;
-  rendition.resize(container.clientWidth - m * 2, container.clientHeight - m * 2);
+  try {
+    rendition.resize(container.clientWidth - m * 2, container.clientHeight - m * 2);
+  } catch {
+    // 预存竞态：设置 watch 可能在 renderTo 后、display 完成前触发 resize（epubjs manager 未挂载），静默忽略
+  }
 }
 
 // ============ 加载 / 销毁 ============
@@ -1127,6 +1379,7 @@ async function loadBook() {
   lookupState.open = false;
   noteModal.open = false;
   hideToolbar();
+  closeHighlightMenu();
   annotations.value = { highlights: [], bookmarks: [], notes: [] };
   try {
     // 先取 ArrayBuffer 再喂 epub.js：绕开 URL 语义（非 .epub 后缀被当书库目录）
@@ -1382,5 +1635,15 @@ onBeforeUnmount(() => {
 .toc-fade-enter-from,
 .toc-fade-leave-to {
   opacity: 0;
+}
+</style>
+
+<style>
+/* epub.js marks-pane 下划线红色覆盖：marks-pane 的 Underline 把 stroke/stroke-width 硬编码
+   为黑色表现属性（0.3.93 实测），而 view.underline 传的 styles 只落到 <g> 上被 line 显式属性盖掉。
+   SVG 表现属性优先级低于任何 CSS 规则 → 用类选择器强制红色，与 UNDERLINE_STYLE 常量一致。 */
+.epubjs-ul line {
+  stroke: #e5484d;
+  stroke-width: 2;
 }
 </style>
