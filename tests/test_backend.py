@@ -881,8 +881,8 @@ def test_api_settings_get_all_namespaces():
     assert s["download"]["downloadDir"] == ""
     assert s["download"]["defaultQuality"] == "exhigh"
     assert s["download"]["quarkQuality"] == "mp3"
-    # video 2 字段（视频模块：本地视频目录数组默认空 + B站 Cookie 默认空串）
-    assert s["video"] == {"videoDirs": [], "bilibiliCookie": ""}
+    # video 3 字段（视频模块：本地视频目录数组默认空 + B站 Cookie / 浏览器 Cookie 来源默认空串）
+    assert s["video"] == {"videoDirs": [], "bilibiliCookie": "", "cookiesFromBrowser": ""}
 
 
 def test_api_settings_put_deep_merge():

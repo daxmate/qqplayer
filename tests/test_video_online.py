@@ -7,6 +7,7 @@
 运行：cd /Users/dax/codes/qqplayerD && /Users/dax/codes/qqplayer/venv/bin/python -m pytest tests/test_video_online.py -q
 """
 
+import io
 import json
 import subprocess
 import sys
@@ -140,8 +141,8 @@ def fake_run(monkeypatch):
     """mock video_ytdlp._run：记录调用，返回可配置 FakeProc（state[\"proc\"] 可为 callable）"""
     state = {"calls": [], "proc": FakeProc()}
 
-    def run_fn(args, timeout, what, cookie=None):
-        state["calls"].append((args, timeout, what, cookie))
+    def run_fn(args, timeout, what, cookie=None, browser=None):
+        state["calls"].append((args, timeout, what, cookie, browser))
         if callable(state["proc"]):
             return state["proc"](args, timeout, what)
         return state["proc"]
@@ -152,17 +153,19 @@ def fake_run(monkeypatch):
 
 @pytest.fixture
 def fake_ytdlp_fns(monkeypatch):
-    """mock 路由依赖的 video_ytdlp 三个顶层函数（resolve/get_stream/get_subtitles）"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    """mock 路由依赖的 video_ytdlp 三个顶层函数（resolve/get_stream/get_subtitles，含 browser 参数）"""
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: "http://up.test/1080.mp4",
+        lambda url, format_hint="best", cookie=None, browser=None: "http://up.test/1080.mp4",
     )
     monkeypatch.setattr(
         video_ytdlp,
         "get_subtitles",
-        lambda url: [
+        lambda url, cookie=None, browser=None: [
             {
                 "lang": "zh-Hans",
                 "name": "中文（简体）",
@@ -301,6 +304,40 @@ def test_ytdlp_get_subtitles_with_cookie(fake_subprocess_run):
     assert subs is not None and subs[0]["lang"] == "zh-Hans"
     cmd = fake_subprocess_run["calls"][0]
     assert cmd[-2] == "--add-header" and cmd[-1] == "Cookie: SESSDATA=abc123"
+
+
+def test_ytdlp_get_stream_with_browser(fake_subprocess_run):
+    """browser 非空（cookie 为空）→ subprocess cmd 尾部含 --cookies-from-browser <browser>"""
+    fake_subprocess_run["proc"] = FakeProc(stdout="http://up.test/1080.mp4\n")
+    url = video_ytdlp.get_stream(BILI_URL, browser="vivaldi")
+    assert url == "http://up.test/1080.mp4"
+    cmd = fake_subprocess_run["calls"][0]
+    assert cmd[0] == "/usr/bin/false"  # YTDLP_BIN 固定假路径
+    assert cmd[-2] == "--cookies-from-browser"
+    assert cmd[-1] == "vivaldi"
+    assert "--add-header" not in cmd
+
+
+def test_ytdlp_cookie_wins_over_browser(fake_subprocess_run):
+    """cookie 非空 + browser 非空 → 只用 --add-header Cookie（手动 cookie 优先，无 --cookies-from-browser）"""
+    fake_subprocess_run["proc"] = FakeProc(stdout="http://up.test/1080.mp4\n")
+    video_ytdlp.get_stream(BILI_URL, cookie="SESSDATA=abc123", browser="vivaldi")
+    cmd = fake_subprocess_run["calls"][0]
+    assert cmd[-2] == "--add-header"
+    assert cmd[-1] == "Cookie: SESSDATA=abc123"
+    assert "--cookies-from-browser" not in cmd
+
+
+def test_ytdlp_resolve_with_browser(fake_subprocess_run):
+    """resolve 带 browser（cookie 为空）→ --dump-json 调用附加 --cookies-from-browser"""
+    fake_subprocess_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    info = video_ytdlp.resolve(BILI_URL, browser="chrome")
+    assert info["title"] == "测试视频"
+    cmd = fake_subprocess_run["calls"][0]
+    assert cmd[0] == "/usr/bin/false"  # YTDLP_BIN 固定假路径
+    assert cmd[1] == "--dump-json"
+    assert cmd[-2] == "--cookies-from-browser" and cmd[-1] == "chrome"
+    assert "--add-header" not in cmd
 
 
 def test_get_stream_empty_output_raises(fake_run):
@@ -515,7 +552,7 @@ def test_bili_provider_stream_with_settings_cookie(fake_run):
     url = vp.get_provider("bilibili").get_stream(BILI_URL)
     assert url == "http://up.test/1080.mp4"
     assert len(fake_run["calls"]) == 2  # resolve(--dump-json) + get_stream(--get-url)
-    for i, (_args, _, _, cookie) in enumerate(fake_run["calls"]):
+    for i, (_args, _, _, cookie, _browser) in enumerate(fake_run["calls"]):
         assert cookie == "SESSDATA=abc; bili_jct=def", f"第 {i} 次调用应带 cookie"
     # resolve 调用不带 --add-header（那是 _run 内部拼装的，由 fake_subprocess_run 用例覆盖）
     assert "--add-header" not in fake_run["calls"][0][0]
@@ -532,7 +569,7 @@ def test_bili_provider_stream_no_cookie_when_unset(fake_run):
 
     fake_run["proc"] = proc
     vp.get_provider("bilibili").get_stream(BILI_URL)
-    for args, _, _, cookie in fake_run["calls"]:
+    for args, _, _, cookie, _browser in fake_run["calls"]:
         assert cookie in (None, ""), "未设置 cookie 时不应传值"
         assert "--add-header" not in args
 
@@ -542,6 +579,147 @@ def test_bili_provider_referer_header():
     headers = vp.get_provider("bilibili").stream_headers(BILI_URL)
     assert headers == {"Referer": "https://www.bilibili.com"}
     assert vp.get_provider("generic").stream_headers(BILI_URL) == {}
+
+
+# ============ BiliProvider：browser 传参与 get_dual_streams ============
+
+# DASH 分离流样本：纯视频轨（acodec=none）+ 纯音频轨（vcodec=none，带 abr）
+DASH_FORMATS = [
+    {
+        "format_id": "30080",
+        "ext": "mp4",
+        "height": 1080,
+        "width": 1920,
+        "acodec": "none",
+        "vcodec": "avc1",
+        "format_note": "DASH video",
+        "url": "http://up.test/v1080.m4s",
+    },
+    {
+        "format_id": "30032",
+        "ext": "mp4",
+        "height": 720,
+        "acodec": "none",
+        "vcodec": "avc1",
+        "format_note": "DASH video",
+        "url": "http://up.test/v720.m4s",
+    },
+    {
+        "format_id": "30280",
+        "ext": "m4a",
+        "height": None,
+        "acodec": "mp4a.40.2",
+        "vcodec": "none",
+        "abr": 320,
+        "format_note": "DASH audio 320k",
+        "url": "http://up.test/a320.m4s",
+    },
+    {
+        "format_id": "30232",
+        "ext": "m4a",
+        "height": None,
+        "acodec": "mp4a.40.2",
+        "vcodec": "none",
+        "abr": 192,
+        "format_note": "DASH audio 192k",
+        "url": "http://up.test/a192.m4s",
+    },
+    {
+        "format_id": "30216",
+        "ext": "m4a",
+        "height": None,
+        "acodec": "mp4a.40.2",
+        "vcodec": "none",
+        "abr": 132,
+        "format_note": "DASH audio 132k",
+        "url": "http://up.test/a132.m4s",
+    },
+]
+
+
+def test_bili_provider_browser_from_settings(fake_run):
+    """settings.video.cookiesFromBrowser 已设置 → resolve 调用把 browser 传给 _run（cookie 空时）"""
+    state._settings = {"video": {"bilibiliCookie": "", "cookiesFromBrowser": "vivaldi"}}
+    fake_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    vp.get_provider("bilibili").resolve(BILI_URL)
+    args, timeout, what, cookie, browser = fake_run["calls"][0]
+    assert cookie in (None, "")  # 手动 cookie 未设置
+    assert browser == "vivaldi"
+
+
+def test_bili_provider_browser_ignored_when_cookie_set(fake_run):
+    """手动 cookie 非空 + browser 已设置 → 两者都传给 _run（_run 内部 cookie 优先拼 --add-header）"""
+    state._settings = {"video": {"bilibiliCookie": "SESSDATA=abc", "cookiesFromBrowser": "vivaldi"}}
+    fake_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    vp.get_provider("bilibili").get_dual_streams(BILI_URL)
+    args, timeout, what, cookie, browser = fake_run["calls"][0]
+    assert cookie == "SESSDATA=abc"
+    assert browser == "vivaldi"
+
+
+def test_bili_provider_browser_unset_is_none(fake_run):
+    """settings 未设置 cookiesFromBrowser（空串/未配置）→ browser 为 None，不加 --cookies-from-browser"""
+    for settings_video in (
+        {"bilibiliCookie": ""},
+        {"bilibiliCookie": "", "cookiesFromBrowser": ""},
+    ):
+        state._settings = {"video": settings_video}
+        fake_run["calls"].clear()
+        fake_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+        vp.get_provider("bilibili").resolve(BILI_URL)
+        args, timeout, what, cookie, browser = fake_run["calls"][0]
+        assert browser is None
+
+
+def test_bili_provider_get_dual_streams(fake_run):
+    """get_dual_streams：一次 resolve → 视频轨（最高清晰度）+ 音频轨（最高 abr）直链，不再二次调用 yt-dlp"""
+    fake_run["proc"] = FakeProc(stdout=json.dumps({"formats": DASH_FORMATS}))
+    dual = vp.get_provider("bilibili").get_dual_streams(BILI_URL)
+    assert dual == {"video": "http://up.test/v1080.m4s", "audio": "http://up.test/a320.m4s"}
+    assert len(fake_run["calls"]) == 1  # 只一次 resolve（--dump-json），不二次调用
+    assert fake_run["calls"][0][0][0] == "--dump-json"
+
+
+def test_bili_provider_get_dual_streams_no_abr_by_format_id(fake_run):
+    """音频轨无 abr → 按 format_id 数字降序取最高（30280 > 30232 > 30216）"""
+    formats = []
+    for f in DASH_FORMATS:
+        if f.get("acodec") != "none":
+            f = {**f, "abr": None}
+        formats.append(f)
+    fake_run["proc"] = FakeProc(stdout=json.dumps({"formats": formats}))
+    dual = vp.get_provider("bilibili").get_dual_streams(BILI_URL)
+    assert dual["audio"] == "http://up.test/a320.m4s"
+
+
+def test_bili_provider_get_dual_streams_no_audio_raises(fake_run):
+    """无音频轨（只有纯视频轨）→ RuntimeError"""
+    only_video = [f for f in DASH_FORMATS if f.get("acodec") == "none"]
+    fake_run["proc"] = FakeProc(stdout=json.dumps({"formats": only_video}))
+    with pytest.raises(RuntimeError) as ei:
+        vp.get_provider("bilibili").get_dual_streams(BILI_URL)
+    assert "音频轨" in str(ei.value)
+
+
+def test_pick_best_audio_format():
+    """pick_best_audio_format：abr 降序优先；无 abr 按 format_id 数字降序；无音频轨抛 RuntimeError"""
+    assert video_ytdlp.pick_best_audio_format(DASH_FORMATS)["format_id"] == "30280"
+    # 混合：有 abr 的永远排在无 abr 之前（abr 是主键）
+    no_abr = [dict(f, abr=None) for f in DASH_FORMATS if f.get("acodec") != "none"]
+    mixed = DASH_FORMATS[:2] + no_abr
+    assert video_ytdlp.pick_best_audio_format(mixed)["format_id"] == "30280"
+    with pytest.raises(RuntimeError):
+        video_ytdlp.pick_best_audio_format([])
+    with pytest.raises(RuntimeError):
+        video_ytdlp.pick_best_audio_format([f for f in DASH_FORMATS if f["acodec"] == "none"])
+
+
+def test_resolve_formats_include_abr(fake_run):
+    """resolve 的 formats 摘要新增 abr 字段（音频轨选路需要）"""
+    fake_run["proc"] = FakeProc(stdout=json.dumps(SAMPLE_INFO))
+    info = video_ytdlp.resolve(BILI_URL)
+    assert "abr" in info["formats"][0]
+    assert all("abr" in f for f in info["formats"])
 
 
 # ============ 路由：resolve ============
@@ -563,10 +741,44 @@ def test_resolve_ok(fake_ytdlp_fns):
 
 
 def test_resolve_bilibili_auto_provider(fake_ytdlp_fns):
-    """bilibili.com url 不带 source → 自动走 B站 provider"""
+    """bilibili.com url 不带 source → 自动走 B站 provider（双轨可用时响应带 audioUrl）"""
     r = client.post("/api/video-online/resolve", json={"url": BILI_URL, "source": "bilibili"})
     assert r.status_code == 200
-    assert r.json()["provider"] == "bilibili"
+    body = r.json()
+    assert body["provider"] == "bilibili"
+    # SAMPLE_INFO 含 DASH 音频轨（30080）→ get_dual_streams 能选出音频轨直链
+    assert body["audioUrl"] == "http://up.test/audio.m4a"
+
+
+def test_resolve_bilibili_audio_url_explicit(monkeypatch, fake_ytdlp_fns):
+    """B站 resolve：mock get_dual_streams → audioUrl 返回音频轨直链"""
+    monkeypatch.setattr(
+        vp.BiliProvider,
+        "get_dual_streams",
+        lambda self, url: {"video": "http://up.test/v.m4s", "audio": "http://up.test/a.m4s"},
+    )
+    r = client.post("/api/video-online/resolve", json={"url": BILI_URL, "source": "bilibili"})
+    assert r.status_code == 200
+    assert r.json()["audioUrl"] == "http://up.test/a.m4s"
+
+
+def test_resolve_bilibili_audio_url_fail_omitted(monkeypatch, fake_ytdlp_fns):
+    """B站音频轨直链获取失败 → audioUrl 省略（不阻塞解析主链路）"""
+
+    def boom(self, url):
+        raise RuntimeError("解析结果无可用音频轨")
+
+    monkeypatch.setattr(vp.BiliProvider, "get_dual_streams", boom)
+    r = client.post("/api/video-online/resolve", json={"url": BILI_URL, "source": "bilibili"})
+    assert r.status_code == 200
+    assert "audioUrl" not in r.json()
+
+
+def test_resolve_generic_no_audio_url(fake_ytdlp_fns):
+    """非 B站（generic）→ 响应无 audioUrl 字段"""
+    r = client.post("/api/video-online/resolve", json={"url": GENERIC_URL})
+    assert r.status_code == 200
+    assert "audioUrl" not in r.json()
 
 
 def test_resolve_failure_400(fake_ytdlp_fns, monkeypatch):
@@ -644,11 +856,13 @@ def fake_proxy_stream(monkeypatch):
 
 def test_stream_ok_range_206(fake_proxy_stream, monkeypatch):
     """Range 透传 + 206 + content-range/accept-ranges 透传；UA 头默认带；上游已给明确 MIME 原样透传"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: "http://up.test/1080.mp4",
+        lambda url, format_hint="best", cookie=None, browser=None: "http://up.test/1080.mp4",
     )
     fake_proxy_stream["resp"] = _FakeUpstream(
         chunks=[b"x" * 1024],
@@ -676,12 +890,14 @@ def test_stream_ok_range_206(fake_proxy_stream, monkeypatch):
 
 
 def test_stream_m4s_octet_stream_fixed_to_video_mp4(fake_proxy_stream, monkeypatch):
-    """B站 DASH 分片：上游 CDN 返回 application/octet-stream → 按 .m4s 扩展名修正为 video/mp4（浏览器 <video> 才能播）"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    """直链 .m4s 分片：上游 CDN 返回 application/octet-stream → 按扩展名修正为 video/mp4（浏览器 <video> 才能播）"""
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: (
+        lambda url, format_hint="best", cookie=None, browser=None: (
             "https://up.test/xxx_da2-1-30080.m4s?deadline=1"
         ),
     )
@@ -690,7 +906,7 @@ def test_stream_m4s_octet_stream_fixed_to_video_mp4(fake_proxy_stream, monkeypat
         status_code=200,
         headers={"content-type": "application/octet-stream"},
     )
-    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    r = client.get("/api/video-online/stream", params={"url": GENERIC_URL})
     assert r.status_code == 200
     assert r.headers["content-type"] == "video/mp4"
     assert r.content == b"fmp4-data"
@@ -698,11 +914,13 @@ def test_stream_m4s_octet_stream_fixed_to_video_mp4(fake_proxy_stream, monkeypat
 
 def test_stream_octet_stream_no_ext_passthrough(fake_proxy_stream, monkeypatch):
     """octet-stream 且直链无已知扩展名 → 保持上游类型原样（不猜错）"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: "https://up.test/blob?id=1",
+        lambda url, format_hint="best", cookie=None, browser=None: "https://up.test/blob?id=1",
     )
     fake_proxy_stream["resp"] = _FakeUpstream(
         chunks=[b"data"], status_code=200, headers={"content-type": "application/octet-stream"}
@@ -713,14 +931,18 @@ def test_stream_octet_stream_no_ext_passthrough(fake_proxy_stream, monkeypatch):
 
 
 def test_stream_403_retry_once(fake_proxy_stream, monkeypatch):
-    """直链 403（过期）→ 重新 resolve 一次再试 → 200"""
+    """直链 403（过期）→ 重新 resolve 一次再试 → 200（单流代理路径）"""
     calls = {"n": 0}
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: f"http://up.test/{calls['n']}.mp4",
+        lambda url, format_hint="best", cookie=None, browser=None: (
+            f"http://up.test/{calls['n']}.mp4"
+        ),
     )
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
 
     def resp_fn():
         calls["n"] += 1
@@ -731,41 +953,45 @@ def test_stream_403_retry_once(fake_proxy_stream, monkeypatch):
         )
 
     fake_proxy_stream["resp"] = resp_fn
-    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    r = client.get("/api/video-online/stream", params={"url": GENERIC_URL})
     assert r.status_code == 200
     assert r.content == b"video-data"
     assert calls["n"] == 2  # 第一次 403 触发重试，第二次成功
 
 
 def test_stream_403_twice_502(fake_proxy_stream, monkeypatch):
-    """重试后仍 403 → 502"""
+    """重试后仍 403 → 502（单流代理路径）"""
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: "http://up.test/x.mp4",
+        lambda url, format_hint="best", cookie=None, browser=None: "http://up.test/x.mp4",
     )
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
     fake_proxy_stream["resp"] = lambda: _FakeUpstream(status_code=403, error=_status_error(403))
-    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    r = client.get("/api/video-online/stream", params={"url": GENERIC_URL})
     assert r.status_code == 502
     assert "403" in r.json()["detail"]
 
 
 def test_stream_connect_error_502(fake_proxy_stream, monkeypatch):
-    """上游连接失败（httpx.stream 抛错）→ 502"""
+    """上游连接失败（httpx.stream 抛错）→ 502（单流代理路径）"""
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: "http://up.test/x.mp4",
+        lambda url, format_hint="best", cookie=None, browser=None: "http://up.test/x.mp4",
     )
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
 
     def boom(method, url, **kw):
         raise httpx.ConnectError("connection refused")
 
     fake_proxy_stream["resp"] = None
     monkeypatch.setattr(video_online.httpx, "stream", boom)
-    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    r = client.get("/api/video-online/stream", params={"url": GENERIC_URL})
     assert r.status_code == 502
 
 
@@ -778,19 +1004,163 @@ def test_stream_bad_url_400(fake_proxy_stream):
     assert client.get("/api/video-online/stream").status_code == 422
 
 
-def test_stream_bilibili_referer(fake_proxy_stream, monkeypatch):
-    """B站直链代理附加 Referer: https://www.bilibili.com（host 自动推断 provider）"""
-    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+# ============ 路由：B站双轨合成（ffmpeg）============
+
+
+class FakeFFmpegProc:
+    """mock subprocess.Popen：stdout 可迭代、poll 立即返回 0（模拟 ffmpeg 正常启动）"""
+
+    def __init__(self, cmd, **kw):
+        self.cmd = cmd
+        self.returncode = 0
+        self.stdout = io.BytesIO(b"fmp4-stream-data")
+        self.stderr = io.BytesIO(b"")
+
+    def poll(self):
+        return 0
+
+    def wait(self, *a, **kw):
+        return 0
+
+    def terminate(self):
+        pass
+
+
+@pytest.fixture
+def fake_ffmpeg(monkeypatch):
+    """mock ffmpeg 定位 + subprocess.Popen：记录 cmd，返回 FakeFFmpegProc（state["proc"] 可为 callable）"""
+    state = {"cmd": None, "proc": None}
+
+    def which(name):
+        return "/usr/bin/ffmpeg" if name == "ffmpeg" else None
+
+    def popen(cmd, **kw):
+        state["cmd"] = cmd
+        return state["proc"](cmd, **kw) if callable(state["proc"]) else state["proc"]
+
+    monkeypatch.setattr(video_online.shutil, "which", which)
+    monkeypatch.setattr(video_online.subprocess, "Popen", popen)
+    state["proc"] = FakeFFmpegProc
+    return state
+
+
+@pytest.fixture
+def fake_dual_streams(monkeypatch):
+    """mock BiliProvider.get_dual_streams → 双轨直链"""
+    monkeypatch.setattr(
+        vp.BiliProvider,
+        "get_dual_streams",
+        lambda self, url: {"video": "http://up.test/v.m4s", "audio": "http://up.test/a.m4s"},
+    )
+
+
+def test_stream_bilibili_dual_ffmpeg(fake_dual_streams, fake_ffmpeg):
+    """B站 → 双轨 ffmpeg 合成：200 video/mp4；t 传 30 → -ss 30 每个输入前各一次；-i 出现两次"""
+    r = client.get("/api/video-online/stream", params={"url": BILI_URL, "t": 30})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "video/mp4"
+    assert r.content == b"fmp4-stream-data"
+    cmd = fake_ffmpeg["cmd"]
+    assert cmd[0] == "/usr/bin/ffmpeg"
+    assert "-y" in cmd
+    assert (
+        cmd.count("-ss") == 2 and cmd.count("30.0") == 2
+    )  # 输入 seek：每个 -i 前一个（FastAPI 解析为 float）
+    assert cmd.count("-i") == 2
+    assert cmd.count("-headers") == 2  # 每个输入各带防盗链头
+    headers_val = cmd[cmd.index("-headers") + 1]
+    assert "Referer: https://www.bilibili.com" in headers_val
+    assert "User-Agent:" in headers_val
+    assert cmd[cmd.index("-c") + 1] == "copy"  # -c copy 零重编码
+    assert "frag_keyframe+empty_moov+default_base_moof" in cmd
+    assert cmd[-3:] == ["-f", "mp4", "pipe:1"]  # -f mp4 pipe:1 输出到 stdout
+
+
+def test_stream_bilibili_dual_no_t_no_ss(fake_dual_streams, fake_ffmpeg):
+    """t 缺省 → 不传 -ss（从头合成）"""
+    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "video/mp4"
+    assert "-ss" not in fake_ffmpeg["cmd"]
+
+
+def test_stream_bilibili_no_ffmpeg_502(monkeypatch):
+    """ffmpeg 未安装（which 找不到）→ 502 清晰错误，不触发 yt-dlp"""
+    monkeypatch.setattr(video_online.shutil, "which", lambda name: None)
+    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    assert r.status_code == 502
+    assert "ffmpeg" in r.json()["detail"]
+
+
+def test_stream_bilibili_dual_fail_502(monkeypatch, fake_ffmpeg):
+    """双轨直链获取失败 → 重新 resolve 一次再试，仍失败 502"""
+    calls = {"n": 0}
+
+    def boom(self, url):
+        calls["n"] += 1
+        raise RuntimeError("解析结果无可用音频轨")
+
+    monkeypatch.setattr(vp.BiliProvider, "get_dual_streams", boom)
+    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    assert r.status_code == 502
+    assert calls["n"] == 2  # 沿用 attempt 模式：重新 resolve 一次再试
+    assert "音频轨" in r.json()["detail"]
+
+
+def test_stream_bilibili_ffmpeg_startup_fail_502(monkeypatch):
+    """ffmpeg 启动失败（立即非零退出，如直链 403）→ 重新 resolve + 重启一次，仍失败 502（带 stderr 摘要）"""
+    calls = {"n": 0}
+
+    class FailingFFmpegProc:
+        def __init__(self, cmd, **kw):
+            self.cmd = cmd
+            self.returncode = 1
+            self.stdout = io.BytesIO(b"")
+            self.stderr = io.BytesIO(b"ffmpeg: HTTP error 403 Forbidden")
+
+        def poll(self):
+            return 1
+
+        def wait(self, *a, **kw):
+            return 1
+
+        def terminate(self):
+            pass
+
+    def popen(cmd, **kw):
+        calls["n"] += 1
+        return FailingFFmpegProc(cmd, **kw)
+
+    monkeypatch.setattr(video_online.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(video_online.subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        vp.BiliProvider,
+        "get_dual_streams",
+        lambda self, url: {"video": "http://up.test/v.m4s", "audio": "http://up.test/a.m4s"},
+    )
+    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    assert r.status_code == 502
+    assert calls["n"] == 2  # 启动失败 → 重启一次
+    assert "403" in r.json()["detail"]
+
+
+def test_stream_non_bilibili_t_ignored(fake_proxy_stream, monkeypatch):
+    """非 B站 + t 参数 → 忽略 t，走单流代理（回归：非 B站逻辑完全不变）"""
+    monkeypatch.setattr(
+        video_ytdlp, "resolve", lambda url, cookie=None, browser=None: dict(SAMPLE_INFO)
+    )
     monkeypatch.setattr(
         video_ytdlp,
         "get_stream",
-        lambda url, format_hint="best", cookie=None: "http://up.test/bili.mp4",
+        lambda url, format_hint="best", cookie=None, browser=None: "http://up.test/1080.mp4",
     )
-    fake_proxy_stream["resp"] = _FakeUpstream(chunks=b"b", headers={"content-type": "video/mp4"})
-    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    fake_proxy_stream["resp"] = _FakeUpstream(
+        chunks=b"proxy-data", status_code=200, headers={"content-type": "video/mp4"}
+    )
+    r = client.get("/api/video-online/stream", params={"url": GENERIC_URL, "t": 30})
     assert r.status_code == 200
-    kw = fake_proxy_stream["calls"][0][2]
-    assert kw["headers"]["Referer"] == "https://www.bilibili.com"
+    assert r.content == b"proxy-data"
+    assert fake_proxy_stream["calls"][0][1] == "http://up.test/1080.mp4"  # 走 httpx 代理
 
 
 # ============ 路由：subtitles ============
@@ -825,7 +1195,7 @@ def test_subtitles_no_url_empty(fake_ytdlp_fns, monkeypatch):
     monkeypatch.setattr(
         video_ytdlp,
         "get_subtitles",
-        lambda url: [
+        lambda url, cookie=None, browser=None: [
             {"lang": "zh-Hans", "name": "中文", "url": None, "data": None, "automatic": False}
         ],
     )
@@ -839,7 +1209,7 @@ def test_subtitles_inline_data_ok(fake_ytdlp_fns, monkeypatch):
     monkeypatch.setattr(
         video_ytdlp,
         "get_subtitles",
-        lambda url: [
+        lambda url, cookie=None, browser=None: [
             {
                 "lang": "zh-Hans",
                 "name": "中文（简体）",
