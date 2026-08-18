@@ -5,6 +5,16 @@
 // - /api/settings → 返回 { settings: { books: backendBooks } }（测试内可控）
 // - 其他 → epub 文件 ArrayBuffer
 // 由此可断言 PUT body（防抖写回/迁移）与 GET 兜底/clamp。
+// ============ 字体注入 mock 辅助（字体改由 style 注入 body * !important，不再走 themes.font） ============
+function mockContentsWithDoc() {
+  const styleEl = { id: "", textContent: "", remove: vi.fn() };
+  const doc = {
+    getElementById: vi.fn(() => null),
+    createElement: vi.fn(() => styleEl),
+    head: { appendChild: vi.fn() },
+  };
+  return { document: doc, styleEl, doc };
+}
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { reactive } from "vue";
@@ -339,7 +349,9 @@ describe("Reader 阅读设置", () => {
     wrapper.unmount();
   });
 
-  it("设置面板：改字体族 → 即时应用 themes.font + 防抖 PUT 深合并", async () => {
+  it("设置面板：改字体族 → 注入 body 字体覆盖 + 防抖 PUT 深合并", async () => {
+    const mc = mockContentsWithDoc();
+    mocks.rendition.getContents.mockReturnValue([mc] as never);
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
     await wrapper
@@ -347,18 +359,20 @@ describe("Reader 阅读设置", () => {
       .find((b) => b.attributes("title") === "阅读设置")!
       .trigger("click");
 
-    // 点字体列表里的 Georgia（serif）
+    // 点字体列表里的 Georgia（serif）→ 注入 body * !important 覆盖（不再调 themes.font）
     const fonts = wrapper.findAll(".reader-settings-font");
     const georgia = fonts.find((c) => c.text().includes("Georgia"))!;
     await georgia.trigger("click");
-    expect(mocks.rendition.themes.font).toHaveBeenLastCalledWith(
-      "Georgia, 'Times New Roman', serif",
-    );
+    expect(mc.doc.createElement).toHaveBeenCalledWith("style");
+    expect(mc.styleEl.textContent).toContain("Georgia, 'Times New Roman', serif");
+    expect(mc.doc.head.appendChild).toHaveBeenCalled();
+    expect(mocks.rendition.themes.font).not.toHaveBeenCalled();
 
-    // 点“默认” → 空值 override 恢复 EPUB 自身字体
+    // 点“默认” → 不再注入（css 空），只走移除逻辑
     const def = fonts.find((c) => c.text().includes("默认"))!;
     await def.trigger("click");
-    expect(mocks.rendition.themes.override).toHaveBeenCalledWith("font-family", "");
+    expect(mc.doc.getElementById).toHaveBeenCalled();
+    expect(mc.doc.createElement).toHaveBeenCalledTimes(1); // 不再新建 style
 
     await new Promise((r) => setTimeout(r, 350));
     const last = putBodies()[putBodies().length - 1];
@@ -367,7 +381,7 @@ describe("Reader 阅读设置", () => {
     wrapper.unmount();
   });
 
-  it("设置应用到 epub.js：字体/字号/行距/粗体/主题色全部 override；页边距走容器 padding", async () => {
+  it("设置应用到 epub.js：字体注入/字号/行距/粗体/主题色全部 override；页边距走容器 padding", async () => {
     backendBooks = {
       fontFamily: "sans",
       fontSize: 120,
@@ -376,11 +390,13 @@ describe("Reader 阅读设置", () => {
       bold: true,
       theme: "dark",
     };
+    const mc = mockContentsWithDoc();
+    mocks.rendition.getContents.mockReturnValue([mc] as never);
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
 
     const themes = mocks.rendition.themes;
-    expect(themes.font).toHaveBeenLastCalledWith("'Helvetica Neue', Helvetica, Arial, sans-serif");
+    expect(mc.styleEl.textContent).toContain("'Helvetica Neue', Helvetica, Arial, sans-serif");
     expect(themes.fontSize).toHaveBeenLastCalledWith("120%");
     expect(themes.override).toHaveBeenCalledWith("line-height", "1.8");
     // 粗体：bold=true → font-weight 700
@@ -396,13 +412,16 @@ describe("Reader 阅读设置", () => {
 
   it("粗体关闭：bold=false → font-weight 空值 override（移除覆盖，EPUB 自带标题样式不受影响）", async () => {
     backendBooks = { bold: false, fontFamily: "serif" };
+    const mc = mockContentsWithDoc();
+    mocks.rendition.getContents.mockReturnValue([mc] as never);
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
 
     const themes = mocks.rendition.themes;
     // 初始应用（loadReaderSettings）：bold=false → 空值
     expect(themes.override).toHaveBeenCalledWith("font-weight", "");
-    expect(themes.font).toHaveBeenLastCalledWith("Georgia, 'Times New Roman', serif");
+    // 字体：serif → Georgia 注入（不再调 themes.font）
+    expect(mc.styleEl.textContent).toContain("Georgia, 'Times New Roman', serif");
     wrapper.unmount();
   });
 
@@ -508,10 +527,15 @@ describe("Reader 阅读设置", () => {
       textColor: "#123456",
       bgColor: "#000000",
     };
+    const mc = mockContentsWithDoc();
+    mocks.rendition.getContents.mockReturnValue([mc] as never);
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
     // 后端值已应用
     expect(wrapper.find(".reader-font-val").text()).toBe("130%");
+
+    // 还原前 createElement 次数（mount 应用 serif 时注入过）
+    const createElCallsBefore = mc.doc.createElement.mock.calls.length;
 
     // 打开面板 → 点底部“还原所有设置”
     await wrapper
@@ -523,7 +547,9 @@ describe("Reader 阅读设置", () => {
 
     // 全部字段回默认并应用
     expect(wrapper.find(".reader-font-val").text()).toBe("100%");
-    expect(mocks.rendition.themes.override).toHaveBeenCalledWith("font-family", "");
+    // 字体回默认 → 不再注入 style（走移除逻辑）；粗体关 → 空值 override
+    expect(mc.doc.getElementById).toHaveBeenCalled();
+    expect(mc.doc.createElement.mock.calls.length).toBe(createElCallsBefore);
     expect(mocks.rendition.themes.override).toHaveBeenCalledWith("font-weight", "");
     // 立即 PUT 全量默认
     const last = putBodies()[putBodies().length - 1];
@@ -668,7 +694,7 @@ describe("settings 模块（/api/settings 契约）", () => {
       lineHeight: 2.0, // clamp 1.0~2.0
       margin: 0, // clamp 0~15
       bold: false,
-      theme: "light", // 非法回默认
+      theme: "auto", // 非法回默认（默认已改为跟随 App）
       textColor: "",
       bgColor: "",
     });

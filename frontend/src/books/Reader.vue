@@ -826,16 +826,57 @@ function jumpTo(cfi: string) {
 }
 
 // ============ 设置应用到 epub.js（themes.override 作用到 iframe body 的 inline 样式） ============
+/** 字体注入 style 的 id（hooks.content 每次内容加载时应用；applyReaderSettings 时对当前内容手动应用） */
+const FONT_STYLE_ID = "qqp-reader-font";
+
+/**
+ * 字体族注入：themes.font() 只把 font-family 设在 documentElement（html）上，EPUB 内部
+ * CSS 对 body/段落的显式 font-family 会覆盖继承值 → 点字体不生效。改用注入
+ * `body, body * { font-family: <css> !important }` 强覆盖（iBooks 等阅读器同类做法）。
+ * default（空 CSS）→ 移除注入，恢复 EPUB 原字体。
+ */
+function applyFontToContents(contents: { document?: Document }) {
+  const doc = contents.document;
+  if (!doc) return;
+  doc.getElementById(FONT_STYLE_ID)?.remove();
+  const css = readerFontCss(readerSettings.fontFamily);
+  if (!css) return;
+  const style = doc.createElement("style");
+  style.id = FONT_STYLE_ID;
+  style.textContent = `body, body * { font-family: ${css} !important; }`;
+  doc.head.appendChild(style);
+}
+
+/**
+ * 高亮位置重算：marks-pane 的 SVG 矩形只在 epubjs reframe（尺寸变化）时重算，
+ * 字体/字号/行距等设置变化引起的内容重排不会触发 → 高亮错位。设置应用后手动
+ * 对所有 view 的 pane 重算一次（pane.render 内部遍历 mark 重新 getBoundingClientRect）。
+ */
+function refreshMarks() {
+  const rendition = renditionRef.value;
+  if (!rendition) return;
+  try {
+    (rendition as { views?: () => Array<{ pane?: { render?: () => void } }> })
+      .views?.()
+      ?.forEach((v) => v.pane?.render?.());
+  } catch {
+    /* 高亮重算失败不影响阅读 */
+  }
+}
+
 function applyReaderSettings() {
   const rendition = renditionRef.value;
   if (!rendition) return;
   const themes = rendition.themes;
   const s = readerSettings;
-  // 字体族：空 CSS → override 空值（epubjs 运行时对空值走 removeProperty，等同移除覆盖）；
-  // 具体字体带回退栈（中文场景回退衬线/无衬线，见 settings.ts READER_FONT_OPTIONS）
-  const fontCss = readerFontCss(s.fontFamily);
-  if (fontCss) themes.font(fontCss);
-  else themes.override("font-family", "");
+  // 字体族：注入 body * !important 覆盖（见 applyFontToContents）；default → 移除注入
+  try {
+    const cs = rendition.getContents();
+    const list = (Array.isArray(cs) ? cs : cs ? [cs] : []) as { document?: Document }[];
+    list.forEach(applyFontToContents);
+  } catch {
+    /* 内容未就绪时忽略（hooks.content 会在加载后自动应用） */
+  }
   // 字号（百分比，相对 iframe 默认字号）
   themes.fontSize(s.fontSize + "%");
   // 行距（body 无单位值，子元素按倍数继承）
@@ -848,6 +889,8 @@ function applyReaderSettings() {
   themes.override("background", bg, true);
   // 页边距不在这里做：epub.js 分页布局（columns()）会强制写 body padding-left/right !important，
   // themes.override 会被覆盖。改为容器 padding（readerContainerStyle）+ renderTo/resize 用内容盒尺寸。
+  // 内容重排（字体/字号/行距等）后高亮 SVG 位置需重算
+  refreshMarks();
 }
 
 // 页边距：容器 padding（iframe 外部，不受 epub.js 内部布局影响）
@@ -1102,6 +1145,10 @@ async function loadBook() {
       height: container.clientHeight - m * 2,
     });
     renditionRef.value = rendition;
+    // 内容加载（含换章重建）后自动注入字体覆盖（body * !important，见 applyFontToContents）
+    rendition.hooks.content.register((contents: { document?: Document }) => {
+      applyFontToContents(contents);
+    });
     applyReaderSettings();
     rendition.on("relocated", onRelocated);
     rendition.on("selected", onSelected);
