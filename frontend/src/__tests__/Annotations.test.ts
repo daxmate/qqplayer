@@ -31,6 +31,22 @@ describe("annotations.ts 纯函数", () => {
     expect(out).toContain('src="/api/dict/resource/d1/b.mp3"');
   });
 
+  it("rewriteDictHtml：sound:// href 无双前缀（只走规则 2）；entry://# 转 #", () => {
+    const html =
+      '<a href="sound://hwd/bre/5/door_n0205.mp3">英音</a>' +
+      '<a href="entry://#usage">用法</a>' +
+      '<a href="sound.mp3">相对同名文件</a>';
+    const out = rewriteDictHtml(html, "d1");
+    // sound:// href → 单前缀资源 URL（曾双前缀 → 404）
+    expect(out).toContain('href="/api/dict/resource/d1/hwd/bre/5/door_n0205.mp3"');
+    expect(out).not.toContain("/api/dict/resource/d1//api");
+    // entry://# 锚点 → 同文档 # 跳转
+    expect(out).toContain('href="#usage"');
+    expect(out).not.toContain("entry://");
+    // 相对路径照旧重写（sound.mp3 非 sound: 前缀）
+    expect(out).toContain('href="/api/dict/resource/d1/sound.mp3"');
+  });
+
   it("rewriteDictHtml：非引号 src/href 与协议相对 // 不误伤", () => {
     const html = '<link href=plain.css/><img src="//cdn.example.com/x.png"/>';
     const out = rewriteDictHtml(html, "d1");

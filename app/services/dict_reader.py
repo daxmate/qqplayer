@@ -180,13 +180,40 @@ class MdxDict:
 
     # ---------- 词条 ----------
     def lookup(self, word: str) -> str | None:
-        """精确查词：命中返回词条 HTML（str），未命中 None"""
+        """精确查词：命中返回词条 HTML（str），未命中 None。
+
+        @@@LINK= 重定向条目（MDX 别名词条，如 photographs → photograph）自动跳转目标
+        词条：链式跟随、防循环（visited 集合 + 最多 5 层）、大小写不敏感（目标词任意
+        大小写，词典 key 通常小写，直查 miss 后回退小写再查）。
+        """
+        return self._lookup_redirect(word, set(), 0)
+
+    def _lookup_redirect(self, word: str, visited: set[str], depth: int) -> str | None:
+        """查词递归实现：命中普通词条直接返回；@@@LINK= 条目跟随跳转（visited/depth 由 lookup 种子化）"""
         self._ensure_loaded()
         assert self._index is not None
         key_id = self._index.get(word.encode("utf-8"))
         if key_id is None:
             return None
-        return self._extract_record(key_id)
+        html = self._extract_record(key_id)
+        if not html.startswith("@@@LINK="):
+            return html
+        if depth >= 5:  # 跳转层数上限：超限返回原链接条目（防深链）
+            return html
+        target = (
+            html[8:].strip().strip("\"'").strip()
+        )  # "@@@LINK=" 共 8 字符；容忍尾部 \r\n 与引号包裹
+        norm = target.lower()
+        if not norm or norm in visited:  # 空目标 / 循环（目标词已在链路中）→ 返回原链接条目
+            return html
+        visited.add(norm)
+        # 目标词可能任意大小写：直查，miss 回退小写（词典 key 通常存小写原型）
+        resolved = target
+        if self._index.get(resolved.encode("utf-8")) is None:
+            resolved = norm
+            if self._index.get(resolved.encode("utf-8")) is None:
+                return html  # 目标词不存在 → 保留原链接条目
+        return self._lookup_redirect(resolved, visited, depth + 1)
 
     def lookup_variants(self, word: str) -> str | None:
         """变形兜底：s/es/ies/ed/ing/er/est/ly/d 简单规则 + 大小写变体，命中即返回
