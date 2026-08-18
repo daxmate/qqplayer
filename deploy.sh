@@ -13,7 +13,7 @@ git pull --ff-only
 
 # 2. 后端依赖
 echo "── 安装后端依赖"
-./venv/bin/python -m pip install -q -r requirements.txt
+./backend/venv/bin/python -m pip install -q -r backend/requirements.txt
 
 # 3. 前端构建（失败自动回滚上一版 dist）
 DIST="frontend/dist"
@@ -51,11 +51,11 @@ if [ ! -f "$PLIST" ]; then
     <string>com.daxmate.qqplayer</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/dax/codes/qqplayer/venv/bin/python</string>
-        <string>/Users/dax/codes/qqplayer/backend.py</string>
+        <string>/Users/dax/codes/qqplayer/backend/venv/bin/python</string>
+        <string>/Users/dax/codes/qqplayer/backend/backend.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/dax/codes/qqplayer</string>
+    <string>/Users/dax/codes/qqplayer/backend</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -81,7 +81,7 @@ fi
 # 5. 重启服务：kill 掉进程，launchd KeepAlive 会自动拉起新进程（加载新代码）
 # 不要 bootout/bootstrap：pkill 后 KeepAlive 已重启，再卸载/加载会和 launchd 域状态打架（I/O error）
 echo "── 重启服务（KeepAlive 自动拉起）"
-pkill -f "backend.py" 2>/dev/null || true
+pkill -f "qqplayer/backend/backend.py" 2>/dev/null || true
 sleep 2 # 等 KeepAlive 拉起新进程
 
 # 5. 健康检查（失败自动回滚上一版 dist 并重启）
@@ -94,7 +94,7 @@ else
     if [ -d "$BACKUP" ]; then
       rm -rf "$DIST"
       cp -R "$BACKUP" "$DIST"
-      pkill -f "backend.py" 2>/dev/null || true
+      pkill -f "qqplayer/backend/backend.py" 2>/dev/null || true
       sleep 3
     fi
     if curl -sf -o /dev/null http://localhost:17627/api/settings; then

@@ -11,11 +11,11 @@ from pathlib import Path
 
 from app.storage import JsonStore
 
-ROOT = Path(__file__).resolve().parent.parent
-# 默认歌曲库：用户本地 iCloud 音乐文件夹（不在仓库内，仓库不存音频文件）
-DEFAULT_LIBRARY = Path(
-    "/Users/dax/Library/Mobile Documents/iCloud~dev~clq~Cosmos-Music-Player/Documents"
-)
+# 仓库根（backend/app/state.py 上溯 3 级；dist/frontend/scripts 等相对路径均以仓库根为基准）
+ROOT = Path(__file__).resolve().parent.parent.parent
+# 默认歌曲库：系统推荐位置 ~/Music/QQPlayer（不在仓库内，仓库不存音频文件；
+# 用户可在设置/命令行参数指定其他路径，argv 覆盖逻辑在 app/main.py）
+DEFAULT_LIBRARY = Path.home() / "Music" / "QQPlayer"
 DEFAULT_PORT = 17627
 
 # 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）
@@ -213,9 +213,9 @@ DICT_SETTINGS_DEFAULTS = {
 IMPORT_MAX_BYTES = 500 * 1024 * 1024  # 500MB
 
 # ============ AI 歌词对齐 ============
-# Qwen3-ForcedAligner 本地对齐工具（项目内 scripts/lyric-align：oMLX 内嵌 python + mlx-community
-# 模型 + ffmpeg + nagisa；模型缺失时自动下载，ModelScope 优先、HuggingFace 保底）
-ALIGN_SCRIPT = str(ROOT / "scripts" / "lyric-align")
+# Qwen3-ForcedAligner 本地对齐工具（项目内 backend/scripts/lyric-align：oMLX 内嵌 python +
+# mlx-community 模型 + ffmpeg + nagisa；模型缺失时自动下载，ModelScope 优先、HuggingFace 保底）
+ALIGN_SCRIPT = str(ROOT / "backend" / "scripts" / "lyric-align")
 # 模型缺失时首次使用会先下载（约 1GB），超时上限放宽到 600s
 ALIGN_TIMEOUT = 600
 # 模型手动下载指引（自动下载失败时附进错误 detail）

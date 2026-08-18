@@ -17,13 +17,13 @@ jobs:
       - name: Install system deps (liblzo2-dev for python-lzo, used by readmdict)
         run: sudo apt-get update && sudo apt-get install -y liblzo2-dev
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install -r backend/requirements.txt
       - name: Lint (ruff check)
-        run: ruff check .
+        run: cd backend && ruff check .
       - name: Format (ruff format)
-        run: ruff format --check .
+        run: cd backend && ruff format --check .
       - name: Test (pytest)
-        run: pytest
+        run: cd backend && pytest
 
   frontend:
     name: Frontend (eslint + prettier + vitest + build)

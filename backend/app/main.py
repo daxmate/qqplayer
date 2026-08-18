@@ -38,15 +38,21 @@ if len(sys.argv) > 1:
 
 include_routers(app)
 
-# 静态前端
-if (state.ROOT / "dist").is_dir():
-    app.mount("/", StaticFiles(directory=str(state.ROOT / "dist"), html=True), name="frontend")
+# 静态前端（构建产物 frontend/dist）
+if (state.ROOT / "frontend" / "dist").is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=str(state.ROOT / "frontend" / "dist"), html=True),
+        name="frontend",
+    )
 
 
 def main():
     """启动入口：初始化歌曲库 + 打印启动信息 + 自动开浏览器 + uvicorn 服务"""
     if len(sys.argv) > 1:
         state.LIBRARY = Path(sys.argv[1])
+    # 默认曲库目录不存在时自动创建（~/Music/QQPlayer 或命令行指定路径）
+    state.LIBRARY.mkdir(parents=True, exist_ok=True)
     init_library()
     url = f"http://localhost:{state.DEFAULT_PORT}"
     print(f"🎵 music-player 已启动: {url}")
