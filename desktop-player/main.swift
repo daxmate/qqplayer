@@ -68,6 +68,87 @@ final class DragOverlayView: NSView {
     }
 }
 
+// ============ 主窗口 WebView：阅读器右键菜单扩展 ============
+// 阅读器（Reader.vue）激活且有选中文本时，在系统右键菜单顶部追加应用项：
+//   查词 "xxx" / 高亮（黄绿蓝粉子菜单）/ 添加笔记… / 分隔线
+// 其余情况原样保留系统菜单（迷你窗 / 歌词窗仍用普通 WKWebView，不受影响）。
+// 菜单点击通过 evaluateJavaScript 调前端全局 API（window.__qqReaderMenu?.*，失败静默）。
+final class MainWebView: WKWebView {
+    // 阅读器状态缓存：前端经 "native" 通道推送 { type: 'readerState', active, hasSelection, text }
+    static var readerActive = false
+    static var readerHasSelection = false
+    static var readerSelectedText = ""
+
+    // 本地化：跟随系统语言（zh* → 中文，其余英文）；英文查词用 "Dictionary" 避免与系统 Look Up 混淆
+    private static let isChinese: Bool = {
+        if let lang = Locale.preferredLanguages.first, lang.lowercased().hasPrefix("zh") {
+            return true
+        }
+        return false
+    }()
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        // 仅阅读器激活且有非空选中文本时追加应用项，否则保持系统默认菜单
+        guard MainWebView.readerActive,
+              MainWebView.readerHasSelection,
+              !MainWebView.readerSelectedText.isEmpty else { return }
+
+        let zh = MainWebView.isChinese
+
+        // 查词 "xxx"（选中词截断 30 字符，超长加 …）
+        let text = MainWebView.readerSelectedText
+        let truncated = text.count > 30 ? String(text.prefix(30)) + "…" : text
+        let lookupTitle = zh ? "查词 \"\(truncated)\"" : "Dictionary \"\(truncated)\""
+        let lookupItem = NSMenuItem(title: lookupTitle, action: #selector(lookupAction(_:)), keyEquivalent: "")
+        lookupItem.target = self
+        menu.insertItem(lookupItem, at: 0)
+
+        // 高亮（子菜单：黄/绿/蓝/粉，颜色字符串存 representedObject）
+        let highlightItem = NSMenuItem(title: zh ? "高亮" : "Highlight", action: nil, keyEquivalent: "")
+        let colorSubmenu = NSMenu()
+        let colors: [(color: String, label: String)] = zh
+            ? [("yellow", "黄"), ("green", "绿"), ("blue", "蓝"), ("pink", "粉")]
+            : [("yellow", "Yellow"), ("green", "Green"), ("blue", "Blue"), ("pink", "Pink")]
+        for c in colors {
+            let item = NSMenuItem(title: c.label, action: #selector(highlightAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = c.color
+            colorSubmenu.addItem(item)
+        }
+        highlightItem.submenu = colorSubmenu
+        menu.insertItem(highlightItem, at: 1)
+
+        // 添加笔记…
+        let noteItem = NSMenuItem(title: zh ? "添加笔记…" : "Add Note…", action: #selector(noteAction(_:)), keyEquivalent: "")
+        noteItem.target = self
+        menu.insertItem(noteItem, at: 2)
+
+        menu.insertItem(.separator(), at: 3)
+    }
+
+    // ---- 菜单点击 → 前端 JS（optional chaining，调用失败静默） ----
+    @objc private func lookupAction(_ sender: Any?) {
+        callJS("window.__qqReaderMenu?.lookup()")
+    }
+
+    @objc private func highlightAction(_ sender: Any?) {
+        let color = (sender as? NSMenuItem)?.representedObject as? String ?? "yellow"
+        callJS("window.__qqReaderMenu?.highlight('\(color)')")
+    }
+
+    @objc private func noteAction(_ sender: Any?) {
+        callJS("window.__qqReaderMenu?.note()")
+    }
+
+    private func callJS(_ js: String) {
+        // evaluateJavaScript 必须在主线程；菜单回调已在主线程，dispatch 兜底
+        DispatchQueue.main.async { [weak self] in
+            self?.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+}
+
 // ============ App 入口 ============
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDelegate {
     // 三窗口
@@ -217,7 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         )
         config.userContentController = controller
 
-        mainWebView = WKWebView(frame: mainWindow.contentView!.bounds, configuration: config)
+        mainWebView = MainWebView(frame: mainWindow.contentView!.bounds, configuration: config)
         mainWebView.autoresizingMask = [.width, .height]
         mainWebView.allowsMagnification = false
         mainWebView.uiDelegate = self
@@ -624,6 +705,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         guard let dict = message.body as? [String: Any], let type = dict["type"] as? String else { return }
         switch type {
+        case "readerState":
+            // 阅读器状态缓存（前端 Reader.vue 推送，驱动右键菜单插入逻辑）
+            MainWebView.readerActive = dict["active"] as? Bool ?? false
+            MainWebView.readerHasSelection = dict["hasSelection"] as? Bool ?? false
+            MainWebView.readerSelectedText = dict["text"] as? String ?? ""
         case "qqlog":
             // 诊断：网页 console 落盘（~/Library/Logs/qqplayer/webview-console.log）
             let level = dict["level"] as? String ?? "log"
