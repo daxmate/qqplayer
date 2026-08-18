@@ -58,7 +58,19 @@
       </button>
     </div>
 
-    <!-- 删除确认 -->
+    <!-- 空态引导（v-else 必须紧邻书架网格的 v-if，中间不能插其他 v-if 元素） -->
+    <div v-else class="bs-empty">
+      <BookOpen :size="46" class="bs-empty-icon" />
+      <p class="bs-empty-title">{{ t("books.empty") }}</p>
+      <p class="bs-empty-hint">{{ t("books.emptyHint") }}</p>
+      <button class="bs-import-btn" :disabled="importing" @click="openFilePicker">
+        <Loader2 v-if="importing" :size="15" class="bs-spin" />
+        <Upload v-else :size="15" />
+        {{ importing ? t("books.importing") : t("books.import") }}
+      </button>
+    </div>
+
+    <!-- 删除确认（独立 v-if，不参与网格/空态配对） -->
     <div v-if="pendingDelete" class="bs-confirm-mask" @click.self="pendingDelete = null">
       <div class="bs-confirm">
         <p class="bs-confirm-text">
@@ -73,18 +85,6 @@
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- 空态引导 -->
-    <div v-else class="bs-empty">
-      <BookOpen :size="46" class="bs-empty-icon" />
-      <p class="bs-empty-title">{{ t("books.empty") }}</p>
-      <p class="bs-empty-hint">{{ t("books.emptyHint") }}</p>
-      <button class="bs-import-btn" :disabled="importing" @click="openFilePicker">
-        <Loader2 v-if="importing" :size="15" class="bs-spin" />
-        <Upload v-else :size="15" />
-        {{ importing ? t("books.importing") : t("books.import") }}
-      </button>
     </div>
 
     <!-- 拖拽中高亮遮罩提示 -->
