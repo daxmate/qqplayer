@@ -6,11 +6,13 @@
  */
 import type {
   BookAnnotations,
+  BookSearchResponse,
   DictConfig,
   DictQueryResult,
   DictScanCandidate,
   DictSettings,
   HighlightColor,
+  HighlightStyle,
   NoteAnnotation,
   VocabEntry,
 } from "./types";
@@ -46,10 +48,15 @@ export function fetchAnnotations(bookId: string): Promise<BookAnnotations> {
   return request<BookAnnotations>(`/api/books/${bookId}/annotations`);
 }
 
-/** 创建高亮 {cfi,text,color} → {id} */
+/** 创建高亮 {cfi,text,color,style?} → {id}；style 缺省 "highlight"（V4） */
 export function createHighlight(
   bookId: string,
-  payload: { cfi: string; text: string; color: HighlightColor },
+  payload: {
+    cfi: string;
+    text: string;
+    color: HighlightColor | "red";
+    style?: HighlightStyle;
+  },
 ): Promise<{ id: string }> {
   return request<{ id: string }>(
     `/api/books/${bookId}/annotations/highlights`,
@@ -219,14 +226,21 @@ export function rewriteDictHtml(html: string, dictId: string): string {
   return out;
 }
 
+/** 书内搜索（V4）：GET /api/books/{bid}/search?q=，句子级全文匹配 */
+export function searchBook(bookId: string, query: string): Promise<BookSearchResponse> {
+  const params = new URLSearchParams({ q: query });
+  return request<BookSearchResponse>(`/api/books/${bookId}/search?${params.toString()}`);
+}
+
 // ============ 高亮颜色（epub.js marks pane SVG 属性） ============
 
-/** 四色高亮：marks pane 用 SVG fill + mix-blend-mode（multiply 适合浅色主题） */
+/** 五色高亮：marks pane 用 SVG fill + mix-blend-mode（multiply 适合浅色主题） */
 export const HIGHLIGHT_COLOR_STYLES: Record<HighlightColor, Record<string, string>> = {
   yellow: { fill: "#f6d32d", "fill-opacity": "0.55", "mix-blend-mode": "multiply" },
   green: { fill: "#7bc47f", "fill-opacity": "0.5", "mix-blend-mode": "multiply" },
   blue: { fill: "#64b5f6", "fill-opacity": "0.5", "mix-blend-mode": "multiply" },
   pink: { fill: "#f28bb0", "fill-opacity": "0.5", "mix-blend-mode": "multiply" },
+  purple: { fill: "#b388ff", "fill-opacity": "0.5", "mix-blend-mode": "multiply" },
 };
 
 /** 高亮色块 UI 色（工具栏色点 / 面板色点） */
@@ -235,6 +249,14 @@ export const HIGHLIGHT_COLOR_HEX: Record<HighlightColor, string> = {
   green: "#7bc47f",
   blue: "#64b5f6",
   pink: "#f28bb0",
+  purple: "#b388ff",
+};
+
+/** 下划线样式（style=underline）：epub.js marks pane 用 stroke；颜色固定，不依赖 blend 模式 */
+export const UNDERLINE_COLOR = "red";
+export const UNDERLINE_STYLE: Record<string, string> = {
+  stroke: "#e5484d",
+  "stroke-width": "2",
 };
 
 /** 背景色是否深色（决定高亮 blend 模式，深色主题用 screen 否则几乎不可见） */

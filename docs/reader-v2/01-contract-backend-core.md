@@ -30,17 +30,22 @@
 ```json
 {
   "<bookId>": {
-    "highlights": [{"id": "hl_<uuid>", "cfi": "epubcfi(...)", "text": "选中文字", "color": "yellow", "createdAt": 1710000000000}],
+    "highlights": [{"id": "hl_<uuid>", "cfi": "epubcfi(...)", "text": "选中文字", "color": "yellow", "style": "highlight", "createdAt": 1710000000000}],
     "bookmarks":  [{"id": "bm_<uuid>", "cfi": "epubcfi(...)", "text": "书签标签（如 第 3 页）", "createdAt": 1710000000000}],
     "notes":      [{"id": "nt_<uuid>", "cfi": "epubcfi(...)", "excerpt": "原文摘录", "text": "笔记正文", "createdAt": 1710000000000, "updatedAt": 1710000000000}]
   }
 }
 ```
 
+**V4 扩展**（iBooks 式菜单配套）：
+- `highlights[].style`：`"highlight" | "underline"`（缺省/旧数据视为 `"highlight"`，**GET 返回时规范化补全**，不强制迁移旧文件）
+- 高亮色板：`{"yellow","green","blue","pink","purple"}` 五色；`style=underline` 时 `color` 固定 `"red"`（后端存值不解释，前端渲染固定色）
+- color 校验白名单 `{"yellow","green","blue","pink","purple","red"}`，非法回落 yellow（兼容旧行为）
+
 **API**（新文件 `app/routers/annotations.py`，挂到 app.main.py 的 router 列表——参照其他 router 注册方式；如 app/main.py 禁止碰则改 `app/routers/__init__.py` 或按现状模式注册，先读 main.py 确认）：
 
 - `GET /api/books/{bid}/annotations` → 该书完整 annotations 对象（无则返回 `{"highlights":[],"bookmarks":[],"notes":[]}`）
-- `PUT /api/books/{bid}/annotations/highlights` body `{"cfi","text","color"}` → 创建，返回 `{"id": "hl_..."}`；color 校验 allowed `{"yellow","green","blue","pink"}` 非法回落 yellow；text 非空
+- `PUT /api/books/{bid}/annotations/highlights` body `{"cfi","text","color","style"?}` → 创建，返回 `{"id": "hl_..."}`；color 校验 allowed `{"yellow","green","blue","pink","purple","red"}` 非法回落 yellow；style 校验 allowed `{"highlight","underline"}`，缺省/非法回落 `"highlight"`；text 非空
 - `DELETE /api/books/{bid}/annotations/highlights/{hid}` → 204
 - `PUT /api/books/{bid}/annotations/bookmarks` body `{"cfi","text"}` → 创建，返回 `{"id":"bm_..."}`；同 cfi 重复创建允许（不去重，前端保证）
 - `DELETE /api/books/{bid}/annotations/bookmarks/{bid2}` → 204
@@ -68,9 +73,39 @@
 ### 4. 测试（tests/ 下，参照现有风格）
 
 - settings：新字段默认值/合法值/非法回落/越界 clamp（fontSize 71/70/200/201、lineHeight 1.0/2.5、theme 非法值、textColor 非字符串）→ pytest 参数化
-- annotations：创建/列表/删除/404（book 不存在、id 不存在）/color 非法回落/notes PATCH 更新 updatedAt
+- annotations：创建/列表/删除/404（book 不存在、id 不存在）/color 非法回落/style 非法回落（含缺省 → highlight）/旧数据 GET 规范化补 style/notes PATCH 更新 updatedAt
 - vocab：创建/列表倒序/删除/404/export 格式（含空词表）
 - 跑：`~/codes/qqplayer/venv/bin/python -m pytest tests/ -x -q`（**fork 无 venv，用主仓库 venv**，cwd 在 fork）
+
+### 5. 书内搜索 API（V4 新增，iBooks 式「搜索」菜单项配套）
+
+**接口**：`GET /api/books/{bid}/search?q=<query>`
+
+**响应**：
+```json
+{
+  "query": "galling",
+  "results": [
+    {
+      "href": "chap01.xhtml",
+      "chapterTitle": "Chapter 1",
+      "sentence": "It was a galling defeat.",
+      "cfi": "epubcfi(/6/8[chap01]!/4/2/1:0)",
+      "matchStart": 11,
+      "matchEnd": 18
+    }
+  ]
+}
+```
+
+**语义**：
+- 数据源：`books/<id>/index.json` 的 `chapters[]`（导入时生成，见 `app/services/book_import.py` `_build_index`）；句子级大小写不敏感子串匹配（`q.lower() in sentence.lower()`）
+- 全部命中（不分页），上限 100 条（超出截断）；`q` 为空或长度 > 100 → 400 `{"detail":"invalid query"}`
+- `href`/`chapterTitle` 直接取自 index.json；`sentence` 为命中句原文；`matchStart`/`matchEnd` 为大小写不敏感匹配时第一个命中词的字符偏移（`sentence[lower:upper].lower() == q.lower()`）
+- `cfi`：**句子起始 CFI，必须能被 epub.js `display(cfi)` 定位到该句子**。生成方式：重新打开 `books/<id>/book.epub`（zipfile），按 spine 顺序解析每个 XHTML，用与 `_build_index` 相同的提纯逻辑定位句子所在段落/文本节点，按 CFI 规范（spine 索引 + 元素路径 + 文本偏移）生成；参考 epub.js 的 CFI 生成算法（`epubcfi(/6/<spineIdx+6>[<id>]!/4/2/1:0)` 结构，文本节点 `:0` 起始偏移）。注意 index.json 的句子是提纯后的 split 结果，映射回原文文本节点时允许首尾空白差异（strip 后匹配）
+- 书中无 index.json（导入时生成失败）→ 返回空 results（不报错）
+
+**测试**：需要真实 EPUB fixture（`tests/fixtures/` 新增 `mini.epub`：手写最小 EPUB，2 个章节 XHTML，含已知句子），用例覆盖：命中/大小写不敏感/多章节命中/miss（空 results）/q 空与超长 400/无 index 时空 results/cfi 可被 epub.js 解析（格式断言 + 与实际章节文本节点对应）
 
 ## 二、技术约束
 

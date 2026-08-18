@@ -103,17 +103,44 @@ export interface ReaderSettings {
 }
 
 /**
- * 高亮颜色（V2 标注，契约指定四色）
+ * 高亮颜色（V4 标注：iBooks 式五色；下划线固定红色不入此类型）
  */
-export type HighlightColor = "yellow" | "green" | "blue" | "pink";
+export type HighlightColor = "yellow" | "green" | "blue" | "pink" | "purple";
 
-/** 高亮条目（annotations.json highlights[]） */
+/** 标注样式：高亮底色 / 下划线（V4 扩展） */
+export type HighlightStyle = "highlight" | "underline";
+
+/** 高亮条目（annotations.json highlights[]）；V4 加 style，旧数据无该字段由后端 GET 规范化补 "highlight" */
 export interface HighlightAnnotation {
   id: string;
   cfi: string;
   text: string;
-  color: HighlightColor;
+  /** 高亮五色；style=underline 时固定 "red"（前端渲染固定色） */
+  color: HighlightColor | "red";
+  style: HighlightStyle;
   createdAt: number;
+}
+
+/** 书内搜索单条结果（GET /api/books/{bid}/search，V4 新增） */
+export interface BookSearchResult {
+  /** 章节文件（spine href），跳转用 */
+  href: string;
+  /** 章节标题（index.json chapters[].title） */
+  chapterTitle: string;
+  /** 命中的句子全文（index.json 句子粒度） */
+  sentence: string;
+  /** 句子起始 CFI（epub.js display 可直接定位），后端解析 XHTML 生成 */
+  cfi: string;
+  /** 命中词在 sentence 内的起始偏移（字符），前端临时高亮用 */
+  matchStart: number;
+  /** 命中词在 sentence 内的结束偏移（字符） */
+  matchEnd: number;
+}
+
+/** 书内搜索响应 */
+export interface BookSearchResponse {
+  query: string;
+  results: BookSearchResult[];
 }
 
 /** 书签条目（annotations.json bookmarks[]） */

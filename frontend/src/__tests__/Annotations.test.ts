@@ -54,8 +54,14 @@ describe("annotations.ts 纯函数", () => {
     expect(out).toContain('src="//cdn.example.com/x.png"');
   });
 
-  it("高亮颜色样式：四色齐全，isDarkBackground 判断正确", () => {
-    expect(Object.keys(HIGHLIGHT_COLOR_STYLES).sort()).toEqual(["blue", "green", "pink", "yellow"]);
+  it("高亮颜色样式：五色齐全，isDarkBackground 判断正确", () => {
+    expect(Object.keys(HIGHLIGHT_COLOR_STYLES).sort()).toEqual([
+      "blue",
+      "green",
+      "pink",
+      "purple",
+      "yellow",
+    ]);
     expect(isDarkBackground("#1f2430")).toBe(true);
     expect(isDarkBackground("#ffffff")).toBe(false);
     expect(isDarkBackground("not-a-color")).toBe(false);
