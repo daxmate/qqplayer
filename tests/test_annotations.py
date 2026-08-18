@@ -70,12 +70,63 @@ def test_highlight_create_and_list():
 
 
 def test_highlight_invalid_color_falls_back_yellow():
-    """color 非法（枚举外/类型非法/缺省）回落 yellow"""
-    for bad in ("red", 123, None, ["yellow"]):
+    """color 非法（枚举外/类型非法/缺省）回落 yellow（V4 后 red 合法，不再回落）"""
+    for bad in ("chartreuse", 123, None, ["yellow"], "YELLOW"):
         r = client.put(f"{H}/highlights", json={"cfi": "c", "text": "x", "color": bad})
         assert r.status_code == 200, f"color={bad!r}"
         assert r.json()["id"]
     assert all(h["color"] == "yellow" for h in client.get(H).json()["highlights"])
+
+
+def test_highlight_color_purple_red_accepted():
+    """V4 色板：purple/red 合法，原样存储（iBooks 五色 + underline 固定 red）"""
+    for c in ("purple", "red"):
+        r = client.put(f"{H}/highlights", json={"cfi": "c", "text": "x", "color": c})
+        assert r.status_code == 200, f"color={c!r}"
+    colors = [h["color"] for h in client.get(H).json()["highlights"]]
+    assert colors == ["purple", "red"]
+
+
+def test_highlight_style_explicit():
+    """V4 style：显式 underline 原样入库，GET 完整返回"""
+    r = client.put(f"{H}/highlights", json={"cfi": "c", "text": "x", "style": "underline"})
+    assert r.status_code == 200
+    hl = client.get(H).json()["highlights"][0]
+    assert hl["style"] == "underline"
+    assert hl["color"] == "yellow"  # style 与 color 独立校验
+
+
+def test_highlight_style_default_and_invalid_fall_back_highlight():
+    """style 缺省/非法/类型错误 → 回落 "highlight"""
+    for bad in (None, "dashed", 123, ["underline"], "Highlight"):
+        body = {"cfi": "c", "text": "x"}
+        if bad is not None:
+            body["style"] = bad
+        r = client.put(f"{H}/highlights", json=body)
+        assert r.status_code == 200, f"style={bad!r}"
+    assert all(h["style"] == "highlight" for h in client.get(H).json()["highlights"])
+
+
+def test_highlight_legacy_get_normalized_no_writeback():
+    """V4 旧数据规范化：无 style 字段的高亮 GET 补 "style":"highlight"，磁盘文件不写回"""
+    legacy = {
+        "b1": {
+            "highlights": [
+                {"id": "hl_old1", "cfi": "c", "text": "old", "color": "yellow", "createdAt": 1}
+            ],
+            "bookmarks": [],
+            "notes": [],
+        }
+    }
+    state.annotations_store.save(legacy)
+    before = (state.ANNOTATIONS_FILE).read_text("utf-8")
+    hl = client.get(H).json()["highlights"][0]
+    assert hl["id"] == "hl_old1"
+    assert hl["style"] == "highlight"
+    assert client.get(H).json()["highlights"][0]["style"] == "highlight"
+    # 不写回磁盘：文件里仍无 style 字段
+    assert "style" not in (state.ANNOTATIONS_FILE).read_text("utf-8")
+    assert (state.ANNOTATIONS_FILE).read_text("utf-8") == before
 
 
 def test_highlight_text_required():
