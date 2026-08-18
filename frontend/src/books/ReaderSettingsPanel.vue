@@ -9,18 +9,61 @@
     </header>
 
     <div class="reader-settings-scroll">
-      <!-- 字体族 -->
+      <!-- 排版预设（iBooks 式顶部一排；只含 字体+字号+行距+边距，颜色走下方独立主题切换） -->
+      <section class="reader-settings-group">
+        <p class="reader-settings-label">{{ t("books.presets") }}</p>
+        <div class="reader-settings-presets">
+          <button
+            v-for="p in TYPOGRAPHY_PRESETS"
+            :key="p.key"
+            class="reader-settings-preset"
+            :class="{ on: isPresetActive(p) }"
+            @click="applyPreset(p)"
+          >
+            {{ t(p.labelKey) }}
+          </button>
+        </div>
+      </section>
+
+      <!-- 字体族（iBooks 式：每项用自身字形渲染 "Aa" 预览 + 选中打勾） -->
       <section class="reader-settings-group">
         <p class="reader-settings-label">{{ t("books.fontFamily") }}</p>
-        <div class="reader-settings-row wrap">
+        <div class="reader-settings-fonts">
           <button
-            v-for="opt in FONT_OPTIONS"
+            v-for="opt in READER_FONT_OPTIONS"
             :key="opt.key"
-            class="reader-settings-chip"
+            class="reader-settings-font"
             :class="{ on: settings.fontFamily === opt.key }"
             @click="emit('patch', { fontFamily: opt.key })"
           >
-            {{ t(opt.labelKey) }}
+            <span
+              class="reader-settings-font-aa"
+              :style="opt.fontFamily ? { fontFamily: opt.fontFamily } : undefined"
+              >Aa</span
+            >
+            <span class="reader-settings-font-name">{{ t(opt.labelKey) }}</span>
+            <Check
+              v-if="settings.fontFamily === opt.key"
+              :size="14"
+              class="reader-settings-font-check"
+            />
+          </button>
+        </div>
+      </section>
+
+      <!-- 粗体开关（iOS 风格，只覆盖正文 body 字重，不影响 EPUB 自带 heading 样式） -->
+      <section class="reader-settings-group">
+        <div class="reader-settings-toggle-row">
+          <span class="reader-settings-label no-margin">{{ t("books.boldText") }}</span>
+          <button
+            class="reader-settings-switch"
+            :class="{ on: settings.bold }"
+            role="switch"
+            :aria-checked="settings.bold"
+            :title="t('books.boldText')"
+            @click="emit('patch', { bold: !settings.bold })"
+          >
+            <span class="reader-settings-switch-knob" />
           </button>
         </div>
       </section>
@@ -114,6 +157,11 @@
           {{ t("books.restoreThemeColors") }}
         </button>
       </section>
+
+      <!-- 还原所有设置（一键回默认并保存） -->
+      <button class="reader-settings-reset-all" @click="emit('reset')">
+        {{ t("books.resetAll") }}
+      </button>
     </div>
   </aside>
 </template>
@@ -121,21 +169,24 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { Minus, Plus, X } from "@lucide/vue";
+import { Check, Minus, Plus, X } from "@lucide/vue";
 import type { ReaderSettings } from "./types";
-import { READER_THEME_PRESETS, resolveReaderThemeColors } from "./settings";
+import {
+  READER_FONT_OPTIONS,
+  READER_THEME_PRESETS,
+  TYPOGRAPHY_PRESETS,
+  type TypographyPreset,
+  resolveReaderThemeColors,
+} from "./settings";
 
 const props = defineProps<{ settings: ReaderSettings }>();
-const emit = defineEmits<{ patch: [patch: Partial<ReaderSettings>]; close: [] }>();
+const emit = defineEmits<{
+  patch: [patch: Partial<ReaderSettings>];
+  reset: [];
+  close: [];
+}>();
 
 const { t } = useI18n();
-
-const FONT_OPTIONS: { key: ReaderSettings["fontFamily"]; labelKey: string }[] = [
-  { key: "default", labelKey: "books.fontDefault" },
-  { key: "serif", labelKey: "books.fontSerif" },
-  { key: "sans", labelKey: "books.fontSans" },
-  { key: "rounded", labelKey: "books.fontRounded" },
-];
 
 const THEME_OPTIONS: {
   key: ReaderSettings["theme"];
@@ -179,6 +230,27 @@ const THEME_OPTIONS: {
 
 /** 颜色选择器展示值：未自定义时显示当前主题生效色（输入框要求合法 #rrggbb） */
 const displayColors = computed(() => resolveReaderThemeColors(props.settings));
+
+/**
+ * 预设命中：字体+字号+行距都相同就算（边距忽略，近似匹配即可）；
+ * 这样用户点过预设再微调边距，预设仍保持高亮。
+ */
+function isPresetActive(p: TypographyPreset): boolean {
+  const s = props.settings;
+  return (
+    s.fontFamily === p.fontFamily && s.fontSize === p.fontSize && s.lineHeight === p.lineHeight
+  );
+}
+
+/** 点击预设：一次性 patch 字体+字号+行距+边距（不动颜色 theme） */
+function applyPreset(p: TypographyPreset) {
+  emit("patch", {
+    fontFamily: p.fontFamily,
+    fontSize: p.fontSize,
+    lineHeight: p.lineHeight,
+    margin: p.margin,
+  });
+}
 
 function clampFontSize(v: number): number {
   return Math.min(200, Math.max(70, v));
@@ -250,13 +322,13 @@ function onBgColorInput(e: Event) {
   font-weight: 600;
   color: var(--text2);
 }
+.reader-settings-label.no-margin {
+  margin-bottom: 0;
+}
 .reader-settings-row {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.reader-settings-row.wrap {
-  flex-wrap: wrap;
 }
 .reader-settings-value {
   min-width: 44px;
@@ -269,6 +341,113 @@ function onBgColorInput(e: Event) {
   min-width: 0;
   margin-left: 6px;
   font-weight: 600;
+}
+/* 排版预设：顶部一排 */
+.reader-settings-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.reader-settings-preset {
+  padding: 6px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.reader-settings-preset:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.reader-settings-preset.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+/* 字体列表：iBooks 式两列网格，每项 Aa 自身字形预览 + 名称 + 选中打勾 */
+.reader-settings-fonts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.reader-settings-font {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text2);
+  transition: all 0.15s;
+}
+.reader-settings-font:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.reader-settings-font.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.reader-settings-font-aa {
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+.reader-settings-font-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reader-settings-font-check {
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+/* 粗体开关：iOS 风格 switch */
+.reader-settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.reader-settings-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: none;
+  background: var(--border);
+  transition: background 0.15s;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.reader-settings-switch.on {
+  background: var(--accent);
+}
+.reader-settings-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: left 0.15s;
+}
+.reader-settings-switch.on .reader-settings-switch-knob {
+  left: 18px;
 }
 .reader-settings-chip {
   padding: 6px 12px;
@@ -360,5 +539,24 @@ function onBgColorInput(e: Event) {
   border-radius: 8px;
   background: var(--card2);
   cursor: pointer;
+}
+/* 还原所有设置：面板底部，破坏性红色（iBooks 式） */
+.reader-settings-reset-all {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 0;
+  border-radius: 8px;
+  border: 1px solid var(--red-soft);
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.reader-settings-reset-all:hover {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
 }
 </style>
