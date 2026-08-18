@@ -26,6 +26,7 @@
         playsinline
         @timeupdate="onTimeupdate"
         @loadedmetadata="onLoadedMeta"
+        @seeking="onSeeking"
         @play="isPlaying = true"
         @pause="isPlaying = false"
         @ended="isPlaying = false"
@@ -147,11 +148,14 @@ const currentTime = ref(0);
 const duration = ref(0);
 const isPlaying = ref(false);
 
-// 播放地址：库内视频走后端流接口；在线视频走防盗链代理（原始页链接）；本地加载直接用 object URL
+// 播放地址：库内视频走后端流接口；在线视频走防盗链代理（原始页链接，缓冲外 seek 时带 t= 重建起点）；本地加载直接用 object URL
+// streamT：在线视频缓冲外 seek 的重建起点（秒）。置位后 src 变为带 t= 的合成流地址，浏览器重新加载；
+// 之后保持该值（当前流就是从 t 秒开始的），直到再次重建或组件卸载（父层按视频 key 重挂载，不会跨视频泄漏）。
+const streamT = ref<number | null>(null);
 const src = computed(() => {
   const v = props.video;
   if (isLibraryVideo(v)) return streamUrl(v.path);
-  if (isOnlineVideo(v)) return onlineStreamUrl(v.url);
+  if (isOnlineVideo(v)) return onlineStreamUrl(v.url, streamT.value ?? undefined);
   return v.localUrl;
 });
 
@@ -203,14 +207,14 @@ function cycleSpeed() {
   if (videoEl.value) videoEl.value.playbackRate = speed.value;
 }
 
-// 跳到某句句首；pauseAfter=true 时暂停（跟读句末语义）
+// 跳到某句句首；pauseAfter=true 时暂停（跟读句末语义）。
+// 统一走 seekVideo：缓冲内原生 set currentTime，缓冲外（在线合成流）换源重建。
 function seekToLine(i: number, pauseAfter = false) {
   const lines = subtitles.value;
   const v = videoEl.value;
   if (i < 0 || i >= lines.length || !v) return;
   anchorLine.value = i;
-  v.currentTime = Math.max(0, lines[i].start);
-  if (pauseAfter) v.pause();
+  seekVideo(Math.max(0, lines[i].start), pauseAfter ? "pause" : "auto");
 }
 
 // 点击字幕行：无 AB → 播放该句；等选终点 → 设为终点；区间内 → 跳转播放；
@@ -240,8 +244,7 @@ function playAt(i: number) {
   const v = videoEl.value;
   if (i < 0 || i >= lines.length || !v) return;
   anchorLine.value = i;
-  v.currentTime = Math.max(0, lines[i].start);
-  v.play().catch(() => {});
+  seekVideo(Math.max(0, lines[i].start), "play"); // 保持原语义：跳转后播放（缓冲外走重建 + 续播）
 }
 
 // 上一句 / 下一句（对齐 karaoke prevLine/nextLine）
@@ -396,11 +399,94 @@ function togglePlay() {
   else v.pause();
 }
 
-function onLoadedMeta() {
+// ============ seek 统一入口（B站合成流 seek 重建，C1 方案） ============
+// 在线视频（B站 DASH 合成流）不支持原生 Range seek：目标超出当前缓冲只能换源重建。
+// 库内/本地视频后端支持 Range，始终原生 seek，不重建。
+const suppressSeek = ref(false); // 程序内设 currentTime 置位，@seeking 消费后复位（防重建死循环）
+let pendingSeek: number | null = null; // 重建后待恢复的进度（loadedmetadata 后落位）
+let resumeAfterRebuild = false; // 重建后是否续播（重建前在播 / 显式要求播放）
+
+/** 目标时间是否落在 <video> 已缓冲范围内（合成流缓冲外无法原生 seek） */
+function isBuffered(t: number): boolean {
+  const v = videoEl.value;
+  if (!v || !v.buffered || v.buffered.length === 0) return false;
+  for (let i = 0; i < v.buffered.length; i++) {
+    if (t >= v.buffered.start(i) && t <= v.buffered.end(i)) return true;
+  }
+  return false;
+}
+
+/** 程序内设 currentTime（置 suppressSeek 防 @seeking 再入；兜底宏任务复位防陈旧标志吞掉后续用户拖动） */
+function setCurrentTime(t: number) {
   const v = videoEl.value;
   if (!v) return;
-  duration.value = v.duration || 0;
-  if (Number.isFinite(v.playbackRate)) speed.value = v.playbackRate;
+  suppressSeek.value = true;
+  v.currentTime = t;
+  setTimeout(() => {
+    suppressSeek.value = false;
+  }, 0);
+}
+
+/**
+ * 统一 seek 入口：字幕句跳转（playAt/seekToLine）与原生进度条拖动（@seeking）都走这里。
+ * 目标在缓冲内 → 原生 currentTime（丝滑不重建）；
+ * 缓冲外（仅在线视频）→ 重建流：换 src 带 t=<目标秒>，loadedmetadata 后恢复进度与播放状态。
+ * intent：'auto' 跟随原播放状态 / 'play' 跳转后播放 / 'pause' 跳转后暂停。
+ */
+function seekVideo(t: number, intent: "auto" | "play" | "pause" = "auto") {
+  const v = videoEl.value;
+  if (!v) return;
+  const target = Math.max(0, t);
+  if (isOnlineVideo(props.video) && !isBuffered(target)) {
+    rebuildStream(target, intent);
+    return;
+  }
+  setCurrentTime(target);
+  if (intent === "play") v.play().catch(() => {});
+  else if (intent === "pause") v.pause();
+}
+
+/** 缓冲外 seek → 重建流：src 换成带 t= 的合成流地址，等 loadedmetadata 后恢复进度 */
+function rebuildStream(t: number, intent: "auto" | "play" | "pause") {
+  const v = props.video;
+  if (!isOnlineVideo(v)) return;
+  const el = videoEl.value;
+  const wasPlaying = el ? !el.paused : false;
+  pendingSeek = Math.floor(t);
+  // 重建后是否续播：显式 play 一定续播；auto 跟随重建前状态；pause 不续播（跟读句末暂停语义）
+  resumeAfterRebuild = intent === "play" || (intent === "auto" && wasPlaying);
+  streamT.value = pendingSeek; // src 变化 → 浏览器从目标时间重新加载合成流
+}
+
+/** 用户拖原生进度条：目标超出缓冲 → 走统一重建（程序内 seek 被 suppressSeek 吞掉，不重复处理） */
+function onSeeking() {
+  const v = videoEl.value;
+  if (!v) return;
+  if (suppressSeek.value) {
+    suppressSeek.value = false;
+    return;
+  }
+  seekVideo(v.currentTime);
+}
+
+function onLoadedMeta() {
+  const el = videoEl.value;
+  if (!el) return;
+  // 合成流浏览器可能拿不到 duration（fMP4 分片，0/NaN/Infinity）：resolve 返回的 v.duration 兜底
+  const metaDur = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0;
+  const resolveDur = isOnlineVideo(props.video) ? props.video.duration || 0 : 0;
+  duration.value = resolveDur || metaDur || 0;
+  if (Number.isFinite(el.playbackRate)) speed.value = el.playbackRate;
+  // 重建流加载完成：恢复进度（置 suppressSeek 防 seeking 再入）+ 按需续播
+  if (pendingSeek !== null) {
+    const target = pendingSeek;
+    pendingSeek = null;
+    setCurrentTime(target);
+    if (resumeAfterRebuild) {
+      resumeAfterRebuild = false;
+      el.play().catch(() => {});
+    }
+  }
 }
 
 // 当前句变化 → 列表滚动跟随（nearest 不抢用户滚动）

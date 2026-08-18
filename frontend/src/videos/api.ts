@@ -80,9 +80,14 @@ export async function resolveOnline(url: string): Promise<OnlineVideo> {
   return { ...data, url };
 }
 
-/** 在线视频流地址（<video> src；防盗链代理，url = 原始视频页链接，Range 透传） */
-export function onlineStreamUrl(url: string): string {
-  return `/api/video-online/stream?url=${encodeURIComponent(url)}`;
+/**
+ * 在线视频流地址（<video> src；防盗链代理，url = 原始视频页链接）。
+ * t 可选：B站 DASH 双轨合成流不支持原生 Range seek，传 t=<秒> 让后端从目标时间重新合成（缺省从头播）。
+ */
+export function onlineStreamUrl(url: string, t?: number): string {
+  const base = `/api/video-online/stream?url=${encodeURIComponent(url)}`;
+  if (t === undefined || t === null || Number.isNaN(t)) return base;
+  return `${base}&t=${Math.floor(t)}`;
 }
 
 /** 在线字幕内容（url = 原始视频页链接；lang = resolve 返回的字幕 lang，空则跳过拉取） */

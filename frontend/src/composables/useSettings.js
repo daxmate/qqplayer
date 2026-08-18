@@ -135,6 +135,9 @@ export const VIDEO_SETTINGS_DEFAULTS = {
   // B站 Cookie（浏览器登录 B站后复制 Cookie 头）：后端 settings.video.bilibiliCookie；
   // 配合在线源 B站 provider 防盗链，让在线播放有声。空 = 未配置。
   bilibiliCookie: "",
+  // B站等站点登录 Cookie 来源浏览器：后端 settings.video.cookiesFromBrowser，
+  // 在线视频用 yt-dlp --cookies-from-browser 自动读取该浏览器登录态（B站可解析更高清晰度）。空 = 不使用。
+  cookiesFromBrowser: "",
 };
 
 export const videoSettings = reactive({ ...VIDEO_SETTINGS_DEFAULTS });

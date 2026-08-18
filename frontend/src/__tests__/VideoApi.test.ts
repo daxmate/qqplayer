@@ -1,8 +1,9 @@
-// videos api 在线源封装测试：resolveOnline 页面链接语义 / 错误 detail 提取
+// videos api 在线源封装测试：resolveOnline 页面链接语义 / 错误 detail 提取 / onlineStreamUrl t 参数
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { resolveOnline } from "../videos/api";
+import { resolveOnline, onlineStreamUrl } from "../videos/api";
 
 const PAGE_URL = "https://www.bilibili.com/video/BV1GJ411x7h7";
+const STREAM_BASE = `/api/video-online/stream?url=${encodeURIComponent(PAGE_URL)}`;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -47,5 +48,22 @@ describe("resolveOnline", () => {
       })),
     );
     await expect(resolveOnline(PAGE_URL)).rejects.toThrow("解析失败: 视频不存在");
+  });
+});
+
+describe("onlineStreamUrl", () => {
+  it("不带 t：纯代理地址（无 t 参数）", () => {
+    expect(onlineStreamUrl(PAGE_URL)).toBe(STREAM_BASE);
+    expect(onlineStreamUrl(PAGE_URL, undefined)).toBe(STREAM_BASE);
+  });
+
+  it("带 t：追加 &t=<向下取整秒>", () => {
+    expect(onlineStreamUrl(PAGE_URL, 12.7)).toBe(`${STREAM_BASE}&t=12`);
+    expect(onlineStreamUrl(PAGE_URL, 0)).toBe(`${STREAM_BASE}&t=0`);
+  });
+
+  it("t 为 null / NaN：忽略不追加", () => {
+    expect(onlineStreamUrl(PAGE_URL, null as unknown as number)).toBe(STREAM_BASE);
+    expect(onlineStreamUrl(PAGE_URL, Number.NaN)).toBe(STREAM_BASE);
   });
 });

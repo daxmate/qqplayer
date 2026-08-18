@@ -191,3 +191,34 @@ describe("SettingsModal 任务 K - 显示封面开关", () => {
     w.unmount();
   });
 });
+
+describe("SettingsModal 视频分类 - 浏览器 Cookie 来源", () => {
+  it("视频分类：默认「不使用」，选项含 6 浏览器，选择后写入 videoSettings.cookiesFromBrowser", async () => {
+    const { videoSettings } = await import("../composables/useSettings.js");
+    videoSettings.cookiesFromBrowser = "";
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+
+    // 切到「视频」分类
+    const videoNav = [...root.querySelectorAll(".nav-item")].find((el) =>
+      el.textContent.includes("视频"),
+    );
+    expect(videoNav).toBeTruthy();
+    videoNav.click();
+    await nextTick();
+
+    const select = root.querySelector("select");
+    expect(select).toBeTruthy();
+    expect(select.value).toBe("");
+    const opts = [...select.querySelectorAll("option")].map((o) => o.value);
+    expect(opts).toEqual(["", "vivaldi", "chrome", "safari", "edge", "firefox", "brave"]);
+
+    // 选择 Chrome → v-model 写入 composable
+    select.value = "chrome";
+    select.dispatchEvent(new Event("change"));
+    await nextTick();
+    expect(videoSettings.cookiesFromBrowser).toBe("chrome");
+    w.unmount();
+  });
+});
