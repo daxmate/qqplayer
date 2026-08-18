@@ -202,18 +202,20 @@ export function queryDict(word: string, dictId?: string): Promise<DictQueryResul
 /**
  * 词典词条 HTML 资源重写（srcdoc iframe 渲染用，纯函数便于单测）：
  * - 相对路径 src/href → /api/dict/resource/<dictId>/<path>
- * - sound://xxx → /api/dict/resource/<dictId>/xxx
+ * - sound://xxx → /api/dict/resource/<dictId>/xxx（含 href="sound://…"，规则 1 负向断言跳过避免双前缀）
+ * - entry://#xxx → #xxx（词条内部锚点，srcdoc 同文档跳转）
  * - <script> 整段剔除（sandbox 无脚本权限，显式剥离防意外）
- * - 绝对 URL（http/https/data:/#/javascript:/协议相对）不动
+ * - 绝对 URL（http/https/data:/#/javascript:/mailto:/sound:/entry:/协议相对）不动
  */
 export function rewriteDictHtml(html: string, dictId: string): string {
   let out = html.replace(/<script[\s\S]*?<\/script\s*>/gi, "");
   const resource = (path: string) => `/api/dict/resource/${dictId}/${path}`;
   out = out.replace(
-    /(\b(?:src|href)\s*=\s*["'])(?!https?:|data:|#|javascript:|mailto:|\/\/)([^"']+)(["'])/gi,
+    /(\b(?:src|href)\s*=\s*["'])(?!https?:|data:|#|javascript:|mailto:|sound:|entry:|\/\/)([^"']+)(["'])/gi,
     (_m, pre, path, post) => `${pre}${resource(path)}${post}`,
   );
   out = out.replace(/sound:\/\/([^\s"'<>]+)/gi, (_m, path) => resource(path));
+  out = out.replace(/entry:\/\/#/gi, "#");
   return out;
 }
 

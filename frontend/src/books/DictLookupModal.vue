@@ -40,7 +40,11 @@
           <Loader2 :size="24" class="dict-modal-spin" />
         </div>
         <template v-else-if="result?.found && result.html">
-          <iframe class="dict-modal-frame" sandbox="allow-same-origin" :srcdoc="srcdoc" />
+          <iframe
+            class="dict-modal-frame"
+            sandbox="allow-same-origin allow-scripts"
+            :srcdoc="srcdoc"
+          />
         </template>
         <div v-else class="dict-modal-status">
           <template v-if="!defineDicts.length">
@@ -111,14 +115,41 @@ const defineDicts = computed(() => dicts.value.filter((d) => d.enabled && d.role
 
 const sourceText = computed(() => (result.value?.found ? result.value.source : ""));
 
-/** 词条 HTML → srcdoc 完整文档（资源 URL 重写 + 基础排版） */
+/** 词条 HTML → srcdoc 完整文档（资源 URL 重写 + 基础排版 + 音频点击播放脚本）
+ *
+ * 注入脚本：拦截 a[href^="/api/dict/resource/"] 点击——音频扩展名就地播放，其余
+ * preventDefault（避免 iframe 导航走）；同时拦截 a[href^="entry://"]（LDOCE 跨词条
+ * 链接，未知协议导航同样会让 iframe 空白）。rewriteDictHtml 已剔除词典自带 script，
+ * 无外部脚本风险。srcdoc 里 script 结束标签用 SCRIPT_CLOSE 拼接生成：@vue/compiler-sfc
+ * 的 tokenizer 对 script 块做字节序列匹配，源文件里出现字面量结束标签会提前截断。
+ */
+const SCRIPT_CLOSE = "<" + "/script>";
+
 const srcdoc = computed(() => {
   if (!result.value?.found || !result.value.html) return "";
   const body = rewriteDictHtml(result.value.html, activeDictId.value);
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
 body{margin:8px 10px;font-size:14px;line-height:1.55;color:#1f2328;word-wrap:break-word}
 a{color:#1a66d6}
-</style></head><body>${body}</body></html>`;
+</style>
+<script>
+try {
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest
+      ? e.target.closest('a[href^="/api/dict/resource/"], a[href^="entry://"]')
+      : null;
+    if (!a) return;
+    e.preventDefault();
+    var href = a.getAttribute('href') || '';
+    if (/[.](mp3|m4a|wav|ogg|aac)([?#]|$)/i.test(href)) {
+      var audio = new Audio(href);
+      var p = audio.play();
+      if (p && p.catch) p.catch(function () {});
+    }
+  }, true);
+} catch (err) { /* 脚本失败不影响词条显示 */ }
+${SCRIPT_CLOSE}
+</head><body>${body}</body></html>`;
 });
 
 /** COCA 词频星级：≤1000 ★★★★★ / ≤5000 ★★★★ / ≤15000 ★★★ / ≤30000 ★★ / 其余 ★ */
