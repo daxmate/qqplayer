@@ -643,7 +643,7 @@ def fake_proxy_stream(monkeypatch):
 
 
 def test_stream_ok_range_206(fake_proxy_stream, monkeypatch):
-    """Range 透传 + 206 + content-range/accept-ranges 透传；UA 头默认带"""
+    """Range 透传 + 206 + content-range/accept-ranges 透传；UA 头默认带；上游已给明确 MIME 原样透传"""
     monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
     monkeypatch.setattr(
         video_ytdlp,
@@ -653,7 +653,11 @@ def test_stream_ok_range_206(fake_proxy_stream, monkeypatch):
     fake_proxy_stream["resp"] = _FakeUpstream(
         chunks=[b"x" * 1024],
         status_code=206,
-        headers={"content-range": "bytes 0-1023/102400", "accept-ranges": "bytes"},
+        headers={
+            "content-range": "bytes 0-1023/102400",
+            "accept-ranges": "bytes",
+            "content-type": "video/mp4",
+        },
     )
     r = client.get(
         "/api/video-online/stream", params={"url": GENERIC_URL}, headers={"Range": "bytes=0-1023"}
@@ -662,12 +666,50 @@ def test_stream_ok_range_206(fake_proxy_stream, monkeypatch):
     assert len(r.content) == 1024
     assert r.headers["content-range"] == "bytes 0-1023/102400"
     assert r.headers["accept-ranges"] == "bytes"
+    assert r.headers["content-type"] == "video/mp4"  # 上游已明确 → 不重写
     method, url, kw = fake_proxy_stream["calls"][0]
     assert method == "GET"
     assert url == "http://up.test/1080.mp4"
     assert kw["headers"]["Range"] == "bytes=0-1023"
     assert kw["headers"]["User-Agent"]
     assert kw["timeout"] == 60.0 and kw["follow_redirects"] is True and kw["trust_env"] is False
+
+
+def test_stream_m4s_octet_stream_fixed_to_video_mp4(fake_proxy_stream, monkeypatch):
+    """B站 DASH 分片：上游 CDN 返回 application/octet-stream → 按 .m4s 扩展名修正为 video/mp4（浏览器 <video> 才能播）"""
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: (
+            "https://up.test/xxx_da2-1-30080.m4s?deadline=1"
+        ),
+    )
+    fake_proxy_stream["resp"] = _FakeUpstream(
+        chunks=[b"fmp4-data"],
+        status_code=200,
+        headers={"content-type": "application/octet-stream"},
+    )
+    r = client.get("/api/video-online/stream", params={"url": BILI_URL})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "video/mp4"
+    assert r.content == b"fmp4-data"
+
+
+def test_stream_octet_stream_no_ext_passthrough(fake_proxy_stream, monkeypatch):
+    """octet-stream 且直链无已知扩展名 → 保持上游类型原样（不猜错）"""
+    monkeypatch.setattr(video_ytdlp, "resolve", lambda url, cookie=None: dict(SAMPLE_INFO))
+    monkeypatch.setattr(
+        video_ytdlp,
+        "get_stream",
+        lambda url, format_hint="best", cookie=None: "https://up.test/blob?id=1",
+    )
+    fake_proxy_stream["resp"] = _FakeUpstream(
+        chunks=[b"data"], status_code=200, headers={"content-type": "application/octet-stream"}
+    )
+    r = client.get("/api/video-online/stream", params={"url": GENERIC_URL})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/octet-stream"
 
 
 def test_stream_403_retry_once(fake_proxy_stream, monkeypatch):

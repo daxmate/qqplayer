@@ -15,6 +15,7 @@
 
 import re
 from contextlib import suppress
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -30,6 +31,33 @@ PROXY_TIMEOUT = 60.0
 _UA = download.DOWNLOAD_UA
 # 上游返回这些状态码视为"直链过期/失效"，自动重新 resolve 一次再试
 _RETRYABLE_UPSTREAM_CODES = (403, 410)
+
+# 流媒体 MIME 白名单（上游 CDN 可能返回 application/octet-stream 或不带类型）
+# B站 DASH 分片 .m4s 就是典型：CDN 返回 octet-stream，浏览器 <video> 不认 → 黑屏
+# 按直链扩展名推断正确类型（fMP4 分片浏览器可直接播放）
+_EXT_MEDIA_TYPES = {
+    ".m4s": "video/mp4",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".m3u8": "application/vnd.apple.mpegurl",
+    ".ts": "video/mp2t",
+    ".ogg": "video/ogg",
+}
+
+
+def _fix_stream_media_type(direct_url: str, upstream_type: str | None) -> str | None:
+    """流 MIME 修正：上游类型缺失或为 octet-stream 时，按直链扩展名推断。
+
+    上游已给出明确视频类型（video/* 等）则原样透传；其余情况查扩展名表。
+    """
+    raw = (upstream_type or "").strip().lower()
+    if raw and raw != "application/octet-stream":
+        return upstream_type
+    path = urlparse(direct_url).path.lower()
+    for ext, media_type in _EXT_MEDIA_TYPES.items():
+        if path.endswith(ext):
+            return media_type
+    return upstream_type
 
 
 def _require_http_url(url: str | None) -> str:
@@ -126,21 +154,21 @@ def api_video_online_stream(url: str, request: Request, source: str = ""):
     provider = _pick_provider(page_url, str(source or "").strip() or None)
     range_h = request.headers.get("range")
 
-    def attempt() -> tuple[object | None, object | None]:
-        """解析直链并打开上游；返回 (upstream, resp) 或 (None, None)"""
+    def attempt() -> tuple[object | None, object | None, str]:
+        """解析直链并打开上游；返回 (upstream, resp, direct_url) 或 (None, 状态码, direct_url)"""
         try:
             direct = provider.get_stream(page_url)
         except RuntimeError as e:
             raise HTTPException(502, f"直链获取失败: {e}") from None
         upstream, resp = _open_upstream(direct, range_h, provider.stream_headers(page_url))
         if upstream is None:
-            return None, resp  # resp 此时是状态码
-        return upstream, resp
+            return None, resp, direct  # resp 此时是状态码
+        return upstream, resp, direct
 
-    upstream, resp = attempt()
+    upstream, resp, direct = attempt()
     if upstream is None and resp in _RETRYABLE_UPSTREAM_CODES:
         # 直链过期（403/410）：重新 resolve 一次再试
-        upstream, resp = attempt()
+        upstream, resp, direct = attempt()
     if upstream is None:
         status = resp if isinstance(resp, int) and resp else "连接失败"
         raise HTTPException(502, f"直链转发失败: 上游 HTTP {status}")
@@ -155,10 +183,12 @@ def api_video_online_stream(url: str, request: Request, source: str = ""):
     for h in ("content-length", "content-range", "accept-ranges"):
         if resp.headers.get(h):
             resp_headers[h] = resp.headers[h]
+    media_type = _fix_stream_media_type(direct, resp.headers.get("content-type"))
+    if media_type:
+        resp_headers["content-type"] = media_type
     return StreamingResponse(
         gen(),
         status_code=resp.status_code,
-        media_type=resp.headers.get("content-type"),
         headers=resp_headers,
     )
 
