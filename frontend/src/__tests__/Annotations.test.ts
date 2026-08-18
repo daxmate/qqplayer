@@ -7,7 +7,9 @@ import SelectionToolbar from "../books/SelectionToolbar.vue";
 import DictLookupModal from "../books/DictLookupModal.vue";
 import AnnotationPanel from "../books/AnnotationPanel.vue";
 import DictManagerModal from "../books/DictManagerModal.vue";
-import { clearToasts } from "../composables/useToast.js";
+import { clearToasts, useToast } from "../composables/useToast.js";
+
+const toastItems = useToast().items as Array<{ type: string; text: string }>;
 
 // ============ annotations.ts 纯函数 ============
 describe("annotations.ts 纯函数", () => {
@@ -98,48 +100,102 @@ vi.mock("../books/annotations", async (importOriginal) => {
 
 // ============ SelectionToolbar ============
 describe("SelectionToolbar", () => {
+  const base = { x: 120, y: 300, visible: true, text: "hello world", hasHighlight: false };
+
   it("visible 时渲染在指定位置；默认在选区上方，y 靠上时翻转", () => {
-    const wrapper = mount(SelectionToolbar, {
-      props: { x: 120, y: 300, visible: true, text: "hello" },
-    });
-    const el = wrapper.find(".sel-toolbar");
+    const wrapper = mount(SelectionToolbar, { props: base });
+    const el = wrapper.find(".hl-menu");
     expect(el.exists()).toBe(true);
     expect(el.attributes("style")).toContain("left: 120px");
     expect(el.classes()).not.toContain("flip");
 
-    const wrapper2 = mount(SelectionToolbar, {
-      props: { x: 120, y: 30, visible: true, text: "hello" },
-    });
-    expect(wrapper2.find(".sel-toolbar").classes()).toContain("flip");
+    const wrapper2 = mount(SelectionToolbar, { props: { ...base, y: 30 } });
+    expect(wrapper2.find(".hl-menu").classes()).toContain("flip");
     wrapper.unmount();
     wrapper2.unmount();
   });
 
   it("不可见时整体不渲染", () => {
     const wrapper = mount(SelectionToolbar, {
-      props: { x: 0, y: 0, visible: false, text: "hello" },
+      props: { ...base, visible: false },
     });
-    expect(wrapper.find(".sel-toolbar").exists()).toBe(false);
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
-  it("查词 / 笔记按钮 emit 选中文字；高亮展开四色并 emit 颜色", async () => {
-    const wrapper = mount(SelectionToolbar, {
-      props: { x: 0, y: 0, visible: true, text: "hello world" },
-    });
-    const btns = wrapper.findAll(".sel-toolbar-btn");
-    await btns[0].trigger("click"); // 查词
-    expect(wrapper.emitted("lookup")![0]).toEqual(["hello world"]);
+  it("顶行五色点常驻 + U 下划线；点色点 emit highlight（style 缺省），点 U emit style=underline", async () => {
+    const wrapper = mount(SelectionToolbar, { props: base });
+    const dots = wrapper.findAll(".hl-menu-dot");
+    expect(dots).toHaveLength(5);
+    expect(wrapper.find(".hl-menu-underline").exists()).toBe(true);
 
-    await btns[2].trigger("click"); // 笔记
-    expect(wrapper.emitted("note")![0]).toEqual(["hello world"]);
-
-    await btns[1].trigger("click"); // 高亮 → 色板
-    const dots = wrapper.findAll(".sel-toolbar-dot");
-    expect(dots).toHaveLength(4);
     await dots[0].trigger("click"); // yellow
     expect(wrapper.emitted("highlight")![0]).toEqual(["hello world", "yellow"]);
+    await dots[4].trigger("click"); // purple
+    expect(wrapper.emitted("highlight")![1]).toEqual(["hello world", "purple"]);
+    await wrapper.find(".hl-menu-underline").trigger("click");
+    expect(wrapper.emitted("highlight")![2]).toEqual(["hello world", "yellow", "underline"]);
     wrapper.unmount();
+  });
+
+  it("功能列表：笔记/搜索/拷贝常驻；移除仅 hasHighlight；查询仅单词", async () => {
+    const wrapper = mount(SelectionToolbar, { props: { ...base, text: "hello" } });
+    const texts = wrapper.findAll(".hl-menu-action").map((b) => b.text());
+    expect(texts.some((x) => x.includes("笔记"))).toBe(true);
+    expect(texts.some((x) => x.includes("搜索"))).toBe(true);
+    expect(texts.some((x) => x.includes("拷贝"))).toBe(true);
+    expect(texts.some((x) => x.includes('查询 "hello"'))).toBe(true);
+    expect(texts.some((x) => x.includes("移除高亮"))).toBe(false); // 无高亮不显示
+
+    // 多词 / 超长（>40）不算单词 → 无查询
+    const wrapper2 = mount(SelectionToolbar, { props: { ...base, text: "hello world" } });
+    expect(
+      wrapper2
+        .findAll(".hl-menu-action")
+        .map((b) => b.text())
+        .some((x) => x.includes("查询")),
+    ).toBe(false);
+    const wrapper3 = mount(SelectionToolbar, { props: { ...base, text: "x".repeat(45) } });
+    expect(
+      wrapper3
+        .findAll(".hl-menu-action")
+        .map((b) => b.text())
+        .some((x) => x.includes("查询")),
+    ).toBe(false);
+
+    // hasHighlight → 移除项显示 + emit remove
+    const wrapper4 = mount(SelectionToolbar, { props: { ...base, hasHighlight: true } });
+    const rmBtn = wrapper4.findAll(".hl-menu-action").find((b) => b.text().includes("移除高亮"))!;
+    expect(rmBtn).toBeTruthy();
+    await rmBtn.trigger("click");
+    expect(wrapper4.emitted("remove")).toBeTruthy();
+    wrapper.unmount();
+    wrapper2.unmount();
+    wrapper3.unmount();
+    wrapper4.unmount();
+  });
+
+  it("搜索 emit 选中文字", async () => {
+    const wrapper = mount(SelectionToolbar, { props: base });
+    const btn = wrapper.findAll(".hl-menu-action").find((b) => b.text().includes("搜索"))!;
+    await btn.trigger("click");
+    expect(wrapper.emitted("search")![0]).toEqual(["hello world"]);
+    wrapper.unmount();
+  });
+
+  it("拷贝：navigator.clipboard.writeText + toast（不 emit）；clipboard 缺失时 fallback execCommand", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const wrapper = mount(SelectionToolbar, { props: base });
+    const copyBtn = wrapper.findAll(".hl-menu-action").find((b) => b.text().includes("拷贝"))!;
+    await copyBtn.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("hello world");
+    expect(toastItems.at(-1)?.text).toBe("已拷贝");
+    expect(wrapper.emitted("copy")).toBeUndefined();
+    expect(wrapper.emitted("search")).toBeUndefined();
+    wrapper.unmount();
+    delete (navigator as { clipboard?: unknown }).clipboard;
   });
 });
 
@@ -329,7 +385,14 @@ describe("DictLookupModal", () => {
 const panelProps = {
   annotations: {
     highlights: [
-      { id: "hl_1", cfi: "cfiH1", text: "hello world", color: "yellow" as const, createdAt: 1 },
+      {
+        id: "hl_1",
+        cfi: "cfiH1",
+        text: "hello world",
+        color: "yellow" as const,
+        style: "highlight" as const,
+        createdAt: 1,
+      },
     ],
     bookmarks: [{ id: "bm_1", cfi: "cfiB1", text: "第 3 页", createdAt: 1 }],
     notes: [
@@ -372,6 +435,43 @@ describe("AnnotationPanel", () => {
     await actions[5].trigger("click"); // 编辑笔记（第一行跳转、第二行编辑）
     const edited = wrapper.emitted("edit-note")![0][0] as { id: string };
     expect(edited.id).toBe("nt_1");
+    wrapper.unmount();
+  });
+
+  it("高亮条目：五色色点渲染；下划线条目显示下划线图标而非色点（V4）", async () => {
+    const wrapper = mount(AnnotationPanel, {
+      props: {
+        annotations: {
+          highlights: [
+            {
+              id: "hl_p",
+              cfi: "cfiP",
+              text: "purple text",
+              color: "purple" as const,
+              style: "highlight" as const,
+              createdAt: 1,
+            },
+            {
+              id: "hl_u",
+              cfi: "cfiU",
+              text: "underlined text",
+              color: "red" as const,
+              style: "underline" as const,
+              createdAt: 2,
+            },
+          ],
+          bookmarks: [],
+          notes: [],
+        },
+        vocab: [],
+      },
+    });
+    const dots = wrapper.findAll(".anno-panel-dot");
+    // 下划线图标 span 也带 anno-panel-dot 基类：purple 色点 + ul 图标各一个
+    expect(dots).toHaveLength(2);
+    const colorDot = dots.find((d) => !d.classes().includes("ul"))!;
+    expect((colorDot.element as HTMLElement).style.background).toBe("rgb(179, 136, 255)"); // purple #b388ff
+    expect(wrapper.find(".anno-panel-dot.ul").exists()).toBe(true); // 下划线条目 → 图标
     wrapper.unmount();
   });
 
