@@ -145,7 +145,6 @@ export default {
     vocabAdd: "加入生词本",
     vocabAdded: "已加入",
     // ===== V4 书内搜索 =====
-    search: "搜索",
     searchInBook: "书内搜索",
     searchPlaceholder: "搜索本书…",
     searchButton: "搜索",

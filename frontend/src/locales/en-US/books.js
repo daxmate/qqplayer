@@ -146,7 +146,6 @@ export default {
     vocabAdd: "Add to vocabulary",
     vocabAdded: "Added",
     // ===== V4 in-book search =====
-    search: "Search",
     searchInBook: "Search in Book",
     searchPlaceholder: "Search this book…",
     searchButton: "Search",
