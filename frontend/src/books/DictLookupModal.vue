@@ -147,6 +147,11 @@ try {
       if (p && p.catch) p.catch(function () {});
     }
   }, true);
+  // 禁浏览器默认右键菜单（词条正文只读；输入框保留系统菜单）
+  document.addEventListener('contextmenu', function (e) {
+    var t = e.target && e.target.closest ? e.target.closest('input, textarea, [contenteditable]') : null;
+    if (!t) e.preventDefault();
+  }, true);
 } catch (err) { /* 脚本失败不影响词条显示 */ }
 ${SCRIPT_CLOSE}
 </head><body>${body}</body></html>`;

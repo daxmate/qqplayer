@@ -1165,6 +1165,26 @@ function applyFontToContents(contents: { document?: Document }) {
 }
 
 /**
+ * 禁 EPUB 内容 iframe 内浏览器默认右键菜单（EPUB 正文只读，右键应弹自定义菜单/无菜单；
+ * input/textarea/[contenteditable] 保留系统菜单）。iframe 内 contextmenu 不冒泡到父页面，
+ * 必须挂在内容 document 上（走 hooks.content 注入，换章重建 iframe 后自动重新挂）。
+ * 注意：处理器是父 realm 函数、事件来自 iframe realm，e.target instanceof Element 会判错，
+ * 用 realm 无关的 .closest 方法判断（同 onTapClick 的写法）。
+ */
+function blockNativeContextMenu(contents: { document?: Document }) {
+  const doc = contents.document;
+  if (!doc) return;
+  doc.addEventListener(
+    "contextmenu",
+    (e: Event) => {
+      const t = (e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]");
+      if (!t) e.preventDefault();
+    },
+    true,
+  );
+}
+
+/**
  * 高亮位置重算：marks-pane 的 SVG 矩形只在 epubjs reframe（尺寸变化）时重算，
  * 字体/字号/行距等设置变化引起的内容重排不会触发 → 高亮错位。设置应用后手动
  * 对所有 view 的 pane 重算一次（pane.render 内部遍历 mark 重新 getBoundingClientRect）。
@@ -1550,8 +1570,10 @@ async function loadBook() {
     });
     renditionRef.value = rendition;
     // 内容加载（含换章重建）后自动注入字体覆盖（body * !important，见 applyFontToContents）
+    // + 禁默认右键菜单（见 blockNativeContextMenu）
     rendition.hooks.content.register((contents: { document?: Document }) => {
       applyFontToContents(contents);
+      blockNativeContextMenu(contents);
     });
     applyReaderSettings();
     rendition.on("relocated", onRelocated);
