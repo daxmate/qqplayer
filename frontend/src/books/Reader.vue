@@ -125,9 +125,9 @@
         </div>
       </Transition>
 
-      <!-- 选中工具栏（选区上方/下方悬浮） -->
+      <!-- 选中工具栏（选区上方/下方悬浮）；Swift 壳内隐藏（壳用系统右键菜单，见 installNativeMenuApi），浏览器照旧 -->
       <SelectionToolbar
-        v-if="toolbar.visible"
+        v-if="toolbar.visible && !isNativeShell"
         :x="toolbar.x"
         :y="toolbar.y"
         :visible="toolbar.visible"
@@ -366,6 +366,7 @@ function clearSelection() {
     /* 清选区失败不影响主流程 */
   }
   currentSelection.value = null;
+  postReaderState(true, ""); // 壳右键菜单：选区已清（去重：仅状态变化时发送）
 }
 
 /** 选区收起（selectionchange）→ 收起工具栏；同一函数引用重复 add 自动去重 */
@@ -424,6 +425,7 @@ function pollSelection() {
   const sel = iw?.getSelection?.();
   if (!sel) return;
   const text = sel.toString().trim();
+  postReaderState(true, text); // 壳右键菜单：选区状态变化时上报（去重：文本没变不重复发）
   if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
     // 无选区：重置稳定计数 + 收起工具栏
     selPollLastText = "";
@@ -717,6 +719,69 @@ function onToolbarHighlight(_text: string, color: HighlightColor) {
 
 function onToolbarNote(_text: string) {
   openNoteCreate();
+}
+
+// ============ Swift 壳桥接（window.qqplayerNative 注入时启用；浏览器内全部静默 no-op） ============
+/** 壳注入的全局对象：qqplayerNative 环境标记 + webkit 消息桥 + 菜单 API 挂载点 */
+const nativeShell = window as unknown as {
+  qqplayerNative?: boolean;
+  webkit?: { messageHandlers?: { native?: { postMessage?: (message: unknown) => void } } };
+  __qqReaderMenu?: {
+    lookup: () => void;
+    highlight: (color: HighlightColor) => void;
+    note: () => void;
+  };
+};
+
+/** 是否运行在 Swift 原生壳内（壳注入 window.qqplayerNative；浏览器没有） */
+function inNativeShell(): boolean {
+  return typeof window !== "undefined" && !!nativeShell.qqplayerNative;
+}
+
+/** 壳内隐藏悬浮工具条（浏览器保留）；选区轮询与 currentSelection 照常维护（壳右键菜单依赖 cfi/context） */
+const isNativeShell = computed(inNativeShell);
+
+/** 已上报给壳的选区状态（去重：仅状态变化时发送，400ms 轮询不重复刷屏） */
+let reportedActive = false;
+let reportedText = "";
+
+/** 上报选区状态给 Swift 壳（channel "native"，type: readerState）；状态没变化不发，非壳环境静默跳过 */
+function postReaderState(active: boolean, text: string) {
+  if (!inNativeShell()) return;
+  if (reportedActive === active && reportedText === text) return;
+  reportedActive = active;
+  reportedText = text;
+  try {
+    nativeShell.webkit?.messageHandlers?.native?.postMessage?.({
+      type: "readerState",
+      active,
+      hasSelection: text.length > 0,
+      text,
+    });
+  } catch {
+    /* 壳消息发送失败忽略（不影响阅读） */
+  }
+}
+
+/** 挂载全局菜单 API（Swift 点击系统右键菜单项时经 evaluateJavaScript 调用）；卸载时清理 */
+function installNativeMenuApi() {
+  nativeShell.__qqReaderMenu = {
+    // 查词：复用 onToolbarLookup（currentSelection 为数据源）；无选中时安全 no-op
+    lookup: () => onToolbarLookup(currentSelection.value?.text ?? ""),
+    // 高亮：复用 onToolbarHighlight；非法颜色回退黄色（壳传 'yellow'|'green'|'blue'|'pink'）
+    highlight: (color: string) => {
+      const c: HighlightColor = HIGHLIGHT_COLOR_STYLES[color as HighlightColor]
+        ? (color as HighlightColor)
+        : "yellow";
+      onToolbarHighlight("", c);
+    },
+    // 笔记：复用 onToolbarNote（openNoteCreate 内部判空）；无选中时安全 no-op
+    note: () => onToolbarNote(""),
+  };
+}
+
+function uninstallNativeMenuApi() {
+  delete nativeShell.__qqReaderMenu;
 }
 
 function onLookupClose() {
@@ -1053,6 +1118,8 @@ onMounted(() => {
   window.addEventListener("resize", onResize);
   window.addEventListener("mousedown", onWindowMouseDown, true);
   startSelPolling();
+  installNativeMenuApi();
+  postReaderState(true, ""); // 壳：Reader 激活初始状态（无选区）
   loadReaderSettings();
   loadBook();
 });
@@ -1062,6 +1129,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", onResize);
   window.removeEventListener("mousedown", onWindowMouseDown, true);
   stopSelPolling();
+  uninstallNativeMenuApi();
+  postReaderState(false, ""); // 壳：Reader 已卸载（hasSelection:false, text:""）
   teardown();
 });
 </script>
