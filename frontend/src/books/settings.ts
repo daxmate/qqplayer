@@ -138,7 +138,7 @@ export const READER_SETTINGS_DEFAULTS: ReaderSettings = {
   lineHeight: 1.6,
   margin: 4,
   bold: false,
-  theme: "light",
+  theme: "auto",
   textColor: "",
   bgColor: "",
 };
