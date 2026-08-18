@@ -11,7 +11,13 @@ echo "🎵 QQPlayer 部署开始..."
 echo "── 拉取最新代码"
 git pull --ff-only
 
-# 2. 后端依赖
+# 2. 后端依赖（venv 缺失自动创建，参照 plist 自愈模式）
+if [ ! -x ./backend/venv/bin/python ]; then
+  echo "── 检测到 backend/venv 缺失，自动创建"
+  python3 -m venv backend/venv
+  # python-lzo/readmdict 需要 lzo 头文件（requirements.txt 注释），新建 venv 时必须带上
+  export LDFLAGS="-L$(brew --prefix lzo)/lib" CPPFLAGS="-I$(brew --prefix lzo)/include"
+fi
 echo "── 安装后端依赖"
 ./backend/venv/bin/python -m pip install -q -r backend/requirements.txt
 
