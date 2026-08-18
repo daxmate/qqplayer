@@ -43,6 +43,14 @@
         </button>
         <button
           class="reader-btn icon"
+          :class="{ on: searchOpen }"
+          :title="t('books.search')"
+          @click="toggleSearch"
+        >
+          <Search :size="18" />
+        </button>
+        <button
+          class="reader-btn icon"
           :class="{ on: panelOpen }"
           :title="t('books.annotations')"
           @click="togglePanel"
@@ -138,6 +146,17 @@
         @note="onToolbarNote"
       />
 
+      <!-- 书内搜索面板（右侧抽屉无遮罩：跳转后阅读区保持可见，可连续点结果；关闭/翻页清理临时高亮） -->
+      <Transition name="search-slide">
+        <SearchPanel
+          v-if="searchOpen"
+          :book-id="book.id"
+          :initial-query="searchInitial"
+          @close="closeSearch"
+          @jump="onSearchJump"
+        />
+      </Transition>
+
       <!-- 查词弹窗 -->
       <DictLookupModal
         v-if="lookupState.open"
@@ -179,6 +198,7 @@ import {
   Loader2,
   Minus,
   Plus,
+  Search,
   Settings2,
 } from "@lucide/vue";
 import ePub from "epubjs";
@@ -211,6 +231,13 @@ import { showToast, toastError } from "../composables/useToast.js";
 import { uiSettings } from "../composables/useSettings.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
+import SearchPanel from "./SearchPanel.vue";
+import {
+  applyTempMark,
+  ensureTempMarkStyle,
+  findSentenceRange,
+  removeTempMark,
+} from "./searchHighlight";
 import AnnotationPanel from "./AnnotationPanel.vue";
 import DictLookupModal from "./DictLookupModal.vue";
 import NoteEditorModal from "./NoteEditorModal.vue";
@@ -734,6 +761,102 @@ function onToolbarNote(_text: string) {
   openNoteCreate();
 }
 
+// ============ 书内搜索（V4）：SearchPanel 面板 + 跳转定位 + 临时高亮 ============
+const searchOpen = ref(false);
+const searchInitial = ref<string | null>(null);
+/**
+ * 菜单「搜索」请求（与子代理 B 的约定：ref<string | null>，初始 null，
+ * SelectionToolbar 的「搜索」项给它赋值选中词；这里 watch 它打开面板并预填）。
+ * B 合入前由本文件声明，merge 时 maintainer 去重。
+ */
+const searchRequest = ref<string | null>(null);
+/** 当前临时高亮 <mark>（直接包在 iframe DOM 上，不进 annotations/重放链路） */
+let searchTempMark: HTMLElement | null = null;
+
+/** 打开搜索面板（initial 非空 → SearchPanel 挂载后自动预填并搜索） */
+function openSearch(initial: string | null) {
+  searchInitial.value = initial;
+  searchOpen.value = true;
+  tocOpen.value = false;
+  settingsOpen.value = false;
+  panelOpen.value = false;
+}
+
+/** 关闭面板：同时清理临时高亮（面板不再可见，书内标记应还原） */
+function closeSearch() {
+  searchOpen.value = false;
+  clearTempHighlight();
+}
+
+function toggleSearch() {
+  if (searchOpen.value) closeSearch();
+  else openSearch(null);
+}
+
+/** 消费菜单搜索请求：非空 → 打开面板预填该词，并置回 null 防重复触发 */
+watch(searchRequest, (v) => {
+  if (!v) return;
+  openSearch(v);
+  searchRequest.value = null;
+});
+
+/** 临时高亮还原：<mark> 解包回原文 DOM（翻页 relocated / 关面板 / 新跳转前调用） */
+function clearTempHighlight() {
+  if (!searchTempMark) return;
+  try {
+    removeTempMark(searchTempMark);
+  } catch {
+    /* 还原失败忽略（epubjs 重渲染时 mark 随文档消失） */
+  }
+  searchTempMark = null;
+}
+
+/** 当前 iframe document（views 优先，getContents 兜底；mock 缺 views 时返回 null） */
+function getSearchDoc(): Document | null {
+  let contents = getCurrentContents();
+  if (!contents) {
+    try {
+      const cs = renditionRef.value?.getContents?.();
+      contents = Array.isArray(cs) ? cs[0] : cs;
+    } catch {
+      contents = null;
+    }
+  }
+  return (contents as { document?: Document } | null)?.document ?? null;
+}
+
+/**
+ * 搜索跳转：display(cfi) 定位 → 当前章节文档内找句子/命中词 → <mark> 临时高亮。
+ * 临时高亮只操作 iframe DOM（见 searchHighlight.ts），不注册 annotations——
+ * 否则会进 epub.js hooks.render 自动重放链路，翻页/重渲染后被反复重放成脏标记。
+ */
+async function onSearchJump(cfi: string, matchStart: number, matchEnd: number, sentence: string) {
+  clearTempHighlight();
+  try {
+    await renditionRef.value?.display(cfi);
+  } catch {
+    toastError(t("books.searchJumpFailed"));
+    return;
+  }
+  const doc = getSearchDoc();
+  if (!doc) {
+    toastError(t("books.searchJumpFailed"));
+    return;
+  }
+  const hit = findSentenceRange(doc, sentence, matchStart, matchEnd);
+  if (!hit) {
+    toastError(t("books.searchJumpFailed"));
+    return;
+  }
+  ensureTempMarkStyle(doc);
+  searchTempMark = applyTempMark(hit.range);
+  try {
+    searchTempMark.scrollIntoView?.({ block: "center" });
+  } catch {
+    /* 滚动定位失败不影响高亮 */
+  }
+}
+
 // ============ Swift 壳桥接（window.qqplayerNative 注入时启用；浏览器内全部静默 no-op） ============
 /** 壳注入的全局对象：qqplayerNative 环境标记 + webkit 消息桥 + 菜单 API 挂载点 */
 const nativeShell = window as unknown as {
@@ -1024,6 +1147,8 @@ function onTapClick(e: MouseEvent) {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onRelocated(loc: Location) {
+  // 翻页/跳转 → 临时高亮还原（mark 留在旧位置没有意义；epubjs 重渲染前手动解包）
+  clearTempHighlight();
   curCfi.value = loc.start.cfi ?? "";
   // epubjs 翻页会重建 contents → 重新挂翻页热区监听（防重复：attach 内部去重）
   attachTapHandlers();
@@ -1065,6 +1190,10 @@ function onKeydown(e: KeyboardEvent) {
       tocOpen.value = false;
       e.preventDefault();
       e.stopPropagation();
+    } else if (searchOpen.value) {
+      closeSearch();
+      e.preventDefault();
+      e.stopPropagation();
     } else if (settingsOpen.value) {
       settingsOpen.value = false;
       e.preventDefault();
@@ -1101,6 +1230,7 @@ function onResize() {
 
 // ============ 加载 / 销毁 ============
 function teardown() {
+  searchTempMark = null; // iframe 文档随 rendition.destroy 销毁，仅清引用
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
@@ -1123,6 +1253,10 @@ async function loadBook() {
   tocOpen.value = false;
   settingsOpen.value = false;
   panelOpen.value = false;
+  searchOpen.value = false;
+  searchInitial.value = null;
+  searchRequest.value = null;
+  clearTempHighlight();
   dictManagerOpen.value = false;
   lookupState.open = false;
   noteModal.open = false;
@@ -1381,6 +1515,18 @@ onBeforeUnmount(() => {
 }
 .toc-fade-enter-from,
 .toc-fade-leave-to {
+  opacity: 0;
+}
+/* 搜索面板滑入滑出（无遮罩，面板自身 translateX） */
+.search-slide-enter-active,
+.search-slide-leave-active {
+  transition:
+    transform 0.22s ease,
+    opacity 0.22s ease;
+}
+.search-slide-enter-from,
+.search-slide-leave-to {
+  transform: translateX(100%);
   opacity: 0;
 }
 </style>

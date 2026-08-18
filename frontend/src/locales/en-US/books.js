@@ -136,5 +136,15 @@ export default {
     lookupSwitchDict: "Switch dictionary",
     vocabAdd: "Add to vocabulary",
     vocabAdded: "Added",
+    // ===== V4 in-book search =====
+    search: "Search",
+    searchInBook: "Search in Book",
+    searchPlaceholder: "Search this book…",
+    searchButton: "Search",
+    searchSearching: "Searching…",
+    searchEmpty: "No results for “{query}”",
+    searchResultsCount: "{count} results",
+    searchFailed: "Search failed: {msg}",
+    searchJumpFailed: "Could not locate this sentence in the book",
   },
 };
