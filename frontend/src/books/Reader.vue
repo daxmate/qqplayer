@@ -521,7 +521,7 @@ function pollSelection() {
   const sel = iw?.getSelection?.();
   if (!sel) return;
   const text = sel.toString().trim();
-  postReaderState(true, text); // 壳右键菜单：选区状态变化时上报（去重：文本没变不重复发）
+  postReaderState(true, text, selectionHasHighlight()); // 壳右键菜单：选区状态变化时上报（去重：文本/高亮态没变不重复发）
   if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
     // 无选区：重置稳定计数 + 收起工具栏
     selPollLastText = "";
@@ -569,6 +569,7 @@ function onSelected(cfi: string, contents: unknown) {
   toolbar.visible = true;
   closeHighlightMenu(); // 新选区优先：收起点击高亮菜单
   currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
+  postReaderState(true, text, selectionHasHighlight()); // 壳：选区稳定后补发精确 hasHighlight（轮询首拍可能滞后）
   // 挂载选区收起监听（contents 每次新建都会触发 selected，函数引用去重）
   (contents as { document?: Document }).document?.addEventListener(
     "selectionchange",
@@ -689,6 +690,10 @@ function removeHighlight(id: string) {
       }
       annotations.value.highlights = annotations.value.highlights.filter((x) => x.id !== id);
       if (hlMenu.id === id) closeHighlightMenu();
+      // 壳：删除后选区高亮态变化 → 补发（右键菜单「移除高亮」项隐藏）
+      if (inNativeShell()) {
+        postReaderState(true, currentSelection.value?.text ?? "", selectionHasHighlight());
+      }
       showToast(t("books.highlightDeleteDone"));
     })
     .catch(() => toastError(t("books.loadError")));
@@ -1052,19 +1057,30 @@ const isNativeShell = computed(inNativeShell);
 /** 已上报给壳的选区状态（去重：仅状态变化时发送，400ms 轮询不重复刷屏） */
 let reportedActive = false;
 let reportedText = "";
+let reportedHasHighlight = false;
+
+/** 当前选中 cfi 是否已有高亮（壳右键菜单「移除高亮」显示条件） */
+function selectionHasHighlight(): boolean {
+  const sel = currentSelection.value;
+  if (!sel) return false;
+  return annotations.value.highlights.some((h) => h.cfi === sel.cfi);
+}
 
 /** 上报选区状态给 Swift 壳（channel "native"，type: readerState）；状态没变化不发，非壳环境静默跳过 */
-function postReaderState(active: boolean, text: string) {
+function postReaderState(active: boolean, text: string, hasHighlight = false) {
   if (!inNativeShell()) return;
-  if (reportedActive === active && reportedText === text) return;
+  if (reportedActive === active && reportedText === text && reportedHasHighlight === hasHighlight)
+    return;
   reportedActive = active;
   reportedText = text;
+  reportedHasHighlight = hasHighlight;
   try {
     nativeShell.webkit?.messageHandlers?.native?.postMessage?.({
       type: "readerState",
       active,
       hasSelection: text.length > 0,
       text,
+      hasHighlight,
     });
   } catch {
     /* 壳消息发送失败忽略（不影响阅读） */
@@ -1076,13 +1092,19 @@ function installNativeMenuApi() {
   nativeShell.__qqReaderMenu = {
     // 查词：复用 onToolbarLookup（currentSelection 为数据源）；无选中时安全 no-op
     lookup: () => onToolbarLookup(currentSelection.value?.text ?? ""),
-    // 高亮：复用 onToolbarHighlight；非法颜色回退黄色（壳传 'yellow'|'green'|'blue'|'pink'）
+    // 高亮：复用 onToolbarHighlight；非法颜色回退黄色（壳传 'yellow'|'green'|'blue'|'pink'|'purple'）
     highlight: (color: string) => {
       const c: HighlightColor = HIGHLIGHT_COLOR_STYLES[color as HighlightColor]
         ? (color as HighlightColor)
         : "yellow";
       onToolbarHighlight("", c);
     },
+    // 下划线（V4）：选中文字 → underline 标注（落库 red）
+    underline: () => onToolbarHighlight("", "yellow", "underline"),
+    // 移除高亮：选中 cfi 已有高亮时删除该条；无选中/无高亮安全 no-op
+    remove: () => onToolbarRemove(),
+    // 书内搜索：选中词 → SearchPanel（searchRequest 由 watch 消费）
+    search: () => onToolbarSearch(currentSelection.value?.text ?? ""),
     // 笔记：复用 onToolbarNote（openNoteCreate 内部判空）；无选中时安全 no-op
     note: () => onToolbarNote(""),
   };

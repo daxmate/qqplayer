@@ -74,10 +74,11 @@ final class DragOverlayView: NSView {
 // 其余情况原样保留系统菜单（迷你窗 / 歌词窗仍用普通 WKWebView，不受影响）。
 // 菜单点击通过 evaluateJavaScript 调前端全局 API（window.__qqReaderMenu?.*，失败静默）。
 final class MainWebView: WKWebView {
-    // 阅读器状态缓存：前端经 "native" 通道推送 { type: 'readerState', active, hasSelection, text }
+    // 阅读器状态缓存：前端经 "native" 通道推送 { type: 'readerState', active, hasSelection, text, hasHighlight }
     static var readerActive = false
     static var readerHasSelection = false
     static var readerSelectedText = ""
+    static var readerHasHighlight = false
 
     // 本地化：跟随系统语言（zh* → 中文，其余英文）；英文查词用 "Dictionary" 避免与系统 Look Up 混淆
     private static let isChinese: Bool = {
@@ -102,14 +103,13 @@ final class MainWebView: WKWebView {
         let lookupTitle = zh ? "查词 \"\(truncated)\"" : "Dictionary \"\(truncated)\""
         let lookupItem = NSMenuItem(title: lookupTitle, action: #selector(lookupAction(_:)), keyEquivalent: "")
         lookupItem.target = self
-        menu.insertItem(lookupItem, at: 0)
 
-        // 高亮（子菜单：黄/绿/蓝/粉，颜色字符串存 representedObject）
+        // 高亮（子菜单：黄/绿/蓝/粉/紫，颜色字符串存 representedObject）
         let highlightItem = NSMenuItem(title: zh ? "高亮" : "Highlight", action: nil, keyEquivalent: "")
         let colorSubmenu = NSMenu()
         let colors: [(color: String, label: String)] = zh
-            ? [("yellow", "黄"), ("green", "绿"), ("blue", "蓝"), ("pink", "粉")]
-            : [("yellow", "Yellow"), ("green", "Green"), ("blue", "Blue"), ("pink", "Pink")]
+            ? [("yellow", "黄"), ("green", "绿"), ("blue", "蓝"), ("pink", "粉"), ("purple", "紫")]
+            : [("yellow", "Yellow"), ("green", "Green"), ("blue", "Blue"), ("pink", "Pink"), ("purple", "Purple")]
         for c in colors {
             let item = NSMenuItem(title: c.label, action: #selector(highlightAction(_:)), keyEquivalent: "")
             item.target = self
@@ -117,14 +117,35 @@ final class MainWebView: WKWebView {
             colorSubmenu.addItem(item)
         }
         highlightItem.submenu = colorSubmenu
-        menu.insertItem(highlightItem, at: 1)
+
+        // 下划线（V4：固定红色）
+        let underlineItem = NSMenuItem(title: zh ? "下划线" : "Underline", action: #selector(underlineAction(_:)), keyEquivalent: "")
+        underlineItem.target = self
+
+        // 移除高亮（仅当选区已有高亮时显示；无高亮隐藏，避免误删）
+        var removeItem: NSMenuItem?
+        if MainWebView.readerHasHighlight {
+            removeItem = NSMenuItem(title: zh ? "移除高亮" : "Remove Highlight", action: #selector(removeAction(_:)), keyEquivalent: "")
+            removeItem?.target = self
+        }
+
+        // 书内搜索选中词
+        let searchItem = NSMenuItem(title: zh ? "搜索" : "Search", action: #selector(searchAction(_:)), keyEquivalent: "")
+        searchItem.target = self
 
         // 添加笔记…
         let noteItem = NSMenuItem(title: zh ? "添加笔记…" : "Add Note…", action: #selector(noteAction(_:)), keyEquivalent: "")
         noteItem.target = self
-        menu.insertItem(noteItem, at: 2)
 
-        menu.insertItem(.separator(), at: 3)
+        // 按序插入：查词 / 高亮 / 下划线 / 移除高亮* / 搜索 / 笔记 / 分隔线（移除项条件显示）
+        var idx = 0
+        menu.insertItem(lookupItem, at: idx); idx += 1
+        menu.insertItem(highlightItem, at: idx); idx += 1
+        menu.insertItem(underlineItem, at: idx); idx += 1
+        if let removeItem { menu.insertItem(removeItem, at: idx); idx += 1 }
+        menu.insertItem(searchItem, at: idx); idx += 1
+        menu.insertItem(noteItem, at: idx); idx += 1
+        menu.insertItem(.separator(), at: idx)
     }
 
     // ---- 菜单点击 → 前端 JS（optional chaining，调用失败静默） ----
@@ -135,6 +156,18 @@ final class MainWebView: WKWebView {
     @objc private func highlightAction(_ sender: Any?) {
         let color = (sender as? NSMenuItem)?.representedObject as? String ?? "yellow"
         callJS("window.__qqReaderMenu?.highlight('\(color)')")
+    }
+
+    @objc private func underlineAction(_ sender: Any?) {
+        callJS("window.__qqReaderMenu?.underline()")
+    }
+
+    @objc private func removeAction(_ sender: Any?) {
+        callJS("window.__qqReaderMenu?.remove()")
+    }
+
+    @objc private func searchAction(_ sender: Any?) {
+        callJS("window.__qqReaderMenu?.search()")
     }
 
     @objc private func noteAction(_ sender: Any?) {
@@ -710,6 +743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             MainWebView.readerActive = dict["active"] as? Bool ?? false
             MainWebView.readerHasSelection = dict["hasSelection"] as? Bool ?? false
             MainWebView.readerSelectedText = dict["text"] as? String ?? ""
+            MainWebView.readerHasHighlight = dict["hasHighlight"] as? Bool ?? false
         case "qqlog":
             // 诊断：网页 console 落盘（~/Library/Logs/qqplayer/webview-console.log）
             let level = dict["level"] as? String ?? "log"
