@@ -340,11 +340,15 @@ describe("Reader 标注交互", () => {
     wrapper.unmount();
   });
 
-  it("搜索：点击 → 只写 searchRequest（SearchPanel 由搜索子代理 watch）", async () => {
+  it("搜索：点击 → 写 searchRequest 并由搜索面板消费（watch 打开面板并预填，然后置回 null）", async () => {
     const wrapper = await mountReader();
     await fireSelection(wrapper);
     await actionButton(wrapper, "搜索").trigger("click");
-    expect((wrapper.vm as unknown as { searchRequest: string | null }).searchRequest).toBe(
+    await flushPromises();
+    // 消费后置回 null（V4 合入后行为：面板已打开、initial 已预填）
+    expect((wrapper.vm as unknown as { searchRequest: string | null }).searchRequest).toBeNull();
+    expect((wrapper.vm as unknown as { searchOpen: boolean }).searchOpen).toBe(true);
+    expect((wrapper.vm as unknown as { searchInitial: string | null }).searchInitial).toBe(
       "hello world",
     );
     wrapper.unmount();
