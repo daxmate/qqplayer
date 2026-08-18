@@ -62,18 +62,38 @@ export interface ReaderSelection {
 }
 
 /**
- * 阅读设置（后端 settings.json books namespace，V2 追加 7 字段）。
+ * 阅读字体 key（iBooks 式字体列表，V3 扩展）。
+ * 保留 V2 的 default/serif/sans/rounded 四个 key 兼容旧设置：
+ * serif=Georgia、sans=Helvetica Neue、rounded=Avenir Next Rounded，新字体再扩展 key。
+ */
+export type ReaderFontKey =
+  | "default"
+  | "serif"
+  | "sans"
+  | "rounded"
+  | "palatino"
+  | "charter"
+  | "new-york"
+  | "songti-sc"
+  | "avenir-next"
+  | "pingfang-sc"
+  | "kaiti-sc";
+
+/**
+ * 阅读设置（后端 settings.json books namespace，V2 追加 7 字段，V3 追加 bold + 字体扩展）。
  * 持久化在后端（GET/PUT /api/settings 深合并），localStorage 只读不写。
  */
 export interface ReaderSettings {
-  /** 字体族：default 系统默认 | serif 衬线 | sans 无衬线 | rounded 圆体 */
-  fontFamily: "default" | "serif" | "sans" | "rounded";
+  /** 字体族：见 ReaderFontKey（default 跟随 EPUB 默认） */
+  fontFamily: ReaderFontKey;
   /** 字号百分比 70~200，默认 100 */
   fontSize: number;
   /** 行距 1.0~2.0，默认 1.6 */
   lineHeight: number;
   /** 页边距 px 0~15，默认 4 */
   margin: number;
+  /** 粗体开关（V3）：false 不覆盖字重，true 正文加粗（不影响 EPUB 自带 heading 样式） */
+  bold: boolean;
   /** 主题：light 浅色 | sepia 米黄 | dark 深色 | auto 跟随 App 主题 */
   theme: "light" | "sepia" | "dark" | "auto";
   /** 正文颜色（#rrggbb），空 = 主题默认 */

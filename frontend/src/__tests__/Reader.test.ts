@@ -347,14 +347,16 @@ describe("Reader 阅读设置", () => {
       .find((b) => b.attributes("title") === "阅读设置")!
       .trigger("click");
 
-    // 点“衬线”
-    const chips = wrapper.findAll(".reader-settings-chip");
-    const serif = chips.find((c) => c.text() === "衬线")!;
-    await serif.trigger("click");
-    expect(mocks.rendition.themes.font).toHaveBeenLastCalledWith("Georgia, serif");
+    // 点字体列表里的 Georgia（serif）
+    const fonts = wrapper.findAll(".reader-settings-font");
+    const georgia = fonts.find((c) => c.text().includes("Georgia"))!;
+    await georgia.trigger("click");
+    expect(mocks.rendition.themes.font).toHaveBeenLastCalledWith(
+      "Georgia, 'Times New Roman', serif",
+    );
 
     // 点“默认” → 空值 override 恢复 EPUB 自身字体
-    const def = chips.find((c) => c.text() === "默认")!;
+    const def = fonts.find((c) => c.text().includes("默认"))!;
     await def.trigger("click");
     expect(mocks.rendition.themes.override).toHaveBeenCalledWith("font-family", "");
 
@@ -365,21 +367,42 @@ describe("Reader 阅读设置", () => {
     wrapper.unmount();
   });
 
-  it("设置应用到 epub.js：字体/字号/行距/主题色全部 override；页边距走容器 padding", async () => {
-    backendBooks = { fontFamily: "sans", fontSize: 120, lineHeight: 1.8, margin: 6, theme: "dark" };
+  it("设置应用到 epub.js：字体/字号/行距/粗体/主题色全部 override；页边距走容器 padding", async () => {
+    backendBooks = {
+      fontFamily: "sans",
+      fontSize: 120,
+      lineHeight: 1.8,
+      margin: 6,
+      bold: true,
+      theme: "dark",
+    };
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
 
     const themes = mocks.rendition.themes;
-    expect(themes.font).toHaveBeenLastCalledWith("Helvetica, Arial, sans-serif");
+    expect(themes.font).toHaveBeenLastCalledWith("'Helvetica Neue', Helvetica, Arial, sans-serif");
     expect(themes.fontSize).toHaveBeenLastCalledWith("120%");
     expect(themes.override).toHaveBeenCalledWith("line-height", "1.8");
+    // 粗体：bold=true → font-weight 700
+    expect(themes.override).toHaveBeenCalledWith("font-weight", "700");
     // 主题色：dark 预设（textColor/bgColor 空 → 预设）
     expect(themes.override).toHaveBeenCalledWith("color", "#c8ccd4", true);
     expect(themes.override).toHaveBeenCalledWith("background", "#1f2430", true);
     // 页边距：容器 padding（epub.js 布局会覆盖 body padding，容器级才可靠）
     const containerStyle = wrapper.find(".reader-container").attributes("style");
     expect(containerStyle).toContain("padding: 6px");
+    wrapper.unmount();
+  });
+
+  it("粗体关闭：bold=false → font-weight 空值 override（移除覆盖，EPUB 自带标题样式不受影响）", async () => {
+    backendBooks = { bold: false, fontFamily: "serif" };
+    const wrapper = mount(Reader, { props: { book: makeBook() } });
+    await flushPromises();
+
+    const themes = mocks.rendition.themes;
+    // 初始应用（loadReaderSettings）：bold=false → 空值
+    expect(themes.override).toHaveBeenCalledWith("font-weight", "");
+    expect(themes.font).toHaveBeenLastCalledWith("Georgia, 'Times New Roman', serif");
     wrapper.unmount();
   });
 
@@ -465,11 +488,46 @@ describe("Reader 阅读设置", () => {
       .find((b) => b.attributes("title") === "阅读设置")!
       .trigger("click");
     await wrapper
-      .findAll(".reader-settings-chip")
-      .find((c) => c.text() === "圆体")!
+      .findAll(".reader-settings-font")
+      .find((c) => c.text().includes("Avenir Next Rounded"))!
       .trigger("click");
     await new Promise((r) => setTimeout(r, 350));
     expect(wrapper.find(".reader-font-val").text()).toBe("100%"); // 字号不受影响
+
+    wrapper.unmount();
+  });
+
+  it("还原所有设置：全部字段回默认 + 立即保存（无防抖）+ 即时应用", async () => {
+    backendBooks = {
+      fontFamily: "kaiti-sc",
+      fontSize: 130,
+      lineHeight: 1.8,
+      margin: 9,
+      bold: true,
+      theme: "dark",
+      textColor: "#123456",
+      bgColor: "#000000",
+    };
+    const wrapper = mount(Reader, { props: { book: makeBook() } });
+    await flushPromises();
+    // 后端值已应用
+    expect(wrapper.find(".reader-font-val").text()).toBe("130%");
+
+    // 打开面板 → 点底部“还原所有设置”
+    await wrapper
+      .findAll(".reader-topbar .reader-btn")
+      .find((b) => b.attributes("title") === "阅读设置")!
+      .trigger("click");
+    await wrapper.find(".reader-settings-reset-all").trigger("click");
+    await flushPromises();
+
+    // 全部字段回默认并应用
+    expect(wrapper.find(".reader-font-val").text()).toBe("100%");
+    expect(mocks.rendition.themes.override).toHaveBeenCalledWith("font-family", "");
+    expect(mocks.rendition.themes.override).toHaveBeenCalledWith("font-weight", "");
+    // 立即 PUT 全量默认
+    const last = putBodies()[putBodies().length - 1];
+    expect(last).toEqual({ books: READER_SETTINGS_DEFAULTS });
 
     wrapper.unmount();
   });
@@ -482,11 +540,23 @@ describe("ReaderSettingsPanel 组件", () => {
     });
   }
 
-  it("渲染各控件：字体/字号/行距/边距/主题/颜色 + 恢复默认按钮", () => {
+  it("渲染各控件：预设/字体列表/粗体/字号/行距/边距/主题/颜色 + 还原按钮", () => {
     const wrapper = mountPanel();
     expect(wrapper.find(".reader-settings-title").text()).toBe("阅读设置");
-    // 4 字体族 + 恢复默认
-    expect(wrapper.findAll(".reader-settings-chip").length).toBe(5);
+    // 4 排版预设
+    expect(wrapper.findAll(".reader-settings-preset").length).toBe(4);
+    // 11 字体项（default + 10 字体，每项 Aa 预览 + 名称 + 选中打勾）
+    expect(wrapper.findAll(".reader-settings-font").length).toBe(11);
+    // 默认字体项带选中勾
+    expect(wrapper.findAll(".reader-settings-font")[0].classes()).toContain("on");
+    expect(wrapper.findAll(".reader-settings-font-check").length).toBe(1);
+    // 粗体开关（未开）
+    const sw = wrapper.find(".reader-settings-switch");
+    expect(sw.exists()).toBe(true);
+    expect(sw.classes()).not.toContain("on");
+    // 颜色重置 chip（保留）+ 还原所有设置按钮
+    expect(wrapper.findAll(".reader-settings-chip").length).toBe(1);
+    expect(wrapper.find(".reader-settings-reset-all").text()).toBe("还原所有设置");
     // 4 主题卡片
     expect(wrapper.findAll(".reader-settings-theme").length).toBe(4);
     // 2 颜色选择器
@@ -500,9 +570,9 @@ describe("ReaderSettingsPanel 组件", () => {
     wrapper.unmount();
   });
 
-  it("控件修改 → emit patch（字体族/字号/主题）", async () => {
+  it("控件修改 → emit patch（字体族/字号/主题/粗体）", async () => {
     const wrapper = mountPanel();
-    await wrapper.findAll(".reader-settings-chip")[1].trigger("click"); // 衬线
+    await wrapper.findAll(".reader-settings-font")[1].trigger("click"); // Georgia (serif)
     expect(wrapper.emitted("patch")![0]).toEqual([{ fontFamily: "serif" }]);
 
     await wrapper.find('.reader-btn[title="增大"]').trigger("click"); // 字号 +
@@ -510,12 +580,43 @@ describe("ReaderSettingsPanel 组件", () => {
 
     await wrapper.findAll(".reader-settings-theme")[2].trigger("click"); // 深色
     expect(wrapper.emitted("patch")!.at(-1)).toEqual([{ theme: "dark" }]);
+
+    // 粗体开关：开 → { bold: true }
+    await wrapper.find(".reader-settings-switch").trigger("click");
+    expect(wrapper.emitted("patch")!.at(-1)).toEqual([{ bold: true }]);
     wrapper.unmount();
 
-    // 选中态渲染：theme 为 dark 时第 3 张卡片带 on
-    const wrapper2 = mountPanel({ theme: "dark" });
+    // 选中态渲染：theme dark → 第 3 张卡片 on；serif → 字体项[1] on + 打勾
+    const wrapper2 = mountPanel({ theme: "dark", fontFamily: "serif", bold: true });
     expect(wrapper2.findAll(".reader-settings-theme")[2].classes()).toContain("on");
+    expect(wrapper2.findAll(".reader-settings-font")[1].classes()).toContain("on");
+    expect(wrapper2.find(".reader-settings-switch").classes()).toContain("on");
     wrapper2.unmount();
+  });
+
+  it("排版预设：点击 → patch 字体+字号+行距+边距（不动颜色）；匹配时高亮", async () => {
+    const wrapper = mountPanel();
+    // 默认预设与初始设置一致 → 高亮
+    expect(wrapper.findAll(".reader-settings-preset")[0].classes()).toContain("on");
+
+    // 点“宽松”：Georgia + 105 + 1.8 + 8
+    await wrapper.findAll(".reader-settings-preset")[2].trigger("click");
+    expect(wrapper.emitted("patch")!.at(-1)).toEqual([
+      { fontFamily: "serif", fontSize: 105, lineHeight: 1.8, margin: 8 },
+    ]);
+    wrapper.unmount();
+
+    // 匹配高亮：字体+字号+行距相同（边距不同也高亮）
+    const wrapper2 = mountPanel({ fontFamily: "sans", fontSize: 95, lineHeight: 1.4, margin: 9 });
+    expect(wrapper2.findAll(".reader-settings-preset")[1].classes()).toContain("on"); // 紧凑
+    wrapper2.unmount();
+  });
+
+  it("还原所有设置：底部按钮 emit reset", async () => {
+    const wrapper = mountPanel({ fontFamily: "kaiti-sc", fontSize: 130 });
+    await wrapper.find(".reader-settings-reset-all").trigger("click");
+    expect(wrapper.emitted("reset")).toBeTruthy();
+    wrapper.unmount();
   });
 
   it("滑杆：行距/边距 emit（含小数取整）", async () => {
@@ -566,10 +667,41 @@ describe("settings 模块（/api/settings 契约）", () => {
       fontSize: 200, // clamp 70~200
       lineHeight: 2.0, // clamp 1.0~2.0
       margin: 0, // clamp 0~15
+      bold: false,
       theme: "light", // 非法回默认
       textColor: "",
       bgColor: "",
     });
+  });
+
+  it("GET：V3 新字体 key + bold 持久化读取；旧 key 兼容", async () => {
+    backendBooks = {
+      fontFamily: "songti-sc",
+      bold: true,
+      theme: "sepia",
+      textColor: "#123456",
+    };
+    const s = await getReaderSettings();
+    expect(s).toEqual({
+      fontFamily: "songti-sc", // 新字体 key 原样保留
+      fontSize: 100,
+      lineHeight: 1.6,
+      margin: 4,
+      bold: true, // V3 新字段
+      theme: "sepia",
+      textColor: "#123456",
+      bgColor: "",
+    });
+
+    // 旧 key（V2 设置的 rounded）仍有效
+    backendBooks = { fontFamily: "rounded" };
+    const s2 = await getReaderSettings();
+    expect(s2.fontFamily).toBe("rounded");
+
+    // 未知 key 回默认
+    backendBooks = { fontFamily: "comic-sans" };
+    const s3 = await getReaderSettings();
+    expect(s3.fontFamily).toBe("default");
   });
 
   it("PUT：body 是 { books: patch } 深合并形状", async () => {

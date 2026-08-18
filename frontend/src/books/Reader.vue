@@ -103,6 +103,7 @@
           <ReaderSettingsPanel
             :settings="readerSettings"
             @patch="onSettingsPatch"
+            @reset="onResetSettings"
             @close="settingsOpen = false"
           />
         </div>
@@ -219,6 +220,7 @@ import {
   getReaderSettings,
   saveReaderSettings,
   resolveReaderThemeColors,
+  readerFontCss,
 } from "./settings";
 
 const props = defineProps<{ book: BookView }>();
@@ -284,6 +286,17 @@ function onSettingsPatch(patch: Partial<ReaderSettings>) {
     settingsSaveTimer = null;
     saveReaderSettings({ ...readerSettings });
   }, 300);
+}
+
+/** 还原所有设置：全部字段回默认 → 即时应用（watch）→ 立即保存（取消未落地的防抖）→ 成功 toast */
+async function onResetSettings() {
+  if (settingsSaveTimer) {
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = null;
+  }
+  Object.assign(readerSettings, READER_SETTINGS_DEFAULTS);
+  const ok = await saveReaderSettings({ ...READER_SETTINGS_DEFAULTS });
+  if (ok) showToast(t("books.settingsResetDone"));
 }
 
 function toggleSettings() {
@@ -813,24 +826,22 @@ function jumpTo(cfi: string) {
 }
 
 // ============ 设置应用到 epub.js（themes.override 作用到 iframe body 的 inline 样式） ============
-const FONT_FAMILY_CSS: Record<"serif" | "sans" | "rounded", string> = {
-  serif: "Georgia, serif",
-  sans: "Helvetica, Arial, sans-serif",
-  rounded: "Avenir Next Rounded, 'Arial Rounded MT Bold', sans-serif",
-};
-
 function applyReaderSettings() {
   const rendition = renditionRef.value;
   if (!rendition) return;
   const themes = rendition.themes;
   const s = readerSettings;
-  // 字体族：default → 空值 override（epubjs 运行时对空值走 removeProperty，等同移除覆盖）
-  if (s.fontFamily === "default") themes.override("font-family", "");
-  else themes.font(FONT_FAMILY_CSS[s.fontFamily]);
+  // 字体族：空 CSS → override 空值（epubjs 运行时对空值走 removeProperty，等同移除覆盖）；
+  // 具体字体带回退栈（中文场景回退衬线/无衬线，见 settings.ts READER_FONT_OPTIONS）
+  const fontCss = readerFontCss(s.fontFamily);
+  if (fontCss) themes.font(fontCss);
+  else themes.override("font-family", "");
   // 字号（百分比，相对 iframe 默认字号）
   themes.fontSize(s.fontSize + "%");
   // 行距（body 无单位值，子元素按倍数继承）
   themes.override("line-height", String(s.lineHeight));
+  // 粗体开关：只覆盖 body 字重（EPUB 自带 heading 等显式样式不受影响）；关 → 空值移除覆盖
+  themes.override("font-weight", s.bold ? "700" : "");
   // 主题色：预设 + textColor/bgColor 自定义覆盖；!important 压过 EPUB 自带 body 样式
   const { text, bg } = resolveReaderThemeColors(s);
   themes.override("color", text, true);
