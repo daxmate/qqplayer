@@ -40,12 +40,24 @@ with zipfile.ZipFile(p, "w") as z:
 </ncx>''')
     z.writestr("chap1.xhtml", '''<?xml version="1.0"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head>
-<body><h1>第一章</h1><p>这是第一句。这是第二句！</p><p>Hello world. Another sentence.</p></body></html>''')
+<body><h1>第一章</h1>'''
+    + "".join(
+        f"<p>这是第 {i + 1} 段。用于翻页测试的内容填充，确保页面超过一页，这样才能验证右侧热区翻页。</p>"
+        for i in range(40)
+    )
+    + "</body></html>'''")
 print("OK")`;
 execFileSync("/Users/dax/codes/qqplayer/venv/bin/python", ["-c", py]);
 console.log("1. 最小 EPUB 生成 OK");
 
 // ---------- 2. 导入（真实 API） ----------
+// 清理上次残留的同名测试书（失败中断会留下），避免书架多张同名卡
+const existing = await (await fetch(`${BASE}/api/books`)).json();
+for (const b of existing) {
+  if (b.title === "E2E 冒烟测试书") {
+    await fetch(`${BASE}/api/books/${b.id}`, { method: "DELETE" });
+  }
+}
 const form = new FormData();
 form.append(
   "file",
@@ -71,9 +83,17 @@ page.on("pageerror", (e) => errors.push("PAGEERROR: " + e.message));
 
 await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
 await page.click('button.tab:has-text("图书")');
+// BooksView 会异步自动打开上次阅读的书（书架可能一闪而过）→ 等自动打开完成后返回书架
+await page.waitForTimeout(1500);
+const backBtn = page.locator(".reader-topbar .reader-btn", { hasText: "返回" });
+if (await backBtn.count()) {
+  await backBtn.click();
+  await page.waitForTimeout(600);
+}
 await page.waitForSelector(".bs-card", { timeout: 15000 });
+// 点开刚导入的测试书（不依赖书架第一张卡）
 const t0 = Date.now();
-await page.click(".bs-card");
+await page.click('.bs-card:has-text("E2E 冒烟测试书")');
 await page.waitForSelector(".reader-status", { state: "detached", timeout: 30000 });
 const loadMs = Date.now() - t0;
 const frameOk = page.frames().some((f) => f !== page.mainFrame());
@@ -91,15 +111,33 @@ const bodyText = await page
 console.log("   正文包含第一章:", bodyText?.includes("第一章"));
 
 // ---------- 4. 翻页 + 进度保存 ----------
-await page.click(".reader-tap.right");
+// 原 .reader-tap 透明按钮已移除（会挡 iframe 边缘文字拖选），翻页改由 iframe 内 click 坐标判断：
+// 点击右侧热区触发下一页。playwright 合成鼠标事件到不了 srcdoc iframe（08-18 已验证），
+// 用主 frame dispatch 走完整链路（监听挂载 → 事件 → 坐标判断 → next → relocated → 进度保存）。
+const progBefore = await (await fetch(`${BASE}/api/books/${book.id}/progress`)).json();
+await page.evaluate(() => {
+  const iframe = document.querySelector(".reader-container iframe");
+  if (!iframe) throw new Error("阅读 iframe 不存在");
+  const doc = iframe.contentDocument;
+  if (!doc) throw new Error("iframe contentDocument 不可访问");
+  const fire = (type, x, y) =>
+    doc.body.dispatchEvent(
+      new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+    );
+  fire("mousedown", 1300, 400);
+  fire("click", 1300, 400);
+});
 await page.waitForTimeout(1800); // relocated 防抖 1s + 请求余量
 const progRes = await fetch(`${BASE}/api/books/${book.id}/progress`);
 const prog = await progRes.json();
+const turned = !!prog?.cfi && prog.cfi !== progBefore?.cfi;
 console.log(
-  "4. 翻页后进度已保存:",
-  prog ? `cfi=${prog.cfi.slice(0, 30)}… loc=${prog.location}` : "未保存（FAIL）",
+  "4. 右侧热区翻页:",
+  turned
+    ? `✅ cfi 变化 ${prog.cfi.slice(0, 30)}…`
+    : `❌ 未翻页（前=${progBefore?.cfi?.slice(0, 30)}）`,
 );
-if (!prog?.cfi) throw new Error("进度未保存");
+if (!turned) throw new Error("翻页未生效");
 
 // ---------- 5. 返回书架 → 进度条出现 ----------
 await page.click(".reader-btn:has-text('返回')");

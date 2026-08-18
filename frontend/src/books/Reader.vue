@@ -70,19 +70,8 @@
           <span>{{ errorMsg }}</span>
           <button class="reader-retry" @click="loadBook">{{ t("books.back") }}</button>
         </div>
-        <!-- 左右 1/3 点击翻页（z-index 盖过 epubjs iframe；中间留白给链接点击） -->
-        <button
-          v-if="!loading && !errorMsg"
-          class="reader-tap left"
-          :title="t('books.prevPage')"
-          @click="prevPage"
-        />
-        <button
-          v-if="!loading && !errorMsg"
-          class="reader-tap right"
-          :title="t('books.nextPage')"
-          @click="nextPage"
-        />
+        <!-- 翻页热区不再用透明按钮盖住 iframe（会挡住边缘文字拖选）；改由 iframe 内
+             mousedown/click 事件按坐标判断：左右 22% 翻页，中间留给链接/选中（见 attachTapHandlers） -->
       </div>
 
       <!-- 目录抽屉（tree 渲染，点击跳转） -->
@@ -452,12 +441,7 @@ function pollSelection() {
   if (selPollStableCount < SEL_POLL_STABLE) return;
   // 选区已稳定（鼠标释放）→ 同一选区已处理过则跳过
   if (currentSelection.value?.text === text) return;
-  const rendition = renditionRef.value;
-  let contents: unknown = null;
-  rendition?.views()?.forEach((v) => {
-    const vc = (v as { contents?: unknown }).contents;
-    if (vc) contents = vc;
-  });
+  const contents = getCurrentContents();
   if (!contents) return;
   try {
     const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
@@ -844,11 +828,86 @@ function nextPage() {
   renditionRef.value?.next();
 }
 
+// ============ 翻页热区（iframe 内事件，不再用透明按钮盖住 iframe） ============
+// 原实现：左右各 22% 透明 button（z-index 2）盖住 epubjs iframe → 左右边缘文字无法拖选。
+// 现方案：epubjs Contents 把 iframe 内 DOM 事件（mousedown/click）转发成 contents 事件，
+// 直接在 iframe document 上监听：click 按坐标判断左右 22% 翻页；拖选（位移 > 阈值或非空选区）不翻页。
+const TAP_EDGE_RATIO = 0.22; // 左右热区各占容器宽度比例（与原 .reader-tap 一致）
+const TAP_DRAG_THRESHOLD = 8; // px：mousedown→click 位移超过视为拖选而非点击
+/** 当前挂了翻页监听的 contents（epubjs 翻页会重建 contents，relocated 后重新挂，防重复挂载） */
+let tapContents: unknown = null;
+let tapDownX = 0;
+let tapDownY = 0;
+
+function getCurrentContents(): unknown {
+  const rendition = renditionRef.value;
+  // 单测 mock 可能没有 views 方法（08-18 坑：诊断逻辑别碰 mock 缺失的 API）
+  if (!rendition || typeof (rendition as { views?: unknown }).views !== "function") return null;
+  let contents: unknown = null;
+  (rendition as { views: () => Array<{ contents?: unknown }> }).views().forEach((v) => {
+    const vc = (v as { contents?: unknown }).contents;
+    if (vc) contents = vc;
+  });
+  return contents;
+}
+
+function attachTapHandlers() {
+  const contents = getCurrentContents();
+  if (!contents || contents === tapContents) return;
+  detachTapHandlers();
+  tapContents = contents;
+  const doc = (contents as { document?: Document }).document;
+  if (!doc) return;
+  doc.addEventListener("mousedown", onTapMouseDown, true);
+  doc.addEventListener("click", onTapClick, true);
+}
+
+function detachTapHandlers() {
+  if (!tapContents) return;
+  const doc = (tapContents as { document?: Document }).document;
+  if (doc) {
+    doc.removeEventListener("mousedown", onTapMouseDown, true);
+    doc.removeEventListener("click", onTapClick, true);
+  }
+  tapContents = null;
+}
+
+function onTapMouseDown(e: MouseEvent) {
+  tapDownX = e.clientX;
+  tapDownY = e.clientY;
+}
+
+function onTapClick(e: MouseEvent) {
+  // 链接点击交给 epubjs 默认处理，不翻页
+  const target = e.target as HTMLElement | null;
+  if (target?.closest?.("a")) return;
+  // 拖选不翻页：位移超阈值（拖选文字）或 iframe 内有非空选区
+  if (Math.hypot(e.clientX - tapDownX, e.clientY - tapDownY) > TAP_DRAG_THRESHOLD) return;
+  const iframe = containerRef.value?.querySelector("iframe");
+  const sel = iframe?.contentWindow?.getSelection?.();
+  if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+  // 坐标基准用容器（可见区域）：epubjs iframe 元素宽度是横向分页内容总宽（远超视口），
+  // 用它算 22%/78% 会全落在中间；容器 rect = 用户实际看到的区域，与原 .reader-tap 定位一致
+  const container = containerRef.value;
+  const cRect = container?.getBoundingClientRect();
+  if (!cRect || cRect.width === 0) return;
+  const x = e.clientX - cRect.left;
+  if (x < cRect.width * TAP_EDGE_RATIO) {
+    e.preventDefault();
+    prevPage();
+  } else if (x > cRect.width * (1 - TAP_EDGE_RATIO)) {
+    e.preventDefault();
+    nextPage();
+  }
+}
+
 // ============ 进度保存（relocated 防抖 ~1s，静默失败） ============
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onRelocated(loc: Location) {
   curCfi.value = loc.start.cfi ?? "";
+  // epubjs 翻页会重建 contents → 重新挂翻页热区监听（防重复：attach 内部去重）
+  attachTapHandlers();
   hideToolbar();
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -931,6 +990,7 @@ function teardown() {
     clearTimeout(settingsSaveTimer);
     settingsSaveTimer = null;
   }
+  detachTapHandlers();
   renditionRef.value?.destroy();
   renditionRef.value = null;
   bookRef.value?.destroy();
@@ -970,6 +1030,7 @@ async function loadBook() {
     rendition.on("relocated", onRelocated);
     rendition.on("selected", onSelected);
     await rendition.display(props.book.progress?.cfi ?? undefined);
+    attachTapHandlers();
     await loadAnnotations();
     void refreshVocab();
   } catch {
@@ -1126,24 +1187,6 @@ onBeforeUnmount(() => {
 .reader-retry:hover {
   border-color: var(--accent);
   color: var(--accent-text);
-}
-/* 左右点击翻页热区：各占 22%，中间 56% 留给内容链接/选中 */
-.reader-tap {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 22%;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  z-index: 2;
-  touch-action: manipulation;
-}
-.reader-tap.left {
-  left: 0;
-}
-.reader-tap.right {
-  right: 0;
 }
 /* 阅读设置抽屉遮罩（与目录抽屉同模式） */
 .reader-settings-mask {
