@@ -144,5 +144,15 @@ export default {
     lookupSwitchDict: "切换词典",
     vocabAdd: "加入生词本",
     vocabAdded: "已加入",
+    // ===== V4 书内搜索 =====
+    search: "搜索",
+    searchInBook: "书内搜索",
+    searchPlaceholder: "搜索本书…",
+    searchButton: "搜索",
+    searchSearching: "搜索中…",
+    searchEmpty: "没有找到包含「{query}」的内容",
+    searchResultsCount: "{count} 条结果",
+    searchFailed: "搜索失败：{msg}",
+    searchJumpFailed: "未能在书中定位该句",
   },
 };
