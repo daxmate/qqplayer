@@ -38,11 +38,11 @@ if len(sys.argv) > 1:
 
 include_routers(app)
 
-# 静态前端（构建产物 frontend/dist）
-if (state.ROOT / "frontend" / "dist").is_dir():
+# 静态前端（构建产物 dist/，vite outDir 为仓库根 dist）
+if (state.ROOT / "dist").is_dir():
     app.mount(
         "/",
-        StaticFiles(directory=str(state.ROOT / "frontend" / "dist"), html=True),
+        StaticFiles(directory=str(state.ROOT / "dist"), html=True),
         name="frontend",
     )
 
