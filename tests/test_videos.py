@@ -66,9 +66,9 @@ def make_video(path: Path, data: bytes = b"FAKE-VIDEO-BYTES-0123456789") -> Path
 
 # ============ videoDirs 设置 ============
 def test_video_dirs_default_empty():
-    """默认 videoDirs 为空数组，随 GET /api/settings 返回（video namespace 含 bilibiliCookie 默认空串）"""
+    """默认 videoDirs 为空数组，随 GET /api/settings 返回（video namespace 含 bilibiliCookie / cookiesFromBrowser 默认空串）"""
     s = client.get("/api/settings").json()["settings"]["video"]
-    assert s == {"videoDirs": [], "bilibiliCookie": ""}
+    assert s == {"videoDirs": [], "bilibiliCookie": "", "cookiesFromBrowser": ""}
 
 
 def test_video_dirs_put_persist():

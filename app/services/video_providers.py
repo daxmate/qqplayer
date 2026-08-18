@@ -55,24 +55,63 @@ class GenericProvider(VideoProvider):
 
 
 class BiliProvider(VideoProvider):
-    """B站：get_stream 带 Cookie（来自设置）resolve 后选最佳合并格式直链；防盗链 Referer 由代理层附加"""
+    """B站：get_stream/resolve/get_subtitles 自动带 Cookie（手动 bilibiliCookie 优先，
+    否则 --cookies-from-browser 读浏览器登录态）；DASH 分离流用 get_dual_streams 双轨直链；
+    防盗链 Referer 由 ffmpeg -headers / 代理层附加。"""
 
     name = "bilibili"
     display_name = "B站"
     _REFERER = "https://www.bilibili.com"
+    # settings.video.cookiesFromBrowser 合法枚举（与 settings.py 白名单一致）
+    _BROWSERS = ("vivaldi", "chrome", "safari", "edge", "firefox", "brave")
 
     def _cookie(self) -> str:
         """settings.video.bilibiliCookie：B站匿名拿不到音视频合并格式（DASH 分离流无声），带 Cookie 才有"""
         return (settings_service.load_all_settings().get("video") or {}).get("bilibiliCookie") or ""
 
+    def _browser(self) -> str | None:
+        """settings.video.cookiesFromBrowser：非空（且在合法枚举内）时 yt-dlp 调用带
+        --cookies-from-browser <browser>；手动 cookie 非空时 _run 优先用 cookie，两者不冲突。"""
+        v = (settings_service.load_all_settings().get("video") or {}).get(
+            "cookiesFromBrowser"
+        ) or ""
+        return v if v in self._BROWSERS else None
+
+    def resolve(self, url: str) -> dict:
+        """B站解析：带 cookie/browser（匿名拿不到合并格式，DASH 分离流）"""
+        return video_ytdlp.resolve(url, cookie=self._cookie(), browser=self._browser())
+
     def get_stream(self, url: str, format_hint: str | None = "best") -> str:
         cookie = self._cookie()
-        info = video_ytdlp.resolve(url, cookie=cookie)
+        browser = self._browser()
+        info = video_ytdlp.resolve(url, cookie=cookie, browser=browser)
         best = video_ytdlp.pick_best_format(info.get("formats") or [], format_hint)
         # 直链按所选 format_id 现取（带 cookie：直链可能也需要 cookie 校验，且比 resolve 里的 url 更新鲜）
         return video_ytdlp.get_stream(
-            url, format_hint=best.get("format_id") or "best", cookie=cookie
+            url, format_hint=best.get("format_id") or "best", cookie=cookie, browser=browser
         )
+
+    def get_subtitles(self, url: str) -> list[dict] | None:
+        """B站字幕：带 cookie/browser（大会员 CC 字幕等可能需登录态）"""
+        return video_ytdlp.get_subtitles(url, cookie=self._cookie(), browser=self._browser())
+
+    def get_dual_streams(self, url: str) -> dict:
+        """B站 DASH 双轨直链 {video, audio}：一次 resolve 拿 formats → 视频轨
+        （pick_best_format，无合并格式时按清晰度取最高，acodec=none 纯视频轨可接受）
+        + 音频轨（pick_best_audio_format 按 abr 取最高）。
+
+        直接取 formats 里的 url 字段（resolve 的 formats 已含 url，实测可用），
+        不再二次调用 yt-dlp（避免每次 stream 请求多花 4-6 秒）。无音频轨抛 RuntimeError。
+        """
+        info = video_ytdlp.resolve(url, cookie=self._cookie(), browser=self._browser())
+        formats = info.get("formats") or []
+        video = video_ytdlp.pick_best_format(formats)
+        audio = video_ytdlp.pick_best_audio_format(formats)
+        video_url = video.get("url")
+        audio_url = audio.get("url")
+        if not video_url or not audio_url:
+            raise RuntimeError("解析结果缺少音/视频轨直链")
+        return {"video": video_url, "audio": audio_url}
 
     def stream_headers(self, url: str) -> dict:
         return {"Referer": self._REFERER}

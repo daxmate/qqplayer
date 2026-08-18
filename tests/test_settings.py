@@ -213,3 +213,39 @@ def test_video_bilibili_cookie_valid_preserved():
     assert s["bilibiliCookie"] == cookie
     # 清理：恢复空值，避免影响其他用例
     client.put("/api/settings", json={"video": {"bilibiliCookie": ""}})
+
+
+# ============ video.cookiesFromBrowser（B站浏览器 Cookie 来源）============
+def test_video_cookies_from_browser_default():
+    """video.cookiesFromBrowser 默认空串（=不使用浏览器 Cookie），随 GET /api/settings 返回"""
+    s = client.get("/api/settings").json()["settings"]["video"]
+    assert s["cookiesFromBrowser"] == ""
+
+
+def test_video_cookies_from_browser_invalid_falls_back():
+    """非字符串 / 枚举外字符串回落默认空串（只接受 vivaldi/chrome/safari/edge/firefox/brave）"""
+    for bad in (123, None, ["vivaldi"], True, {"b": "vivaldi"}, "unknown-browser", "Opera"):
+        s = client.put("/api/settings", json={"video": {"cookiesFromBrowser": bad}}).json()[
+            "settings"
+        ]["video"]
+        assert s["cookiesFromBrowser"] == "", f"cookiesFromBrowser={bad!r} 应回落默认"
+
+
+def test_video_cookies_from_browser_valid_preserved():
+    """合法枚举值保留并落盘持久化（模拟重启后仍读到）；空串合法（=不使用）"""
+    for browser in ("vivaldi", "chrome", "safari", "edge", "firefox", "brave"):
+        s = client.put("/api/settings", json={"video": {"cookiesFromBrowser": browser}}).json()[
+            "settings"
+        ]["video"]
+        assert s["cookiesFromBrowser"] == browser, f"cookiesFromBrowser={browser!r} 应保留"
+    # 模拟重启：持久化值仍在
+    state._settings = None
+    s = client.get("/api/settings").json()["settings"]["video"]
+    assert s["cookiesFromBrowser"] == "brave"
+    # 空串合法（不使用浏览器 Cookie）
+    s = client.put("/api/settings", json={"video": {"cookiesFromBrowser": ""}}).json()["settings"][
+        "video"
+    ]
+    assert s["cookiesFromBrowser"] == ""
+    # 清理：恢复空值，避免影响其他用例
+    client.put("/api/settings", json={"video": {"cookiesFromBrowser": ""}})

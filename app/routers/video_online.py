@@ -3,17 +3,22 @@
 与本地视频 /api/videos（books 域）区分，命名空间 /api/video-online。
 
 - ``POST /api/video-online/resolve``：body {url, source?} → {title, url, provider, duration, subtitles}
+  （B站额外返回 audioUrl 音频轨直链，供双轨合成播放）
 - ``GET  /api/video-online/stream``：防盗链代理（透传 Range/206/Content-Range；
-  直链 403/过期自动重新 resolve 一次再试，仍失败 502）
+  直链 403/过期自动重新 resolve 一次再试，仍失败 502）；B站走 ffmpeg 双轨合成流
+  （DASH 分离音视频轨 -c copy 零重编码合并成 fMP4 分片，t 参数支持 seek）
 - ``GET  /api/video-online/subtitles``：字幕内容 → {items: [{start, end, text, translation}]}
 
 前端契约（供后续在线 UI 任务，写死）：
-- resolve 响应 {title, url, provider, duration, subtitles:[{lang, name}]}
+- resolve 响应 {title, url, provider, duration, subtitles:[{lang, name}], audioUrl?}
 - stream 直接当 <video> src（url 参数传原始视频页链接，后端实时解析直链）
 - subtitles 响应 {items: [{start, end, text, translation}]}（translation 本轮恒 None）
 """
 
 import re
+import shutil
+import subprocess
+import time
 from contextlib import suppress
 from urllib.parse import urlparse
 
@@ -31,6 +36,8 @@ PROXY_TIMEOUT = 60.0
 _UA = download.DOWNLOAD_UA
 # 上游返回这些状态码视为"直链过期/失效"，自动重新 resolve 一次再试
 _RETRYABLE_UPSTREAM_CODES = (403, 410)
+# ffmpeg 启动探测窗口：Popen 后窗口内非零退出视为启动失败（直链 403 等会让 ffmpeg 秒退）
+FFMPEG_STARTUP_GRACE = 2.0
 
 # 流媒体 MIME 白名单（上游 CDN 可能返回 application/octet-stream 或不带类型）
 # B站 DASH 分片 .m4s 就是典型：CDN 返回 octet-stream，浏览器 <video> 不认 → 黑屏
@@ -87,6 +94,8 @@ def _pick_provider(url: str, source: str | None) -> vp.VideoProvider:
 def api_video_online_resolve(body: dict):
     """粘贴链接通用解析：{url, source?} → {title, url(直链), provider, duration, subtitles}
 
+    B站额外返回 audioUrl（DASH 分离流音频轨直链，供双轨合成播放）；
+    音频轨获取失败/无音频轨 → 省略 audioUrl（前端降级静音播放）。
     解析失败 400（带 yt-dlp stderr 摘要）。url 为原始视频页链接；
     返回的 url 是直链（有时效，播放请走 /stream 代理）。
     """
@@ -99,13 +108,115 @@ def api_video_online_resolve(body: dict):
         subs = provider.get_subtitles(url) or []
     except RuntimeError as e:
         raise HTTPException(400, f"解析失败: {e}") from None
-    return {
+    result = {
         "title": info.get("title"),
         "url": stream_url,
         "provider": provider.name,
         "duration": info.get("duration"),
         "subtitles": [{"lang": s["lang"], "name": s["name"]} for s in subs],
     }
+    if provider.name == "bilibili":
+        with suppress(RuntimeError):
+            # 音频轨直链获取失败/无音频轨 → 省略 audioUrl
+            result["audioUrl"] = provider.get_dual_streams(url)["audio"]
+    return result
+
+
+# ============ B站 DASH 双轨合成（ffmpeg）============
+
+
+def _spawn_ffmpeg(cmd: list[str]) -> tuple[object | None, str | None]:
+    """启动 ffmpeg 并探测启动失败：Popen 后窗口内非零退出视为启动失败（如直链 403 秒退），
+    读 stderr 摘要返回 (None, 摘要)；进程存活（或已零退出）返回 (proc, None)，stdout 交给生成器。
+    """
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    deadline = time.monotonic() + FFMPEG_STARTUP_GRACE
+    while time.monotonic() < deadline:
+        code = proc.poll()
+        if code is not None:
+            break
+        time.sleep(0.05)
+    if proc.poll() is not None and proc.returncode != 0:
+        stderr = ""
+        if proc.stderr:
+            with suppress(Exception):
+                stderr = proc.stderr.read().decode("utf-8", "replace")
+        return None, video_ytdlp._stderr_summary(stderr) or f"ffmpeg 退出码 {proc.returncode}"
+    return proc, None
+
+
+def _bili_dual_stream(
+    page_url: str, provider: vp.VideoProvider, seek_t: float | None
+) -> StreamingResponse:
+    """B站 DASH 双轨合成流：ffmpeg 双输入 -c copy 零重编码合并 → fMP4 分片 stdout → StreamingResponse。
+
+    - 双轨直链来自 get_dual_streams（一次 resolve，不再二次调用 yt-dlp）
+    - seek：-ss <t> 放在每个 -i 之前（输入 seek，秒级响应，从目标时间重建合成流）
+    - 防盗链：两个输入都带 -headers "Referer: https://www.bilibili.com\r\nUser-Agent: <UA>\r\n"
+    - 直链获取失败 / ffmpeg 启动失败（403 秒退等）→ 重新 resolve 一次再试，仍失败 502
+    - content-type 固定 video/mp4（fMP4 分片浏览器可直接播放，不走 _fix_stream_media_type）
+    """
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise HTTPException(502, "未找到 ffmpeg，无法合成 B站音视频双轨（请先安装 ffmpeg）")
+
+    def build_cmd(dual: dict) -> list[str]:
+        headers = f"Referer: {provider._REFERER}\r\nUser-Agent: {_UA}\r\n"
+        cmd = [ffmpeg_bin, "-y"]
+        if seek_t:
+            cmd += ["-ss", str(seek_t)]
+        cmd += ["-headers", headers, "-i", dual["video"]]
+        if seek_t:
+            cmd += ["-ss", str(seek_t)]
+        cmd += ["-headers", headers, "-i", dual["audio"]]
+        cmd += [
+            "-c",
+            "copy",
+            "-movflags",
+            "frag_keyframe+empty_moov+default_base_moof",
+            "-f",
+            "mp4",
+            "pipe:1",
+        ]
+        return cmd
+
+    def attempt() -> tuple[object | None, str | None]:
+        """取双轨直链并启动 ffmpeg；返回 (proc, None) 或 (None, 错误摘要)"""
+        try:
+            dual = provider.get_dual_streams(page_url)
+        except RuntimeError as e:
+            return None, str(e)
+        proc, err = _spawn_ffmpeg(build_cmd(dual))
+        if proc is None:
+            return None, err
+        return proc, None
+
+    proc, err = attempt()
+    if proc is None:
+        # 直链获取失败 / 启动失败（403 过期等）：重新 resolve 一次再试
+        proc, err = attempt()
+    if proc is None:
+        raise HTTPException(502, f"B站双轨合成失败: {err}")
+
+    def gen():
+        try:
+            while True:
+                chunk = proc.stdout.read1(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            with suppress(Exception):
+                proc.stdout.close()
+            with suppress(Exception):
+                proc.stderr.close()
+            if proc.poll() is None:
+                with suppress(Exception):
+                    proc.terminate()
+            with suppress(Exception):
+                proc.wait()
+
+    return StreamingResponse(gen(), media_type="video/mp4")
 
 
 # ============ GET /api/video-online/stream（防盗链代理）============
@@ -143,15 +254,19 @@ def _open_upstream(direct_url: str, range_h: str | None, extra_headers: dict):
 
 
 @router.get("/api/video-online/stream")
-def api_video_online_stream(url: str, request: Request, source: str = ""):
-    """防盗链流代理：后端实时解析直链并转发，加 Referer/UA 头。
+def api_video_online_stream(url: str, request: Request, source: str = "", t: float | None = None):
+    """在线视频流：B站 → ffmpeg 双轨合成流；其余站点 → 防盗链单流代理。
 
     - url 参数 = 原始视频页链接（与 resolve 同款）；source 可选，缺省按 host 推断
-    - 透传 Range（206 + Content-Range，浏览器 <video> seek 依赖）
-    - 直链有时效：上游 403/410 视为过期，自动重新 resolve 一次再试；仍失败 502
+    - t 可选（秒）：B站双轨合成的 seek 起点（缺省从头合成）；非 B站忽略
+    - B站：DASH 分离音视频轨 ffmpeg -c copy 合并成 fMP4 分片（content-type 固定 video/mp4）
+    - 非 B站：透传 Range（206 + Content-Range，浏览器 <video> seek 依赖）；
+      直链有时效：上游 403/410 视为过期，自动重新 resolve 一次再试；仍失败 502
     """
     page_url = _require_http_url(url)
     provider = _pick_provider(page_url, str(source or "").strip() or None)
+    if provider.name == "bilibili":
+        return _bili_dual_stream(page_url, provider, t)
     range_h = request.headers.get("range")
 
     def attempt() -> tuple[object | None, object | None, str]:

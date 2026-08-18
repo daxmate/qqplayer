@@ -292,6 +292,15 @@ _SETTINGS_SPEC = {
         # B站 Cookie：匿名访问拿不到音视频合并格式（DASH 分离流无声），填 Cookie 后
         # yt-dlp 解析可拿合并直链；空串 = 未设置；敏感信息只存本地 settings.json，不进日志/API 响应
         "bilibiliCookie": ("", _norm_str),
+        # 浏览器 Cookie 来源：非空时 yt-dlp 调用自动带 --cookies-from-browser <browser>
+        # （读浏览器登录态，macOS 常用 vivaldi）；与手动 bilibiliCookie 不冲突：
+        # 手动 cookie 非空时优先手动，否则用浏览器。空串 = 不使用
+        "cookiesFromBrowser": (
+            "",
+            lambda v, d: _norm_str(
+                v, d, allowed={"vivaldi", "chrome", "safari", "edge", "firefox", "brave"}
+            ),
+        ),
     },
 }
 
