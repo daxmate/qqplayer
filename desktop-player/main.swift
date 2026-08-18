@@ -182,6 +182,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 forMainFrameOnly: true
             )
         )
+        // 诊断用：console 转发到壳日志文件（~/Library/Logs/qqplayer/webview-console.log）
+        controller.addUserScript(
+            WKUserScript(
+                source: """
+                (function() {
+                  function send(level, args) {
+                    try {
+                      var parts = [];
+                      for (var i = 0; i < args.length; i++) {
+                        var a = args[i];
+                        if (typeof a === 'string') parts.push(a);
+                        else if (a instanceof Error) parts.push('Error: ' + a.message);
+                        else { try { parts.push(JSON.stringify(a)); } catch (e) { parts.push(String(a)); } }
+                      }
+                      window.webkit.messageHandlers.native.postMessage({ type: 'qqlog', level: level, msg: parts.join(' ') });
+                    } catch (e) {}
+                  }
+                  var origLog = console.log, origWarn = console.warn, origErr = console.error;
+                  console.log = function() { send('log', arguments); origLog.apply(console, arguments); };
+                  console.warn = function() { send('warn', arguments); origWarn.apply(console, arguments); };
+                  console.error = function() { send('error', arguments); origErr.apply(console, arguments); };
+                  window.addEventListener('error', function(e) {
+                    send('error', ['PAGEERROR: ' + (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || '')]);
+                  });
+                  window.addEventListener('unhandledrejection', function(e) {
+                    send('error', ['UNHANDLED: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason))]);
+                  });
+                })();
+                """,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
         config.userContentController = controller
 
         mainWebView = WKWebView(frame: mainWindow.contentView!.bounds, configuration: config)
@@ -591,6 +624,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         guard let dict = message.body as? [String: Any], let type = dict["type"] as? String else { return }
         switch type {
+        case "qqlog":
+            // 诊断：网页 console 落盘（~/Library/Logs/qqplayer/webview-console.log）
+            let level = dict["level"] as? String ?? "log"
+            let msg = dict["msg"] as? String ?? ""
+            let logDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Logs/qqplayer")
+            try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+            let f = logDir.appendingPathComponent("webview-console.log")
+            let line = "[\(level)] \(msg)\n"
+            if let h = try? FileHandle(forWritingTo: f) {
+                h.seekToEndOfFile()
+                h.write(line.data(using: .utf8)!)
+                try? h.close()
+            } else {
+                try? line.data(using: .utf8)?.write(to: f)
+            }
         case "openMini":
             // 打开迷你窗：显示迷你面板 + 主窗口自动隐藏
             showMiniPanel()

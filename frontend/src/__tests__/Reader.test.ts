@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
     destroy: vi.fn(),
     resize: vi.fn(),
     annotations: { add: vi.fn(), remove: vi.fn() },
+    hooks: { content: { register: vi.fn() } },
     currentLocation: vi.fn(() => ({
       start: { cfi: "epubcfi(/6/8!/4/2/2/1:0)", location: 2, percentage: 0.5 },
     })),

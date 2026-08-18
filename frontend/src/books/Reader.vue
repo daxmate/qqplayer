@@ -404,6 +404,71 @@ function extractSentence(text: string, contents: unknown): string {
   }
 }
 
+/**
+ * WKWebView 兜底（终极方案）：事件链路在 WebKit 里全部不可靠（selectionchange
+ * 不触发、iframe document 监听器收不到事件、跨 frame 冒泡捕获不到），改主动轮询：
+ * 每 400ms 读一次 epub.js iframe 的选区，有选中文字就显示工具栏（走 onSelected），
+ * 选区消失则收起。不依赖任何事件，只要选区存在就能工作。
+ */
+let selPollTimer: number | null = null;
+/** 轮询稳定判断：拖选过程中选区持续变化，连续 N 次相同才视为拖选完成（鼠标已释放） */
+let selPollLastText = "";
+let selPollStableCount = 0;
+/** 需要连续几次轮询选区相同才弹工具条（400ms/次，2 次 ≈ 800ms） */
+const SEL_POLL_STABLE = 2;
+
+function stopSelPolling() {
+  if (selPollTimer !== null) {
+    clearInterval(selPollTimer);
+    selPollTimer = null;
+  }
+}
+
+function startSelPolling() {
+  stopSelPolling();
+  selPollTimer = window.setInterval(pollSelection, 400);
+}
+
+function pollSelection() {
+  const iframe = containerRef.value?.querySelector("iframe");
+  const iw = iframe?.contentWindow;
+  const sel = iw?.getSelection?.();
+  if (!sel) return;
+  const text = sel.toString().trim();
+  if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
+    // 无选区：重置稳定计数 + 收起工具栏
+    selPollLastText = "";
+    selPollStableCount = 0;
+    if (toolbar.visible) hideToolbar();
+    return;
+  }
+  if (text !== selPollLastText) {
+    // 选区在变化（拖选中）→ 记录并等待稳定
+    selPollLastText = text;
+    selPollStableCount = 1;
+    return;
+  }
+  selPollStableCount++;
+  if (selPollStableCount < SEL_POLL_STABLE) return;
+  // 选区已稳定（鼠标释放）→ 同一选区已处理过则跳过
+  if (currentSelection.value?.text === text) return;
+  const rendition = renditionRef.value;
+  let contents: unknown = null;
+  rendition?.views()?.forEach((v) => {
+    const vc = (v as { contents?: unknown }).contents;
+    if (vc) contents = vc;
+  });
+  if (!contents) return;
+  try {
+    const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
+      sel.getRangeAt(0),
+    );
+    if (cfi) onSelected(cfi, contents);
+  } catch {
+    /* 轮询 CFI 生成失败忽略 */
+  }
+}
+
 /** epub.js selected 事件（选区非空，250ms 防抖后触发）：定位工具栏 + 记录选中 */
 function onSelected(cfi: string, contents: unknown) {
   const c = contents as { window?: Window };
@@ -926,6 +991,7 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown, true);
   window.addEventListener("resize", onResize);
   window.addEventListener("mousedown", onWindowMouseDown, true);
+  startSelPolling();
   loadReaderSettings();
   loadBook();
 });
@@ -934,6 +1000,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown, true);
   window.removeEventListener("resize", onResize);
   window.removeEventListener("mousedown", onWindowMouseDown, true);
+  stopSelPolling();
   teardown();
 });
 </script>
