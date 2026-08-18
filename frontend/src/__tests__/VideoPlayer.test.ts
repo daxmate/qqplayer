@@ -343,3 +343,72 @@ describe("VideoPlayer 在线视频源", () => {
     wrapper.unmount();
   });
 });
+
+describe("VideoPlayer 在线视频 seek 重建（B站合成流缓冲外换源）", () => {
+  const ONLINE = {
+    title: "B站示例视频",
+    url: "https://www.bilibili.com/video/BV1xx411c7mD",
+    provider: "bilibili",
+    duration: 125,
+    subtitles: [{ lang: "zh-Hans", name: "中文（自动生成）" }],
+  };
+  const BASE_SRC = `/api/video-online/stream?url=${encodeURIComponent(ONLINE.url)}`;
+
+  /** 覆盖 video.buffered（jsdom 默认空 TimeRanges）：ranges = [start, end] 列表 */
+  function mockBuffered(video: HTMLVideoElement, ranges: Array<[number, number]>) {
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: {
+        length: ranges.length,
+        start: (i: number) => ranges[i][0],
+        end: (i: number) => ranges[i][1],
+      },
+    });
+  }
+
+  it("缓冲内 seek：原生 set currentTime，src 不变（不带 t=）", async () => {
+    const wrapper = mount(VideoPlayer, { props: { video: ONLINE } });
+    await flushPromises();
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    mockBuffered(videoEl, [[0, 120]]); // 缓冲覆盖目标 2.5
+
+    await wrapper.findAll(".vline")[1].trigger("click"); // playAt(1) → 2.5
+    expect(videoEl.currentTime).toBe(2.5);
+    expect(playSpy).toHaveBeenCalled(); // 保持"跳转后播放"语义
+    expect(videoEl.getAttribute("src")).toBe(BASE_SRC);
+
+    wrapper.unmount();
+  });
+
+  it("缓冲外 seek：src 换带 t= 的合成流，loadedmetadata 后恢复进度并续播", async () => {
+    const wrapper = mount(VideoPlayer, { props: { video: ONLINE } });
+    await flushPromises();
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    mockBuffered(videoEl, [[0, 2]]); // 只缓冲开头，目标 2.5 在外
+
+    await wrapper.findAll(".vline")[1].trigger("click"); // playAt(1) → 2.5 缓冲外 → 重建
+    expect(videoEl.getAttribute("src")).toBe(`${BASE_SRC}&t=2`); // Math.floor(2.5) = 2
+    expect(videoEl.currentTime).not.toBe(2.5); // 未重建完成前不落位
+
+    await wrapper.find("video").trigger("loadedmetadata");
+    expect(videoEl.currentTime).toBe(2); // 进度恢复到重建起点
+    expect(playSpy).toHaveBeenCalled(); // play 意图 → 续播
+
+    wrapper.unmount();
+  });
+
+  it("duration 兜底：浏览器 duration 异常时用 resolve 返回的时长", async () => {
+    const wrapper = mount(VideoPlayer, {
+      props: { video: { ...ONLINE, duration: 212.4 } },
+    });
+    await flushPromises();
+    const videoEl = wrapper.find("video").element as HTMLVideoElement;
+    // jsdom duration 默认 NaN；显式置 0 模拟合成流拿不到时长（fMP4 分片）
+    Object.defineProperty(videoEl, "duration", { configurable: true, value: 0 });
+
+    await wrapper.find("video").trigger("loadedmetadata");
+    expect(wrapper.find(".vc-time").text()).toContain("3:32"); // 212.4 → 3:32
+
+    wrapper.unmount();
+  });
+});

@@ -99,6 +99,10 @@ export default {
     bilibiliCookie: "B站 Cookie",
     bilibiliCookieDesc: "浏览器登录 B站后复制 Cookie 头，让 B站在线播放有声（存后端 settings）",
     bilibiliCookiePlaceholder: "SESSDATA=…; bili_jct=…",
+    cookiesFromBrowser: "登录 Cookie 来源浏览器",
+    cookiesFromBrowserDesc:
+      "选择浏览器后，在线视频自动读取其登录 Cookie（yt-dlp --cookies-from-browser），B站可解析更高清晰度",
+    cookiesFromBrowserNone: "不使用",
 
     // ============ 下载 ============
     download: "在线下载",

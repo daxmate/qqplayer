@@ -402,6 +402,21 @@
                     />
                   </div>
                 </div>
+                <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.cookiesFromBrowser") }}</div>
+                  <div class="setting-desc">{{ t("settings.cookiesFromBrowserDesc") }}</div>
+                  <div class="setting-control">
+                    <select v-model="videoSettings.cookiesFromBrowser" class="lib-input">
+                      <option value="">{{ t("settings.cookiesFromBrowserNone") }}</option>
+                      <option value="vivaldi">Vivaldi</option>
+                      <option value="chrome">Chrome</option>
+                      <option value="safari">Safari</option>
+                      <option value="edge">Edge</option>
+                      <option value="firefox">Firefox</option>
+                      <option value="brave">Brave</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </section>
 
