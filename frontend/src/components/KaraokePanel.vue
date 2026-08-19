@@ -16,10 +16,10 @@
       <span v-if="uiSettings.showSongInfo && state.currentSong" class="kp-song" :title="songTitle">
         {{ songTitle }}
       </span>
+      <span class="kp-hint">{{ abHint }}</span>
       <button class="kp-spec-btn" :title="t('spec.title')" @click="openLyricSpec()">
         <FileMusic :size="14" />
       </button>
-      <span class="kp-hint">{{ abHint }}</span>
     </div>
     <!-- AB 区间进度：区间确定后显示当前句在区间内的位置（abVisual 开关控制） -->
     <div v-if="abProgress" class="ab-progress">
@@ -307,7 +307,6 @@ watch(
   font-size: 12px;
   font-weight: 400;
   color: var(--text3);
-  margin-left: auto;
 }
 /* AB 区间进度条：区间确定后显示（细绿条，与区间高亮色系协调） */
 .ab-progress {
