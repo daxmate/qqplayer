@@ -7,7 +7,6 @@
 
 import asyncio
 import sys
-import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
