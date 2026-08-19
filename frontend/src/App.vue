@@ -742,6 +742,13 @@ onUnmounted(() => {
 .controls {
   grid-area: controls;
 }
+/* 控制条左侧贴着音乐库/播放列表边栏时：左侧两角改直角（右侧保持 16px 圆角）；
+   无边栏时保持全圆角。连播/跟唱共用 panelClass，此处统一覆盖（scoped 下组件根节点带父作用域属性，选择器可命中） */
+.main.has-music .controls,
+.main.has-playlist .controls {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 .no-lyric {
   flex: 1;
   display: flex;
