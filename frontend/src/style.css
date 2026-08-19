@@ -42,7 +42,11 @@
 
 /* 浅色主题 */
 html[data-theme="light"] {
-  --accent-ink: color-mix(in srgb, var(--accent) 52%, #000); /* 浅色主题 on 态文字深色化：52%+#000 在实色卡面(native)与 84% 毛玻璃(chromium 降级)两路径下全 accent ≥4.5:1（teal 最紧 4.98/4.92；55% 时降级路径 4.47 不达标） */
+  --accent-ink: color-mix(
+    in srgb,
+    var(--accent) 52%,
+    #000
+  ); /* 浅色主题 on 态文字深色化：52%+#000 在实色卡面(native)与 84% 毛玻璃(chromium 降级)两路径下全 accent ≥4.5:1（teal 最紧 4.98/4.92；55% 时降级路径 4.47 不达标） */
   --accent-text: color-mix(in srgb, var(--accent) 34%, #1c2030); /* 高亮句文字用深色混合保证可读 */
   --bg: #f4f5fa;
   --bg2: #e9ebf3;
