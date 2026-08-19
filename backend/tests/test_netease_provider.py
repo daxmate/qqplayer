@@ -164,7 +164,10 @@ SONG = {
 
 # ============ search ============
 def test_search_parses_songs():
-    """标准 JSON 响应解析：id 转 str、artist 逗号连接、duration mm:ss、album/cover/level"""
+    """标准 JSON 响应解析：id 转 str、artist 逗号连接、duration mm:ss、album/cover/level
+
+    cover 为 http:// 明文 URL 时自动转 https://（Swift 壳 ATS 拦截外网 http）。
+    """
     client = FakeClient()
     client.posts.append(FakeResponse({"result": {"songs": [SONG]}}))
     provider = make_provider(client)
@@ -175,7 +178,7 @@ def test_search_parses_songs():
     assert it["title"] == "夜に駆ける"
     assert it["artist"] == "YOASOBI, 某人"
     assert it["album"] == "THE BOOK"
-    assert it["cover"] == "http://p1.music.126.net/cover.jpg"
+    assert it["cover"] == "https://p1.music.126.net/cover.jpg"
     assert it["duration"] == "04:21"
     assert it["level"] == "exhigh"
     # payload 结构：header + e_r + 查询参数（解密 params 验证），limit 透传
@@ -185,6 +188,55 @@ def test_search_parses_songs():
     assert dec["e_r"] is True
     assert dec["header"]["deviceId"]
     assert dec["s"] == "夜に駆ける" and dec["limit"] == 5 and dec["total"] is True
+
+
+def test_search_cover_http_to_https():
+    """http:// 封面 URL → 转 https://（大小写不敏感，仅替换前缀）"""
+    song = {
+        "id": 1,
+        "name": "x",
+        "ar": [{"name": "a"}],
+        "al": {"name": "al", "picUrl": "HTTP://p2.music.126.net/a/b.jpg?param=300"},
+        "dt": 1000,
+    }
+    client = FakeClient()
+    client.posts.append(FakeResponse({"result": {"songs": [song]}}))
+    item = make_provider(client).search("x")[0]
+    assert item["cover"] == "https://p2.music.126.net/a/b.jpg?param=300"
+
+
+def test_search_cover_already_https_unchanged():
+    """已是 https:// 的封面原样返回"""
+    song = {
+        "id": 1,
+        "name": "x",
+        "ar": [{"name": "a"}],
+        "al": {"name": "al", "picUrl": "https://p1.music.126.net/cover.jpg"},
+        "dt": 1000,
+    }
+    client = FakeClient()
+    client.posts.append(FakeResponse({"result": {"songs": [song]}}))
+    item = make_provider(client).search("x")[0]
+    assert item["cover"] == "https://p1.music.126.net/cover.jpg"
+
+
+def test_search_cover_non_http_unchanged():
+    """非 http 开头（如相对路径/空值）原样返回，空值 → None"""
+    song = {
+        "id": 1,
+        "name": "x",
+        "ar": [{"name": "a"}],
+        "al": {"name": "al", "picUrl": "//p1.music.126.net/cover.jpg"},
+        "dt": 1000,
+    }
+    client = FakeClient()
+    client.posts.append(FakeResponse({"result": {"songs": [song]}}))
+    assert make_provider(client).search("x")[0]["cover"] == "//p1.music.126.net/cover.jpg"
+
+    song_no_cover = {"id": 2, "name": "y", "ar": [{"name": "b"}], "al": {"name": "al"}, "dt": 1000}
+    client2 = FakeClient()
+    client2.posts.append(FakeResponse({"result": {"songs": [song_no_cover]}}))
+    assert make_provider(client2).search("x")[0]["cover"] is None
 
 
 def test_search_encrypted_response():

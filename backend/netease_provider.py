@@ -147,6 +147,16 @@ def _is_http_url(value: str) -> bool:
     return bool(_HTTP_URL_RE.match(value.strip()))
 
 
+def _to_https(url):
+    """http:// 明文 URL → https://（网易云 CDN 同路径支持 https）；其余原样返回
+
+    用途：Swift 壳（WKWebView）ATS 拦截外网 http 资源，封面必须 https 才能显示。
+    """
+    if isinstance(url, str) and url.lower().startswith("http://"):
+        return "https://" + url[7:]
+    return url
+
+
 def word_json_to_lrc(text: str) -> str:
     """新版逐字歌词（JSON-lines：每行 {"t": 毫秒, "c": [{"tx": 文本}]}）→ 普通 LRC
 
@@ -254,7 +264,7 @@ class NeteaseProvider:
             "title": song.get("name") or "未知歌曲",
             "artist": _join_artists(song.get("ar") or song.get("artists")) or "未知歌手",
             "album": album.get("name") or None,
-            "cover": album.get("picUrl") or None,
+            "cover": _to_https(album.get("picUrl")) or None,
             "duration": _format_duration(song.get("dt") or song.get("duration")),
             "level": DEFAULT_LEVEL,
         }
