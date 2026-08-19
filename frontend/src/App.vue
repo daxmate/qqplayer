@@ -615,8 +615,7 @@ onUnmounted(() => {
 }
 /* 跟唱模式：面板容器圆角统一直角（用户反馈跟唱界面圆角不协调） */
 .main.karaoke .karaoke-panel,
-.main.karaoke .controls,
-.main.karaoke .activity-bar {
+.main.karaoke .controls {
   border-radius: 0;
 }
 .main.continuous.has-tabbar.no-controls,

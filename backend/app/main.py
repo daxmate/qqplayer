@@ -8,7 +8,6 @@
 import asyncio
 import sys
 import threading
-import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -59,7 +58,7 @@ def _apply_persisted_library_path() -> None:
 
 
 def main():
-    """启动入口：初始化歌曲库 + 打印启动信息 + 自动开浏览器 + uvicorn 服务"""
+    """启动入口：初始化歌曲库 + 打印启动信息 + uvicorn 服务（不自动开浏览器，人工测试在桌面壳进行）"""
     if len(sys.argv) > 1:
         state.LIBRARY = Path(sys.argv[1])
     else:
@@ -75,9 +74,7 @@ def main():
         print(f"   📁 监听歌曲库变动（去抖 {state.WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
     else:
         print("   📁 自动刷新已关闭（设置里可开启）")
-    threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host="0.0.0.0", port=state.DEFAULT_PORT, log_level="warning")
-
 
 if __name__ == "__main__":
     main()
