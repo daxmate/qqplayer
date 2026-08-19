@@ -135,16 +135,19 @@
         </div>
         <div class="foot-actions">
           <!-- AI 对齐（通用区）：自动用当前已加载歌词；无歌词时用粘贴文本 -->
-          <button
-            class="align-btn"
-            :disabled="aligning || !alignSourceText.trim()"
-            :title="t('spec.align')"
-            @click="doAlign"
-          >
-            <Loader2 v-if="aligning" :size="14" class="spin" />
-            <Sparkles v-else :size="14" />
-            {{ aligning ? t("spec.aligning") : t("spec.align") }}
-          </button>
+          <div class="align-wrap">
+            <button
+              class="align-btn"
+              :disabled="aligning || !alignSourceText.trim()"
+              :title="t('spec.alignExperimentalHint')"
+              @click="doAlign"
+            >
+              <Loader2 v-if="aligning" :size="14" class="spin" />
+              <Sparkles v-else :size="14" />
+              {{ aligning ? t("spec.aligning") : t("spec.align") }}
+            </button>
+            <span v-if="!aligning" class="beta-chip">{{ t("spec.alignExperimental") }}</span>
+          </div>
           <button v-if="manualSpecified" class="btn-danger" @click="clearSpec">
             <Trash2 :size="13" />{{ t("spec.clear") }}
           </button>
@@ -803,6 +806,25 @@ watch(
   border-color: var(--accent);
   outline: none;
 }
+.align-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.beta-chip {
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #f59e0b55;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .align-btn {
   display: inline-flex;
   align-items: center;
