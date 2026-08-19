@@ -16,7 +16,6 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { state, playbackSettings, VISUALIZER_STYLES } from "../composables/usePlayer.js";
-import { useVizLoop } from "../composables/useVizLoop.js";
 import {
   ensureAnalyser,
   getAnalyser,
@@ -43,6 +42,8 @@ const style = computed(() =>
     : "bars",
 );
 
+let rafId = 0;
+let running = false;
 let ro = null;
 
 function resize() {
@@ -50,6 +51,7 @@ function resize() {
   if (!cv) return;
   const parent = cv.parentElement;
   const w = parent ? parent.clientWidth : 150;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   const pw = Math.max(1, Math.round(w * dpr));
   const ph = Math.max(1, Math.round(36 * dpr));
   if (cv.width !== pw) cv.width = pw;
@@ -77,7 +79,7 @@ function paint() {
   const a = ensureAnalyser() || getAnalyser();
   const active = !!(a && state.isPlaying);
   const { accent, accent2 } = accentColors();
-  const opts = { accent, accent2, small: true, dpr };
+  const opts = { accent, accent2, small: true, dpr: Math.min(2, window.devicePixelRatio || 1) };
   const s = style.value;
   // 播放中读真实数据；暂停/降级 → 各样式画静态轮廓（呼吸，不抛错）
   const data = active ? (s === "wave" ? readWaveData(a, 24) : readBarData(a, 24)) : null;
@@ -102,13 +104,27 @@ function paint() {
   }
 }
 
-// rAF 循环按环境差异化：壳满帧/暂停呼吸照旧；浏览器 30fps 节流、暂停停 rAF、隐藏停 rAF
-// （循环启停与 paint 的协作全部收敛在 useVizLoop 内，组件只负责 paint 与开关/播放态来源）
-const { dpr, dispose: disposeVizLoop } = useVizLoop({
-  paint,
-  isEnabled: () => enabled.value,
-  isPlaying: () => !!state.isPlaying,
-});
+function tick() {
+  rafId = requestAnimationFrame(tick);
+  paint();
+}
+
+watch(
+  () => enabled.value,
+  () => {
+    if (enabled.value) {
+      if (!running) {
+        running = true;
+        rafId = requestAnimationFrame(tick);
+      }
+    } else if (running) {
+      running = false;
+      cancelAnimationFrame(rafId);
+      paint();
+    }
+  },
+  { flush: "sync", immediate: true },
+);
 
 onMounted(() => {
   resize();
@@ -120,7 +136,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  disposeVizLoop();
+  running = false;
+  cancelAnimationFrame(rafId);
   if (ro) ro.disconnect();
 });
 </script>
