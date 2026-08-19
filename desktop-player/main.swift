@@ -883,7 +883,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         switch type {
         case "readerState":
             // 阅读器状态缓存（前端 Reader.vue 推送，驱动右键菜单插入逻辑）
-            MainWebView.readerActive = dict["active"] as? Bool ?? false
+            let active = dict["active"] as? Bool ?? false
+            // 图书模式：隐藏迷你窗/桌面歌词（前端入口同步隐藏，此处兜底防漏关）
+            if active && !MainWebView.readerActive {
+                hideMiniPanel()
+                hideLyricPanel()
+            }
+            MainWebView.readerActive = active
             MainWebView.readerHasSelection = dict["hasSelection"] as? Bool ?? false
             MainWebView.readerSelectedText = dict["text"] as? String ?? ""
             MainWebView.readerHasHighlight = dict["hasHighlight"] as? Bool ?? false
@@ -921,6 +927,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // 打开迷你窗：显示迷你面板 + 主窗口自动隐藏
             showMiniPanel()
             mainWindow.orderOut(nil)
+        case "closeMini":
+            // 关闭迷你窗：隐藏面板 + 恢复主窗口（与 openMini 对称）
+            hideMiniPanel()
+            showMainWindow()
         case "lyric":
             // 桌面歌词开关：按主页面状态显示/隐藏面板
             if let show = dict["show"] as? Bool {
@@ -997,15 +1007,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     // URL scheme 调起（qqplayer / qqplayermini / qqplayerlyric 同一进程，按 scheme 显示对应窗口）
+    // 关闭走 qqplayermini://close / qqplayerlyric://close（host == "close"，浏览器端关闭浮窗的通道）
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
+            let close = url.host == "close"
             switch url.scheme {
             case "qqplayer":
                 showMainWindow()
             case "qqplayermini":
-                showMiniPanel()
+                if close {
+                    hideMiniPanel()
+                    showMainWindow()
+                } else {
+                    showMiniPanel()
+                }
             case "qqplayerlyric":
-                showLyricPanel()
+                if close {
+                    hideLyricPanel()
+                } else {
+                    showLyricPanel()
+                }
             default:
                 break
             }

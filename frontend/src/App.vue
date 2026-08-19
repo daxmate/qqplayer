@@ -46,6 +46,7 @@
         </div>
         <div class="topbar-right">
           <button
+            v-if="state.mode !== 'books'"
             class="gear-btn mini-btn"
             :class="{ on: miniRunning }"
             :title="miniRunning ? t('app.miniMode.running') : t('app.miniMode.standalone')"
@@ -55,6 +56,7 @@
             <span class="gear-label">{{ t("app.miniMode.label") }}</span>
           </button>
           <button
+            v-if="state.mode !== 'books'"
             class="gear-btn lyric-float-btn"
             :class="{ on: desktopLyricSettings.enabled }"
             :title="
@@ -198,7 +200,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Music2,
@@ -290,6 +292,42 @@ const panelClass = computed(() => {
 function switchMode(m) {
   state.mode = m;
 }
+
+// 图书模式：关闭迷你窗/桌面歌词（入口按钮已隐藏，此处处理已开着的浮窗）
+// 壳内走 native 消息；浏览器走 close scheme（壳新增 qqplayermini://close / qqplayerlyric://close）
+function closeFloatingForReader() {
+  if (desktopLyricSettings.enabled) {
+    desktopLyricSettings.enabled = false;
+    if (window.qqplayerNative) {
+      window.webkit.messageHandlers.native.postMessage({ type: "lyric", show: false });
+    } else {
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = "qqplayerlyric://close";
+      document.body.appendChild(iframe);
+      setTimeout(() => iframe.remove(), 1000);
+    }
+  }
+  if (miniRunning.value) {
+    if (window.qqplayerNative) {
+      window.webkit.messageHandlers.native.postMessage({ type: "closeMini" });
+    } else {
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = "qqplayermini://close";
+      document.body.appendChild(iframe);
+      setTimeout(() => iframe.remove(), 1000);
+    }
+    refreshMiniStatus();
+  }
+}
+
+watch(
+  () => state.mode,
+  (mode) => {
+    if (mode === "books") closeFloatingForReader();
+  },
+);
 
 // 桌面歌词悬浮窗：原生壳内直接开关面板（同进程）；浏览器版走 URL scheme 调起（拉起主 app 显示面板）
 // 用隐藏 iframe 触发（location.href 会让当前页面尝试导航到未知协议，Vivaldi 可能弹窗/卡顿）

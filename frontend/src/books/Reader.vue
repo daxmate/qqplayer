@@ -49,6 +49,10 @@
         >
           <Search :size="18" />
         </button>
+        <!-- 词典管理常驻入口（查词空态之外任何时候可打开，V2 改进） -->
+        <button class="reader-btn icon" :title="t('books.dictManage')" @click="onOpenDictManager">
+          <BookOpenText :size="18" />
+        </button>
         <button
           class="reader-btn icon"
           :class="{ on: panelOpen }"
@@ -219,6 +223,7 @@ import { useI18n } from "vue-i18n";
 import {
   Bookmark,
   BookOpen,
+  BookOpenText,
   ChevronLeft,
   ChevronRight,
   Highlighter,
