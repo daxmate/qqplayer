@@ -159,7 +159,6 @@ button {
 /* ============ 封面模糊背景（html[data-blur="true"]）============
    主面板半透明 + backdrop-filter，让模糊封面层透出（类似 Apple Music） */
 html[data-blur="true"] .panel,
-html[data-blur="true"] .center,
 html[data-blur="true"] .lyric-panel,
 html[data-blur="true"] .karaoke-panel {
   background: color-mix(in srgb, var(--card) 60%, transparent);
