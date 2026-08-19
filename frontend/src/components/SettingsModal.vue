@@ -712,6 +712,58 @@
                       <span class="switch" :class="{ on: lyricSettings.autoScroll }"><i /></span>
                     </div>
                   </div>
+                  <!-- AMLL 三特效（仅 amll 引擎生效）：壳内默认开 = 满血；浏览器默认关防 CPU 高占用 -->
+                  <div class="amll-head">
+                    <span class="amll-head-label">{{ t("settings.amllEffects") }}</span>
+                    <button
+                      class="amll-info-btn"
+                      :class="{ on: amllPerfHintOpen }"
+                      :title="t('settings.amllPerfHint')"
+                      :aria-expanded="String(amllPerfHintOpen)"
+                      @click="amllPerfHintOpen = !amllPerfHintOpen"
+                    >
+                      <Info :size="13" />
+                    </button>
+                  </div>
+                  <div v-if="amllPerfHintOpen" class="setting-desc hint amll-perf-hint">
+                    {{ t("settings.amllPerfHint") }}
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="lyricSettings.amllBlur = !lyricSettings.amllBlur"
+                    >
+                      <div>
+                        <div class="setting-label">{{ t("settings.amllBlur") }}</div>
+                        <div class="setting-desc">{{ t("settings.amllBlurDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.amllBlur }"><i /></span>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="lyricSettings.amllSpring = !lyricSettings.amllSpring"
+                    >
+                      <div>
+                        <div class="setting-label">{{ t("settings.amllSpring") }}</div>
+                        <div class="setting-desc">{{ t("settings.amllSpringDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.amllSpring }"><i /></span>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="lyricSettings.amllScale = !lyricSettings.amllScale"
+                    >
+                      <div>
+                        <div class="setting-label">{{ t("settings.amllScale") }}</div>
+                        <div class="setting-desc">{{ t("settings.amllScaleDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: lyricSettings.amllScale }"><i /></span>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- 时间校准 -->
@@ -1274,7 +1326,7 @@ import {
   DOWNLOAD_SETTINGS_DEFAULTS,
   videoSettings,
   VIDEO_SETTINGS_DEFAULTS,
-  LYRIC_SETTINGS_DEFAULTS,
+  resetLyricSettingsToDefaults,
   UI_SETTINGS_DEFAULTS,
   PLAYBACK_SETTINGS_DEFAULTS,
   DESKTOP_LYRIC_DEFAULTS,
@@ -1317,6 +1369,7 @@ const repoUrl = "https://github.com/daxmate/qqplayer";
 
 const tab = ref("playback");
 const lyricSubTab = ref("app"); // 歌词 tab 子页：'app' APP 歌词 | 'desktop' 桌面歌词
+const amllPerfHintOpen = ref(false); // AMLL 三特效性能提示（info 按钮）展开状态
 const libInput = ref("");
 const saving = ref(false);
 const error = ref("");
@@ -1559,7 +1612,7 @@ function stepAbMax(delta) {
 // 恢复默认：重置全部设置为出厂值（watch 自动持久化；音乐库设置走后端）
 function resetAll() {
   Object.assign(playbackSettings, PLAYBACK_SETTINGS_DEFAULTS);
-  Object.assign(lyricSettings, LYRIC_SETTINGS_DEFAULTS);
+  resetLyricSettingsToDefaults(); // 歌词：AMLL 三特效按环境差异化（壳满血 / 浏览器默认关）
   Object.assign(uiSettings, UI_SETTINGS_DEFAULTS);
   Object.assign(downloadSettings, DOWNLOAD_SETTINGS_DEFAULTS);
   Object.assign(videoSettings, VIDEO_SETTINGS_DEFAULTS);
@@ -2418,6 +2471,49 @@ kbd {
 .hint {
   margin-top: 10px;
   line-height: 1.6;
+}
+
+/* AMLL 三特效：子标题 + info 按钮（点击展开/收起性能提示） */
+.amll-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px;
+}
+.amll-head-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.amll-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--text3);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+@media (hover: hover) {
+  .amll-info-btn:hover {
+    color: var(--accent-text);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+}
+.amll-info-btn.on {
+  color: var(--accent-text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.amll-perf-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
 }
 
 /* 关于 */

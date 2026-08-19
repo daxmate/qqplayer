@@ -234,6 +234,32 @@ describe("settingsIndex 行为（get/set 往返）", () => {
     }
   });
 
+  it("AMLL 三特效条目：toggle 类型、get/set 读写 lyricSettings.amll*、关键词含 模糊/弹簧/放大", async () => {
+    const en = (await import("../locales/en-US/index.js")).default;
+    const entries = ["amllBlur", "amllSpring", "amllScale"].map((id) =>
+      settingsIndex.find((e) => e.id === id),
+    );
+    expect(entries.every(Boolean)).toBe(true);
+    for (const e of entries) {
+      expect(e.category).toBe("lyric");
+      expect(e.subTab).toBe("app");
+      expect(e.type).toBe("toggle");
+      // 语言包齐全（zh 文案 + en 覆盖）
+      expect(resolveKey(zhCN, e.labelKey)).toBeTruthy();
+      expect(resolveKey(en, e.labelKey)).toBeTruthy();
+      // 关键词覆盖用户可能搜的词
+      const kw = e.keywords.join(" ");
+      expect(kw).toMatch(/模糊|弹簧|放大/);
+      expect(kw).toMatch(/amll/i);
+      // get/set 往返
+      const orig = e.get();
+      e.set(!orig);
+      expect(e.get()).toBe(!orig);
+      e.set(orig);
+      expect(e.get()).toBe(orig);
+    }
+  });
+
   it("行为测试后各 reactive 恢复默认（未污染共享状态）", () => {
     // sleepTimerOn 恢复走 cancelSleepTimer（清除倒计时 interval），此处兜底断言字段
     expect(playbackSettings.sleepTimerOn).toBe(false);

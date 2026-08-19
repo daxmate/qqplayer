@@ -608,6 +608,42 @@ export const settingsIndex = [
     },
   },
   {
+    id: "amllBlur",
+    category: "lyric",
+    subTab: "app",
+    labelKey: "settings.amllBlur",
+    keywords: ["amll模糊", "模糊效果", "高斯模糊", "歌词模糊", "amll blur", "blur"],
+    type: "toggle",
+    get: () => lyricSettings.amllBlur,
+    set: (v) => {
+      lyricSettings.amllBlur = v;
+    },
+  },
+  {
+    id: "amllSpring",
+    category: "lyric",
+    subTab: "app",
+    labelKey: "settings.amllSpring",
+    keywords: ["弹簧动画", "物理动画", "amll弹簧", "弹簧", "spring", "amll spring"],
+    type: "toggle",
+    get: () => lyricSettings.amllSpring,
+    set: (v) => {
+      lyricSettings.amllSpring = v;
+    },
+  },
+  {
+    id: "amllScale",
+    category: "lyric",
+    subTab: "app",
+    labelKey: "settings.amllScale",
+    keywords: ["放大效果", "当前行放大", "amll放大", "scale", "放大动画"],
+    type: "toggle",
+    get: () => lyricSettings.amllScale,
+    set: (v) => {
+      lyricSettings.amllScale = v;
+    },
+  },
+  {
     id: "offset",
     category: "lyric",
     subTab: "app",

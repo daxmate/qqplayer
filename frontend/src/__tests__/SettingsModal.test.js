@@ -26,7 +26,7 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const SettingsModal = (await import("../components/SettingsModal.vue")).default;
-const { playbackSettings, uiSettings } = await import("../composables/usePlayer.js");
+const { playbackSettings, uiSettings, lyricSettings } = await import("../composables/usePlayer.js");
 const { VISUALIZER_STYLES } = await import("../composables/playerCore.js");
 const zhCN = (await import("../locales/zh-CN/index.js")).default;
 
@@ -219,6 +219,81 @@ describe("SettingsModal 视频分类 - 浏览器 Cookie 来源", () => {
     select.dispatchEvent(new Event("change"));
     await nextTick();
     expect(videoSettings.cookiesFromBrowser).toBe("chrome");
+    w.unmount();
+  });
+});
+
+describe("SettingsModal 歌词分类 - AMLL 三特效开关", () => {
+  async function openLyricTab() {
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+      el.textContent.includes("歌词"),
+    );
+    expect(navItem).toBeTruthy();
+    navItem.click();
+    await nextTick();
+    return { w, root };
+  }
+
+  it("歌词分类渲染 AMLL 模糊/弹簧/放大三个开关，默认值跟随 lyricSettings", async () => {
+    lyricSettings.amllBlur = true;
+    lyricSettings.amllSpring = false;
+    lyricSettings.amllScale = true;
+    const { w, root } = await openLyricTab();
+    expect(root.textContent).toContain("AMLL 模糊效果");
+    expect(root.textContent).toContain("AMLL 弹簧动画");
+    expect(root.textContent).toContain("AMLL 放大效果");
+    // 三个开关行的 on/off 状态与设置一致
+    const rows = [...root.querySelectorAll(".toggle-row")].filter((el) =>
+      /AMLL (模糊效果|弹簧动画|放大效果)/.test(el.textContent),
+    );
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toContain("AMLL 模糊效果");
+    expect(rows[0].querySelector(".switch.on")).toBeTruthy();
+    expect(rows[1].textContent).toContain("AMLL 弹簧动画");
+    expect(rows[1].querySelector(".switch.on")).toBeFalsy();
+    expect(rows[2].textContent).toContain("AMLL 放大效果");
+    expect(rows[2].querySelector(".switch.on")).toBeTruthy();
+    w.unmount();
+  });
+
+  it("点击开关切换 lyricSettings.amll*（写入持久化链路的 reactive）", async () => {
+    lyricSettings.amllBlur = true;
+    const { w, root } = await openLyricTab();
+    const blurRow = [...root.querySelectorAll(".toggle-row")].find((el) =>
+      el.textContent.includes("AMLL 模糊效果"),
+    );
+    blurRow.click();
+    await nextTick();
+    expect(lyricSettings.amllBlur).toBe(false);
+    expect(blurRow.querySelector(".switch.on")).toBeFalsy();
+    blurRow.click();
+    await nextTick();
+    expect(lyricSettings.amllBlur).toBe(true);
+    w.unmount();
+  });
+
+  it("info 按钮渲染在 AMLL 三开关旁，点击展开/收起性能提示", async () => {
+    const { w, root } = await openLyricTab();
+    const btn = root.querySelector(".amll-info-btn");
+    expect(btn).toBeTruthy();
+    // 提示展开前不显示文案
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(root.textContent).not.toContain("性能影响巨大");
+    // 点击展开：提示出现，含关键文案
+    btn.click();
+    await nextTick();
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(root.textContent).toContain("性能影响巨大");
+    expect(root.textContent).toContain("CPU 占用");
+    expect(root.textContent).toContain("浏览器环境");
+    // 再点收起：提示消失
+    btn.click();
+    await nextTick();
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(root.textContent).not.toContain("性能影响巨大");
     w.unmount();
   });
 });

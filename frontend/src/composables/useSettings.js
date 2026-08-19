@@ -19,6 +19,12 @@ export const LYRIC_SETTINGS_DEFAULTS = {
   colorScheme: "theme", // 配色方案：'theme' 跟随主题强调色 | 其他见 LYRIC_SCHEMES
   jpColor: "", // 主行文字颜色（自定义，空 = 跟随 colorScheme）
   zhColor: "", // 翻译行文字颜色（自定义，空 = 跟随 colorScheme）
+  // AMLL 三特效（仅 amll 引擎生效；true = 满血效果）：
+  // 壳（window.qqplayerNative）默认开 = 现状零变化；浏览器默认关（防 CPU 高占用）——
+  // 见 loadLyricSettings 的环境差异化默认（localStorage 无存储值时生效）
+  amllBlur: true, // AMLL 歌词行 WebGL 高斯模糊滤镜（三个里最耗性能）
+  amllSpring: true, // AMLL 弹簧物理动画（官方注释：需要性能足够强劲的电脑）
+  amllScale: true, // AMLL 当前行放大动画
 };
 
 export const lyricSettings = reactive({ ...LYRIC_SETTINGS_DEFAULTS });
@@ -238,7 +244,25 @@ function loadDownloadSettings() {
 }
 loadDownloadSettings();
 
+// AMLL 三特效环境差异化默认：localStorage 无存储值时，壳（window.qqplayerNative）满血默认开；
+// 浏览器默认关（防 CPU 高占用）。用户手动改过的值由 loadLyricSettings 字段级覆盖（存储值优先）。
+export function applyAmllEnvDefaults() {
+  if (typeof window !== "undefined" && !window.qqplayerNative) {
+    lyricSettings.amllBlur = false;
+    lyricSettings.amllSpring = false;
+    lyricSettings.amllScale = false;
+  }
+}
+
+// 恢复歌词设置出厂默认（AMLL 三特效按环境差异化：壳内满血开 / 浏览器默认关）
+export function resetLyricSettingsToDefaults() {
+  Object.assign(lyricSettings, LYRIC_SETTINGS_DEFAULTS);
+  applyAmllEnvDefaults();
+}
+
 function loadLyricSettings() {
+  // 环境差异化默认必须先于存储值读取（未存储的字段用环境默认，存储的字段覆盖之）
+  applyAmllEnvDefaults();
   try {
     const raw = localStorage.getItem(LYRIC_SETTINGS_KEY);
     if (!raw) return;

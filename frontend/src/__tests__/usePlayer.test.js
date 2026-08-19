@@ -1693,6 +1693,56 @@ describe("歌词显示设置（lyricSettings）", () => {
     expect(lyricSettings.autoScroll).toBe(true);
   });
 
+  it("AMLL 三特效：浏览器（无壳）默认关闭，防 CPU 高占用", () => {
+    // jsdom 无 window.qqplayerNative → 浏览器环境：开箱默认关（localStorage 无存储值时）
+    expect(lyricSettings.amllBlur).toBe(false);
+    expect(lyricSettings.amllSpring).toBe(false);
+    expect(lyricSettings.amllScale).toBe(false);
+  });
+
+  it("AMLL 三特效：壳（window.qqplayerNative）内默认开启（满血，行为零变化）", async () => {
+    localStorage.removeItem(LYRIC_SETTINGS_KEY);
+    window.qqplayerNative = true;
+    vi.resetModules();
+    try {
+      const m = await import("../composables/usePlayer.js");
+      expect(m.lyricSettings.amllBlur).toBe(true);
+      expect(m.lyricSettings.amllSpring).toBe(true);
+      expect(m.lyricSettings.amllScale).toBe(true);
+      expect(m.lyricSettings.fontSize).toBe(20); // 其他字段不受影响
+    } finally {
+      delete window.qqplayerNative;
+    }
+  });
+
+  it("AMLL 三特效：已存储值优先（壳内存 false → 关；浏览器存 true → 开）", async () => {
+    // 壳环境：存储值 false 覆盖环境默认 true
+    localStorage.setItem(
+      LYRIC_SETTINGS_KEY,
+      JSON.stringify({ amllBlur: false, amllSpring: false, amllScale: false }),
+    );
+    window.qqplayerNative = true;
+    vi.resetModules();
+    try {
+      const m = await import("../composables/usePlayer.js");
+      expect(m.lyricSettings.amllBlur).toBe(false);
+      expect(m.lyricSettings.amllSpring).toBe(false);
+      expect(m.lyricSettings.amllScale).toBe(false);
+    } finally {
+      delete window.qqplayerNative;
+    }
+    // 浏览器环境：存储值 true 覆盖环境默认 false
+    localStorage.setItem(
+      LYRIC_SETTINGS_KEY,
+      JSON.stringify({ amllBlur: true, amllSpring: true, amllScale: true }),
+    );
+    vi.resetModules();
+    const m2 = await import("../composables/usePlayer.js");
+    expect(m2.lyricSettings.amllBlur).toBe(true);
+    expect(m2.lyricSettings.amllSpring).toBe(true);
+    expect(m2.lyricSettings.amllScale).toBe(true);
+  });
+
   it("修改后自动持久化到 localStorage", async () => {
     localStorage.removeItem(LYRIC_SETTINGS_KEY);
     lyricSettings.fontSize = 26;

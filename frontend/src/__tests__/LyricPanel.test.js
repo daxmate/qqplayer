@@ -6,12 +6,23 @@ import { flushPromises } from "@vue/test-utils";
 import { mount } from "@vue/test-utils";
 
 // amll LyricPlayer 依赖 pixi（jsdom 下 ESM 互操作报错）；面板测试只关心行为，mock 掉组件
-// 数据通过 data-lines 属性透出，供测试断言
+// 数据通过 data-lines 属性透出，供测试断言；enable-* 三特效以 data-* 透出（props 绑定断言）
 vi.mock("@applemusic-like-lyrics/vue", () => ({
   LyricPlayer: {
     name: "LyricPlayer",
-    template: '<div class="amll-mock" :data-lines="JSON.stringify(lyricLines)" />',
-    props: ["lyricLines", "currentTime", "alignPosition"],
+    template:
+      '<div class="amll-mock" :data-lines="JSON.stringify(lyricLines)" ' +
+      ':data-enable-spring="String(enableSpring)" ' +
+      ':data-enable-blur="String(enableBlur)" ' +
+      ':data-enable-scale="String(enableScale)" />',
+    props: [
+      "lyricLines",
+      "currentTime",
+      "alignPosition",
+      "enableSpring",
+      "enableBlur",
+      "enableScale",
+    ],
   },
 }));
 
@@ -188,5 +199,33 @@ describe("LyricPanel 对齐设置", () => {
     await flushPromises();
     const host = wrapper.find(".amll-host");
     expect(host.attributes("data-align")).toBe("right");
+  });
+});
+
+describe("LyricPanel AMLL 三特效 props 绑定", () => {
+  it("enable-spring/blur/scale 跟随 lyricSettings.amll*（关闭时传 false）", async () => {
+    lyricSettings.engine = "amll";
+    lyricSettings.amllSpring = false;
+    lyricSettings.amllBlur = false;
+    lyricSettings.amllScale = false;
+    const wrapper = mountPanel();
+    await flushPromises();
+    const mock = wrapper.find(".amll-mock");
+    expect(mock.attributes("data-enable-spring")).toBe("false");
+    expect(mock.attributes("data-enable-blur")).toBe("false");
+    expect(mock.attributes("data-enable-scale")).toBe("false");
+  });
+
+  it("开启时传 true（壳内默认满血）", async () => {
+    lyricSettings.engine = "amll";
+    lyricSettings.amllSpring = true;
+    lyricSettings.amllBlur = true;
+    lyricSettings.amllScale = true;
+    const wrapper = mountPanel();
+    await flushPromises();
+    const mock = wrapper.find(".amll-mock");
+    expect(mock.attributes("data-enable-spring")).toBe("true");
+    expect(mock.attributes("data-enable-blur")).toBe("true");
+    expect(mock.attributes("data-enable-scale")).toBe("true");
   });
 });
