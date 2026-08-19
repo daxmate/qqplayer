@@ -16,10 +16,12 @@ jobs:
           python-version: "3.12"
       - name: Install system deps (liblzo2-dev for python-lzo, used by readmdict)
         # apt 在 runner 上偶发挂起（曾多次卡 20+ 分钟）：加 timeout-minutes 快速失败 + 传输超时/重试
-        # azure.archive.ubuntu.com 在 runner 上持续 Ign（连不上），archive.ubuntu.com 可达——先把源替换掉再 update
+        # azure.archive.ubuntu.com 在 runner 上持续 Ign（连不上），archive.ubuntu.com 可达。
+        # 注意：ubuntu-24.04 runner 用 /etc/apt/apt-mirrors.txt mirrorlist 选源（sources 里 URIs 是 mirror+file:...），
+        # 只改 sources 文件无效——必须把 mirrorlist 里的 azure 也换掉（sed 保留原 scheme）
         timeout-minutes: 3
         run: |
-          sudo sed -i 's|http://azure.archive.ubuntu.com|http://archive.ubuntu.com|g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo sed -i 's|//azure.archive.ubuntu.com|//archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
           sudo apt-get install -y liblzo2-dev
       - name: Install deps
