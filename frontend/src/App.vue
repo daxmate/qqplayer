@@ -613,10 +613,12 @@ onUnmounted(() => {
   grid-template-rows: 1fr;
   grid-template-areas: "center";
 }
-/* 跟唱模式：面板容器圆角统一直角（用户反馈跟唱界面圆角不协调） */
-.main.karaoke .karaoke-panel,
+/* 跟唱模式：面板圆角——歌词面板右上、控制条右下贴窗口边缘保留圆角，其余角直角 */
+.main.karaoke .karaoke-panel {
+  border-radius: 0 16px 0 0;
+}
 .main.karaoke .controls {
-  border-radius: 0;
+  border-radius: 0 0 16px 0;
 }
 .main.continuous.has-tabbar.no-controls,
 .main.karaoke.has-tabbar.no-controls {
