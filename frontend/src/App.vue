@@ -613,6 +613,12 @@ onUnmounted(() => {
   grid-template-rows: 1fr;
   grid-template-areas: "center";
 }
+/* 跟唱模式：面板容器圆角统一直角（用户反馈跟唱界面圆角不协调） */
+.main.karaoke .karaoke-panel,
+.main.karaoke .controls,
+.main.karaoke .activity-bar {
+  border-radius: 0;
+}
 .main.continuous.has-tabbar.no-controls,
 .main.karaoke.has-tabbar.no-controls {
   grid-template-areas: "activity center";
