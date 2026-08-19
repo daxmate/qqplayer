@@ -20,16 +20,25 @@ import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
-export const audio = new Audio();
+// 双元素设计（2026-08-19，WebKit 变速缺陷）：
+// audioEq 接 Web Audio 图（EQ/频谱，常态 1.0 播放）；audioBare 永不接图（变速用）。
+// WebKit 中 createMediaElementSource 接管后变速（尤其 0.75 减速）走缺陷链路会卡顿，
+// 且元素被接管后无法归还（规范限制）→ 变速时切到裸元素走原生媒体管线（流畅），
+// 回 1.0 切回图元素（EQ 照常）。audio 为当前活动元素引用（live binding，其他模块自动跟随）。
+export const audioEq = new Audio();
+export const audioBare = new Audio();
+export let audio = audioEq;
 audio.preload = "auto";
+audioBare.preload = "auto";
 // 包装 play：每次播放前确保 Web Audio 图就绪（懒创建 + resume，autoplay policy 需要用户手势）
 // 均衡器常驻音频图后，audio 元素的声音只经过 AudioContext 输出，context suspended 时会无声，
 // 所以必须在 play 前 resume。注意：图创建与 resume 发起是同步的（在手势栈内生效），
 // 但 play() 的返回不受异步 resume 阻塞——否则自动切歌等场景的播放状态更新会延迟。
-const origPlay = audio.play.bind(audio);
-audio.play = () => {
+// 图元素 play 时懒建图；裸元素（变速）不建图（原生管线）
+const origEqPlay = audioEq.play.bind(audioEq);
+audioEq.play = () => {
   ensureAudioGraph();
-  return origPlay();
+  return origEqPlay();
 };
 
 export const state = reactive({
@@ -180,7 +189,41 @@ let audioCtx = null; // AudioContext 实例（懒初始化，常驻）
 let eqFilters = []; // 10 个 BiquadFilter（peaking），与 EQ_BANDS 对齐
 let eqGraphFailed = false; // 创建失败标记（降级为直通，不再重试）
 
+// 变速切换中标志：抑制 pause 回调的播放会话 flush（避免变速产生断裂的播放记录）
+let swappingAudio = false;
+
+// 切换活动音频元素（变速 ↔ 常速）：状态迁移到目标元素后接管播放。
+// 变速（0.75/1.25）→ audioBare（原生媒体管线，WebKit 变速流畅）；
+// 1.0 → audioEq（Web Audio 图，EQ/频谱生效）。
+// 切换瞬间有短暂中断（~100ms：pause → src/seek → play），变速是主动操作，可接受。
+function swapAudioElement(next) {
+  if (next === audio) return;
+  const cur = audio;
+  const wasPlaying = !cur.paused;
+  const t = cur.currentTime || 0;
+  const src = cur.src;
+  swappingAudio = true;
+  cur.pause();
+  if (src) {
+    next.src = src; // 同源（本地/代理 URL）浏览器缓存秒开
+    next.volume = cur.volume;
+    next.muted = cur.muted;
+    next.playbackRate = state.speed;
+    if (t > 0) next.currentTime = t; // src 未就绪时设 currentTime：浏览器排队到可 seek 后生效
+  }
+  audio = next;
+  swappingAudio = false;
+  if (wasPlaying && src) next.play().catch(() => {});
+}
+
+// 统一变速入口（4 处赋值共用）：变速时切到裸元素（原生管线流畅），1.0 切回图元素（EQ）
+function applySpeed() {
+  swapAudioElement(state.speed === 1.0 ? audioEq : audioBare);
+  audio.playbackRate = state.speed;
+}
+
 // 确保音频图就绪（首次播放/用户手势时创建并 resume）。
+// 只接管 audioEq（图元素）；audioBare（变速）永不接管。
 // 无 AudioContext 环境（旧浏览器/测试）静默降级，不影响播放。
 function ensureAudioGraph() {
   if (audioCtx || eqGraphFailed) return Promise.resolve();
@@ -188,7 +231,7 @@ function ensureAudioGraph() {
   if (!AC) return Promise.resolve();
   try {
     const ctx = new AC();
-    const src = ctx.createMediaElementSource(audio);
+    const src = ctx.createMediaElementSource(audioEq);
     let node = src;
     for (const f of EQ_BANDS) {
       const filter = ctx.createBiquadFilter();
@@ -239,6 +282,8 @@ export function _resetEqGraph() {
   audioCtx = null;
   eqFilters = [];
   eqGraphFailed = false;
+  swappingAudio = false;
+  audio = audioEq; // 活动元素复位（测试用例隔离）
 }
 
 // 均衡器设置变化 → 实时应用到音频图（未创建时下次创建应用）
@@ -1413,7 +1458,7 @@ export async function playPreview(desc, opts = {}) {
   state.currentSong = song;
   state.isPlaying = false;
   audio.src = streamProxyUrl(src);
-  audio.playbackRate = state.speed;
+  applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
   audio.volume = state.muted ? 0 : state.volume;
   state.currentTime = 0;
   state.duration = 0;
@@ -1507,7 +1552,7 @@ export async function selectSong(index, opts = {}) {
     src = "/api/audio?path=" + encodeURIComponent(state.currentSong.path);
   }
   audio.src = streamProxyUrl(src);
-  audio.playbackRate = state.speed;
+  applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   audio.volume = state.muted ? 0 : state.volume;
   state.currentTime = 0;
@@ -1602,7 +1647,7 @@ export function seek(t) {
 export function cycleSpeed() {
   const i = SPEEDS.indexOf(state.speed);
   state.speed = SPEEDS[(i + 1) % SPEEDS.length];
-  audio.playbackRate = state.speed;
+  applySpeed();
 }
 
 // 变速步进（任务 G 快捷键 [ / ]）：delta=-1 减速 / +1 加速；边界（0.75 最低 / 1.25 最高）不动作
@@ -1612,7 +1657,7 @@ export function stepSpeed(delta) {
   const next = i + delta;
   if (next < 0 || next >= SPEEDS.length) return;
   state.speed = SPEEDS[next];
-  audio.playbackRate = state.speed;
+  applySpeed();
 }
 
 // 连播 ↔ 跟唱模式切换（任务 G 快捷键 G；模式切换触发现有 watch → 上报播放会话）
@@ -1882,71 +1927,75 @@ export function stopKaraokeTicker() {
   }
 }
 
-// ============ 音频事件 ============
-audio.addEventListener("timeupdate", () => {
-  state.currentTime = audio.currentTime;
-  syncMediaPosition();
-  // 恢复上次播放：节流保存进度（10s 一次；页面关闭由 setupPlaybackFlush 兑底）
-  if (playbackSettings.resumeLast && Date.now() - lastSaveAt > 10000) {
-    lastSaveAt = Date.now();
-    saveLastPlayed();
-  }
-  // 跟唱模式：每句播完自动停 / AB 区间循环 / 单句循环（逻辑在 useAbLoop.js）
-  handleKaraokeTick(audio.currentTime);
-});
+// ============ 音频事件（双元素都绑：audioEq 常态 / audioBare 变速；audio 活动引用即触发元素）============
+function bindAudioEvents(el) {
+  el.addEventListener("timeupdate", () => {
+    state.currentTime = audio.currentTime;
+    syncMediaPosition();
+    // 恢复上次播放：节流保存进度（10s 一次；页面关闭由 setupPlaybackFlush 兑底）
+    if (playbackSettings.resumeLast && Date.now() - lastSaveAt > 10000) {
+      lastSaveAt = Date.now();
+      saveLastPlayed();
+    }
+    // 跟唱模式：每句播完自动停 / AB 区间循环 / 单句循环（逻辑在 useAbLoop.js）
+    handleKaraokeTick(audio.currentTime);
+  });
 
-audio.addEventListener("play", () => {
-  state.isPlaying = true;
-  syncMediaPlaybackState();
-  startKaraokeTicker(); // 跟唱句末高频检测（变速 0.75 时 timeupdate 太粗）
-  // 真正开始出声才建播放会话：选歌但未播放不记；
-  // 若已跟踪的歌不同（换歌后立即播放）→ 先上报旧会话
-  const song = state.currentSong;
-  if (song && (!playbackSession || playbackSession.key !== songSessionKey(song))) {
-    flushPlaybackSession();
-    startPlaybackSession();
-  }
-});
-audio.addEventListener("pause", () => {
-  state.isPlaying = false;
-  syncMediaPlaybackState();
-  stopKaraokeTicker(); // 暂停/句末自动停：停掉高频检测
-  // 暂停：结束当前播放会话并上报（跟唱模式句间自动暂停也会触发——
-  // 但因每句间隔很短，连续跟唱会被下一句 play 合并？不会——pause 即 flush，
-  // 跟唱模式每句暂停都会产生一条短记录。处理：跟唱模式下不因句间暂停 flush，
-  // 而是等切歌/播完/退出模式时再报。
-  // 这里仅对非跟唱模式的主动暂停 flush（连播/图书等；跟唱交还给时间锚点逻辑，
-  // 图书模式下用户读书放背景音乐，暂停是真实的收听行为）
-  if (state.mode !== "karaoke" && playbackSession) {
-    flushPlaybackSession();
-  }
-});
-audio.addEventListener("ended", () => {
-  state.isPlaying = false;
-  syncMediaPlaybackState();
-  // 自然播完：标记 completed 后上报（repeatOne 除外，同一首歌继续听）
-  if (playbackSession && state.playMode !== "repeatOne") {
-    playbackSession.completed = true;
-    flushPlaybackSession();
-  }
-  // 试听 / URL 播放：播完自然停止，不自动切歌（currentIndex 未动，next/prev 随时回主队列）
-  if (isPreviewSong(state.currentSong)) return;
-  // 跟唱模式播完自然停（句间暂停由时间锚点接管）；连播/图书等模式自动切歌继续
-  if (state.mode === "karaoke") return;
-  if (state.playMode === "repeatOne") {
-    // 单曲循环：重播本首
-    audio.currentTime = 0;
-    state.currentTime = 0;
-    audio.play().catch(() => {});
-    return;
-  }
-  if (state.playMode === "shuffle") {
-    nextShuffle({ autoPlay: true, source: "auto" });
-    return;
-  }
-  // 列表循环：顺序下一首并自动播放（连播 bug：只切歌不播放）
-  nextSong({ autoPlay: true, source: "auto" });
-});
+  el.addEventListener("play", () => {
+    state.isPlaying = true;
+    syncMediaPlaybackState();
+    startKaraokeTicker(); // 跟唱句末高频检测（变速 0.75 时 timeupdate 太粗）
+    // 真正开始出声才建播放会话：选歌但未播放不记；
+    // 若已跟踪的歌不同（换歌后立即播放）→ 先上报旧会话
+    const song = state.currentSong;
+    if (song && (!playbackSession || playbackSession.key !== songSessionKey(song))) {
+      flushPlaybackSession();
+      startPlaybackSession();
+    }
+  });
+  el.addEventListener("pause", () => {
+    state.isPlaying = false;
+    syncMediaPlaybackState();
+    stopKaraokeTicker(); // 暂停/句末自动停：停掉高频检测
+    // 暂停：结束当前播放会话并上报（跟唱模式句间自动暂停也会触发——
+    // 但因每句间隔很短，连续跟唱会被下一句 play 合并？不会——pause 即 flush，
+    // 跟唱模式每句暂停都会产生一条短记录。处理：跟唱模式下不因句间暂停 flush，
+    // 而是等切歌/播完/退出模式时再报。
+    // 这里仅对非跟唱模式的主动暂停 flush（连播/图书等；跟唱交还给时间锚点逻辑，
+    // 图书模式下用户读书放背景音乐，暂停是真实的收听行为）
+    if (!swappingAudio && state.mode !== "karaoke" && playbackSession) {
+      flushPlaybackSession();
+    }
+  });
+  el.addEventListener("ended", () => {
+    state.isPlaying = false;
+    syncMediaPlaybackState();
+    // 自然播完：标记 completed 后上报（repeatOne 除外，同一首歌继续听）
+    if (playbackSession && state.playMode !== "repeatOne") {
+      playbackSession.completed = true;
+      flushPlaybackSession();
+    }
+    // 试听 / URL 播放：播完自然停止，不自动切歌（currentIndex 未动，next/prev 随时回主队列）
+    if (isPreviewSong(state.currentSong)) return;
+    // 跟唱模式播完自然停（句间暂停由时间锚点接管）；连播/图书等模式自动切歌继续
+    if (state.mode === "karaoke") return;
+    if (state.playMode === "repeatOne") {
+      // 单曲循环：重播本首
+      audio.currentTime = 0;
+      state.currentTime = 0;
+      audio.play().catch(() => {});
+      return;
+    }
+    if (state.playMode === "shuffle") {
+      nextShuffle({ autoPlay: true, source: "auto" });
+      return;
+    }
+    // 列表循环：顺序下一首并自动播放（连播 bug：只切歌不播放）
+    nextSong({ autoPlay: true, source: "auto" });
+  });
+}
+bindAudioEvents(audioEq);
+bindAudioEvents(audioBare);
 
 // ============ 页面标题 ============
 watch(

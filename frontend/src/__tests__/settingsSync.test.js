@@ -338,7 +338,7 @@ describe("统一 Settings 层：防抖保存（save）", () => {
     expect(putBodies[0].body.player.volume).toBe(0.3);
     // saveLastPlayed → PUT lastPlayed
     m.state.currentSong = { path: "/b.mp3", name: "B" };
-    const a = FakeAudio.instances[FakeAudio.instances.length - 1];
+    const a = m.audio; // 当前活动元素（双元素：instances[last] 是裸元素）
     a._src = "/api/audio?path=/b.mp3";
     a.currentTime = 30;
     m.saveLastPlayed();
@@ -594,7 +594,7 @@ describe("统一 Settings 层：useSleepTimer / restoreLastPlayed 走统一层",
     ];
     await m.restoreLastPlayed();
     expect(m.state.currentSong.path).toBe("/b.mp3");
-    const a = FakeAudio.instances[FakeAudio.instances.length - 1];
+    const a = m.audio; // 当前活动元素（双元素：instances[last] 是裸元素）
     a.duration = 100;
     a.listeners["loadedmetadata"]();
     expect(a.currentTime).toBe(42);

@@ -51,6 +51,9 @@ const localStorageStub = {
 const {
   state,
   cycleSpeed,
+  stepSpeed,
+  audioEq,
+  audioBare,
   cyclePlayMode,
   nextSong,
   prevSong,
@@ -119,6 +122,9 @@ const {
   _resetQueueOrder,
 } = await import("../composables/usePlayer.js");
 
+// 模块对象（live binding：playerMod.audio 每次读当前活动元素，跨变速切换）
+const playerMod = await import("../composables/usePlayer.js");
+
 const {
   loadPlaylists,
   createPlaylist,
@@ -167,6 +173,7 @@ const RESET = {
 };
 
 beforeEach(() => {
+  _resetEqGraph(); // 重置音频图 + 活动元素回 audioEq（防变速用例把 audio 切到 audioBare 泄漏）
   Object.assign(state, RESET);
   // RESET 里的数组字段是模块级共享引用（旧用例可能 push 过），换成新数组防跨用例残留
   state.songs = [];
@@ -959,17 +966,17 @@ describe("快捷键配置表（任务 G）", () => {
 
   it("[ / ] 变速步进（0.75 → 1.0 → 1.25，边界不动作）", () => {
     const h = captureHandler();
-    const a = audio();
     state.speed = 1.0;
     fire(h, "BracketLeft");
     expect(state.speed).toBe(0.75);
-    expect(a.playbackRate).toBe(0.75);
+    expect(playerMod.audio.playbackRate).toBe(0.75); // 变速写入当前活动元素（裸元素）
     fire(h, "BracketLeft"); // 边界：不再变慢
     expect(state.speed).toBe(0.75);
     fire(h, "BracketRight");
     expect(state.speed).toBe(1.0);
     fire(h, "BracketRight");
     expect(state.speed).toBe(1.25);
+    expect(playerMod.audio.playbackRate).toBe(1.25);
     fire(h, "BracketRight"); // 边界：不再变快
     expect(state.speed).toBe(1.25);
   });
@@ -3199,7 +3206,7 @@ describe("均衡器 EQ", () => {
       FakeAudioContext.instances.push(this);
     }
     createMediaElementSource() {
-      this.source = { connect: vi.fn() };
+      this.source = { connect: vi.fn(), disconnect: vi.fn() };
       return this.source;
     }
     createBiquadFilter() {
@@ -3372,6 +3379,49 @@ describe("均衡器 EQ", () => {
       setEqGain(0, 3);
       playbackSettings.eqEnabled = true;
     }).not.toThrow();
+  });
+
+  it("变速切元素：0.75/1.25 切到裸元素（原生管线），回 1.0 切回图元素（EQ）", async () => {
+    stubAudioContext();
+    setupSong();
+    await play(); // 建图，speed=1.0 活动元素 = audioEq（走 EQ 链）
+    const ctx = FakeAudioContext.instances.at(-1);
+    expect(audioEq).toBeDefined();
+    expect(playerMod.audio).toBe(audioEq);
+    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.filters[0]);
+
+    state.speed = 1.0;
+    stepSpeed(-1); // → 0.75：切到裸元素
+    expect(state.speed).toBe(0.75);
+    expect(playerMod.audio).toBe(audioBare);
+    expect(playerMod.audio.playbackRate).toBe(0.75);
+
+    stepSpeed(1); // → 1.0：切回图元素
+    expect(state.speed).toBe(1.0);
+    expect(playerMod.audio).toBe(audioEq);
+    expect(playerMod.audio.playbackRate).toBe(1.0);
+
+    stepSpeed(1); // → 1.25：再切裸元素
+    expect(state.speed).toBe(1.25);
+    expect(playerMod.audio).toBe(audioBare);
+    expect(playerMod.audio.playbackRate).toBe(1.25);
+  });
+
+  it("变速中切歌：换源仍走裸元素（原生管线保持），回 1.0 状态迁移回图元素", async () => {
+    stubAudioContext();
+    setupSong();
+    await play();
+    const ctx = FakeAudioContext.instances.at(-1);
+    state.speed = 1.0;
+    stepSpeed(-1); // 0.75 切裸元素
+    state.songs = [{ path: "/b.mp3", name: "B" }];
+    state.currentIndex = 0;
+    await nextSong();
+    expect(playerMod.audio).toBe(audioBare); // 变速状态：新歌加载到裸元素
+    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.filters[0]); // 图元素链路未被扰动
+    state.speed = 0.75;
+    stepSpeed(1); // 回 1.0：切回图元素
+    expect(playerMod.audio).toBe(audioEq);
   });
 });
 
