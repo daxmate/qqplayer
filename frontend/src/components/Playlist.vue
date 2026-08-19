@@ -675,7 +675,8 @@ function onRowClick(i, e) {
     if (path != null) toggleSelected(path);
     return;
   }
-  pick(i);
+  // 必须用 entry.i（全局曲库索引）：viewSongs 可能被过滤/歌单/排序，视图索引 ≠ 曲库索引（8-19 壳内左键点歌无反应 bug）
+  pick(entry.i);
 }
 
 // 批量收藏：只加不删（幂等），新增数 toast
