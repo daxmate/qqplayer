@@ -486,9 +486,9 @@ function fmt(t) {
   box-shadow: 0 4px 14px var(--accent-glow2);
 }
 .btn.on {
-  background: var(--accent-on);
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent-ink);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 /* 带文字的按钮（变速/跟唱/译） */
 .btn:has(span),
