@@ -15,11 +15,19 @@ git pull --ff-only
 if [ ! -x ./backend/venv/bin/python ]; then
   echo "── 检测到 backend/venv 缺失，自动创建"
   python3 -m venv backend/venv
-  # python-lzo/readmdict 需要 lzo 头文件（requirements.txt 注释），新建 venv 时必须带上
+fi
+# python-lzo/readmdict 需要 lzo 头文件（requirements.txt 注释）。
+# 无条件导出：venv 已存在但缺 python-lzo 时同样需要（曾因只在新建时导出导致编译失败）
+if brew --prefix lzo >/dev/null 2>&1; then
   export LDFLAGS="-L$(brew --prefix lzo)/lib" CPPFLAGS="-I$(brew --prefix lzo)/include"
+else
+  echo "⚠️ 未检测到 brew lzo，python-lzo 编译可能失败（先 brew install lzo）"
 fi
 echo "── 安装后端依赖"
-./backend/venv/bin/python -m pip install -q -r backend/requirements.txt
+if ! ./backend/venv/bin/python -m pip install -r backend/requirements.txt; then
+  echo "❌ 后端依赖安装失败，完整错误见上方输出"
+  exit 1
+fi
 
 # 3. 前端构建（失败自动回滚上一版 dist）
 DIST="frontend/dist"
@@ -110,4 +118,16 @@ else
       tail -20 "$HOME/Library/Logs/qqplayer/err.log" 2>/dev/null || true
       exit 1
     fi
+fi
+
+# 6. 编译安装桌面壳（代码有更新时一并部署；运行中的 app 下次启动才用新壳）
+echo "── 编译安装桌面壳"
+if [ -f desktop-player/build.sh ]; then
+  if ./desktop-player/build.sh --install >/dev/null 2>&1; then
+    echo "✅ 桌面壳已更新（/Applications/QQPlayer.app），重启 QQPlayer.app 生效"
+  else
+    echo "⚠️ 桌面壳编译安装失败（不影响后端服务），手动排查: cd desktop-player && ./build.sh --install"
+  fi
+else
+  echo "── 跳过：desktop-player/build.sh 不存在"
 fi

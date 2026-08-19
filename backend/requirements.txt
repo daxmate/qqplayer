@@ -12,6 +12,12 @@ pillow
 send2trash
 # 视频模块在线源：yt-dlp 引擎（锁版本，与系统 CLI 2026.07.04 一致）
 yt-dlp==2026.07.04
+# yt-dlp 可选增强：curl 指纹伪装（部分站点反爬必需，不装自动降级）
+curl_cffi
+# 歌词 AI 对齐（backend/scripts/align_lyric.py）：日语假名/汉字转换，用于歌词匹配
+# ⚠️ 该脚本用 openai-whisper 的 venv 跑（Homebrew openai-whisper），那边也需装：
+#   /opt/homebrew/Cellar/openai-whisper/<ver>/libexec/bin/python -m pip install pykakasi
+pykakasi
 # 阅读器 V2 词典域：MDX/MDD 解析（readmdict 只读库，依赖 python-lzo；
 # python-lzo 本机编译：brew install lzo 后 LDFLAGS="-L$(brew --prefix lzo)/lib"
 # CPPFLAGS="-I$(brew --prefix lzo)/include" pip install python-lzo）

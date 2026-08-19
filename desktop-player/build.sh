@@ -1,9 +1,16 @@
 #!/bin/bash
 # 构建 QQPlayer 桌面版 .app（Swift 原生壳三合一：主窗口 + 迷你窗 + 桌面歌词）
-# 用法: ./build.sh [--install]
+# 用法: ./build.sh [--install]  （兼容 install / --install 两种写法）
 #   --install: 构建后安装到 /Applications（自动清理旧的独立迷你窗/歌词壳，避免 scheme 冲突）
 set -euo pipefail
 cd "$(dirname "$0")"
+
+INSTALL=0
+case "${1:-}" in
+  --install|install) INSTALL=1 ;;
+  "") : ;;
+  *) echo "⚠️ 未知参数: $1（仅支持 install / --install）" >&2 ;;
+esac
 
 APP_NAME="QQPlayer"
 BUNDLE_ID="com.daxmate.qqplayer"
@@ -84,7 +91,7 @@ codesign --force --sign - "$APP" 2>/dev/null || true
 
 echo "✅ 构建完成: $APP"
 
-if [[ "${1:-}" == "--install" ]]; then
+if [ "$INSTALL" -eq 1 ]; then
     echo "📥 安装到 /Applications..."
     # 清理旧的独立壳（迷你窗/歌词），避免 scheme 注册冲突（qqplayermini/qqplayerlyric 已由本 app 接管）
     rm -rf "/Applications/QQPlayerMini.app" "/Applications/QQPlayerLyric.app"
