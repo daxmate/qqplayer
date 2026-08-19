@@ -682,6 +682,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
 
+        let viewItem = NSMenuItem()
+        mainMenu.addItem(viewItem)
+        let viewMenu = NSMenu(title: "显示")
+        viewMenu.addItem(
+            withTitle: "刷新页面",
+            action: #selector(reloadPage(_:)),
+            keyEquivalent: "r"
+        )
+        viewItem.submenu = viewMenu
+
         let winItem = NSMenuItem()
         mainMenu.addItem(winItem)
         let winMenu = NSMenu(title: "窗口")
@@ -698,6 +708,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         winItem.submenu = winMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    // 刷新页面：重新 loadURL（新时间戳绕过 WKWebView 磁盘缓存），主窗/迷你窗/歌词窗一起刷
+    @objc func reloadPage(_ sender: Any?) {
+        loadURL(BACKEND_BASE, into: mainWebView)
+        if miniPanel != nil, miniWebView != nil {
+            loadURL("\(BACKEND_BASE)/mini.html", into: miniWebView)
+        }
+        if lyricPanel != nil, lyricWebView != nil {
+            loadURL("\(BACKEND_BASE)/desktop-lyric.html", into: lyricWebView)
+        }
     }
 
     // ============ 媒体键桥：系统媒体键 → 指令队列（主页面轮询执行） ============
