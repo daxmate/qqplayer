@@ -9,6 +9,7 @@
       异步加载：只有选 amll 才下载 pixi 等重依赖，native/spring 用户不背体积
     -->
     <LyricPlayer
+      ref="amllRef"
       v-if="engine === 'amll'"
       class="amll-host"
       :class="{ 'no-mask': !lyricSettings.fadeMask }"
@@ -16,6 +17,7 @@
       :lyric-lines="amllLines"
       :current-time="amllTime"
       :align-position="lyricSettings.focusPos"
+      :playing="state.isPlaying"
       :enable-spring="lyricSettings.amllSpring"
       :enable-blur="lyricSettings.amllBlur"
       :enable-scale="lyricSettings.amllScale"
@@ -74,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, nextTick, defineAsyncComponent } from "vue";
+import { ref, watch, computed, nextTick, defineAsyncComponent, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { Music2, FileMusic } from "@lucide/vue";
 import {
@@ -97,6 +99,35 @@ const props = defineProps({
   lyric: { type: Array, default: () => [] },
   current: { type: Number, default: -1 },
 });
+
+// AMLL 实例引用（异步组件挂载后可用；expose lyricPlayer = 内部实例）
+const amllRef = ref(null);
+// 浏览器环境（非壳）降 AMLL WebGL 渲染帧率 60→30fps：特效全关时引擎仍每帧渲染歌词，
+// 降帧后绘制量减半（歌词滚动 30fps 视觉无感）。壳（window.qqplayerNative）保持满帧零变化。
+let amllTimer = 0;
+let amllTries = 0;
+function degradeAmllFps() {
+  const c = amllRef.value;
+  if (!c) return;
+  const p = c.lyricPlayer?.value;
+  if (p) {
+    p.setFPS(30);
+    return;
+  }
+  if (++amllTries > 20) return; // 4 秒拿不到实例放弃（防御）
+  clearTimeout(amllTimer);
+  amllTimer = setTimeout(degradeAmllFps, 200);
+}
+if (typeof window !== "undefined" && !window.qqplayerNative) {
+  watch(amllRef, (c) => {
+    if (c) {
+      clearTimeout(amllTimer);
+      amllTries = 0;
+      amllTimer = setTimeout(degradeAmllFps, 0);
+    }
+  });
+}
+onBeforeUnmount(() => clearTimeout(amllTimer));
 
 const scrollEl = ref(null);
 const trackEl = ref(null);
