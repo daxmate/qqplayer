@@ -27,7 +27,6 @@ export default {
     detectFormatLabel: "检测格式：",
     pasteNeedTimeline: "需包含 [mm:ss]（LRC）或 序号+时间轴（SRT）",
     align: "AI 对齐",
-    alignExperimental: "实验",
     alignExperimentalHint:
       "实验功能：对齐精度有限，结果可能与实际演唱位置有偏差，建议与在线歌词对比后使用",
     aligning: "AI 对齐中…",
