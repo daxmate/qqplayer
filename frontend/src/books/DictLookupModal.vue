@@ -98,6 +98,8 @@ const props = defineProps<{
   bookId: string;
   bookTitle: string;
   cfi: string;
+  /** 当前阅读主题色（Reader 传入；dark=true 时注入覆盖层适配词典自带浅色样式） */
+  themeColors?: { text: string; bg: string; dark: boolean };
 }>();
 const emit = defineEmits<{ close: []; openDictManager: [] }>();
 
@@ -125,12 +127,31 @@ const sourceText = computed(() => (result.value?.found ? result.value.source : "
  */
 const SCRIPT_CLOSE = "<" + "/script>";
 
+/** 词条链接色：按背景亮度选（暗底→亮蓝，米黄/浅底→深蓝） */
+function linkColorFor(bg: string): string {
+  const m = bg.match(/^#([0-9a-f]{6})$/i);
+  if (m) {
+    const n = parseInt(m[1], 16);
+    const luma = ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114;
+    return luma < 140 ? "#7ab8ff" : "#1a5aa8";
+  }
+  return "#1a5aa8";
+}
+
 const srcdoc = computed(() => {
   if (!result.value?.found || !result.value.html) return "";
   const body = rewriteDictHtml(result.value.html, activeDictId.value);
+  const c = props.themeColors;
+  // 基础样式：浅色（或未传）用默认；非浅色主题用主题色 + !important 覆盖词典内联样式
+  const themeCss = c?.dark
+    ? `body{margin:8px 10px;font-size:14px;line-height:1.55;color:${c.text};background:${c.bg};word-wrap:break-word}
+body, body *{color:${c.text} !important}
+a, a *{color:${linkColorFor(c.bg)} !important}
+[style*="background"]{background-color:transparent !important}`
+    : `body{margin:8px 10px;font-size:14px;line-height:1.55;color:#1f2328;word-wrap:break-word}
+a{color:#1a66d6}`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-body{margin:8px 10px;font-size:14px;line-height:1.55;color:#1f2328;word-wrap:break-word}
-a{color:#1a66d6}
+${themeCss}
 </style>
 <script>
 try {

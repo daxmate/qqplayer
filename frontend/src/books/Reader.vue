@@ -196,6 +196,7 @@
         :context="lookupState.context"
         :book-id="book.id"
         :book-title="book.title"
+        :theme-colors="dictThemeColors"
         :cfi="lookupState.cfi"
         @close="onLookupClose"
         @open-dict-manager="onOpenDictManager"
@@ -310,6 +311,21 @@ const tocOpen = ref(false);
 const LEGACY_FONT_KEY = "qqplayer.books.fontSize";
 const settingsOpen = ref(false);
 const readerSettings = reactive<ReaderSettings>({ ...READER_SETTINGS_DEFAULTS });
+
+/** 查词弹窗主题色（与阅读器当前生效主题一致；dark 驱动词典 CSS 覆盖层） */
+const dictThemeColors = computed(() => {
+  const { text, bg } = resolveReaderThemeColors(readerSettings);
+  const theme = readerSettings.theme;
+  const dark =
+    theme === "dark" ||
+    theme === "sepia" ||
+    (theme === "auto" &&
+      (uiSettings.theme === "dark" ||
+        (uiSettings.theme === "auto" &&
+          typeof document !== "undefined" &&
+          document.documentElement.dataset.theme !== "light")));
+  return { text, bg, dark };
+});
 let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 旧字号：localStorage 读取（70~200 合法才认），读不到返回 null */
