@@ -224,9 +224,9 @@
           @contextmenu.prevent="openCtxMenu($event, vi)"
         >
           <span
-            v-if="canDrag"
+            v-if="canDragOut"
             class="pl-drag"
-            :title="t('playlist.dragSort')"
+            :title="canReorder ? t('playlist.dragSort') : t('playlist.dragOut')"
             draggable="true"
             @dragstart="onRowDragStart($event, song.path)"
           >
@@ -632,11 +632,14 @@ function onSelectSort() {
   sortDir.value = "asc";
 }
 
-// 拖拽启用条件：无搜索/排序/收藏/分组过滤时（保证可见集 = 全量，排序不丢歌）。
-// 歌单视图 = 歌单内排序；全部歌曲视图 = 播放队列排序（拖到侧栏歌单的拖拽源也走这个手柄）。
-const canDrag = computed(
+// 列表内排序启用条件：无搜索/排序/收藏/分组过滤时（保证可见集 = 全量，排序不丢歌）。
+// 歌单视图 = 歌单内排序；全部歌曲视图 = 播放队列排序。
+const canReorder = computed(
   () => sortKey.value === "default" && !query.value.trim() && !favOnly.value && !browseFilter.value,
 );
+// 拖出到侧栏歌单：所有视图行手柄始终可用（搜索/排序/收藏/分组过滤也拖得出）；
+// 网络歌（path=null）由 onRowDragStart preventDefault / 壳内 sourcePath null 天然拦截
+const canDragOut = computed(() => true);
 
 function pick(i) {
   selectSong(i);
@@ -1149,13 +1152,14 @@ function setupSortable() {
   sortable = null;
   shellDragCleanup?.();
   shellDragCleanup = null;
-  if (!canDrag.value || !listEl.value) return;
+  if (!listEl.value) return;
   if (inNativeShell()) {
     // 壳内（WKWebView 无 HTML5 DnD）：手柄 pointer 事件模拟排序 + 拖到侧栏歌单；
-    // onEnd 动作与 SortableJS 完全一致（歌单视图 setPlaylistOrder / 全部歌曲 reorderQueue + 持久化）
+    // 任何视图都挂（canDragOut 恒真），getCanReorder 控制列表内排序是否放行（过滤时禁）
     shellDragCleanup = setupShellRowDrag({
       listEl: listEl.value,
-      getCanDrag: () => canDrag.value,
+      getCanDrag: () => canDragOut.value,
+      getCanReorder: () => canReorder.value,
       isPlaylistView: () => !!state.activePlaylistId,
       onQueueReorder: (from, to) => {
         reorderQueue(from, to);
@@ -1167,6 +1171,8 @@ function setupSortable() {
     });
     return;
   }
+  // 浏览器：列表内排序只在无过滤时初始化 SortableJS（过滤时排序禁，但行手柄仍可 HTML5 DnD 拖出加歌单）
+  if (!canReorder.value) return;
   sortable = Sortable.create(listEl.value, {
     handle: ".pl-drag",
     animation: 150,
@@ -1187,7 +1193,7 @@ function setupSortable() {
   });
 }
 
-watch([activePlaylist, canDrag], () => nextTick(setupSortable));
+watch([activePlaylist, canReorder], () => nextTick(setupSortable));
 onMounted(() => nextTick(setupSortable));
 onBeforeUnmount(() => {
   sortable?.destroy();

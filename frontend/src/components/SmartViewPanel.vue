@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="panelStyle" class="sv-panel" :style="panelStyle">
+    <div v-if="panelStyle" ref="panelEl" class="sv-panel" :style="panelStyle">
       <div class="sv-head">
         <button class="sv-back" :title="t('smart.back')" @click="close">
           <ArrowLeft :size="15" />
@@ -8,7 +8,7 @@
         <span class="sv-title">{{ t(meta.titleKey) }}</span>
         <span class="sv-count">{{ t("smart.count", { n: rows.length }) }}</span>
       </div>
-      <div class="sv-list">
+      <div ref="svListEl" class="sv-list">
         <div v-if="loading" class="sv-empty">{{ t("smart.loading") }}</div>
         <div v-else-if="error" class="sv-empty">{{ error }}</div>
         <template v-else>
@@ -18,9 +18,15 @@
             class="sv-item"
             :class="{ active: isCurrent(row) }"
             :data-path="row.song.path"
+            draggable="true"
             @click="playRow(row)"
             @contextmenu.prevent="openCtxMenu($event, row)"
+            @dragstart="onRowDragStart($event, row.song.path)"
+            @dragend="onDragEnd"
           >
+            <span class="sv-drag" :title="t('playlist.dragOut')">
+              <GripVertical :size="14" />
+            </span>
             <span class="sv-cover">
               <img
                 v-if="coverOk(row.song.path)"
@@ -113,7 +119,16 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
-import { ArrowLeft, Music2, ListPlus, ListMusic, Check, Plus, Trash2 } from "@lucide/vue";
+import {
+  ArrowLeft,
+  Music2,
+  ListPlus,
+  ListMusic,
+  Check,
+  Plus,
+  Trash2,
+  GripVertical,
+} from "@lucide/vue";
 import {
   state,
   selectSong,
@@ -127,7 +142,12 @@ import {
   _resetPlayMode,
   findSongIndex,
 } from "../composables/usePlayer.js";
-import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
+import {
+  deleteLibrarySongs,
+  removeSongsFromQueue,
+  DRAG_SONG_TYPE,
+} from "../composables/useLibrary.js";
+import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import {
   SMART_VIEWS,
@@ -161,6 +181,29 @@ function playRow(row) {
 }
 function close() {
   emit("close");
+}
+
+// ============ 拖拽到侧栏歌单（歌曲行 → Sidebar 歌单项） ============
+// 浏览器：整行 draggable，dragstart 写自定义 MIME（与 Playlist.onRowDragStart 同一契约）；
+// 网络歌（path=null）不能加歌单 → preventDefault。
+// 浮层遮挡：.sv-panel 是 fixed + z-index 40 浮层，拖拽期间 drop 事件到不了下面的侧边栏歌单项，
+// dragstart 时给面板根元素设 pointer-events:none 放行，dragend（drop 后必发）恢复。
+const panelEl = ref(null);
+
+function onRowDragStart(e, path) {
+  if (!path) {
+    e.preventDefault();
+    return;
+  }
+  const dt = e.dataTransfer;
+  if (!dt) return;
+  dt.setData(DRAG_SONG_TYPE, path);
+  dt.effectAllowed = "copy";
+  if (panelEl.value) panelEl.value.style.pointerEvents = "none";
+}
+
+function onDragEnd() {
+  if (panelEl.value) panelEl.value.style.pointerEvents = "";
 }
 
 // ============ 右键菜单（桌面）：浏览器 ContextMenu + 壳 NSMenu 共用同一套动作 ============
@@ -465,6 +508,29 @@ function unbindCtxEvents() {
 const panelStyle = ref(null);
 let ro = null;
 
+// ============ 壳内拖拽到侧栏歌单（WKWebView 无 HTML5 DnD → Pointer Events 模拟） ============
+// 只拖到侧栏歌单（自动歌单不可排序：getCanReorder=false，reorder 回调空实现）；
+// 几何命中不受浮层遮挡影响，与浏览器 pointer-events 放行无关。
+const svListEl = ref(null);
+let shellDragCleanup = null;
+
+function setupShellDrag() {
+  shellDragCleanup?.();
+  shellDragCleanup = null;
+  const el = svListEl.value;
+  if (!el || !inNativeShell()) return;
+  shellDragCleanup = setupShellRowDrag({
+    listEl: el,
+    rowSelector: ".sv-item",
+    handleSelector: ".sv-drag",
+    getCanDrag: () => true,
+    getCanReorder: () => false,
+    isPlaylistView: () => false,
+    onQueueReorder: () => {},
+    onPlaylistReorder: () => {},
+  });
+}
+
 function measure() {
   const el = document.querySelector(".main .playlist");
   if (!el) {
@@ -512,6 +578,8 @@ function onKeydown(e) {
 
 watch(() => state.musicLibOpen, remeasure);
 watch(() => state.controlsHidden, remeasure);
+// 面板浮层渲染后才存在 .sv-list → panelStyle 变化时（重）挂壳内拖拽（含初次渲染）
+watch(panelStyle, () => nextTick(setupShellDrag), { immediate: true });
 watch(
   () => props.kind,
   (k) => loadSmartView(k),
@@ -527,6 +595,7 @@ onMounted(() => {
   loadSmartView(props.kind); // 进入视图时拉取数据
 });
 onBeforeUnmount(() => {
+  shellDragCleanup?.();
   ro?.disconnect();
   window.removeEventListener("resize", remeasure);
   window.removeEventListener("keydown", onKeydown);
@@ -625,6 +694,35 @@ function coverUrl(path) {
     color-mix(in srgb, var(--accent) 22%, transparent),
     color-mix(in srgb, var(--accent2) 12%, transparent)
   );
+}
+/* 拖拽手柄（与 Playlist .pl-drag 同款视觉） */
+.sv-drag {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text3);
+  cursor: grab;
+  flex-shrink: 0;
+  opacity: 0.5;
+  /* 触屏拖拽：禁止浏览器接管手势（否则拖拽变成页面滚动） */
+  touch-action: none;
+}
+@media (hover: hover) {
+  .sv-drag:hover {
+    opacity: 1;
+    color: var(--text2);
+  }
+}
+.sv-drag:active {
+  cursor: grabbing;
+}
+/* 壳内拖拽（pointer 模拟）：源行幽灵样式（与 Playlist 同款） */
+.sv-item.pl-drag-source {
+  opacity: 0.45;
+  background: var(--card2);
+  cursor: grabbing;
+  position: relative;
+  z-index: 2;
+  transition: none;
 }
 .sv-cover {
   width: 40px;

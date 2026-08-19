@@ -79,6 +79,7 @@ export default {
     etc: " 等",
     // 行操作
     dragSort: "拖拽排序",
+    dragOut: "拖到歌单加歌",
     hasLyric: "有歌词",
     playing: "播放中",
     // 定位当前播放（工具条按钮 / EQ 标记）
