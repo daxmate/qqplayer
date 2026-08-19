@@ -2,7 +2,7 @@
 //
 // 背景：Swift 壳（WKWebView）里 HTML5 draggable 相关事件不派发，SortableJS（歌单内排序）和
 // 拖到侧栏歌单（dataTransfer drop）全部失效；文件拖入导入（useDragImport 的 drop）正常，不受影响。
-// 壳内（window.qqplayerNative 存在时）改用手柄 .pl-drag 的 pointerdown/pointermove/pointerup 模拟：
+// 壳内（window.qqplayerNative 存在时）改用手柄（默认 .pl-drag，可参数化）的 pointerdown/pointermove/pointerup 模拟：
 //   - 列表内拖动：行中心交叉模型算插入索引（与 SortableJS onEnd 语义一致）→ 回调 onQueueReorder / onPlaylistReorder
 //   - 拖到侧边栏歌单（.sb-item[data-playlist-id] 几何命中）：加 sb-drop 高亮 + 派发
 //     qqplayer:shell-drag-drop 事件，Sidebar.vue 监听并复用 onPlaylistDrop 同一套幂等加歌逻辑
@@ -16,17 +16,23 @@ export function inNativeShell() {
 }
 
 /**
- * 壳内行拖拽（Playlist.vue 在 canDrag 且壳内时调用，返回清理函数）
+ * 壳内行拖拽（Playlist.vue / SmartViewPanel.vue 在壳内时调用，返回清理函数）
  * @param {object} opts
- * @param {HTMLElement} opts.listEl .pl-list 滚动容器（pointerdown 委托挂在这里）
- * @param {() => boolean} opts.getCanDrag 拖拽启用条件（搜索/排序/收藏/分组过滤时 false）
+ * @param {HTMLElement} opts.listEl 滚动容器（pointerdown 委托挂在这里）
+ * @param {string} [opts.rowSelector=".pl-item"] 行选择器（rows() 内部用它）
+ * @param {string} [opts.handleSelector=".pl-drag"] 拖拽手柄选择器（pointerdown 命中手柄才进入拖拽）
+ * @param {() => boolean} opts.getCanDrag 拖拽启用条件（false = 手柄按下不进入拖拽态）
+ * @param {() => boolean} [opts.getCanReorder=() => true] 列表内排序允许条件（false = 拖到侧栏歌单仍生效，列表内不显示插入线、不排序）
  * @param {() => boolean} opts.isPlaylistView 歌单视图（true = setPlaylistOrder，false = reorderQueue）
  * @param {(from: number, to: number) => void} opts.onQueueReorder 全部歌曲视图重排（reorderQueue + persistQueueOrder）
  * @param {(paths: string[]) => void} opts.onPlaylistReorder 歌单视图重排（setPlaylistOrder）
  */
 export function setupShellRowDrag({
   listEl,
+  rowSelector = ".pl-item",
+  handleSelector = ".pl-drag",
   getCanDrag,
+  getCanReorder = () => true,
   isPlaylistView,
   onQueueReorder,
   onPlaylistReorder,
@@ -45,7 +51,7 @@ export function setupShellRowDrag({
   let targetIndex = -1; // 当前插入索引（-1 = 无目标）
   let hoverPlaylistEl = null; // 当前悬停的歌单项（sb-drop 高亮）
 
-  const rows = () => [...listEl.querySelectorAll(".pl-item")];
+  const rows = () => [...listEl.querySelectorAll(rowSelector)];
 
   // 行中心交叉模型算插入索引：被拖行中心（跟随指针）越过某行中心 → 插到该行之后。
   // 语义与 SortableJS onEnd 的 newIndex 一致（移除源行后的位置）；其他行 rect 每次重取，
@@ -112,9 +118,9 @@ export function setupShellRowDrag({
   function onPointerDown(e) {
     if (e.button !== 0) return; // 只跟左键（右键是壳菜单）
     if (!getCanDrag()) return;
-    const handle = e.target?.closest?.(".pl-drag");
+    const handle = e.target?.closest?.(handleSelector);
     if (!handle) return;
-    const el = handle.closest(".pl-item");
+    const el = handle.closest(rowSelector);
     if (!el) return;
     pointerId = e.pointerId;
     startX = e.clientX;
@@ -154,7 +160,9 @@ export function setupShellRowDrag({
     } else {
       targetIndex = -1;
     }
-    applyIndicator(targetIndex);
+    // 列表内排序指示线只在允许排序时显示（过滤状态：悬停歌单高亮照常，列表内无插入线）
+    if (getCanReorder()) applyIndicator(targetIndex);
+    else clearIndicator();
   }
 
   function onPointerUp(e) {
@@ -167,6 +175,7 @@ export function setupShellRowDrag({
     suppressNextClick(); // 拖拽后的 click 吞掉，防松手落在行上误触发行点击播放
     if (hover && sourcePath != null) {
       // 拖到侧栏歌单：派发给 Sidebar（幂等 + toast 与浏览器 drop 完全一致）
+      // 该分支不受 getCanReorder 限制：过滤状态下列表内排序禁，拖出加歌单永远放行
       const pid = hover.getAttribute("data-playlist-id");
       if (pid) {
         window.dispatchEvent(
@@ -176,6 +185,7 @@ export function setupShellRowDrag({
       return;
     }
     if (t < 0 || t === sourceIndex) return; // 没挪动（含拖出列表外松手）
+    if (!getCanReorder()) return; // 列表内排序被禁用（搜索/排序/收藏/分组过滤时）→ 不排序
     if (isPlaylistView()) {
       // 歌单视图：DOM 路径顺序（= 原顺序，拖拽中不重排）移除源行后插到目标位 → setPlaylistOrder
       const paths = rows()

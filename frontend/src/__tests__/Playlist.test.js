@@ -293,18 +293,18 @@ describe("Playlist", () => {
     expect(state.songs).toHaveLength(2); // 曲库不变
   });
 
-  it("歌单视图：拖拽手柄仅在默认排序且无过滤时显示", async () => {
+  it("歌单视图：手柄始终可用（排序/过滤也可拖出加歌单）；列表内排序仅在无过滤时启用", async () => {
     state.playlists = [{ id: "p1", name: "歌单", songPaths: ["/a.mp3"] }];
     state.activePlaylistId = "p1";
     state.songs = [{ id: "a", name: "A歌", artist: "", path: "/a.mp3" }];
     const wrapper = mount(Playlist);
     expect(wrapper.find(".pl-drag").exists()).toBe(true);
-    // 激活排序 → 手柄隐藏
+    // 激活排序 → 手柄仍显示（可拖出到其他歌单），仅列表内排序禁用
     await wrapper.find(".pl-sort").setValue("name");
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
-    // 全部歌曲视图 → 无手柄
+    expect(wrapper.find(".pl-drag").exists()).toBe(true);
+    // 全部歌曲视图 + 排序 → 手柄仍显示
     state.activePlaylistId = null;
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    expect(wrapper.find(".pl-drag").exists()).toBe(true);
   });
 
   // ============ 分组浏览（歌手/专辑） ============
@@ -427,7 +427,7 @@ describe("Playlist", () => {
     expect(wrapper.find(".pl-filter-bar").exists()).toBe(false);
   });
 
-  it("歌单视图 + 分组过滤 → 拖拽手柄隐藏", async () => {
+  it("歌单视图 + 分组过滤 → 手柄仍显示（可拖出加歌单），列表内排序禁", async () => {
     state.playlists = [{ id: "p1", name: "歌单", songPaths: ["/a.mp3", "/b.mp3"] }];
     state.activePlaylistId = "p1";
     state.songs = [
@@ -438,7 +438,7 @@ describe("Playlist", () => {
     expect(wrapper.find(".pl-drag").exists()).toBe(true);
     await wrapper.findAll(".pb-tab")[1].trigger("click");
     await wrapper.findAll(".gr-card")[0].trigger("click"); // 进入歌手分组
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    expect(wrapper.find(".pl-drag").exists()).toBe(true);
   });
 
   // ============ 加歌浮层：锚定触发按钮 ============

@@ -379,24 +379,75 @@ describe("壳内拖拽边界", () => {
     expect(state.songs.map((s) => s.name)).toEqual(["A歌", "B歌", "C歌"]);
   });
 
-  it("canDrag=false（搜索中）→ 无手柄，不挂拖拽监听", async () => {
+  it("过滤状态（搜索 五月天）：拖到侧栏歌单仍生效（sb-drop 高亮 + addToPlaylist）", async () => {
+    const fetchMock = okFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    state.playlists = [{ id: "p2", name: "日语歌", songPaths: [], createdAt: "", updatedAt: "" }];
+    const { pw, sw } = mountBoth();
+    await nextTick();
+    await pw.find(".pl-search input").setValue("五月天");
+    await nextTick();
+    await nextTick(); // watch → nextTick(setupSortable) 的二次 tick
+    expect(pw.findAll(".pl-drag")).toHaveLength(2); // 过滤后 2 行可见，手柄仍在
+    layoutRows(pw);
+    const items = layoutSidebar(sw);
+    const p2 = items[0].element;
+    const handle = pw.findAll(".pl-drag")[0].element;
+    handle.dispatchEvent(ptr("pointerdown", [10, 120]));
+    document.body.dispatchEvent(ptr("pointermove", [430, 120]));
+    expect(p2.classList.contains("sb-drop")).toBe(true); // 歌单悬停高亮照常
+    document.body.dispatchEvent(ptr("pointerup", [430, 120]));
+    await flushPromises();
+    expect(state.playlists[0].songPaths).toEqual(["/a.mp3"]);
+    expect(toastText()).toContain("已加入歌单「日语歌」");
+    expect(p2.classList.contains("sb-drop")).toBe(false);
+  });
+
+  it("过滤状态（搜索 五月天）：列表内拖动不触发 reorder、不显示插入线（getCanReorder=false）", async () => {
     const fetchMock = okFetch();
     vi.stubGlobal("fetch", fetchMock);
     const { pw } = mountBoth();
     await nextTick();
-    await pw.find(".pl-search input").setValue("B歌");
+    await pw.find(".pl-search input").setValue("五月天");
     await nextTick();
-    expect(pw.find(".pl-drag").exists()).toBe(false);
-    // 直接向列表派发 pointer 序列也无效果
-    pw.find(".pl-list").element.dispatchEvent(ptr("pointerdown", 10, 120));
-    document.body.dispatchEvent(ptr("pointermove", 10, 200));
-    document.body.dispatchEvent(ptr("pointerup", 10, 200));
     await nextTick();
+    layoutRows(pw);
+    // 拖过 C 行中心（dc=175 > C 中心 160）→ 若允许排序应变为 [C, A]，现在必须不动
+    await dragHandle(pw.findAll(".pl-drag")[0].element, [10, 120], [10, 175]);
     expect(state.songs.map((s) => s.name)).toEqual(["A歌", "B歌", "C歌"]);
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/queue/order"))).toBe(false);
   });
 
-  it("拖拽中 canDrag 变 false（搜索）→ 清理拖拽态，后续事件无动作", async () => {
+  it("过滤状态：列表内拖动不显示插入指示线（悬停歌单时列表内也无指示）", async () => {
+    const { pw } = mountBoth();
+    await nextTick();
+    await pw.find(".pl-search input").setValue("五月天");
+    await nextTick();
+    await nextTick();
+    layoutRows(pw);
+    const handle = pw.findAll(".pl-drag")[0].element;
+    handle.dispatchEvent(ptr("pointerdown", [10, 120]));
+    document.body.dispatchEvent(ptr("pointermove", [10, 175]));
+    expect(pw.findAll(".pl-drop-before, .pl-drop-after").length).toBe(0);
+    document.body.dispatchEvent(ptr("pointerup", [10, 175]));
+    await nextTick();
+  });
+
+  it("非过滤状态：列表内拖动显示插入指示线（getCanReorder=true）", async () => {
+    const { pw } = mountBoth();
+    await nextTick();
+    layoutRows(pw);
+    const handle = pw.findAll(".pl-drag")[0].element;
+    handle.dispatchEvent(ptr("pointerdown", [10, 120]));
+    document.body.dispatchEvent(ptr("pointermove", [10, 175]));
+    // t=1 → B 行后插入线（pl-drop-after）
+    expect(pw.findAll(".pl-drop-before, .pl-drop-after").length).toBeGreaterThan(0);
+    document.body.dispatchEvent(ptr("pointerup", [10, 175]));
+    await nextTick();
+    expect(pw.findAll(".pl-drop-before, .pl-drop-after").length).toBe(0); // 松手清理
+  });
+
+  it("拖拽中 canReorder 变 false（搜索）→ 清理拖拽态，后续事件无动作", async () => {
     const { pw } = mountBoth();
     await nextTick();
     layoutRows(pw);

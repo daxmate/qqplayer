@@ -30,8 +30,11 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const SmartViewPanel = (await import("../components/SmartViewPanel.vue")).default;
+const Sidebar = (await import("../components/Sidebar.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { DRAG_SONG_TYPE } = await import("../composables/usePlayer.js");
 const { closeSmartView } = await import("../composables/useSmartViews.js");
+const { useToast, clearToasts } = await import("../composables/useToast.js");
 
 const lib = [
   { id: "a", path: "/lib/a.mp3", name: "雪の華", artist: "中島美嘉", album: "雪の華" },
@@ -71,6 +74,8 @@ beforeEach(() => {
 afterEach(() => {
   wrappers.splice(0).forEach((w) => w.unmount());
   document.body.innerHTML = "";
+  delete window.qqplayerNative;
+  clearToasts();
   vi.unstubAllGlobals();
 });
 
@@ -239,6 +244,157 @@ describe("SmartViewPanel（桌面）", () => {
   });
 });
 
+describe("SmartViewPanel 拖拽到侧栏歌单", () => {
+  it("浏览器：行 dragstart → 写 DRAG_SONG_TYPE + effectAllowed=copy，浮层 pointer-events 放行后恢复", async () => {
+    const wrapper = mountPanel("recentAdded");
+    await flushPromises();
+    const panel = wrapper.find(".sv-panel").element;
+    const dt = { setData: vi.fn(), effectAllowed: "" };
+    await wrapper.findAll(".sv-item")[0].trigger("dragstart", { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith(DRAG_SONG_TYPE, "/lib/a.mp3");
+    expect(dt.effectAllowed).toBe("copy");
+    // 浮层遮挡：拖拽期间 .sv-panel 不拦截指针（drop 才能到达侧边栏歌单项）
+    expect(panel.style.pointerEvents).toBe("none");
+    await wrapper.findAll(".sv-item")[0].trigger("dragend");
+    expect(panel.style.pointerEvents).toBe("");
+  });
+
+  it("浏览器：网络歌（path=null）→ preventDefault，不写数据", async () => {
+    state.songs = [{ id: "s", name: "网歌", path: null, artist: "" }];
+    const wrapper = mountPanel("recentAdded");
+    await flushPromises();
+    const dt = { setData: vi.fn(), effectAllowed: "" };
+    const evt = new Event("dragstart", { bubbles: true, cancelable: true });
+    evt.dataTransfer = dt;
+    wrapper.findAll(".sv-item")[0].element.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(true);
+    expect(dt.setData).not.toHaveBeenCalled();
+    // 本地歌行正常
+    expect(wrapper.findAll(".sv-item")).toHaveLength(1);
+  });
+
+  it("壳内：拖 .sv-drag 手柄到歌单项 → sb-drop 高亮 + 派发 shell-drag-drop → 加歌 + toast", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    window.qqplayerNative = true;
+    state.playlists = [{ id: "p1", name: "日语歌", songPaths: [], createdAt: "", updatedAt: "" }];
+    // 先挂 Sidebar（attachTo body）再挂面板（teleport stub 内联渲染）；顺序反了面板会被真实 teleport 到 body
+    const sw = mount(Sidebar, { attachTo: document.body });
+    wrappers.push(sw);
+    const pv = mountPanel("recentAdded");
+    await flushPromises();
+    // 行 rect（与 Playlist.shellDrag.test.js 同款几何 stub）
+    const rows = pv.findAll(".sv-item");
+    rows.forEach((row, i) =>
+      setRect(row.element, {
+        top: 100 + i * 40,
+        bottom: 100 + (i + 1) * 40,
+        left: 0,
+        right: 400,
+        height: 40,
+        width: 400,
+      }),
+    );
+    setRect(pv.find(".sv-list").element, {
+      top: 100,
+      bottom: 100 + rows.length * 40 + 12,
+      left: 0,
+      right: 400,
+      height: rows.length * 40 + 12,
+      width: 400,
+    });
+    const items = sw.findAll(".sb-item[data-playlist-id]");
+    items.forEach((item, i) =>
+      setRect(item.element, {
+        top: 100 + i * 44,
+        bottom: 100 + (i + 1) * 44,
+        left: 420,
+        right: 620,
+        height: 44,
+        width: 200,
+      }),
+    );
+    expect(pv.findAll(".sv-drag")).toHaveLength(rows.length);
+    const handle = pv.findAll(".sv-drag")[0].element;
+    handle.dispatchEvent(ptr("pointerdown", [10, 120]));
+    document.body.dispatchEvent(ptr("pointermove", [430, 120]));
+    expect(items[0].element.classList.contains("sb-drop")).toBe(true);
+    document.body.dispatchEvent(ptr("pointerup", [430, 120]));
+    await flushPromises();
+    expect(state.playlists[0].songPaths).toEqual(["/lib/a.mp3"]);
+    expect(
+      useToast()
+        .items.map((i) => i.text)
+        .join(" "),
+    ).toContain("已加入歌单「日语歌」");
+    expect(items[0].element.classList.contains("sb-drop")).toBe(false);
+  });
+
+  it("壳内：拖到列表内松手 → 不排序不派发（自动歌单无排序语义）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    window.qqplayerNative = true;
+    state.playlists = [{ id: "p1", name: "日语歌", songPaths: [], createdAt: "", updatedAt: "" }];
+    const pv = mountPanel("recentAdded");
+    await flushPromises();
+    const rows = pv.findAll(".sv-item");
+    rows.forEach((row, i) =>
+      setRect(row.element, {
+        top: 100 + i * 40,
+        bottom: 100 + (i + 1) * 40,
+        left: 0,
+        right: 400,
+        height: 40,
+        width: 400,
+      }),
+    );
+    setRect(pv.find(".sv-list").element, {
+      top: 100,
+      bottom: 100 + rows.length * 40 + 12,
+      left: 0,
+      right: 400,
+      height: rows.length * 40 + 12,
+      width: 400,
+    });
+    // 越过第二行中心（dc=175 > 160）→ 列表内无排序回调，歌单不变
+    const handle = pv.findAll(".sv-drag")[0].element;
+    handle.dispatchEvent(ptr("pointerdown", [10, 120]));
+    document.body.dispatchEvent(ptr("pointermove", [10, 175]));
+    document.body.dispatchEvent(ptr("pointerup", [10, 175]));
+    await flushPromises();
+    expect(state.songs.map((s) => s.name)).toEqual(["雪の華", "知足", "温柔"]);
+    expect(state.playlists[0].songPaths).toEqual([]);
+  });
+});
+
+// —— 几何 stub（jsdom getBoundingClientRect 恒 0，壳内拖拽命中全靠几何，同 Playlist.shellDrag.test.js 模式）——
+const realRect = Element.prototype.getBoundingClientRect;
+const rectMap = new WeakMap();
+Element.prototype.getBoundingClientRect = function () {
+  const r = rectMap.get(this);
+  return r || realRect.call(this);
+};
+function setRect(el, r) {
+  rectMap.set(el, { x: r.left, y: r.top, width: r.width, height: r.height, ...r });
+}
+
+// pointer 事件工厂（主指针 id=1，左键）；坐标支持 (x, y) 或数组 [x, y]
+function ptr(type, x, y, over = {}) {
+  if (Array.isArray(x)) [x, y] = x;
+  return new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    button: 0,
+    pointerId: 1,
+    ...over,
+  });
+}
 describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
   it("右键歌曲行 → 弹出菜单（播放/下一首/收藏/加歌单/进歌手/进专辑/移到废纸篓）", async () => {
     const wrapper = mountPanel("recentAdded");

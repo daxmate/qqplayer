@@ -35,6 +35,7 @@ vi.stubGlobal("Audio", FakeAudio);
 const Playlist = (await import("../components/Playlist.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
 const { DRAG_SONG_TYPE } = await import("../composables/usePlayer.js");
+const Sortable = (await import("sortablejs")).default;
 
 const SONGS = [
   { id: "a", name: "A歌", artist: "五月天", path: "/a.mp3" },
@@ -58,6 +59,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   wrappers.splice(0).forEach((w) => w.unmount());
   document.body.querySelectorAll(".add-menu, .am-backdrop").forEach((el) => el.remove());
 });
@@ -72,40 +74,71 @@ function mountSongs(songs = SONGS) {
 }
 
 describe("Playlist 队列拖拽排序（全部歌曲视图）", () => {
-  it("全部歌曲视图 + 默认状态 → 拖拽手柄可见（可排队列）", async () => {
+  it("全部歌曲视图 + 默认状态 → 拖拽手柄可见（可排队列）+ SortableJS 初始化", async () => {
+    const spy = vi.spyOn(Sortable, "create");
     const wrapper = mountSongs();
     await nextTick();
     expect(wrapper.findAll(".pl-drag")).toHaveLength(3);
+    expect(spy).toHaveBeenCalledTimes(1); // 可排序：SortableJS 挂载
   });
 
-  it("搜索过滤 → 手柄隐藏", async () => {
+  it("搜索过滤 → 手柄仍显示可拖出（dragstart 写 MIME），但不初始化 SortableJS", async () => {
+    const spy = vi.spyOn(Sortable, "create");
     const wrapper = mountSongs();
+    await nextTick();
+    expect(spy).toHaveBeenCalledTimes(1); // 默认状态初始化一次
     await wrapper.find(".pl-search input").setValue("B歌");
     await nextTick();
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    await nextTick(); // watch → nextTick(setupSortable) 的二次 tick
+    expect(spy).toHaveBeenCalledTimes(1); // 过滤后不再初始化（列表内排序禁）
+    const dt = { setData: vi.fn(), effectAllowed: "" };
+    await wrapper.find(".pl-drag").trigger("dragstart", { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith(DRAG_SONG_TYPE, "/b.mp3"); // 拖出加歌单仍可用
   });
 
-  it("排序（按标题）→ 手柄隐藏", async () => {
+  it("排序（按标题）→ 手柄仍显示可拖出，但不初始化 SortableJS", async () => {
+    const spy = vi.spyOn(Sortable, "create");
     const wrapper = mountSongs();
+    await nextTick();
     await wrapper.find(".pl-sort").setValue("name");
     await nextTick();
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    await nextTick();
+    expect(wrapper.findAll(".pl-drag")).toHaveLength(3);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const dt = { setData: vi.fn(), effectAllowed: "" };
+    await wrapper.findAll(".pl-drag")[0].trigger("dragstart", { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith(DRAG_SONG_TYPE, "/a.mp3");
   });
 
-  it("只看收藏 → 手柄隐藏", async () => {
+  it("只看收藏 → 手柄仍显示可拖出，但不初始化 SortableJS", async () => {
+    const spy = vi.spyOn(Sortable, "create");
+    state.favorites = ["/a.mp3"];
     const wrapper = mountSongs();
+    await nextTick();
     await wrapper.find(".pl-fav-btn").trigger("click");
     await nextTick();
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    await nextTick();
+    expect(wrapper.findAll(".pl-drag")).toHaveLength(1); // 收藏过滤后 1 行，手柄仍在
+    expect(spy).toHaveBeenCalledTimes(1);
+    const dt = { setData: vi.fn(), effectAllowed: "" };
+    await wrapper.find(".pl-drag").trigger("dragstart", { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith(DRAG_SONG_TYPE, "/a.mp3");
   });
 
-  it("分组过滤（进入歌手）→ 手柄隐藏", async () => {
+  it("分组过滤（进入歌手）→ 手柄仍显示可拖出，但不初始化 SortableJS", async () => {
+    const spy = vi.spyOn(Sortable, "create");
     const wrapper = mountSongs();
+    await nextTick();
     await wrapper.findAll(".pb-tab")[1].trigger("click"); // 歌手 tab
     const card = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天");
     await card.trigger("click");
     await nextTick();
-    expect(wrapper.find(".pl-drag").exists()).toBe(false);
+    await nextTick();
+    expect(wrapper.findAll(".pl-drag")).toHaveLength(2); // 五月天 2 首歌，手柄仍在
+    expect(spy).toHaveBeenCalledTimes(1);
+    const dt = { setData: vi.fn(), effectAllowed: "" };
+    await wrapper.findAll(".pl-drag")[0].trigger("dragstart", { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith(DRAG_SONG_TYPE, "/a.mp3");
   });
 
   it("歌单视图 + 默认状态 → 手柄仍可见（歌单内排序，回归）", async () => {
