@@ -749,6 +749,13 @@ onUnmounted(() => {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
+/* 歌词面板（连播模式）同理：左侧贴着音乐库/播放列表边栏时左两角改直角（右侧保持 16px 圆角）；
+   无边栏时保持全圆角（LyricPanel 根节点，scoped 机制与 .controls 相同） */
+.main.has-music .lyric-panel,
+.main.has-playlist .lyric-panel {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 .no-lyric {
   flex: 1;
   display: flex;
