@@ -2289,6 +2289,26 @@ describe("播放统计", () => {
     expect(calls.length).toBe(1);
     expect(calls[0].played).toBe(15); // 5+10s 累计（从 karaoke play 到切模式）
   });
+
+  it("变速切换不打断播放会话（pause 被 swappingAudio 抑制，无断裂记录）", async () => {
+    const calls = stubPlaybackFetch();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00Z"));
+    await startPlaying();
+    vi.setSystemTime(new Date("2026-08-12T12:00:30Z")); // 播了 30s
+    state.speed = 1.0;
+    stepSpeed(-1); // 0.75：swap 触发 pause（audioEq）+ play（audioBare）
+    expect(playerMod.audio).toBe(audioBare);
+    expect(calls.length).toBe(0); // 变速 pause 被抑制：无断裂播放记录
+    stepSpeed(1); // 回 1.0：再切一次
+    expect(calls.length).toBe(0);
+    // 真实暂停（非变速）才上报
+    playerMod.audio.listeners["pause"]();
+    expect(calls.length).toBe(1);
+    expect(calls[0].path).toBe("/a.mp3");
+    expect(calls[0].played).toBe(30);
+    vi.useRealTimers();
+  });
 });
 
 describe("歌单", () => {
@@ -3422,6 +3442,27 @@ describe("均衡器 EQ", () => {
     state.speed = 0.75;
     stepSpeed(1); // 回 1.0：切回图元素
     expect(playerMod.audio).toBe(audioEq);
+  });
+
+  it("变速切换状态迁移：播放位置/音量/静音/src 同步到目标元素（双向）", async () => {
+    stubAudioContext();
+    setupSong();
+    await play();
+    audioEq.currentTime = 42;
+    audioEq.volume = 0.6;
+    audioEq.muted = true;
+    state.speed = 1.0;
+    stepSpeed(-1); // → 0.75：迁移到裸元素
+    expect(playerMod.audio).toBe(audioBare);
+    expect(audioBare.src).toBe(audioEq.src);
+    expect(audioBare.currentTime).toBe(42);
+    expect(audioBare.volume).toBe(0.6);
+    expect(audioBare.muted).toBe(true);
+    // 回 1.0：反向迁移（变速期间位置推进）
+    audioBare.currentTime = 55;
+    stepSpeed(1);
+    expect(playerMod.audio).toBe(audioEq);
+    expect(audioEq.currentTime).toBe(55);
   });
 });
 
