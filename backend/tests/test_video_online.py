@@ -235,8 +235,7 @@ def test_get_stream_default_combined_format(fake_run):
     assert args[0] == "--get-url"
     assert args[1] == "-f"
     assert (
-        args[2]
-        == "best[acodec!=none][vcodec!=none][vcodec*=avc1]/best[acodec!=none][vcodec!=none]"
+        args[2] == "best[acodec!=none][vcodec!=none][vcodec*=avc1]/best[acodec!=none][vcodec!=none]"
     )
     assert "--no-playlist" in args
 
