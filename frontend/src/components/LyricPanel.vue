@@ -438,6 +438,14 @@ function onAmllLineClick(e) {
 .amll-host[data-align="right"] :deep([class*="lyricMainLine"]) span {
   text-align: right;
 }
+/* AMLL 非弹簧模式（enableSpring=false，浏览器默认关弹簧时走此路径）：库默认 transition
+   transform .5s + 内联 transition-delay（每行 50ms 起步累计，滚动区内可达数百 ms）→ 高亮行
+   持续滞后播放进度（壳弹簧模式每帧物理更新无此问题）。覆盖为短过渡并重置 delay
+   （!important 压过库 CSS 与内联 transition-delay；壳弹簧模式无 disableSpring class，不命中） */
+.amll-host :deep([class*="disableSpring"]) > *,
+.amll-host :deep([class*="disableSpring"]) [class*="lyricLine"] {
+  transition: filter 0.25s, transform 0.12s !important;
+}
 .amll-host[data-align="right"] :deep([class*="lyricLineWrapper"]) {
   align-items: flex-end;
 }
