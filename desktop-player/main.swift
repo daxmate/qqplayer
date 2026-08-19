@@ -90,30 +90,35 @@ final class MainWebView: WKWebView {
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
-        // 仅阅读器激活且有非空选中文本时追加应用项，否则保持系统默认菜单
-        guard MainWebView.readerActive,
-              MainWebView.readerHasSelection,
-              !MainWebView.readerSelectedText.isEmpty else { return }
+        // 仅阅读器激活时追加应用项（选区缓存为空也插入——系统右键自动选词瞬间前端 400ms 轮询
+        // 可能还没上报，点击动作由前端从 DOM 实时读选区兜底，见 __qqReaderMenu）
+        guard MainWebView.readerActive else { return }
 
         let zh = MainWebView.isChinese
 
-        // 查词 "xxx"（选中词截断 30 字符，超长加 …）
+        // 查词 "xxx"（选中词截断 30 字符，超长加 …；选区缓存为空时仅显示固定标题）
         let text = MainWebView.readerSelectedText
-        let truncated = text.count > 30 ? String(text.prefix(30)) + "…" : text
-        let lookupTitle = zh ? "查词 \"\(truncated)\"" : "Dictionary \"\(truncated)\""
+        let truncated = text.isEmpty ? "" : (text.count > 30 ? String(text.prefix(30)) + "…" : text)
+        let lookupTitle = zh ? (truncated.isEmpty ? "查词" : "查词 \"\(truncated)\"") : (truncated.isEmpty ? "Dictionary" : "Dictionary \"\(truncated)\"")
         let lookupItem = NSMenuItem(title: lookupTitle, action: #selector(lookupAction(_:)), keyEquivalent: "")
         lookupItem.target = self
 
-        // 高亮（子菜单：黄/绿/蓝/粉/紫，颜色字符串存 representedObject）
+        // 高亮（子菜单：五色圆点，颜色字符串存 representedObject；色值与前端 HIGHLIGHT_COLOR_HEX 一致）
         let highlightItem = NSMenuItem(title: zh ? "高亮" : "Highlight", action: nil, keyEquivalent: "")
         let colorSubmenu = NSMenu()
-        let colors: [(color: String, label: String)] = zh
-            ? [("yellow", "黄"), ("green", "绿"), ("blue", "蓝"), ("pink", "粉"), ("purple", "紫")]
-            : [("yellow", "Yellow"), ("green", "Green"), ("blue", "Blue"), ("pink", "Pink"), ("purple", "Purple")]
+        let colors: [(color: String, nsColor: NSColor)] = [
+            ("yellow", NSColor(calibratedRed: 0.965, green: 0.827, blue: 0.176, alpha: 1)), // #f6d32d
+            ("green", NSColor(calibratedRed: 0.482, green: 0.769, blue: 0.498, alpha: 1)), // #7bc47f
+            ("blue", NSColor(calibratedRed: 0.392, green: 0.710, blue: 0.965, alpha: 1)), // #64b5f6
+            ("pink", NSColor(calibratedRed: 0.949, green: 0.545, blue: 0.690, alpha: 1)), // #f28bb0
+            ("purple", NSColor(calibratedRed: 0.702, green: 0.533, blue: 1.0, alpha: 1)), // #b388ff
+        ]
         for c in colors {
-            let item = NSMenuItem(title: c.label, action: #selector(highlightAction(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: "", action: #selector(highlightAction(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = c.color
+            item.image = MainWebView.colorDotImage(c.nsColor)
+            item.toolTip = zh ? Self.colorNameZh(c.color) : c.color
             colorSubmenu.addItem(item)
         }
         highlightItem.submenu = colorSubmenu
@@ -178,6 +183,30 @@ final class MainWebView: WKWebView {
         // evaluateJavaScript 必须在主线程；菜单回调已在主线程，dispatch 兜底
         DispatchQueue.main.async { [weak self] in
             self?.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+
+    // ---- 色块辅助 ----------------
+
+    /// 画一个实心圆点（菜单色块），尺寸 14×14（含 1pt 内边距）
+    private static func colorDotImage(_ color: NSColor, size: CGFloat = 14) -> NSImage {
+        let img = NSImage(size: NSSize(width: size, height: size))
+        img.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: size - 2, height: size - 2)).fill()
+        img.unlockFocus()
+        return img
+    }
+
+    /// 颜色名（tooltip 悬停提示，避免纯色块不可读）
+    private static func colorNameZh(_ color: String) -> String {
+        switch color {
+        case "yellow": return "黄"
+        case "green": return "绿"
+        case "blue": return "蓝"
+        case "pink": return "粉"
+        case "purple": return "紫"
+        default: return color
         }
     }
 }

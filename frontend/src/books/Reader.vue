@@ -1087,26 +1087,67 @@ function postReaderState(active: boolean, text: string, hasHighlight = false) {
   }
 }
 
+/** 壳菜单动作兜底：currentSelection 为空时从 iframe 实时读选区（系统右键自动选词瞬间，
+ *  400ms 轮询还没上报，currentSelection 尚未建立）。读到则填充 currentSelection（含 cfi/context），
+ *  后续 addHighlight/onToolbarLookup 等以 currentSelection 为数据源的动作即可正常工作。 */
+function syncSelectionFromDom(): boolean {
+  if (currentSelection.value) return true;
+  const iframe = containerRef.value?.querySelector("iframe");
+  const iw = iframe?.contentWindow;
+  const sel = iw?.getSelection?.();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  const text = sel.toString().trim();
+  if (!text) return false;
+  const contents = getCurrentContents();
+  if (!contents) return false;
+  try {
+    const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
+      sel.getRangeAt(0),
+    );
+    if (!cfi) return false;
+    currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 挂载全局菜单 API（Swift 点击系统右键菜单项时经 evaluateJavaScript 调用）；卸载时清理 */
 function installNativeMenuApi() {
   nativeShell.__qqReaderMenu = {
     // 查词：复用 onToolbarLookup（currentSelection 为数据源）；无选中时安全 no-op
-    lookup: () => onToolbarLookup(currentSelection.value?.text ?? ""),
+    lookup: () => {
+      syncSelectionFromDom();
+      onToolbarLookup(currentSelection.value?.text ?? "");
+    },
     // 高亮：复用 onToolbarHighlight；非法颜色回退黄色（壳传 'yellow'|'green'|'blue'|'pink'|'purple'）
     highlight: (color: string) => {
+      syncSelectionFromDom();
       const c: HighlightColor = HIGHLIGHT_COLOR_STYLES[color as HighlightColor]
         ? (color as HighlightColor)
         : "yellow";
       onToolbarHighlight("", c);
     },
     // 下划线（V4）：选中文字 → underline 标注（落库 red）
-    underline: () => onToolbarHighlight("", "yellow", "underline"),
+    underline: () => {
+      syncSelectionFromDom();
+      onToolbarHighlight("", "yellow", "underline");
+    },
     // 移除高亮：选中 cfi 已有高亮时删除该条；无选中/无高亮安全 no-op
-    remove: () => onToolbarRemove(),
+    remove: () => {
+      syncSelectionFromDom();
+      onToolbarRemove();
+    },
     // 书内搜索：选中词 → SearchPanel（searchRequest 由 watch 消费）
-    search: () => onToolbarSearch(currentSelection.value?.text ?? ""),
+    search: () => {
+      syncSelectionFromDom();
+      onToolbarSearch(currentSelection.value?.text ?? "");
+    },
     // 笔记：复用 onToolbarNote（openNoteCreate 内部判空）；无选中时安全 no-op
-    note: () => onToolbarNote(""),
+    note: () => {
+      syncSelectionFromDom();
+      onToolbarNote("");
+    },
   };
 }
 
