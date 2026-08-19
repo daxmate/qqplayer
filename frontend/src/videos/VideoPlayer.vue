@@ -27,8 +27,8 @@
         @timeupdate="onTimeupdate"
         @loadedmetadata="onLoadedMeta"
         @seeking="onSeeking"
-        @play="isPlaying = true"
-        @pause="isPlaying = false"
+        @play="onPlay"
+        @pause="onPause"
         @ended="isPlaying = false"
       />
       <div v-if="currentCue" class="vp-overlay-sub">
@@ -343,12 +343,14 @@ function abBadge(i: number) {
 // ============ 句末处理（对齐 karaoke handleKaraokeTick） ============
 // 跟读开：句末回句首暂停（可反复练一句）；单句循环：句末回句首续播；
 // AB 区间：A→B 连播，B 播完跳回 A；等选终点（b=null）：起点句循环
-function onTimeupdate() {
-  const v = videoEl.value;
-  if (!v) return;
-  const t = v.currentTime;
-  currentTime.value = t;
-  highlightIdx.value = locateLineAt(t);
+// ============ 句末处理（对齐 karaoke handleKaraokeTick） ============
+// 跟读开：句末回句首暂停（可反复练一句）；单句循环：句末回句首续播；
+// AB 区间：A→B 连播，B 播完跳回 A；等选终点（b=null）：起点句循环
+// 变速精度（2026-08-19）：timeupdate 粒度 ~250ms 媒体时间，变速 0.75 后墙钟间隔
+// 拉长 → 句末截止时间戳判定滞后，循环/暂停“多播尾巴 + 突然跳回”= 抖。
+// 播放中额外 50ms 轮询 currentTime 做句末判定（与 timeupdate 并存、幂等；
+// 截止时间戳实时读当前句 lines[i].end，变速不改媒体时间轴）。
+function checkLineEnd(t: number) {
   if (!karaokeOn.value || !subtitles.value.length) return;
   const lines = subtitles.value;
   // 锚点失效（间隙/seek 回退）→ 重新定位
@@ -389,6 +391,34 @@ function onTimeupdate() {
     return;
   }
   anchorLine.value = li; // AB 区间内正常推进后落位
+}
+
+function onTimeupdate() {
+  const v = videoEl.value;
+  if (!v) return;
+  const t = v.currentTime;
+  currentTime.value = t;
+  highlightIdx.value = locateLineAt(t);
+  checkLineEnd(t);
+}
+
+// 高频句末检测（变速精度）：播放中 50ms 轮询 currentTime；暂停/停止即清
+const KARAOKE_TICK_MS = 50;
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+function onPlay() {
+  isPlaying.value = true;
+  if (tickTimer) return;
+  tickTimer = setInterval(() => {
+    const v = videoEl.value;
+    if (v && !v.paused) checkLineEnd(v.currentTime);
+  }, KARAOKE_TICK_MS);
+}
+function onPause() {
+  isPlaying.value = false;
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
 }
 
 // ============ 基础播放控制 ============
@@ -472,11 +502,13 @@ function onSeeking() {
 function onLoadedMeta() {
   const el = videoEl.value;
   if (!el) return;
+  // 重建 src（在线合成流 seek 换源）后浏览器把 playbackRate 重置回 1.0：
+  // 恒等恢复用户设定变速（0.75/1.25），否则变速状态丢失 → 速度跳变 + 字幕/截止时间戳对不上
+  el.playbackRate = speed.value;
   // 合成流浏览器可能拿不到 duration（fMP4 分片，0/NaN/Infinity）：resolve 返回的 v.duration 兜底
   const metaDur = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0;
   const resolveDur = isOnlineVideo(props.video) ? props.video.duration || 0 : 0;
   duration.value = resolveDur || metaDur || 0;
-  if (Number.isFinite(el.playbackRate)) speed.value = el.playbackRate;
   // 重建流加载完成：恢复进度（置 suppressSeek 防 seeking 再入）+ 按需续播
   if (pendingSeek !== null) {
     const target = pendingSeek;
@@ -500,6 +532,10 @@ watch(highlightIdx, async () => {
 // 本地加载视频：object URL 卸载时释放
 onUnmounted(() => {
   if (pressTimer) clearTimeout(pressTimer);
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
   const v = props.video;
   if ("localUrl" in v) URL.revokeObjectURL(v.localUrl);
 });

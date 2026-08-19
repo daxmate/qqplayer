@@ -412,3 +412,34 @@ describe("VideoPlayer 在线视频 seek 重建（B站合成流缓冲外换源）
     wrapper.unmount();
   });
 });
+
+describe("变速精度（2026-08-19）", () => {
+  it("重建 src 后恢复变速：loadedmetadata 时按 speed 恒等写回 playbackRate（防浏览器重置 1.0）", async () => {
+    const { wrapper, video } = await mountPlayer();
+    const speedBtn = wrapper.findAll(".vc-btn").find((b) => b.text().includes("x"))!;
+    await speedBtn.trigger("click"); // 1.25
+    await speedBtn.trigger("click"); // 0.75
+    expect(video.playbackRate).toBe(0.75);
+    // 模拟在线合成流重建 src 后浏览器把 playbackRate 重置回 1.0
+    video.playbackRate = 1.0;
+    await wrapper.find("video").trigger("loadedmetadata");
+    expect(video.playbackRate).toBe(0.75); // 恢复用户设定变速
+    wrapper.unmount();
+  });
+
+  it("播放中 50ms 轮询做句末判定：越过截止时间戳即回句首暂停", async () => {
+    vi.useFakeTimers();
+    const { wrapper, video } = await mountPlayer();
+    // 先锚定第 0 句（timeupdate 在句内）
+    await playTo(wrapper, video, 1);
+    expect(video.currentTime).toBe(1);
+    // 越过第 0 句截止时间戳（end=2）：变速下 timeupdate 墙钟间隔拉长，靠轮询兜住
+    video.currentTime = 2.1;
+    await video.play(); // jsdom paused 只读：play mock 置 false
+    await wrapper.find("video").trigger("play"); // 启动轮询
+    vi.advanceTimersByTime(50);
+    expect(video.currentTime).toBe(0); // 回句首
+    expect(video.paused).toBe(true); // 句末暂停
+    wrapper.unmount();
+  });
+});

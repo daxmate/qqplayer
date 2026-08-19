@@ -1856,6 +1856,32 @@ registerPlayerBridge({
   persistPlayerCache,
 });
 
+// ============ 跟唱句末高频检测（变速精度，2026-08-19） ============
+// timeupdate 粒度约 250ms 媒体时间：变速 0.75 后墙钟间隔被拉长到 ~333ms，
+// 句末越过截止时间戳（lines[i].e）后还要等这么久才跳转 → 单句/AB 循环
+// "多播一截尾巴 + 突然跳回句首" = 节律性抖动；普通跟唱则"停不准"。
+// 跟唱模式播放中额外 50ms 轮询 currentTime 做句末判定（与 timeupdate 并存、
+// 幂等；句末判定始终实时读当前时间与当前句截止时间戳比较，变速不改媒体时间轴）。
+const KARAOKE_TICK_MS = 50;
+let karaokeTicker = null;
+
+export function startKaraokeTicker() {
+  if (karaokeTicker) return;
+  karaokeTicker = setInterval(() => {
+    // 非跟唱/跟读关：空转（切模式后由 stop 兜底，这里防御）
+    if (state.mode === "karaoke" && state.karaokeOn) {
+      handleKaraokeTick(audio.currentTime);
+    }
+  }, KARAOKE_TICK_MS);
+}
+
+export function stopKaraokeTicker() {
+  if (karaokeTicker) {
+    clearInterval(karaokeTicker);
+    karaokeTicker = null;
+  }
+}
+
 // ============ 音频事件 ============
 audio.addEventListener("timeupdate", () => {
   state.currentTime = audio.currentTime;
@@ -1872,6 +1898,7 @@ audio.addEventListener("timeupdate", () => {
 audio.addEventListener("play", () => {
   state.isPlaying = true;
   syncMediaPlaybackState();
+  startKaraokeTicker(); // 跟唱句末高频检测（变速 0.75 时 timeupdate 太粗）
   // 真正开始出声才建播放会话：选歌但未播放不记；
   // 若已跟踪的歌不同（换歌后立即播放）→ 先上报旧会话
   const song = state.currentSong;
@@ -1883,6 +1910,7 @@ audio.addEventListener("play", () => {
 audio.addEventListener("pause", () => {
   state.isPlaying = false;
   syncMediaPlaybackState();
+  stopKaraokeTicker(); // 暂停/句末自动停：停掉高频检测
   // 暂停：结束当前播放会话并上报（跟唱模式句间自动暂停也会触发——
   // 但因每句间隔很短，连续跟唱会被下一句 play 合并？不会——pause 即 flush，
   // 跟唱模式每句暂停都会产生一条短记录。处理：跟唱模式下不因句间暂停 flush，
@@ -1934,6 +1962,7 @@ watch(
   () => state.mode,
   () => {
     flushPlaybackSession();
+    stopKaraokeTicker(); // 退出跟唱模式：停掉高频检测（切回跟唱后由 play 事件重启）
   },
 );
 

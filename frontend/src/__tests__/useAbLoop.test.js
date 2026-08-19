@@ -47,9 +47,15 @@ const localStorageStub = {
   },
 };
 
-const { state, playbackSettings, selectSong, _resetPlayMode } =
-  await import("../composables/playerCore.js");
-const { playLine, _resetKaraokeAnchor } = await import("../composables/useLyric.js");
+const {
+  state,
+  playbackSettings,
+  selectSong,
+  _resetPlayMode,
+  startKaraokeTicker,
+  stopKaraokeTicker,
+} = await import("../composables/playerCore.js");
+const { playLine, _resetKaraokeAnchor, karaokeState } = await import("../composables/useLyric.js");
 const { enterAbLoop, setAbEnd, exitAbLoop, clickLine, _getAbLoopCount, resetAbLoopCount } =
   await import("../composables/useAbLoop.js");
 
@@ -94,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("AB 循环计数（防走开安全阀）", () => {
@@ -265,5 +272,61 @@ describe("AB 循环计数（防走开安全阀）", () => {
     expect(_getAbLoopCount()).toBe(0); // 进入 + 设终点均已清零
     completeRound(1, 3);
     expect(_getAbLoopCount()).toBe(1);
+  });
+});
+
+describe("跟唱句末高频检测（变速精度，2026-08-19）", () => {
+  const audio = () => FakeAudio.instances[0];
+
+  function startKaraoke() {
+    const a = audio();
+    state.mode = "karaoke";
+    state.karaokeOn = true;
+    state.karaokeLoop = false;
+    state.currentSong = { path: "/a.mp3" };
+    a.src = "/a.mp3";
+    state.lyric = LYRIC;
+    karaokeState.line = 0; // 已锚定第 0 句
+    return a;
+  }
+
+  it("播放中 50ms 轮询触发句末判定：越过截止时间戳即回句首暂停", () => {
+    vi.useFakeTimers();
+    const a = startKaraoke();
+    a.currentTime = LYRIC[0].e + 0.5; // 越过截止时间戳（变速下 timeupdate 太粗，靠轮询兜住）
+    startKaraokeTicker();
+    vi.advanceTimersByTime(50);
+    expect(a.currentTime).toBe(LYRIC[0].s); // 回句首
+    expect(a.paused).toBe(true); // 句末暂停
+    stopKaraokeTicker();
+  });
+
+  it("停止轮询后不再处理句末", () => {
+    vi.useFakeTimers();
+    const a = startKaraoke();
+    a.currentTime = LYRIC[0].e + 0.5;
+    startKaraokeTicker();
+    vi.advanceTimersByTime(50);
+    expect(a.currentTime).toBe(LYRIC[0].s); // 第一次触发已处理
+    stopKaraokeTicker();
+    a.currentTime = LYRIC[1].e + 0.5; // 再越过一句
+    vi.advanceTimersByTime(200);
+    expect(a.currentTime).toBe(LYRIC[1].e + 0.5); // 不再跳转
+  });
+
+  it("非跟唱模式：轮询空转不处理", () => {
+    vi.useFakeTimers();
+    const a = audio();
+    state.mode = "continuous";
+    state.karaokeOn = true;
+    state.currentSong = { path: "/a.mp3" };
+    a.src = "/a.mp3";
+    state.lyric = LYRIC;
+    karaokeState.line = 0;
+    a.currentTime = LYRIC[0].e + 0.5;
+    startKaraokeTicker();
+    vi.advanceTimersByTime(100);
+    expect(a.currentTime).toBe(LYRIC[0].e + 0.5); // 不处理
+    stopKaraokeTicker();
   });
 });
