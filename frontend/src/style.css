@@ -171,7 +171,8 @@ html[data-blur="true"] .karaoke-panel {
   backdrop-filter: blur(32px) saturate(1.3);
 }
 html[data-blur="true"] .sidebar,
-html[data-blur="true"] .playlist {
+html[data-blur="true"] .playlist,
+html[data-blur="true"] .activity-bar {
   background: color-mix(in srgb, var(--bg2) 64%, transparent);
   -webkit-backdrop-filter: blur(32px) saturate(1.3);
   backdrop-filter: blur(32px) saturate(1.3);
