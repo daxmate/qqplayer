@@ -620,6 +620,15 @@ onUnmounted(() => {
 .main.karaoke .controls {
   border-radius: 0 0 16px 0;
 }
+/* 无边栏时：歌词面板左上角、控制条左下角也贴窗口边缘，恢复圆角 */
+.main.karaoke:not(.has-music):not(.has-playlist) .karaoke-panel,
+.main.continuous:not(.has-music):not(.has-playlist) .lyric-panel {
+  border-radius: 16px 16px 0 0;
+}
+.main.karaoke:not(.has-music):not(.has-playlist) .controls,
+.main.continuous:not(.has-music):not(.has-playlist) .controls {
+  border-radius: 0 0 16px 16px;
+}
 /* 连播模式：有音乐库/播放列表面板时，歌词面板右下角直角；控制区左上/右上/左下直角（左边贴边栏、右上贴歌词面板），仅右下贴窗口边缘保留圆角 */
 .main.continuous.has-music .lyric-panel,
 .main.continuous.has-playlist .lyric-panel {
