@@ -39,6 +39,7 @@
           class="sb-item"
           :class="{ on: p.id === state.activePlaylistId, 'sb-drop': dropOverId === p.id }"
           :title="p.name"
+          :data-playlist-id="p.id"
           @click="activate(p.id)"
           @dragover="onPlaylistDragOver(p, $event)"
           @dragleave="onPlaylistDragLeave(p, $event)"
@@ -128,6 +129,8 @@ import {
 import { useI18n } from "vue-i18n";
 import {
   state,
+  selectSong,
+  play,
   createPlaylist,
   renamePlaylist,
   deletePlaylist,
@@ -180,6 +183,7 @@ function closeSmartViewPanel() {
 // 侧栏被关闭（音乐库面板收起）时同步退出智能视图，避免残留覆盖层
 onBeforeUnmount(() => {
   window.removeEventListener("dragend", clearDropHighlight);
+  unbindCtxEvents(); // 壳右键菜单动作监听
   if (smartViewState.active) {
     const prev = smartViewState.prevPlaylistOpen;
     closeSmartView();
@@ -230,7 +234,57 @@ async function onPlaylistDrop(p, e) {
 function clearDropHighlight() {
   dropOverId.value = null;
 }
-onMounted(() => window.addEventListener("dragend", clearDropHighlight));
+onMounted(() => {
+  window.addEventListener("dragend", clearDropHighlight);
+  bindCtxEvents(); // 壳右键菜单动作（浏览器内事件永不派发，无副作用）
+});
+
+// ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报上下文 → 壳注入 NSMenu → 点击调 __qqCtxMenu → 事件派发到这里） ============
+// 复用侧边栏既有实现（activate/startRename/askDelete）；事件只在原生壳内派发，浏览器永不触发。
+function playlistFromEvent(e) {
+  return state.playlists.find((x) => x.id === e.detail?.id) ?? null;
+}
+
+// 播放：打开该歌单视图；有歌则从第一首开始播（与点击歌单 + 点歌行为等价）
+function onCtxPlayPlaylist(e) {
+  const p = playlistFromEvent(e);
+  if (!p) return;
+  activate(p.id);
+  const first = (p.songPaths || [])[0];
+  if (first) {
+    const idx = state.songs.findIndex((s) => s.path === first);
+    if (idx >= 0) {
+      selectSong(idx);
+      play();
+    }
+  }
+}
+
+// 重命名：行内输入（startRename 内部聚焦并全选）
+function onCtxRenamePlaylist(e) {
+  const p = playlistFromEvent(e);
+  if (p) startRename(p);
+}
+
+// 删除：Gmail 式删除 + 撤销 toast（askDelete）
+function onCtxDeletePlaylist(e) {
+  const p = playlistFromEvent(e);
+  if (p) askDelete(p);
+}
+
+const CTX_EVENTS = [
+  ["qqplayer:ctx-playplaylist", onCtxPlayPlaylist],
+  ["qqplayer:ctx-renameplaylist", onCtxRenamePlaylist],
+  ["qqplayer:ctx-deleteplaylist", onCtxDeletePlaylist],
+];
+
+function bindCtxEvents() {
+  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn);
+}
+
+function unbindCtxEvents() {
+  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn);
+}
 
 // ============ 新建 ============
 const creating = ref(false);
@@ -266,8 +320,9 @@ async function startRename(p) {
   editingId.value = p.id;
   editName.value = p.name;
   await nextTick();
-  editInput.value?.focus();
-  editInput.value?.select();
+  // editInput 在 v-for 内（<template v-for="p in state.playlists">），Vue 3 对 v-for 内 ref 收集为数组 → 取 [0]
+  editInput.value?.[0]?.focus();
+  editInput.value?.[0]?.select();
 }
 
 async function commitEdit() {

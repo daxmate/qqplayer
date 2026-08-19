@@ -68,17 +68,35 @@ final class DragOverlayView: NSView {
     }
 }
 
-// ============ 主窗口 WebView：阅读器右键菜单扩展 ============
+// ============ 主窗口 WebView：右键菜单扩展（阅读器 + 歌曲列表/侧边栏歌单） ============
 // 阅读器（Reader.vue）激活且有选中文本时，在系统右键菜单顶部追加应用项：
 //   查词 "xxx" / 高亮（黄绿蓝粉子菜单）/ 添加笔记… / 分隔线
-// 其余情况原样保留系统菜单（迷你窗 / 歌词窗仍用普通 WKWebView，不受影响）。
-// 菜单点击通过 evaluateJavaScript 调前端全局 API（window.__qqReaderMenu?.*，失败静默）。
+// 其余情况：歌曲列表/侧边栏歌单右键（前端 mousedown 上报 ctxState）→ 注入播放/收藏/加歌单等应用项；
+// 无上下文或上下文过期 → 原样保留系统菜单（迷你窗 / 歌词窗仍用普通 WKWebView，不受影响）。
+// 菜单点击通过 evaluateJavaScript 调前端全局 API（window.__qqReaderMenu?.* / window.__qqCtxMenu?.*，失败静默）。
 final class MainWebView: WKWebView {
     // 阅读器状态缓存：前端经 "native" 通道推送 { type: 'readerState', active, hasSelection, text, hasHighlight }
     static var readerActive = false
     static var readerHasSelection = false
     static var readerSelectedText = ""
     static var readerHasHighlight = false
+
+    // 歌曲列表/侧边栏歌单右键菜单上下文缓存：前端 mousedown(button===2) 时经 "native" 通道推送
+    // { type: 'ctxState', kind: 'song'|'playlist'|nil, path, songIndex, playlistId, songName, isFav, hasPath, canGoArtist, canGoAlbum }
+    // willOpenMenu 时按 kind 注入菜单项；kind 为 nil（空白区右键）或上下文过期 → 不注入，保留系统菜单
+    static var ctxKind: String? = nil
+    static var ctxPath: String? = nil
+    static var ctxSongIndex = -1
+    static var ctxPlaylistId: String? = nil
+    static var ctxSongName = ""
+    static var ctxIsFav = false
+    static var ctxHasPath = false
+    static var ctxCanGoArtist = false
+    static var ctxCanGoAlbum = false
+    static var ctxTimestamp: TimeInterval = 0
+
+    // 上下文保鲜窗口（秒）：超过视为过期，不注入自定义项（防右键后长时间未开菜单误用旧上下文）
+    private static let ctxFreshWindow: TimeInterval = 10
 
     // 本地化：跟随系统语言（zh* → 中文，其余英文）；英文查词用 "Dictionary" 避免与系统 Look Up 混淆
     private static let isChinese: Bool = {
@@ -90,12 +108,18 @@ final class MainWebView: WKWebView {
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
-        // 仅阅读器激活时追加应用项（选区缓存为空也插入——系统右键自动选词瞬间前端 400ms 轮询
-        // 可能还没上报，点击动作由前端从 DOM 实时读选区兜底，见 __qqReaderMenu）
-        guard MainWebView.readerActive else { return }
+        // 阅读器激活 → 阅读器菜单（原逻辑）；否则 → 歌曲列表/侧边栏歌单右键菜单（有新鲜上下文时注入）
+        if MainWebView.readerActive {
+            insertReaderMenuItems(into: menu, zh: MainWebView.isChinese)
+            return
+        }
+        insertCtxMenuItems(into: menu)
+    }
 
-        let zh = MainWebView.isChinese
-
+    // ---- 阅读器右键菜单（原逻辑，从 willOpenMenu 抽出保持可读性） ----
+    // 仅阅读器激活时追加应用项（选区缓存为空也插入——系统右键自动选词瞬间前端 400ms 轮询
+    // 可能还没上报，点击动作由前端从 DOM 实时读选区兜底，见 __qqReaderMenu）
+    private func insertReaderMenuItems(into menu: NSMenu, zh: Bool) {
         // 查词 "xxx"（选中词截断 30 字符，超长加 …；选区缓存为空时仅显示固定标题）
         let text = MainWebView.readerSelectedText
         let truncated = text.isEmpty ? "" : (text.count > 30 ? String(text.prefix(30)) + "…" : text)
@@ -158,6 +182,84 @@ final class MainWebView: WKWebView {
         menu.insertItem(searchItem, at: idx); idx += 1
         menu.insertItem(noteItem, at: idx); idx += 1
         menu.insertItem(.separator(), at: idx)
+    }
+
+    // ---- 歌曲列表 / 侧边栏歌单右键菜单（前端 ctxState 驱动） ----
+    // 歌曲行：播放 / 下一首播放 / 收藏(取消收藏) / 添加到歌单… / ─ / 移到废纸篓* / 进歌手* / 进专辑*
+    // 歌单项：播放 / 重命名 / 删除（* 按 canGoArtist / canGoAlbum / hasPath 条件显示，同 ContextMenu.vue）
+    private func insertCtxMenuItems(into menu: NSMenu) {
+        // 无上下文（空白区右键）或上下文过期 → 不注入，保留系统菜单
+        guard Date().timeIntervalSince1970 - MainWebView.ctxTimestamp <= MainWebView.ctxFreshWindow,
+              let kind = MainWebView.ctxKind else { return }
+        let zh = MainWebView.isChinese
+        var idx = 0
+        if kind == "song" {
+            menu.insertItem(ctxItem(zh ? "播放" : "Play", #selector(ctxPlayAction(_:))), at: idx); idx += 1
+            menu.insertItem(ctxItem(zh ? "下一首播放" : "Play Next", #selector(ctxPlayNextAction(_:))), at: idx); idx += 1
+            let favTitle = MainWebView.ctxIsFav
+                ? (zh ? "取消收藏" : "Unfavorite")
+                : (zh ? "收藏" : "Favorite")
+            menu.insertItem(ctxItem(favTitle, #selector(ctxToggleFavAction(_:))), at: idx); idx += 1
+            menu.insertItem(ctxItem(zh ? "添加到歌单…" : "Add to Playlist…", #selector(ctxAddPlaylistAction(_:))), at: idx); idx += 1
+            menu.insertItem(.separator(), at: idx); idx += 1
+            if MainWebView.ctxHasPath {
+                menu.insertItem(ctxItem(zh ? "移到废纸篓" : "Move to Trash", #selector(ctxRemoveAction(_:))), at: idx); idx += 1
+            }
+            if MainWebView.ctxCanGoArtist {
+                menu.insertItem(ctxItem(zh ? "进歌手" : "Go to Artist", #selector(ctxGoArtistAction(_:))), at: idx); idx += 1
+            }
+            if MainWebView.ctxCanGoAlbum {
+                menu.insertItem(ctxItem(zh ? "进专辑" : "Go to Album", #selector(ctxGoAlbumAction(_:))), at: idx); idx += 1
+            }
+        } else if kind == "playlist" {
+            menu.insertItem(ctxItem(zh ? "播放" : "Play", #selector(ctxPlayAction(_:))), at: idx); idx += 1
+            menu.insertItem(ctxItem(zh ? "重命名" : "Rename", #selector(ctxRenameAction(_:))), at: idx); idx += 1
+            menu.insertItem(ctxItem(zh ? "删除" : "Delete", #selector(ctxDeletePlaylistAction(_:))), at: idx); idx += 1
+        }
+    }
+
+    /// 菜单项快捷构造（target 固定为 self，与阅读器菜单一致）
+    private func ctxItem(_ title: String, _ action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    // ---- 歌曲列表/歌单菜单点击 → 前端 JS（optional chaining，调用失败静默） ----
+    @objc private func ctxPlayAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.play()")
+    }
+
+    @objc private func ctxPlayNextAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.playNext()")
+    }
+
+    @objc private func ctxToggleFavAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.toggleFav()")
+    }
+
+    @objc private func ctxAddPlaylistAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.addPlaylist()")
+    }
+
+    @objc private func ctxRemoveAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.remove()")
+    }
+
+    @objc private func ctxGoArtistAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.goArtist()")
+    }
+
+    @objc private func ctxGoAlbumAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.goAlbum()")
+    }
+
+    @objc private func ctxRenameAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.rename()")
+    }
+
+    @objc private func ctxDeletePlaylistAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.delete()")
     }
 
     // ---- 菜单点击 → 前端 JS（optional chaining，调用失败静默） ----
@@ -785,6 +887,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             MainWebView.readerHasSelection = dict["hasSelection"] as? Bool ?? false
             MainWebView.readerSelectedText = dict["text"] as? String ?? ""
             MainWebView.readerHasHighlight = dict["hasHighlight"] as? Bool ?? false
+        case "ctxState":
+            // 歌曲列表/侧边栏歌单右键上下文缓存（前端 useNativeCtxMenu mousedown(button===2) 上报，
+            // 驱动 willOpenMenu 注入菜单项）。kind 为 null（空白区右键）→ as? String 得 nil → 清空上下文，
+            // willOpenMenu 不再注入自定义项，原样保留系统菜单。
+            MainWebView.ctxKind = dict["kind"] as? String
+            MainWebView.ctxPath = dict["path"] as? String
+            MainWebView.ctxSongIndex = dict["songIndex"] as? Int ?? -1
+            MainWebView.ctxPlaylistId = dict["playlistId"] as? String
+            MainWebView.ctxSongName = dict["songName"] as? String ?? ""
+            MainWebView.ctxIsFav = dict["isFav"] as? Bool ?? false
+            MainWebView.ctxHasPath = dict["hasPath"] as? Bool ?? false
+            MainWebView.ctxCanGoArtist = dict["canGoArtist"] as? Bool ?? false
+            MainWebView.ctxCanGoAlbum = dict["canGoAlbum"] as? Bool ?? false
+            MainWebView.ctxTimestamp = Date().timeIntervalSince1970
         case "qqlog":
             // 诊断：网页 console 落盘（~/Library/Logs/qqplayer/webview-console.log）
             let level = dict["level"] as? String ?? "log"

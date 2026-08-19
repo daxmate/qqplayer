@@ -743,26 +743,26 @@ const ctxCanGoAlbum = computed(() => {
   return !(browseFilter.value?.type === "album" && browseFilter.value.value === v);
 });
 
-function ctxPlay() {
-  if (ctxIdx.value >= 0 && ctxIdx.value < state.songs.length) {
-    selectSong(ctxIdx.value);
+// 播放指定曲库索引的歌（浏览器/壳右键菜单共用；idx 越界静默）
+function playFor(idx) {
+  if (idx >= 0 && idx < state.songs.length) {
+    selectSong(idx);
     play();
   }
+}
+
+function ctxPlay() {
+  playFor(ctxIdx.value);
   ctxClose();
 }
 
 // 下一首播放：把该歌挪到当前歌之后并立即播放（列表即队列，避免重复条目）
-function ctxPlayNext() {
-  const idx = ctxIdx.value;
-  if (idx < 0 || idx >= state.songs.length) {
-    ctxClose();
-    return;
-  }
+function playNextFor(idx) {
+  if (idx < 0 || idx >= state.songs.length) return;
   const cur = state.currentIndex;
   if (cur < 0 || idx === cur) {
     selectSong(idx);
     play();
-    ctxClose();
     return;
   }
   const song = state.songs[idx];
@@ -773,6 +773,10 @@ function ctxPlayNext() {
   _resetPlayMode(); // 洗牌队列失效，selectSong 会按新歌重建
   selectSong(cur2 + 1);
   play();
+}
+
+function ctxPlayNext() {
+  playNextFor(ctxIdx.value);
   ctxClose();
 }
 
@@ -803,19 +807,30 @@ function ctxAddPlaylist() {
   });
 }
 
-function ctxGoArtist() {
-  const s = ctxSong.value;
-  if (s?.artist) {
-    browseFilter.value = { type: "artist", value: norm(s.artist, UNKNOWN_ARTIST) };
+// 进歌手/进专辑分组视图（浏览器/壳右键菜单共用）：按歌曲数据设置 browseFilter
+function goArtistFor(song) {
+  if (song?.artist) {
+    browseFilter.value = { type: "artist", value: norm(song.artist, UNKNOWN_ARTIST) };
   }
+}
+
+function goAlbumFor(song) {
+  if (song?.album) {
+    browseFilter.value = {
+      type: "album",
+      value: norm(song.album, UNKNOWN_ALBUM),
+      artist: song.artist,
+    };
+  }
+}
+
+function ctxGoArtist() {
+  goArtistFor(ctxSong.value);
   ctxClose();
 }
 
 function ctxGoAlbum() {
-  const s = ctxSong.value;
-  if (s?.album) {
-    browseFilter.value = { type: "album", value: norm(s.album, UNKNOWN_ALBUM), artist: s.artist };
-  }
+  goAlbumFor(ctxSong.value);
   ctxClose();
 }
 
@@ -827,6 +842,81 @@ function ctxDelete() {
   }
   ctxClose();
   openDeleteDialog([p]);
+}
+
+// ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报上下文 → 壳注入 NSMenu → 点击调 __qqCtxMenu → 事件派发到这里） ============
+// 与浏览器右键菜单共用同一套实现（playFor/playNextFor/goArtistFor/goAlbumFor/openAddMenuAt/openDeleteDialog），
+// 壳内与浏览器行为完全一致；事件只在原生壳内由 __qqCtxMenu 派发，浏览器永不触发。
+function ctxSongFromEvent(e) {
+  const path = e.detail?.path;
+  if (path == null) return null;
+  return state.songs.find((s) => s.path === path) ?? null;
+}
+
+function onCtxPlay(e) {
+  const s = ctxSongFromEvent(e);
+  if (s) playFor(state.songs.indexOf(s));
+}
+
+function onCtxPlayNext(e) {
+  const s = ctxSongFromEvent(e);
+  if (s) playNextFor(state.songs.indexOf(s));
+}
+
+function onCtxToggleFav(e) {
+  const s = ctxSongFromEvent(e);
+  if (s?.path != null) toggleFavorite(s.path);
+}
+
+// 加歌单：与 ctxAddPlaylist 同一锚定方式（右键坐标 → 假 rect 右对齐 → 浮层从光标处展开）
+function onCtxAddPlaylist(e) {
+  const p = e.detail?.path;
+  if (p == null) return;
+  const { x, y } = e.detail;
+  openAddMenuAt(p, {
+    getBoundingClientRect: () => ({
+      left: x,
+      top: y,
+      right: x + ADD_MENU_WIDTH,
+      bottom: y + 4,
+      width: ADD_MENU_WIDTH,
+      height: 4,
+    }),
+  });
+}
+
+// 移到废纸篓：与 ctxDelete 同一确认弹窗链路
+function onCtxDeleteSong(e) {
+  const p = e.detail?.path;
+  if (p != null) openDeleteDialog([p]);
+}
+
+function onCtxGoArtist(e) {
+  const s = ctxSongFromEvent(e);
+  if (s) goArtistFor(s);
+}
+
+function onCtxGoAlbum(e) {
+  const s = ctxSongFromEvent(e);
+  if (s) goAlbumFor(s);
+}
+
+const CTX_EVENTS = [
+  ["qqplayer:ctx-play", onCtxPlay],
+  ["qqplayer:ctx-playnext", onCtxPlayNext],
+  ["qqplayer:ctx-togglefav", onCtxToggleFav],
+  ["qqplayer:ctx-addplaylist", onCtxAddPlaylist],
+  ["qqplayer:ctx-deletesong", onCtxDeleteSong],
+  ["qqplayer:ctx-goartist", onCtxGoArtist],
+  ["qqplayer:ctx-goalbum", onCtxGoAlbum],
+];
+
+function bindCtxEvents() {
+  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn);
+}
+
+function unbindCtxEvents() {
+  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn);
 }
 
 // ============ 行操作：移除（跟随视图语义） / 加歌 ============
@@ -967,11 +1057,13 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("resize", onViewportChange);
   window.addEventListener("scroll", onViewportChange, true);
+  bindCtxEvents(); // 壳右键菜单动作（浏览器内事件永不派发，无副作用）
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("resize", onViewportChange);
   window.removeEventListener("scroll", onViewportChange, true);
+  unbindCtxEvents();
 });
 
 async function toggleAdd(pid) {
