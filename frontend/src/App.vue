@@ -374,6 +374,17 @@ function onSearchPick(item) {
   });
 }
 
+// 智能视图右键「进歌手/进专辑」→ 同一链路：打开 Playlist 分组浏览
+// （SmartViewPanel 已先 emit close 关闭智能视图，这里补开播放列表面板 + 设置分组过滤）
+function onOpenBrowse(e) {
+  const { type, value } = e.detail || {};
+  if (!type || !value) return;
+  if (!state.playlistOpen) togglePlaylist();
+  nextTick(() => {
+    playlistRef.value?.openBrowse(type === "artist" ? "artists" : "albums", value);
+  });
+}
+
 let cleanupDragImport = null;
 
 onMounted(() => {
@@ -393,9 +404,11 @@ onMounted(() => {
   cleanupDragImport = setupDragImport();
   // 封面/歌词区尺寸：RO 量 center 高度（自适应保底 + 拖拽范围硬保护依赖）
   cleanupCoverObserve = observeCoverArea(centerRef.value);
+  window.addEventListener("qqplayer:open-browse", onOpenBrowse);
 });
 
 onUnmounted(() => {
+  window.removeEventListener("qqplayer:open-browse", onOpenBrowse);
   cleanupDragImport?.();
   cleanupDragImport = null;
   cleanupCoverObserve?.();

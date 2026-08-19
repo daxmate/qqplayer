@@ -1,14 +1,15 @@
-// Swift 壳右键菜单桥接（歌曲列表 / 侧边栏歌单）
+// Swift 壳右键菜单桥接（歌曲列表 / 智能视图 / 侧边栏歌单）
 //
-// 背景：浏览器端歌曲列表右键菜单用 @contextmenu.prevent 弹自定义菜单（Playlist.vue ContextMenu 组件），
+// 背景：浏览器端歌曲列表右键菜单用 @contextmenu.prevent 弹自定义菜单（Playlist.vue / SmartViewPanel.vue ContextMenu 组件），
 // 但 Swift 壳的 WKWebView 里 contextmenu 事件被系统吞掉不触发。照抄阅读器（Reader.vue）的壳桥接范式：
 //
 //   1. 前端 document 监听 mousedown（button===2 或 ⌃+左键）——WKWebView 里右键 mousedown/mouseup 正常触发，
-//      只有 contextmenu 被吞——检测目标是否落在歌曲行（.pl-item[data-path]）或侧边栏歌单（.sb-item[data-playlist-id]），
-//      组装上下文 ctxTarget 经 "native" 通道上报（type: 'ctxState'，去重：上下文没变化不重复发）
+//      只有 contextmenu 被吞——检测目标是否落在歌曲行（.pl-item[data-path] 全部歌曲 / .sv-item[data-path] 智能视图行）
+//      或侧边栏歌单（.sb-item[data-playlist-id]），组装上下文 ctxTarget 经 "native" 通道上报
+//      （type: 'ctxState'，去重：上下文没变化不重复发）
 //   2. 壳 willOpenMenu 按 ctxState 注入原生 NSMenu 项（播放/下一首播放/收藏/加歌单…）
 //   3. 菜单点击 → evaluateJavaScript 调 window.__qqCtxMenu.play() 等 → 这里派发 window 事件，
-//      Playlist.vue / Sidebar.vue 监听并复用浏览器右键菜单同一套动作实现（行为完全一致）
+//      Playlist.vue / SmartViewPanel.vue / Sidebar.vue 监听并复用浏览器右键菜单同一套动作实现（行为完全一致）
 //
 // 浏览器环境（无 window.qqplayerNative）init 直接返回，不挂任何监听、不装全局 API，右键行为零影响。
 
@@ -34,14 +35,17 @@ function ctxKey(ctx) {
 
 /**
  * 从右键事件目标找命中项：
- * - 歌曲行 `.pl-item[data-path]`（网络歌 path=null 时 Vue 不渲染该属性，自然不命中 → 壳显示系统菜单）
- * - 侧边栏歌单 `.sb-item[data-playlist-id]`（Sidebar 为歌单行挂了 data-playlist-id；全部歌曲/智能视图行没有 → 不命中）
+ * - 歌曲行 `.pl-item[data-path]`（全部歌曲/歌单视图）与 `.sv-item[data-path]`（智能视图：最近添加/最近播放/常听排行）
+ *   ——网络歌 path=null 时 Vue 不渲染该属性，自然不命中 → 壳显示系统菜单
+ * - 侧边栏歌单 `.sb-item[data-playlist-id]`（Sidebar 为歌单行挂了 data-playlist-id；全部歌曲/智能视图入口没有 → 不命中）
  * - 其余区域 → null（清空上下文）
  */
 function buildCtx(e) {
   const t = e.target;
   if (t instanceof Element) {
-    const row = t.closest(".pl-item[data-path]");
+    // 合并选择器：全部歌曲行与智能视图行同一套歌曲上下文（songIndex 按 state.songs 全库索引，
+    // 智能视图行是 state.songs 的过滤视图，path 可匹配）
+    const row = t.closest(".pl-item[data-path], .sv-item[data-path]");
     if (row) {
       const path = row.getAttribute("data-path");
       const songIndex = state.songs.findIndex((s) => s.path === path);
@@ -119,7 +123,7 @@ function onRightMousedown(e) {
   postCtxState();
 }
 
-/** 派发动作事件给组件（Playlist.vue / Sidebar.vue 监听，复用浏览器右键菜单同一套实现） */
+/** 派发动作事件给组件（Playlist.vue / SmartViewPanel.vue / Sidebar.vue 监听，复用浏览器右键菜单同一套实现） */
 function dispatch(type, detail) {
   window.dispatchEvent(new CustomEvent(type, { detail }));
 }

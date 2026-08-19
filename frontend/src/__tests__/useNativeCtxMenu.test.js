@@ -36,8 +36,10 @@ const { initNativeCtxMenu, resetNativeCtxMenu } =
   await import("../composables/useNativeCtxMenu.js");
 const { state, isFavorite } = await import("../composables/usePlayer.js");
 const { useToast, clearToasts } = await import("../composables/useToast.js");
+const { closeSmartView } = await import("../composables/useSmartViews.js");
 const Playlist = (await import("../components/Playlist.vue")).default;
 const Sidebar = (await import("../components/Sidebar.vue")).default;
+const SmartViewPanel = (await import("../components/SmartViewPanel.vue")).default;
 
 const SONG = [
   { id: "a", name: "A歌", artist: "五月天", album: "知足", path: "/a.mp3" },
@@ -59,6 +61,7 @@ beforeEach(() => {
     playlists: [],
     activePlaylistId: null,
   });
+  closeSmartView(); // 重置智能视图状态（mount SmartViewPanel 会写 smartViewState）
   // 模拟壳环境：window.qqplayerNative 标记 + webkit 消息桥
   window.qqplayerNative = true;
   postMock = vi.fn();
@@ -76,6 +79,7 @@ afterEach(() => {
   document.body
     .querySelectorAll(".ctx-menu, .ctx-backdrop, .add-menu, .am-backdrop, .dt-modal, .dt-backdrop")
     .forEach((el) => el.remove());
+  document.body.querySelectorAll(".main").forEach((el) => el.remove()); // 智能面板定位锚点
   // 注意：不删 window.__qqCtxMenu（init 幂等，删了不会重装）
 });
 
@@ -91,6 +95,32 @@ function mountPlaylist(songs = SONG) {
 function mountSidebar() {
   const wrapper = mount(Sidebar, { attachTo: document.body });
   wrappers.push(wrapper);
+  return wrapper;
+}
+
+// 智能视图面板：需要 ResizeObserver stub + .main .playlist 定位锚点（与 SmartViewPanel.test.js 同套路）
+// recentAdded 视图纯前端计算（mapRecentAdded(state.songs)），不发请求，适合壳桥测试
+async function mountSmartPanel(songs = SONG) {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    },
+  );
+  state.songs = songs.map((s) => ({ ...s }));
+  const main = document.createElement("div");
+  main.className = "main";
+  main.innerHTML = '<div class="playlist"></div>';
+  document.body.appendChild(main);
+  const wrapper = mount(SmartViewPanel, {
+    props: { kind: "recentAdded" },
+    attachTo: document.body,
+    global: { stubs: { teleport: true } },
+  });
+  wrappers.push(wrapper);
+  await nextTick(); // onMounted 里 measure() 后才渲染 .sv-panel，须等一帧
   return wrapper;
 }
 
@@ -207,6 +237,79 @@ describe("壳右键上下文上报（ctxState）", () => {
     expect(row.attributes("data-playlist-id")).toBeUndefined();
     await rclick(row.element);
     expect(lastCtxPost().kind).toBe(null);
+  });
+
+  it("右键智能视图行（.sv-item[data-path]）→ 上报 ctxState(kind=song, 索引正确)", async () => {
+    const wrapper = await mountSmartPanel(); // SONG 全量 → 最近添加前三行
+    const items = wrapper.findAll(".sv-item");
+    expect(items.length).toBeGreaterThan(0);
+    await rclick(items[1]); // B歌
+    expect(postMock).toHaveBeenCalledTimes(1);
+    const msg = lastCtxPost();
+    expect(msg.type).toBe("ctxState");
+    expect(msg.kind).toBe("song");
+    expect(msg.path).toBe("/b.mp3");
+    expect(msg.songIndex).toBe(1); // 全库索引（智能视图是 state.songs 的过滤视图）
+    expect(msg.songName).toBe("B歌");
+    expect(msg.hasPath).toBe(true);
+    expect(msg.canGoArtist).toBe(true);
+    expect(msg.canGoAlbum).toBe(true);
+    expect(msg.isFav).toBe(false);
+  });
+
+  it("右键智能视图行后壳菜单动作：__qqCtxMenu.play → 事件 → SmartViewPanel 播放", async () => {
+    const wrapper = await mountSmartPanel();
+    const items = wrapper.findAll(".sv-item");
+    await rclick(items[1]); // 右键 B
+    window.__qqCtxMenu.play();
+    await nextTick();
+    expect(state.currentIndex).toBe(1);
+    expect(state.currentSong.name).toBe("B歌");
+    expect(state.isPlaying).toBe(true);
+  });
+
+  it("智能视图行右键去重：同行重复右键只上报一次；Playlist 与智能视图行共享 ctxState 去重", async () => {
+    const wrapper = await mountSmartPanel();
+    const items = wrapper.findAll(".sv-item");
+    await rclick(items[0]);
+    await rclick(items[0]); // 同上下文 → 去重
+    expect(ctxPosts().filter((m) => m.kind === "song")).toHaveLength(1);
+    await rclick(items[1]); // 不同行 → 重新上报
+    expect(ctxPosts().filter((m) => m.kind === "song")).toHaveLength(2);
+  });
+
+  it("智能视图行右键 → 壳菜单动作 addPlaylist/remove/goArtist/goAlbum 派发对应事件", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+    );
+    const wrapper = await mountSmartPanel();
+    const items = wrapper.findAll(".sv-item");
+    const events = [];
+    for (const name of [
+      "qqplayer:ctx-addplaylist",
+      "qqplayer:ctx-deletesong",
+      "qqplayer:ctx-goartist",
+      "qqplayer:ctx-goalbum",
+    ]) {
+      window.addEventListener(name, (e) => events.push([name, e.detail]));
+    }
+    await rclick(items[0], 300, 200); // 右键 A
+    window.__qqCtxMenu.addPlaylist();
+    window.__qqCtxMenu.remove();
+    window.__qqCtxMenu.goArtist();
+    window.__qqCtxMenu.goAlbum();
+    await nextTick();
+    expect(events.map(([n]) => n)).toEqual([
+      "qqplayer:ctx-addplaylist",
+      "qqplayer:ctx-deletesong",
+      "qqplayer:ctx-goartist",
+      "qqplayer:ctx-goalbum",
+    ]);
+    const add = events.find(([n]) => n === "qqplayer:ctx-addplaylist");
+    expect(add[1]).toMatchObject({ path: "/a.mp3", x: 300, y: 200 });
+    expect(events.find(([n]) => n === "qqplayer:ctx-deletesong")[1]).toEqual({ path: "/a.mp3" });
+    expect(events.find(([n]) => n === "qqplayer:ctx-goartist")[1]).toEqual({ path: "/a.mp3" });
   });
 });
 
