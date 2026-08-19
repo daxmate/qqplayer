@@ -9,8 +9,8 @@
       异步加载：只有选 amll 才下载 pixi 等重依赖，native/spring 用户不背体积
     -->
     <LyricPlayer
-      ref="amllRef"
       v-if="engine === 'amll'"
+      ref="amllRef"
       class="amll-host"
       :class="{ 'no-mask': !lyricSettings.fadeMask }"
       :data-align="lyricSettings.align"
