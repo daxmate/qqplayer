@@ -219,6 +219,11 @@ async function onPlaylistDrop(p, e) {
   dropOverId.value = null;
   const path = e.dataTransfer?.getData(DRAG_SONG_TYPE);
   if (!path) return;
+  await addSongToPlaylist(p, path);
+}
+
+// 加歌到歌单（幂等 + toast）：浏览器 drop / 壳内拖拽（useShellDrag 派发）共用，语义完全一致
+async function addSongToPlaylist(p, path) {
   if (isInPlaylist(p.id, path)) {
     showToast(t("sidebar.drag.alreadyIn", { name: p.name }));
     return;
@@ -278,12 +283,25 @@ const CTX_EVENTS = [
   ["qqplayer:ctx-deleteplaylist", onCtxDeletePlaylist],
 ];
 
+// 壳内拖拽加歌单（useShellDrag 派发，无 dataTransfer）：与右键菜单一样走 window 事件，
+// 复用浏览器 drop 同一套幂等加歌 + toast（addSongToPlaylist）
+function onShellDragDrop(e) {
+  const p = playlistFromEvent(e); // e.detail.id
+  const path = e.detail?.path;
+  if (!p || !path) return;
+  addSongToPlaylist(p, path);
+}
+
+const SHELL_DRAG_EVENTS = [["qqplayer:shell-drag-drop", onShellDragDrop]];
+
 function bindCtxEvents() {
   for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn);
+  for (const [name, fn] of SHELL_DRAG_EVENTS) window.addEventListener(name, fn);
 }
 
 function unbindCtxEvents() {
   for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn);
+  for (const [name, fn] of SHELL_DRAG_EVENTS) window.removeEventListener(name, fn);
 }
 
 // ============ 新建 ============

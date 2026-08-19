@@ -428,6 +428,7 @@ import {
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
 import { showToast, toastError } from "../composables/useToast.js";
+import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import ContextMenu from "./ContextMenu.vue";
 
 defineProps({
@@ -1138,14 +1139,34 @@ async function doDelete() {
   }
 }
 
-// ============ 歌单拖拽排序（sortablejs） ============
+// ============ 歌单拖拽排序（sortablejs / 壳内 Pointer Events 模拟） ============
 const listEl = ref(null);
 let sortable = null;
+let shellDragCleanup = null; // 壳内拖拽清理函数（useShellDrag）
 
 function setupSortable() {
   sortable?.destroy();
   sortable = null;
+  shellDragCleanup?.();
+  shellDragCleanup = null;
   if (!canDrag.value || !listEl.value) return;
+  if (inNativeShell()) {
+    // 壳内（WKWebView 无 HTML5 DnD）：手柄 pointer 事件模拟排序 + 拖到侧栏歌单；
+    // onEnd 动作与 SortableJS 完全一致（歌单视图 setPlaylistOrder / 全部歌曲 reorderQueue + 持久化）
+    shellDragCleanup = setupShellRowDrag({
+      listEl: listEl.value,
+      getCanDrag: () => canDrag.value,
+      isPlaylistView: () => !!state.activePlaylistId,
+      onQueueReorder: (from, to) => {
+        reorderQueue(from, to);
+        persistQueueOrder().catch((e) => toastError(e.message));
+      },
+      onPlaylistReorder: (paths) => {
+        setPlaylistOrder(state.activePlaylistId, paths).catch((e) => toastError(e.message));
+      },
+    });
+    return;
+  }
   sortable = Sortable.create(listEl.value, {
     handle: ".pl-drag",
     animation: 150,
@@ -1170,6 +1191,7 @@ watch([activePlaylist, canDrag], () => nextTick(setupSortable));
 onMounted(() => nextTick(setupSortable));
 onBeforeUnmount(() => {
   sortable?.destroy();
+  shellDragCleanup?.();
   clearTimeout(locateTimer);
 });
 
@@ -1627,6 +1649,21 @@ function fmtDur(d) {
 .pl-ghost {
   opacity: 0.4;
   background: var(--card2);
+}
+/* 壳内拖拽（pointer 模拟）：源行幽灵跟随指针 + 插入位置指示线 */
+.pl-item.pl-drag-source {
+  opacity: 0.45;
+  background: var(--card2);
+  cursor: grabbing;
+  position: relative;
+  z-index: 2;
+  transition: none;
+}
+.pl-item.pl-drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.pl-item.pl-drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
 }
 .pl-item {
   display: flex;
