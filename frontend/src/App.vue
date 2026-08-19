@@ -620,14 +620,14 @@ onUnmounted(() => {
 .main.karaoke .controls {
   border-radius: 0 0 16px 0;
 }
-/* 连播模式：有音乐库/播放列表面板时，歌词面板右下角与控制区右上角改直角（两面板交汇处） */
+/* 连播模式：有音乐库/播放列表面板时，歌词面板右下角直角；控制区左上/右上/左下直角（左边贴边栏、右上贴歌词面板），仅右下贴窗口边缘保留圆角 */
 .main.continuous.has-music .lyric-panel,
 .main.continuous.has-playlist .lyric-panel {
   border-radius: 16px 16px 0 16px;
 }
 .main.continuous.has-music .controls,
 .main.continuous.has-playlist .controls {
-  border-radius: 16px 0 16px 16px;
+  border-radius: 0 0 16px 0;
 }
 .main.continuous.has-tabbar.no-controls,
 .main.karaoke.has-tabbar.no-controls {
