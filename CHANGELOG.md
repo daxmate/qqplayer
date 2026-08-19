@@ -170,6 +170,8 @@
 
 ### 🐛 修复
 
+- **0.75 变速卡顿（WebKit 音频图缺陷）**：8-13 EQ 引入后 audio 元素被 `createMediaElementSource` 接管，WKWebView 中该链路变速（尤其 0.75 减速）走有缺陷的媒体管线 → 卡顿/断续（1.25 稍好，减速最明显）；且元素被接管后无法归还。改为双元素：`audioEq`（接 Web Audio 图，EQ/频谱，常态 1.0）与 `audioBare`（永不接图，变速时切过去走原生媒体管线，流畅），切换瞬间状态迁移（~100ms 中断，变速是主动操作可接受）、抑制会话 flush 不产生断裂播放记录、变速中切歌/seek/跟唱句末/AB 循环正常；变速时频谱静止，回 1.0 自动切回图元素（EQ 恢复）。测试 +2 并适配双元素对快捷键/settingsSync 的影响，1150 全绿
+
 - **ControlBar LRC 徽标与编辑按钮间距粘连**：歌曲信息行的 `.fmt-badge`（如 LRC）与铅笔编辑按钮视觉过挤；`.fmt-badge` 补 `margin-right: 8px`（叠加 `.song-line` 的 flex gap 后总间距 16px），徽标与按钮清晰分离；无歌词徽标场景间距不变
 
 - **刮削保存后播放界面不更新**：`loadSongs` 刷新列表时只更新了 currentIndex，`state.currentSong` 仍指向旧数组里的旧对象（旧歌名/封面）；改为同步替换引用（本地歌按 path、网络歌按 streamId 定位），播放不中断，ControlBar/跟唱面板/媒体键元数据立即显示新信息
