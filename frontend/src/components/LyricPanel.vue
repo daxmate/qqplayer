@@ -475,7 +475,9 @@ function onAmllLineClick(e) {
    （!important 压过库 CSS 与内联 transition-delay；壳弹簧模式无 disableSpring class，不命中） */
 .amll-host :deep([class*="disableSpring"]) > *,
 .amll-host :deep([class*="disableSpring"]) [class*="lyricLine"] {
-  transition: filter 0.25s, transform 0.12s !important;
+  transition:
+    filter 0.25s,
+    transform 0.12s !important;
 }
 .amll-host[data-align="right"] :deep([class*="lyricLineWrapper"]) {
   align-items: flex-end;
