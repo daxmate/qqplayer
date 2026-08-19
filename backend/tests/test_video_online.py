@@ -227,14 +227,17 @@ def test_resolve_timeout_raises(monkeypatch):
 
 
 def test_get_stream_default_combined_format(fake_run):
-    """默认 best → -f 音视频合并选择器（浏览器 <video> 直接可播）"""
+    """默认 best → -f avc1 优先的音视频合并选择器（浏览器 <video> 直接可播且 H.264 可硬解）"""
     fake_run["proc"] = FakeProc(stdout="http://up.test/1080.mp4\n")
     url = video_ytdlp.get_stream(BILI_URL)
     assert url == "http://up.test/1080.mp4"
     args = fake_run["calls"][0][0]
     assert args[0] == "--get-url"
     assert args[1] == "-f"
-    assert args[2] == "best[acodec!=none][vcodec!=none]/best"
+    assert (
+        args[2]
+        == "best[acodec!=none][vcodec!=none][vcodec*=avc1]/best[acodec!=none][vcodec!=none]"
+    )
     assert "--no-playlist" in args
 
 
@@ -408,17 +411,53 @@ def test_download_sanitizes_filename(fake_run, tmp_path):
 
 
 def test_pick_best_format_combined_first():
-    """优先音视频合并格式（1080P 合并 > 4K DASH 分离）；format_id 精确匹配；无合并退回最高清"""
+    """优先音视频合并格式（1080P 合并 > 4K DASH 分离）；format_id 精确匹配；无合并退回最高清；avc1 优先于清晰度"""
     formats = list(SAMPLE_INFO["formats"])
     best = video_ytdlp.pick_best_format(formats)
     assert best["format_id"] == "80"
     # format_id 精确匹配
     assert video_ytdlp.pick_best_format(formats, format_hint="30216")["format_id"] == "30216"
-    # 无合并格式 → 全部里按 height 取最高
+    # 无合并格式 → 全部里按 avc1 + height 取最佳
     only_dash = [f for f in formats if f["acodec"] == "none"]
     assert video_ytdlp.pick_best_format(only_dash)["format_id"] == "30280"
     with pytest.raises(RuntimeError):
         video_ytdlp.pick_best_format([])
+
+
+def test_pick_best_format_avc1_beats_av1_4k():
+    """avc1 优先于清晰度：H.264 1080p 硬解 > AV1 4K 软解（vcodec 用 yt-dlp 原始值验证子串判断）"""
+    formats = [
+        {
+            "format_id": "av1-4k",
+            "ext": "mp4",
+            "height": 2160,
+            "width": 3840,
+            "acodec": "aac",
+            "vcodec": "av01.0.05M.08",
+            "url": "http://up.test/av1-4k.mp4",
+        },
+        {
+            "format_id": "h264-1080p",
+            "ext": "mp4",
+            "height": 1080,
+            "width": 1920,
+            "acodec": "aac",
+            "vcodec": "avc1.640028",
+            "url": "http://up.test/h264-1080p.mp4",
+        },
+        {
+            "format_id": "vp9-1440p",
+            "ext": "webm",
+            "height": 1440,
+            "acodec": "opus",
+            "vcodec": "vp09.00.50.08",
+            "url": "http://up.test/vp9-1440p.webm",
+        },
+    ]
+    assert video_ytdlp.pick_best_format(formats)["format_id"] == "h264-1080p"
+    # 无 avc1 时退回按清晰度取最高
+    no_avc1 = [f for f in formats if f["format_id"] != "h264-1080p"]
+    assert video_ytdlp.pick_best_format(no_avc1)["format_id"] == "av1-4k"
 
 
 def test_parse_subtitle_content_bili_json():

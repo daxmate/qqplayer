@@ -157,10 +157,13 @@ def resolve(
 
 
 def _select_format(format_hint: str | None) -> str:
-    """format 选择器：默认 best 优先音视频合并格式（浏览器 <video> 可直接播），避免 -g 输出 DASH 分离多行"""
+    """format 选择器：默认 best 优先 avc1 音视频合并格式（浏览器 <video> 可直接播，且
+    Chromium/WebKit 对 H.264 有硬件解码——B站等源的 best 常是 AV1/HEVC，macOS Chromium
+    对 AV1 无硬解会软解单核满载），无 avc1 合并格式则降级任意合并格式；避免 -g 输出 DASH
+    分离多行。hint 显式指定时原样透传。"""
     hint = (format_hint or "").strip()
     if not hint or hint == "best":
-        return "best[acodec!=none][vcodec!=none]/best"
+        return "best[acodec!=none][vcodec!=none][vcodec*=avc1]/best[acodec!=none][vcodec!=none]"
     return hint
 
 
@@ -195,7 +198,9 @@ def pick_best_format(formats: list[dict], format_hint: str | None = "best") -> d
 
     - format_hint 指定 format_id 时优先精确匹配；
     - 默认优先音视频合并格式（acodec/vcodec 均非 none，浏览器可直接播），
-      无合并格式则退回全部格式按清晰度（height 降序，同清晰度优先 mp4）取最佳。
+      无合并格式则退回全部格式；
+    - 排序 avc1（H.264）优先于清晰度（流畅优先：H.264 1080p 硬解 > AV1 4K 软解），
+      同为 avc1 再按 height 降序，同清晰度优先 mp4。
     """
     if not formats:
         raise RuntimeError("解析结果无可用格式")
@@ -212,7 +217,13 @@ def pick_best_format(formats: list[dict], format_hint: str | None = "best") -> d
     pool = combined or formats
 
     def _key(f: dict):
-        return (f.get("height") or 0, 1 if f.get("ext") == "mp4" else 0)
+        # avc1 优先于清晰度（vcodec 为 yt-dlp 原始值如 "avc1.640028"/"av01.0.05M.08"，
+        # "avc1" 子串判断即可区分 av01，不会误匹配）
+        return (
+            1 if "avc1" in (f.get("vcodec") or "") else 0,
+            f.get("height") or 0,
+            1 if f.get("ext") == "mp4" else 0,
+        )
 
     return max(pool, key=_key)
 
