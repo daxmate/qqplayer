@@ -47,11 +47,25 @@ if (state.ROOT / "dist").is_dir():
     )
 
 
+def _apply_persisted_library_path() -> None:
+    """启动时应用用户持久化的歌曲库路径（settings.json → library.path）
+
+    用户在前端设置过歌曲库（POST /api/library）→ 重启后仍用该路径，不回默认；
+    未设置（空）或目录已不存在（外接盘未挂/被删）→ 保持当前值（默认库/argv），绝不崩。
+    """
+    saved = settings_service.load_settings().get("path") or ""
+    if saved and Path(saved).is_dir():
+        state.LIBRARY = Path(saved)
+
+
 def main():
     """启动入口：初始化歌曲库 + 打印启动信息 + 自动开浏览器 + uvicorn 服务"""
     if len(sys.argv) > 1:
         state.LIBRARY = Path(sys.argv[1])
-    # 默认曲库目录不存在时自动创建（~/Music/QQPlayer 或命令行指定路径）
+    else:
+        # 未显式传 argv → 用户设置过歌曲库则用持久化值（argv 显式指定优先）
+        _apply_persisted_library_path()
+    # 默认曲库目录不存在时自动创建（默认库 / argv / 持久化路径已定，最后统一建）
     state.LIBRARY.mkdir(parents=True, exist_ok=True)
     init_library()
     url = f"http://localhost:{state.DEFAULT_PORT}"

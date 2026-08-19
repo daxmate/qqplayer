@@ -117,6 +117,8 @@ _SETTINGS_SPEC = {
         "ignoreHidden": (state.LIBRARY_SETTINGS_DEFAULTS["ignoreHidden"], _norm_bool),
         "autoRefresh": (state.LIBRARY_SETTINGS_DEFAULTS["autoRefresh"], _norm_bool),
         "autoScanOnStart": (state.LIBRARY_SETTINGS_DEFAULTS["autoScanOnStart"], _norm_bool),
+        # 歌曲库路径（空 = 未设定；POST /api/library 设置后持久化，重启沿用）
+        "path": ("", _norm_str),
     },
     "ui": {
         "showSongInfo": (state.UI_SETTINGS_DEFAULTS["showSongInfo"], _norm_bool),

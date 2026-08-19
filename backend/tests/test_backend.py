@@ -828,8 +828,15 @@ def test_api_settings_get_all_namespaces():
         "dict",
         "video",
     }
-    # library 4 字段
-    assert set(s["library"]) == {"audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"}
+    # library 5 字段（含任务：歌曲库路径 path，空 = 未设定）
+    assert set(s["library"]) == {
+        "audioExts",
+        "ignoreHidden",
+        "autoRefresh",
+        "autoScanOnStart",
+        "path",
+    }
+    assert s["library"]["path"] == ""
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
     # ui 10 字段（含任务 D searchHistory）
     assert set(s["ui"]) == {

@@ -88,7 +88,7 @@ def api_update_library_settings(body: dict):
 
 @router.post("/api/library")
 async def api_set_library(body: dict):
-    """设置歌曲库文件夹（切换后清缓存并重启监听）"""
+    """设置歌曲库文件夹（切换后清缓存并重启监听；路径持久化到 settings.json，重启不丢）"""
     p = Path(body.get("path", ""))
     if not p.is_dir():
         raise HTTPException(400, f"目录不存在: {p}")
@@ -98,6 +98,8 @@ async def api_set_library(body: dict):
         state._scan_cache = None
         state._scan_version += 1
     library_scan.start_watcher()
+    # 持久化歌曲库路径（settings.json → library.path）：重启后按用户设定恢复，不回默认
+    settings_service.save_settings({"path": str(p)})
     return {"path": str(state.LIBRARY), "count": len(library_scan.scan_library())}
 
 
