@@ -248,6 +248,9 @@ loadDownloadSettings();
 // 浏览器默认关（防 CPU 高占用）。用户手动改过的值由 loadLyricSettings 字段级覆盖（存储值优先）。
 export function applyAmllEnvDefaults() {
   if (typeof window !== "undefined" && !window.qqplayerNative) {
+    // 浏览器默认不用 AMLL 引擎：pixi WebGL 渲染即使特效全关，长时间播放仍会累积高占用
+    // （实测全关播放数分钟后 CPU 窜到 50%+）。引擎回退 spring，用户手动切回 amll 才启用
+    lyricSettings.engine = "spring";
     lyricSettings.amllBlur = false;
     lyricSettings.amllSpring = false;
     lyricSettings.amllScale = false;

@@ -1698,6 +1698,8 @@ describe("歌词显示设置（lyricSettings）", () => {
     expect(lyricSettings.amllBlur).toBe(false);
     expect(lyricSettings.amllSpring).toBe(false);
     expect(lyricSettings.amllScale).toBe(false);
+    // 引擎同样回退 spring：浏览器默认不用 AMLL（pixi WebGL 长时间播放仍高占用），用户手动切才启用
+    expect(lyricSettings.engine).toBe("spring");
   });
 
   it("AMLL 三特效：壳（window.qqplayerNative）内默认开启（满血，行为零变化）", async () => {
@@ -1709,6 +1711,7 @@ describe("歌词显示设置（lyricSettings）", () => {
       expect(m.lyricSettings.amllBlur).toBe(true);
       expect(m.lyricSettings.amllSpring).toBe(true);
       expect(m.lyricSettings.amllScale).toBe(true);
+      expect(m.lyricSettings.engine).toBe("amll"); // 壳默认保持 AMLL 引擎
       expect(m.lyricSettings.fontSize).toBe(20); // 其他字段不受影响
     } finally {
       delete window.qqplayerNative;
@@ -1734,13 +1737,14 @@ describe("歌词显示设置（lyricSettings）", () => {
     // 浏览器环境：存储值 true 覆盖环境默认 false
     localStorage.setItem(
       LYRIC_SETTINGS_KEY,
-      JSON.stringify({ amllBlur: true, amllSpring: true, amllScale: true }),
+      JSON.stringify({ amllBlur: true, amllSpring: true, amllScale: true, engine: "amll" }),
     );
     vi.resetModules();
     const m2 = await import("../composables/usePlayer.js");
     expect(m2.lyricSettings.amllBlur).toBe(true);
     expect(m2.lyricSettings.amllSpring).toBe(true);
     expect(m2.lyricSettings.amllScale).toBe(true);
+    expect(m2.lyricSettings.engine).toBe("amll"); // 用户手动切回 AMLL 的存储值优先
   });
 
   it("修改后自动持久化到 localStorage", async () => {
