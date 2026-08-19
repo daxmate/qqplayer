@@ -103,8 +103,12 @@ final class MainWebView: WKWebView {
         let lookupItem = NSMenuItem(title: lookupTitle, action: #selector(lookupAction(_:)), keyEquivalent: "")
         lookupItem.target = self
 
-        // 高亮（子菜单：五色圆点，颜色字符串存 representedObject；色值与前端 HIGHLIGHT_COLOR_HEX 一致）
-        let highlightItem = NSMenuItem(title: zh ? "高亮" : "Highlight", action: nil, keyEquivalent: "")
+        // 高亮/颜色（子菜单：五色圆点，颜色字符串存 representedObject；色值与前端 HIGHLIGHT_COLOR_HEX 一致）
+        // 已有高亮（readerHasHighlight）→ 显示「颜色」子菜单改色（iBooks 行为）；无高亮 → 「高亮」新建
+        let hasHL = MainWebView.readerHasHighlight
+        let highlightItem = NSMenuItem(
+            title: hasHL ? (zh ? "颜色" : "Color") : (zh ? "高亮" : "Highlight"),
+            action: nil, keyEquivalent: "")
         let colorSubmenu = NSMenu()
         let colors: [(color: String, nsColor: NSColor)] = [
             ("yellow", NSColor(calibratedRed: 0.965, green: 0.827, blue: 0.176, alpha: 1)), // #f6d32d
@@ -114,7 +118,10 @@ final class MainWebView: WKWebView {
             ("purple", NSColor(calibratedRed: 0.702, green: 0.533, blue: 1.0, alpha: 1)), // #b388ff
         ]
         for c in colors {
-            let item = NSMenuItem(title: "", action: #selector(highlightAction(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: "",
+                action: hasHL ? #selector(recolorAction(_:)) : #selector(highlightAction(_:)),
+                keyEquivalent: "")
             item.target = self
             item.representedObject = c.color
             item.image = MainWebView.colorDotImage(c.nsColor)
@@ -161,6 +168,11 @@ final class MainWebView: WKWebView {
     @objc private func highlightAction(_ sender: Any?) {
         let color = (sender as? NSMenuItem)?.representedObject as? String ?? "yellow"
         callJS("window.__qqReaderMenu?.highlight('\(color)')")
+    }
+
+    @objc private func recolorAction(_ sender: Any?) {
+        let color = (sender as? NSMenuItem)?.representedObject as? String ?? "yellow"
+        callJS("window.__qqReaderMenu?.recolor('\(color)')")
     }
 
     @objc private func underlineAction(_ sender: Any?) {

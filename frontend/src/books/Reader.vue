@@ -931,11 +931,9 @@ function onToolbarSearch(text: string) {
   searchRequest.value = text;
 }
 
-/** 移除：选中 cfi 已有高亮时删除该条（hasHighlight 显示条件同源） */
+/** 移除：选中 cfi 已有高亮时删除该条（宽松匹配，hasHighlight 显示条件同源） */
 function onToolbarRemove() {
-  const sel = currentSelection.value;
-  if (!sel) return;
-  const h = annotations.value.highlights.find((x) => x.cfi === sel.cfi);
+  const h = findHighlightForSelection();
   if (h) removeHighlight(h.id);
 }
 
@@ -1043,6 +1041,7 @@ const nativeShell = window as unknown as {
     lookup: () => void;
     highlight: (color: HighlightColor) => void;
     note: () => void;
+    recolor: (color: HighlightColor) => void;
   };
 };
 
@@ -1061,9 +1060,22 @@ let reportedHasHighlight = false;
 
 /** 当前选中 cfi 是否已有高亮（壳右键菜单「移除高亮」显示条件） */
 function selectionHasHighlight(): boolean {
+  return findHighlightForSelection() !== null;
+}
+
+/** 按当前选区找高亮条目（换色/移除用）：精确 cfi → 去 offset 的 cfiPath → 文本包含（右键自动选词
+ *  选中的单词常落在整句高亮内，cfi 对不上但文本能命中）。无选区/无匹配返回 null。 */
+function findHighlightForSelection(): HighlightAnnotation | null {
   const sel = currentSelection.value;
-  if (!sel) return false;
-  return annotations.value.highlights.some((h) => h.cfi === sel.cfi);
+  if (!sel) return null;
+  const hs = annotations.value.highlights;
+  return (
+    hs.find((h) => h.cfi === sel.cfi) ??
+    hs.find((h) => cfiPath(h.cfi) === cfiPath(sel.cfi)) ??
+    (sel.text
+      ? (hs.find((h) => h.text && (h.text.includes(sel.text) || sel.text.includes(h.text))) ?? null)
+      : null)
+  );
 }
 
 /** 上报选区状态给 Swift 壳（channel "native"，type: readerState）；状态没变化不发，非壳环境静默跳过 */
@@ -1137,6 +1149,15 @@ function installNativeMenuApi() {
     remove: () => {
       syncSelectionFromDom();
       onToolbarRemove();
+    },
+    // 改颜色：已有高亮条目换色（删除重建，色点永远产出底色高亮，iBooks 行为）
+    recolor: (color: string) => {
+      syncSelectionFromDom();
+      const c: HighlightColor = HIGHLIGHT_COLOR_STYLES[color as HighlightColor]
+        ? (color as HighlightColor)
+        : "yellow";
+      const h = findHighlightForSelection();
+      if (h) changeHighlightColor(h, c);
     },
     // 书内搜索：选中词 → SearchPanel（searchRequest 由 watch 消费）
     search: () => {
