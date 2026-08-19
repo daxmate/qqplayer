@@ -12,6 +12,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { state, playbackSettings, VISUALIZER_STYLES } from "../composables/usePlayer.js";
+import { useVizLoop } from "../composables/useVizLoop.js";
 import {
   ensureAnalyser,
   getAnalyser,
@@ -46,16 +47,13 @@ const style = computed(() =>
     : "bars",
 );
 
-let rafId = 0;
-let running = false;
 let ro = null;
 
-// 画布实际像素 = CSS 尺寸 × dpr（≤2），保证清晰
+// 画布实际像素 = CSS 尺寸 × dpr（壳 ≤2；浏览器 1x 降级保流畅），保证清晰
 function resize() {
   const cv = canvasEl.value;
   if (!cv) return;
   const parent = cv.parentElement;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
   if (props.small) {
     // 小频谱：固定高度 44px，宽度跟随容器
     const w = parent ? parent.clientWidth : 300;
@@ -104,7 +102,7 @@ function paint() {
     accent,
     accent2,
     small: props.small,
-    dpr: Math.min(2, window.devicePixelRatio || 1),
+    dpr,
   };
   if (props.small) {
     // 小频谱：播放中读真实数据；暂停/降级 → 各样式画静态（不抛错）
@@ -156,10 +154,13 @@ function paint() {
   });
 }
 
-function tick() {
-  rafId = requestAnimationFrame(tick);
-  paint();
-}
+// rAF 循环按环境差异化：壳满帧/暂停呼吸照旧；浏览器 30fps 节流、暂停停 rAF、隐藏停 rAF
+// （循环启停与 paint 的协作全部收敛在 useVizLoop 内，组件只负责 paint 与开关/播放态来源）
+const { dpr, dispose: disposeVizLoop } = useVizLoop({
+  paint,
+  isEnabled: () => enabled.value,
+  isPlaying: () => !!state.isPlaying,
+});
 
 // 封面主色：随当前歌曲（path / coverUrl）变化重新取色
 watch(
@@ -185,24 +186,6 @@ watch(
   { immediate: true },
 );
 
-// 开关驱动：开启即跑 rAF（播放中画频谱/律动，暂停画呼吸 idle，保持活感）；关闭停掉并画一帧静止
-watch(
-  () => enabled.value,
-  () => {
-    if (enabled.value) {
-      if (!running) {
-        running = true;
-        rafId = requestAnimationFrame(tick);
-      }
-    } else if (running) {
-      running = false;
-      cancelAnimationFrame(rafId);
-      paint();
-    }
-  },
-  { flush: "sync", immediate: true },
-);
-
 onMounted(() => {
   resize();
   ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
@@ -213,8 +196,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  running = false;
-  cancelAnimationFrame(rafId);
+  disposeVizLoop();
   if (ro) ro.disconnect();
 });
 </script>
