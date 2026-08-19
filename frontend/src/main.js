@@ -8,6 +8,11 @@ import "./mobile.css"; // 移动端（<1024px）布局与触摸适配（全部�
 // amll 歌词组件基础样式（体积小，全局引入；组件本体走异步按需加载）
 import "@applemusic-like-lyrics/core/style.css";
 
+// 浏览器降级标记（非 Swift 壳环境）：html.browser-degraded 作用域下 style.css 全局禁用
+// backdrop-filter 并给持续可见区域补半透明实色背景（Chromium 对 backdrop-filter 的重采样成本
+// 远高于 WebKit，Vivaldi GPU 合成 CPU 高的根因；壳注入 window.qqplayerNative → 不标记，效果零变化）
+if (!window.qqplayerNative) document.documentElement.classList.add("browser-degraded");
+
 // 全局取消浏览器默认右键菜单（input/textarea/contenteditable 输入框保留系统菜单：复制/粘贴/拼写）。
 // 自定义右键菜单组件用 @contextmenu.prevent 自行 preventDefault 弹菜单，与此监听不冲突。
 document.addEventListener("contextmenu", (e) => {

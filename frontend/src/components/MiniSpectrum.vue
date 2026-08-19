@@ -102,12 +102,14 @@ function paint() {
   }
 }
 
-// rAF 循环按环境差异化：壳满帧/暂停呼吸照旧；浏览器 30fps 节流、暂停停 rAF、隐藏停 rAF
+// rAF 循环按环境差异化：壳满帧/暂停呼吸照旧；浏览器 15fps 节流（MiniSpectrum 仅 150px 小条，
+// 15fps 足够跟手且省 GPU，大背景 Visualizer 仍 30fps）、暂停停 rAF、隐藏停 rAF
 // （循环启停与 paint 的协作全部收敛在 useVizLoop 内，组件只负责 paint 与开关/播放态来源）
 const { dpr, dispose: disposeVizLoop } = useVizLoop({
   paint,
   isEnabled: () => enabled.value,
   isPlaying: () => !!state.isPlaying,
+  frameMs: 1000 / 15, // 浏览器 15fps（壳内该参数被忽略，满帧不变）
 });
 
 onMounted(() => {

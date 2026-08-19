@@ -241,3 +241,44 @@ html[data-compact="true"] .album-card {
 html[data-compact="true"] .settings-scroll .setting-item {
   padding: 8px 0;
 }
+
+/* ============ 浏览器降级（html.browser-degraded，非 Swift 壳环境）============
+   Chromium 对 backdrop-filter 的重采样成本远高于 WebKit（Vivaldi GPU 合成 CPU 高根因）。
+   壳（window.qqplayerNative 注入）不挂 browser-degraded → 本段全部规则不生效，效果零变化。
+
+   1) 全局禁用 backdrop-filter：!important 压过所有组件（含 scoped）的毛玻璃；
+   2) 持续可见区域视觉补偿：禁用毛玻璃后原本半透明背景若透出底层封面图会显突兀，
+      补更高不透明度的主题色背景，保持通透感但不穿帮；
+   3) 弹窗遮罩（.modal-mask/.qlm-mask/.url-mask 等）自带 var(--mask)/rgba 实色背景，
+      禁用毛玻璃后视觉可接受，无需补偿；拖拽遮罩(.drag-overlay)/书籍删除钮(.bs-del)
+      本身已是高不透明度背景，同样无需补偿。 */
+html.browser-degraded * {
+  /* 注意：-webkit- 在前、标准属性在后 —— Vite/LightningCSS 会把两个别名声明去重为最后一个，
+     标准属性必须殿后才能在 Chromium 里命中 backdrop-filter 计算值（壳不挂此类，无兼容性顾虑） */
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* 主面板 / 歌词面板 / 跟唱面板：blur(32px) → 84% 主题卡色（原 60%，禁 blur 后提不透明度） */
+html.browser-degraded[data-blur="true"] .panel,
+html.browser-degraded[data-blur="true"] .lyric-panel,
+html.browser-degraded[data-blur="true"] .karaoke-panel {
+  background: color-mix(in srgb, var(--card) 84%, transparent);
+}
+
+/* 左侧栏 / 播放列表：blur(32px) → 86% 主题次底色（原 64%） */
+html.browser-degraded[data-blur="true"] .sidebar,
+html.browser-degraded[data-blur="true"] .playlist {
+  background: color-mix(in srgb, var(--bg2) 86%, transparent);
+}
+
+/* 全屏搜索层（SearchAnything .sa-mask）：原 55% 透底 + blur(16px)，禁 blur 后底层内容
+   会清晰穿帮 → 提到 85% */
+html.browser-degraded .sa-mask {
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+}
+
+/* 在线搜索下拉面板（OnlineSearch .os-panel）：原 88% + blur(18px)，禁 blur 后提到 94% */
+html.browser-degraded .os-panel {
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+}

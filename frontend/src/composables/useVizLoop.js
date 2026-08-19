@@ -23,14 +23,16 @@ export function isNativeShell() {
  * @param {() => void} opts.paint 每帧绘制（节流时跳过；暂停/关闭时补画一帧静态）
  * @param {() => boolean} opts.isEnabled 视觉化区域开关（computed 求值）
  * @param {() => boolean} opts.isPlaying 播放态（浏览器分支驱动循环启停）
+ * @param {number} [opts.frameMs] 浏览器分支每帧最小间隔 ms（默认 1000/30 = 30fps）；
+ *   壳分支忽略此参数永远满帧。小尺寸可视化（如 MiniSpectrum）可传更大值降频省 GPU。
  * @returns {{ dpr: number, dispose: () => void }}
  *   dpr：壳 = min(2, devicePixelRatio)（历史行为）；浏览器 = 1（降级）
  *   dispose：卸载清理（停 rAF + 摘 visibilitychange）
  */
-export function useVizLoop({ paint, isEnabled, isPlaying }) {
+export function useVizLoop({ paint, isEnabled, isPlaying, frameMs }) {
   const shell = isNativeShell();
   const dpr = shell ? Math.min(2, window.devicePixelRatio || 1) : 1;
-  const frameMs = shell ? 0 : 1000 / 30; // 0 = 不限（壳满帧）；浏览器 30fps
+  const effectiveFrameMs = shell ? 0 : (frameMs ?? 1000 / 30); // 0 = 不限（壳满帧）；浏览器默认 30fps，可降频
 
   let rafId = 0; // 始终指向"下一帧"的 pending id（tick 先排帧再画）
   let running = false;
@@ -53,7 +55,7 @@ export function useVizLoop({ paint, isEnabled, isPlaying }) {
   function tick(ts) {
     if (!running) return; // 已在 stop 后（防御：排队的回调不再续排）
     rafId = requestAnimationFrame(tick); // 循环：先排下一帧，再决定本次是否画
-    if (frameMs > 0 && lastPaintTs != null && ts - lastPaintTs < frameMs) return; // 节流跳过
+    if (effectiveFrameMs > 0 && lastPaintTs != null && ts - lastPaintTs < effectiveFrameMs) return; // 节流跳过
     lastPaintTs = ts;
     paint();
   }
