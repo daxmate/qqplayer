@@ -220,8 +220,8 @@
           class="pl-item"
           :class="{ active: i === state.currentIndex, selected: isSelected(song.path) }"
           :data-path="song.path"
-          @click="onRowClick(i, $event)"
-          @contextmenu.prevent="openCtxMenu($event, i)"
+          @click="onRowClick(vi, $event)"
+          @contextmenu.prevent="openCtxMenu($event, vi)"
         >
           <span
             v-if="canDrag"
@@ -292,7 +292,7 @@
             :title="
               inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')
             "
-            @click.stop="removeItem(i)"
+            @click.stop="removeItem(vi)"
           >
             <X :size="14" />
           </button>
@@ -662,8 +662,9 @@ function clearSelection() {
 
 // 行点击：多选态 = 切换选中；⌘/Ctrl+点选 = 进入多选态并选中；否则播放
 // 网络歌（path=null）不参与多选（所有批量操作都是 path 语义），⌘/Ctrl+点选也不动作
-function onRowClick(i, e) {
-  const entry = viewSongs.value[i];
+// vi 是 visible（过滤+排序后）视图索引，entry.i 才是原始曲库索引——歌单/过滤/排序视图下两者不一致（8-19 壳内实测暴露）
+function onRowClick(vi, e) {
+  const entry = visible.value[vi];
   if (!entry) return;
   const path = entry.song.path;
   const mod = e?.metaKey || e?.ctrlKey;
@@ -675,7 +676,7 @@ function onRowClick(i, e) {
     if (path != null) toggleSelected(path);
     return;
   }
-  // 必须用 entry.i（全局曲库索引）：viewSongs 可能被过滤/歌单/排序，视图索引 ≠ 曲库索引（8-19 壳内左键点歌无反应 bug）
+  // 必须用 entry.i（全局曲库索引）：viewSongs 可能被过滤/歌单/排序，视图索引 ≠ 曲库索引
   pick(entry.i);
 }
 
@@ -716,8 +717,8 @@ const ctxSong = ref(null);
 const ctxIdx = ref(-1); // 曲库队列索引（viewSongs 可能被过滤/排序，用原始 i）
 const ctxPos = ref({ x: 0, y: 0 });
 
-function openCtxMenu(e, i) {
-  const entry = viewSongs.value[i];
+function openCtxMenu(e, vi) {
+  const entry = visible.value[vi];
   if (!entry) return;
   ctxSong.value = entry.song;
   ctxIdx.value = entry.i;
@@ -920,12 +921,14 @@ function unbindCtxEvents() {
 }
 
 // ============ 行操作：移除（跟随视图语义） / 加歌 ============
-function removeItem(i) {
+function removeItem(vi) {
+  const entry = visible.value[vi];
+  if (!entry) return;
   if (inPlaylistView.value) {
-    const path = viewSongs.value[i]?.song.path;
+    const path = entry.song.path;
     if (path) removeFromPlaylist(state.activePlaylistId, path);
   } else {
-    removeFromQueue(i);
+    removeFromQueue(entry.i);
   }
 }
 
