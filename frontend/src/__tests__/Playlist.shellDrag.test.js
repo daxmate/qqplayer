@@ -297,7 +297,7 @@ describe("壳内拖到侧栏歌单", () => {
     const { pw, sw } = mountBoth();
     await nextTick();
     layoutRows(pw);
-    const items = layoutSidebar(sw);
+    layoutSidebar(sw);
     await dragHandle(pw.findAll(".pl-drag")[0].element, [10, 120], [430, 120]);
     await flushPromises();
     expect(state.playlists[0].songPaths).toEqual(["/a.mp3"]);
