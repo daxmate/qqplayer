@@ -13,7 +13,7 @@
 // ControlBar 迷你频谱条（任务 C 混合方案：频谱从主区域移到这里）。
 // 沿用 6 样式渲染器（bars/radial/wave/pulse/mirror/particle，small 变体），
 // 半透明低调，作为「正在播放」的节奏指示；开关 = visualizerEnabled && miniSpectrumEnabled。
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { state, playbackSettings, VISUALIZER_STYLES } from "../composables/usePlayer.js";
 import { useVizLoop } from "../composables/useVizLoop.js";
