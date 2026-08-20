@@ -905,11 +905,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     // 通知前端：词典「链接原路径」导入的绝对路径数组（取消 → 空数组）
+    // JS 构造逻辑已抽到 dict_events.swift 的 buildDictFilesEventJS（可单测）
     func notifyFrontendDictFiles(_ paths: [String]) {
-        guard let json = try? JSONSerialization.data(withJSONObject: paths),
-              let s = String(data: json, encoding: .utf8) else { return }
-        let escaped = s.dropFirst().dropLast() // ["/a","/b"] → "/a","/b"（JSON 转义）
-        let js = "window.dispatchEvent(new CustomEvent('qqplayer:nativeDictFiles', { detail: { paths: [\(escaped)] } }))"
+        let js = buildDictFilesEventJS(paths)
         DispatchQueue.main.async { [weak self] in
             self?.mainWebView?.evaluateJavaScript(js, completionHandler: nil)
         }
