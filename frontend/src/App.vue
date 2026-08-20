@@ -476,6 +476,10 @@ onUnmounted(() => {
   flex-shrink: 0;
   box-shadow: 0 3px 8px var(--shadow-sm);
 }
+/* 深色主题使用配套深色版 logo（html[data-theme] 由 useSettings.applyTheme 维护） */
+html[data-theme="dark"] .logo-img {
+  content: url("/logo-dark.png");
+}
 .logo-text {
   font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
   font-size: 18px;
