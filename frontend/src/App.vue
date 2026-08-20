@@ -639,6 +639,13 @@ onUnmounted(() => {
 .main.continuous.has-playlist .lyric-panel {
   border-radius: 0 16px 0 0;
 }
+/* 控制区收起 + 有边栏时：右下角恢复圆角（贴窗口底边），左上/左下仍直角（贴边栏），右上保持圆角 */
+.main.continuous.has-music.no-controls .lyric-panel,
+.main.continuous.has-playlist.no-controls .lyric-panel,
+.main.karaoke.has-music.no-controls .karaoke-panel,
+.main.karaoke.has-playlist.no-controls .karaoke-panel {
+  border-radius: 0 16px 16px 0;
+}
 .main.continuous.has-music .controls,
 .main.continuous.has-playlist .controls {
   border-radius: 0 0 16px 0;
