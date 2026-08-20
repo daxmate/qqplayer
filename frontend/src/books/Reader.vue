@@ -146,6 +146,8 @@
         :visible="toolbar.visible"
         :text="currentSelection?.text ?? ''"
         :has-highlight="toolbarHasHighlight"
+        :color="toolbarColor"
+        :underline-active="toolbarHighlight?.style === 'underline'"
         @lookup="onToolbarLookup"
         @highlight="onToolbarHighlight"
         @note="onToolbarNote"
@@ -426,6 +428,18 @@ const toolbarHasHighlight = computed(() => {
   return sel ? annotations.value.highlights.some((h) => h.cfi === sel.cfi) : false;
 });
 
+/** 当前选区已有高亮（工具栏 active 态数据源：色点/U 亮起；宽松匹配，与壳上报/移除/换色同源） */
+const toolbarHighlight = computed(() => {
+  const sel = currentSelection.value;
+  return sel ? findHighlightForSelection() : null;
+});
+
+/** 工具栏色点激活色：选中已有底色高亮时传其颜色；下划线/无高亮 → null（red 只属于下划线） */
+const toolbarColor = computed<HighlightColor | null>(() => {
+  const h = toolbarHighlight.value;
+  return h && h.style === "highlight" && h.color !== "red" ? h.color : null;
+});
+
 /** 点击已有高亮弹菜单状态（位置 + 目标高亮 id；条目被删则菜单自动关闭） */
 const hlMenu = reactive({ x: 0, y: 0, visible: false, id: null as string | null });
 const hlMenuHighlight = computed(
@@ -542,7 +556,7 @@ function pollSelection() {
   const sel = iw?.getSelection?.();
   if (!sel) return;
   const text = sel.toString().trim();
-  postReaderState(true, text, selectionHasHighlight()); // 壳右键菜单：选区状态变化时上报（去重：文本/高亮态没变不重复发）
+  postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳右键菜单：选区状态变化时上报（去重：文本/高亮态没变不重复发）
   if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
     // 无选区：重置稳定计数 + 收起工具栏
     selPollLastText = "";
@@ -590,7 +604,7 @@ function onSelected(cfi: string, contents: unknown) {
   toolbar.visible = true;
   closeHighlightMenu(); // 新选区优先：收起点击高亮菜单
   currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
-  postReaderState(true, text, selectionHasHighlight()); // 壳：选区稳定后补发精确 hasHighlight（轮询首拍可能滞后）
+  postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳：选区稳定后补发精确 hasHighlight/highlightStyle（轮询首拍可能滞后）
   // 挂载选区收起监听（contents 每次新建都会触发 selected，函数引用去重）
   (contents as { document?: Document }).document?.addEventListener(
     "selectionchange",
@@ -713,7 +727,12 @@ function removeHighlight(id: string) {
       if (hlMenu.id === id) closeHighlightMenu();
       // 壳：删除后选区高亮态变化 → 补发（右键菜单「移除高亮」项隐藏）
       if (inNativeShell()) {
-        postReaderState(true, currentSelection.value?.text ?? "", selectionHasHighlight());
+        postReaderState(
+          true,
+          currentSelection.value?.text ?? "",
+          selectionHasHighlight(),
+          selectionHighlightStyle(),
+        );
       }
       showToast(t("books.highlightDeleteDone"));
     })
@@ -779,15 +798,21 @@ function toggleHighlightStyle(h: HighlightAnnotation) {
   replaceHighlight(h, { color, style: next });
 }
 
-/** 点击高亮菜单动作（内部取当前菜单目标，模板无需空值断言） */
+/** 点击高亮菜单动作（内部取当前菜单目标，模板无需空值断言）；色点按行为矩阵：
+ *  同色底色 → 移除（toggle off）；异色 → 换色；下划线 → 转底色 */
 function changeMenuColor(color: HighlightColor) {
   const h = hlMenuHighlight.value;
-  if (h) changeHighlightColor(h, color);
+  if (!h) return;
+  if (h.style === "highlight" && h.color === color) removeHighlight(h.id);
+  else changeHighlightColor(h, color);
 }
 
+/** U 按行为矩阵：下划线条目点 U = 移除（toggle off）；底色条目点 U = 转下划线 */
 function toggleMenuStyle() {
   const h = hlMenuHighlight.value;
-  if (h) toggleHighlightStyle(h);
+  if (!h) return;
+  if (h.style === "underline") removeHighlight(h.id);
+  else toggleHighlightStyle(h);
 }
 
 function removeMenuHighlight() {
@@ -943,8 +968,28 @@ function onToolbarLookup(text: string) {
   clearSelection();
 }
 
+/**
+ * 工具栏/壳菜单统一入口（行为矩阵，iBooks 契约）：
+ * - 无已有标注 → 新建（色点 = 底色高亮，U = 下划线）
+ * - 点 U：已有下划线 → 移除（toggle off）；已有底色 → 转下划线
+ * - 点色点 C：已有同色底色 → 移除（toggle off）；已有异色 → 换色；已有下划线 → 转底色
+ * 复用 findHighlightForSelection 宽松匹配，杜绝"已有标注仍新建"（原 bug 根因）。
+ */
 function onToolbarHighlight(_text: string, color: HighlightColor, style?: HighlightStyle) {
-  addHighlight(color, style ?? "highlight");
+  const existing = findHighlightForSelection();
+  if (!existing) {
+    addHighlight(color, style ?? "highlight");
+    return;
+  }
+  if (style === "underline") {
+    // 点 U
+    if (existing.style === "underline") removeHighlight(existing.id);
+    else toggleHighlightStyle(existing);
+    return;
+  }
+  // 点色点
+  if (existing.style === "highlight" && existing.color === color) removeHighlight(existing.id);
+  else changeHighlightColor(existing, color);
 }
 
 /** 书内搜索：只写 searchRequest（SearchPanel 由搜索子代理挂载并 watch 该 ref） */
@@ -1078,10 +1123,16 @@ const isNativeShell = computed(inNativeShell);
 let reportedActive = false;
 let reportedText = "";
 let reportedHasHighlight = false;
+let reportedHighlightStyle: HighlightStyle | null = null;
 
 /** 当前选中 cfi 是否已有高亮（壳右键菜单「移除高亮」显示条件） */
 function selectionHasHighlight(): boolean {
   return findHighlightForSelection() !== null;
+}
+
+/** 当前选区已有高亮的样式（壳右键菜单「下划线」勾选态；与 hasHighlight 同源宽松匹配） */
+function selectionHighlightStyle(): HighlightStyle | null {
+  return findHighlightForSelection()?.style ?? null;
 }
 
 /** 按当前选区找高亮条目（换色/移除用）：精确 cfi → 去 offset 的 cfiPath → 文本包含（右键自动选词
@@ -1100,13 +1151,24 @@ function findHighlightForSelection(): HighlightAnnotation | null {
 }
 
 /** 上报选区状态给 Swift 壳（channel "native"，type: readerState）；状态没变化不发，非壳环境静默跳过 */
-function postReaderState(active: boolean, text: string, hasHighlight = false) {
+function postReaderState(
+  active: boolean,
+  text: string,
+  hasHighlight = false,
+  highlightStyle: HighlightStyle | null = null,
+) {
   if (!inNativeShell()) return;
-  if (reportedActive === active && reportedText === text && reportedHasHighlight === hasHighlight)
+  if (
+    reportedActive === active &&
+    reportedText === text &&
+    reportedHasHighlight === hasHighlight &&
+    reportedHighlightStyle === highlightStyle
+  )
     return;
   reportedActive = active;
   reportedText = text;
   reportedHasHighlight = hasHighlight;
+  reportedHighlightStyle = highlightStyle;
   try {
     nativeShell.webkit?.messageHandlers?.native?.postMessage?.({
       type: "readerState",
@@ -1114,6 +1176,7 @@ function postReaderState(active: boolean, text: string, hasHighlight = false) {
       hasSelection: text.length > 0,
       text,
       hasHighlight,
+      highlightStyle,
     });
   } catch {
     /* 壳消息发送失败忽略（不影响阅读） */

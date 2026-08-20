@@ -288,7 +288,7 @@ describe("Reader 标注交互", () => {
     wrapper.unmount();
   });
 
-  it("重复高亮同一 cfi → 拒绝 + toast", async () => {
+  it("已有底色高亮（同色）→ 点同色点 → 移除（toggle off，不再「重复新建」）", async () => {
     apiMock.fetchAnnotations.mockResolvedValue({
       highlights: [
         {
@@ -304,11 +304,169 @@ describe("Reader 标注交互", () => {
       notes: [],
     });
     const wrapper = await mountReader();
-    await fireSelection(wrapper);
-    await wrapper.findAll(".hl-menu-dot")[0].trigger("click");
+    await fireSelection(wrapper, "hello world");
+    await wrapper.findAll(".hl-menu-dot")[0].trigger("click"); // 黄（同色）
+    await flushPromises();
+    // 不新建，而是移除
+    expect(apiMock.createHighlight).not.toHaveBeenCalled();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_x");
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: unknown[] } }).annotations.highlights,
+    ).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("已有底色高亮（异色）→ 点其他色点 → 换色（不新建第二条）", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_x",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "yellow",
+          style: "highlight",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    await wrapper.findAll(".hl-menu-dot")[3].trigger("click"); // 粉（异色）
+    await flushPromises();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_x");
+    expect(apiMock.createHighlight).toHaveBeenCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "pink",
+      style: "highlight",
+    });
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: Array<{ color: string }> } })
+        .annotations.highlights,
+    ).toHaveLength(1); // 仍是单条标注
+    wrapper.unmount();
+  });
+
+  it("已有底色高亮 → 点 U → 转下划线（删除重建，color 固定 red）", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_x",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "yellow",
+          style: "highlight",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    await wrapper.find(".hl-menu-underline").trigger("click");
+    await flushPromises();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_x");
+    expect(apiMock.createHighlight).toHaveBeenCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "red",
+      style: "underline",
+    });
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: Array<{ style: string }> } })
+        .annotations.highlights[0].style,
+    ).toBe("underline");
+    wrapper.unmount();
+  });
+
+  it("已有下划线选区 → 点 U → 移除（不再新建，原 bug 修复点）", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_ul",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "red",
+          style: "underline",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    // 宽松匹配：选中词"hello"落在整句下划线"hello world"内（cfi 相同+文本包含均命中）
+    await fireSelection(wrapper, "hello");
+    // 选中下划线 → 工具栏 U 亮起（underline-active 由 Reader 传入）
+    expect(wrapper.find(".hl-menu-underline").classes()).toContain("on");
+    await wrapper.find(".hl-menu-underline").trigger("click");
     await flushPromises();
     expect(apiMock.createHighlight).not.toHaveBeenCalled();
-    expect(toastItems.at(-1)?.text).toBe("这段文字已高亮过");
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_ul");
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: unknown[] } }).annotations.highlights,
+    ).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("已有下划线 → 点色点 → 转底色高亮（换色，不新建第二条）", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_ul",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "red",
+          style: "underline",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    await wrapper.findAll(".hl-menu-dot")[2].trigger("click"); // 蓝
+    await flushPromises();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_ul");
+    expect(apiMock.createHighlight).toHaveBeenCalledWith("b1", {
+      cfi: HL_CFI,
+      text: "hello world",
+      color: "blue",
+      style: "highlight",
+    });
+    expect(
+      (wrapper.vm as unknown as { annotations: { highlights: Array<{ style: string }> } })
+        .annotations.highlights[0].style,
+    ).toBe("highlight");
+    wrapper.unmount();
+  });
+
+  it("选中已有底色高亮 → 工具栏对应色点亮起（color 由 Reader 传入）", async () => {
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_x",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "blue",
+          style: "highlight",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    // 蓝是第三个色点（黄绿蓝粉紫）→ 只有它带 on 类
+    const dots = wrapper.findAll(".hl-menu-dot");
+    const on = dots.map((d) => d.classes().includes("on"));
+    expect(on).toEqual([false, false, true, false, false]);
+    expect(wrapper.find(".hl-menu-underline").classes()).not.toContain("on");
     wrapper.unmount();
   });
 
@@ -712,15 +870,32 @@ describe("点击高亮弹菜单", () => {
     const menu = wrapper.find(".hl-menu");
     expect(menu.exists()).toBe(true);
     expect(wrapper.find(".hl-menu .hl-menu-underline").classes()).toContain("on");
-    // U 切换回底色高亮：颜色从 red 回落 yellow
+    // 矩阵：下划线条目点 U = 移除（toggle off），不再切换回底色高亮
     await wrapper.find(".hl-menu .hl-menu-underline").trigger("click");
     await flushPromises();
-    expect(apiMock.createHighlight).toHaveBeenLastCalledWith("b1", {
+    expect(apiMock.createHighlight).not.toHaveBeenCalled();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_ul");
+    // 条目被删 → 菜单自动关闭
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("小菜单点同色色点 → 移除（toggle off，矩阵）", async () => {
+    const { wrapper, doc } = await mountWithMark({
+      id: "hl_1",
       cfi: HL_CFI,
-      text: "underlined",
+      text: "hello world",
       color: "yellow",
       style: "highlight",
     });
+    await clickMark(wrapper, doc);
+    expect(wrapper.find(".hl-menu").exists()).toBe(true);
+    // 点黄色（与当前高亮同色）→ 移除，不换色不新建
+    await wrapper.findAll(".hl-menu .hl-menu-dot")[0].trigger("click");
+    await flushPromises();
+    expect(apiMock.createHighlight).not.toHaveBeenCalled();
+    expect(apiMock.deleteHighlight).toHaveBeenCalledWith("b1", "hl_1");
+    expect(wrapper.find(".hl-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -736,5 +911,88 @@ describe("点击高亮弹菜单", () => {
     await clickMark(wrapper, doc);
     expect(wrapper.find(".hl-menu").exists()).toBe(false);
     wrapper.unmount();
+  });
+});
+
+// ============ 壳桥接：postReaderState 上报 highlightStyle（壳右键菜单「下划线」勾选态，与 hasHighlight 同源） ============
+describe("壳上报 highlightStyle", () => {
+  function installShellBridge(messages: Array<Record<string, unknown>>) {
+    (window as unknown as Record<string, unknown>).qqplayerNative = true;
+    (window as unknown as Record<string, unknown>).webkit = {
+      messageHandlers: {
+        native: {
+          postMessage: (m: unknown) => messages.push(m as Record<string, unknown>),
+        },
+      },
+    };
+  }
+
+  function uninstallShellBridge() {
+    delete (window as unknown as Record<string, unknown>).qqplayerNative;
+    delete (window as unknown as Record<string, unknown>).webkit;
+  }
+
+  it("壳内选中已有下划线 → readerState 携带 hasHighlight=true + highlightStyle=underline", async () => {
+    const messages: Array<Record<string, unknown>> = [];
+    installShellBridge(messages);
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_ul",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "red",
+          style: "underline",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    const last = messages.filter((m) => m.type === "readerState").at(-1);
+    expect(last?.hasHighlight).toBe(true);
+    expect(last?.highlightStyle).toBe("underline");
+    wrapper.unmount();
+    uninstallShellBridge();
+  });
+
+  it("壳内选中已有底色高亮 → highlightStyle=highlight", async () => {
+    const messages: Array<Record<string, unknown>> = [];
+    installShellBridge(messages);
+    apiMock.fetchAnnotations.mockResolvedValue({
+      highlights: [
+        {
+          id: "hl_x",
+          cfi: HL_CFI,
+          text: "hello world",
+          color: "yellow",
+          style: "highlight",
+          createdAt: 1,
+        },
+      ],
+      bookmarks: [],
+      notes: [],
+    });
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    const last = messages.filter((m) => m.type === "readerState").at(-1);
+    expect(last?.hasHighlight).toBe(true);
+    expect(last?.highlightStyle).toBe("highlight");
+    wrapper.unmount();
+    uninstallShellBridge();
+  });
+
+  it("壳内选中无标注文字 → highlightStyle=null", async () => {
+    const messages: Array<Record<string, unknown>> = [];
+    installShellBridge(messages);
+    const wrapper = await mountReader();
+    await fireSelection(wrapper, "hello world");
+    const last = messages.filter((m) => m.type === "readerState").at(-1);
+    expect(last?.hasHighlight).toBe(false);
+    expect(last?.highlightStyle).toBeNull();
+    wrapper.unmount();
+    uninstallShellBridge();
   });
 });
