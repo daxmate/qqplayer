@@ -148,21 +148,24 @@ export function addDict(path: string, name?: string): Promise<DictConfig> {
   return request<DictConfig>("/api/dict", jsonInit("POST", { path, name }));
 }
 
-/** 上传 mdx/mdd（XHR 流式，带进度回调）；返回配置项或 {ok:true} */
-export function uploadDictFile(
-  file: File,
+/**
+ * 批量上传词典文件（单请求多文件，XHR 流式，onProgress 为整体总进度）。
+ * FormData 字段名 "files"（多个）；响应 {added: DictConfig[], ignored: [{name,reason}]}。
+ */
+export function uploadDictFiles(
+  files: File[],
   onProgress?: (percent: number) => void,
-): Promise<DictConfig | { ok: boolean }> {
+): Promise<{ added: DictConfig[]; ignored: { name: string; reason: string }[] }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/dict/upload");
+    xhr.open("POST", "/api/dict/upload-batch");
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          resolve(JSON.parse(xhr.responseText) as DictConfig | { ok: boolean });
+          resolve(JSON.parse(xhr.responseText));
         } catch {
           reject(new Error("bad response"));
         }
@@ -179,9 +182,19 @@ export function uploadDictFile(
     };
     xhr.onerror = () => reject(new Error("network"));
     const form = new FormData();
-    form.append("file", file);
+    for (const f of files) form.append("files", f);
     xhr.send(form);
   });
+}
+
+/** 批量添加本地路径词典（链接原路径）：{paths} → {added, skipped:[{path,reason}]} */
+export function addDictBatch(
+  paths: string[],
+): Promise<{ added: DictConfig[]; skipped: { path: string; reason: string }[] }> {
+  return request<{ added: DictConfig[]; skipped: { path: string; reason: string }[] }>(
+    "/api/dict/add-batch",
+    jsonInit("POST", { paths }),
+  );
 }
 
 /** 设为默认词典 */

@@ -1,7 +1,7 @@
 // 阅读器 V2 标注组件测试：annotations.ts 纯函数 + SelectionToolbar + DictLookupModal +
 // AnnotationPanel + DictManagerModal（fetch/XMLHttpRequest 全部 mock，参照 Reader.test.ts 模式）
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { rewriteDictHtml, isDarkBackground, HIGHLIGHT_COLOR_STYLES } from "../books/annotations";
 import SelectionToolbar from "../books/SelectionToolbar.vue";
 import DictLookupModal from "../books/DictLookupModal.vue";
@@ -86,7 +86,8 @@ const apiMock = vi.hoisted(() => ({
   fetchDictSettings: vi.fn(),
   scanDictPath: vi.fn(),
   addDict: vi.fn(),
-  uploadDictFile: vi.fn(),
+  uploadDictFiles: vi.fn(),
+  addDictBatch: vi.fn(),
   activateDict: vi.fn(),
   setDictEnabled: vi.fn(),
   deleteDict: vi.fn(),
@@ -231,7 +232,8 @@ beforeEach(() => {
     { path: "/Users/x/Dictionary/oald.mdx", name: "oald", size: 1024, mddExists: true },
   ]);
   apiMock.addDict.mockResolvedValue({ ...DICTS[0], id: "d3", name: "oald" });
-  apiMock.uploadDictFile.mockResolvedValue({ ok: true });
+  apiMock.uploadDictFiles.mockResolvedValue({ added: [], ignored: [] });
+  apiMock.addDictBatch.mockResolvedValue({ added: [], skipped: [] });
   apiMock.activateDict.mockResolvedValue(undefined);
   apiMock.setDictEnabled.mockResolvedValue(undefined);
   apiMock.deleteDict.mockResolvedValue(undefined);
@@ -532,6 +534,15 @@ const DICTS = [
 ];
 
 describe("DictManagerModal", () => {
+  // 切到「链接原路径」radio（默认是复制模式，扫描区只在链接模式显示）
+  async function switchToLink(wrapper: VueWrapper) {
+    const link = wrapper
+      .findAll(".dictmgr-mode input[type='radio']")
+      .find((r) => (r.element as HTMLInputElement).value === "link")!;
+    (link.element as HTMLInputElement).checked = true;
+    await link.trigger("change");
+  }
+
   it("列表渲染：name + 路径 + role 徽标 + 默认标记", async () => {
     const wrapper = mount(DictManagerModal);
     await flushPromises();
@@ -542,18 +553,32 @@ describe("DictManagerModal", () => {
     wrapper.unmount();
   });
 
-  it("扫描：输入路径 → 候选列表 → 点选添加", async () => {
+  it("扫描：输入路径 → 候选列表 → 多选 → 添加所选批量添加", async () => {
+    apiMock.scanDictPath.mockResolvedValue([
+      { path: "/Users/x/Dictionary/oald.mdx", name: "oald", size: 1024, mddExists: true },
+      { path: "/Users/x/Dictionary/coca.mdx", name: "coca", size: 2048, mddExists: false },
+    ]);
     const wrapper = mount(DictManagerModal);
     await flushPromises();
+    await switchToLink(wrapper);
     await wrapper.find(".dictmgr-input").setValue("/Users/x/Dictionary");
     await wrapper.find(".dictmgr-path-row .dictmgr-btn.primary").trigger("click");
     await flushPromises();
     expect(apiMock.scanDictPath).toHaveBeenCalledWith("/Users/x/Dictionary");
     expect(wrapper.text()).toContain("oald");
 
-    await wrapper.find(".dictmgr-candidate .dictmgr-btn").trigger("click");
+    // 勾选两个候选 → 添加所选 (2) → 批量接口
+    const boxes = wrapper.findAll('.dictmgr-candidate input[type="checkbox"]');
+    expect(boxes).toHaveLength(2);
+    await boxes[0].setValue(true);
+    await boxes[1].setValue(true);
+    expect(wrapper.find(".dictmgr-add-selected").text()).toContain("(2)");
+    await wrapper.find(".dictmgr-add-selected").trigger("click");
     await flushPromises();
-    expect(apiMock.addDict).toHaveBeenCalledWith("/Users/x/Dictionary/oald.mdx");
+    expect(apiMock.addDictBatch).toHaveBeenCalledWith([
+      "/Users/x/Dictionary/oald.mdx",
+      "/Users/x/Dictionary/coca.mdx",
+    ]);
     wrapper.unmount();
   });
 
@@ -580,21 +605,29 @@ describe("DictManagerModal", () => {
     wrapper.unmount();
   });
 
-  it("上传：选文件 → uploadDictFile 带进度回调 → 刷新列表", async () => {
+  it("复制模式：多选文件 → uploadDictFiles 带进度回调 → 刷新列表", async () => {
+    apiMock.uploadDictFiles.mockResolvedValue({
+      added: [{ ...DICTS[0], id: "d9", name: "oald" }],
+      ignored: [{ name: "extra.css", reason: "缺少对应的 .mdx 主文件" }],
+    });
     const wrapper = mount(DictManagerModal);
     await flushPromises();
     const input = wrapper.find('.dictmgr-upload input[type="file"]');
+    expect(input.attributes("multiple")).toBeDefined();
     const file = new File(["x"], "test.mdx", { type: "application/octet-stream" });
     Object.defineProperty(input.element, "files", { value: [file], configurable: true });
     await input.trigger("change");
     await flushPromises();
-    expect(apiMock.uploadDictFile).toHaveBeenCalledWith(file, expect.any(Function));
+    expect(apiMock.uploadDictFiles).toHaveBeenCalledWith([file], expect.any(Function));
+    expect(toastItems.some((x) => x.text === "成功导入 1 本词典")).toBe(true);
+    expect(toastItems.some((x) => x.text === "忽略 1 个文件（缺少对应的 .mdx 主文件）")).toBe(true);
     wrapper.unmount();
   });
 
   it("直接添加 .mdx 路径：路径不合法时提示且不请求", async () => {
     const wrapper = mount(DictManagerModal);
     await flushPromises();
+    await switchToLink(wrapper);
     // 输入 .epub 路径 → 添加按钮 disabled
     await wrapper.find(".dictmgr-input").setValue("/x/y.epub");
     const addBtn = wrapper.findAll(".dictmgr-path-row .dictmgr-btn")[1];
