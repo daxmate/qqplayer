@@ -889,6 +889,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
+    // ============ 词典文件多选桥：NSOpenPanel 多选文件 → 回传绝对路径数组（链接原路径模式） ============
+    // 与 <input type="file"> 的 runOpenPanel 不同：网页 File API 拿不到真实路径，链接模式需原生回传
+    func pickDictFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.message = "选择词典文件（.mdx/.mdd/.css 等，可多选）"
+        // 不设 allowedFileTypes：沿用现有约定，前端按 accept/扩展名自行过滤
+        panel.begin { [weak self] resp in
+            let paths = resp == .OK ? panel.urls.map { $0.path } : []
+            self?.notifyFrontendDictFiles(paths)
+        }
+    }
+
+    // 通知前端：词典「链接原路径」导入的绝对路径数组（取消 → 空数组）
+    func notifyFrontendDictFiles(_ paths: [String]) {
+        guard let json = try? JSONSerialization.data(withJSONObject: paths),
+              let s = String(data: json, encoding: .utf8) else { return }
+        let escaped = s.dropFirst().dropLast() // ["/a","/b"] → "/a","/b"（JSON 转义）
+        let js = "window.dispatchEvent(new CustomEvent('qqplayer:nativeDictFiles', { detail: { paths: [\(escaped)] } }))"
+        DispatchQueue.main.async { [weak self] in
+            self?.mainWebView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+
     // ============ 网页消息（三窗口共用 "native" 通道，按来源路由） ============
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.webView === mainWebView {
@@ -960,6 +986,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             // 关闭迷你窗：隐藏面板 + 恢复主窗口（与 openMini 对称）
             hideMiniPanel()
             showMainWindow()
+        case "pickDictFiles":
+            // 词典管理「链接原路径」：原生多选 .mdx/.mdd/.css 等 → 回传绝对路径数组
+            pickDictFiles()
         case "lyric":
             // 桌面歌词开关：按主页面状态显示/隐藏面板
             if let show = dict["show"] as? Bool {
