@@ -69,61 +69,102 @@
           <p class="dictmgr-empty-hint">{{ t("books.dictAddHint") }}</p>
         </div>
 
-        <!-- 添加方式 1：本地路径扫描 -->
-        <p class="dictmgr-section-title">{{ t("books.dictPath") }}</p>
-        <div class="dictmgr-path-row">
-          <input
-            v-model="pathInput"
-            class="dictmgr-input"
-            :placeholder="t('books.dictPathPlaceholder')"
-            @keydown.enter="scan()"
-          />
-          <button
-            class="dictmgr-btn primary"
-            :disabled="scanning || !pathInput.trim()"
-            @click="scan"
-          >
-            <Loader2 v-if="scanning" :size="14" class="dictmgr-spin" />
-            <FolderSearch v-else :size="14" />
-            {{ scanning ? t("books.dictScanning") : t("books.dictScan") }}
-          </button>
-          <button
-            class="dictmgr-btn"
-            :disabled="adding || !pathInput.trim().toLowerCase().endsWith('.mdx')"
-            @click="addByPath"
-          >
-            {{ t("books.dictAdd") }}
-          </button>
+        <!-- 添加词典：复制到应用 / 链接原路径 -->
+        <p class="dictmgr-section-title">{{ t("books.dictAddTitle") }}</p>
+        <div class="dictmgr-mode-row">
+          <label class="dictmgr-mode" :class="{ on: mode === 'copy' }">
+            <input v-model="mode" type="radio" value="copy" />
+            📋 {{ t("books.dictModeCopy") }}
+          </label>
+          <label class="dictmgr-mode" :class="{ on: mode === 'link' }">
+            <input v-model="mode" type="radio" value="link" />
+            🔗 {{ t("books.dictModeLink") }}
+          </label>
         </div>
-        <div v-if="scanCandidates.length" class="dictmgr-candidates">
-          <div v-for="c in scanCandidates" :key="c.path" class="dictmgr-candidate">
-            <span class="dictmgr-candidate-name">{{ c.name }}</span>
-            <span class="dictmgr-candidate-meta">
-              {{ fmtSize(c.size) }}{{ c.mddExists ? " +mdd" : "" }}
-            </span>
-            <button class="dictmgr-btn primary small" :disabled="adding" @click="addByCandidate(c)">
+
+        <!-- 复制模式：多选批量上传 -->
+        <div v-if="mode === 'copy'" class="dictmgr-copy">
+          <p class="dictmgr-hint small">{{ t("books.dictSelectFilesHint") }}</p>
+          <label class="dictmgr-upload">
+            <Loader2 v-if="uploading" :size="15" class="dictmgr-spin" />
+            <Upload v-else :size="15" />
+            {{ uploading ? t("books.dictUploading") : t("books.dictSelectFiles") }}
+            <input
+              type="file"
+              multiple
+              accept=".mdx,.mdd,.css,.js,.jpg,.jpeg,.png,.gif,.svg,.mp3,.woff,.woff2"
+              :disabled="uploading"
+              @change="onFilesPicked"
+            />
+          </label>
+          <div v-if="uploading" class="dictmgr-progress">
+            <div class="dictmgr-progress-bar">
+              <div class="dictmgr-progress-fill" :style="{ width: uploadProgress + '%' }" />
+            </div>
+            <span class="dictmgr-progress-text">{{ uploadName }} {{ uploadProgress }}%</span>
+          </div>
+        </div>
+
+        <!-- 链接模式：壳内原生选文件 + 路径扫描（多选批量添加） -->
+        <div v-else class="dictmgr-link">
+          <button
+            v-if="isNative"
+            class="dictmgr-btn primary"
+            :disabled="adding"
+            @click="pickNativeFiles"
+          >
+            <FolderSearch :size="14" />
+            {{ t("books.dictPickFiles") }}
+          </button>
+          <div class="dictmgr-path-row">
+            <input
+              v-model="pathInput"
+              class="dictmgr-input"
+              :placeholder="t('books.dictPathPlaceholder')"
+              @keydown.enter="scan()"
+            />
+            <button
+              class="dictmgr-btn primary"
+              :disabled="scanning || !pathInput.trim()"
+              @click="scan"
+            >
+              <Loader2 v-if="scanning" :size="14" class="dictmgr-spin" />
+              <FolderSearch v-else :size="14" />
+              {{ scanning ? t("books.dictScanning") : t("books.dictScan") }}
+            </button>
+            <button
+              class="dictmgr-btn"
+              :disabled="adding || !pathInput.trim().toLowerCase().endsWith('.mdx')"
+              @click="addByPath"
+            >
               {{ t("books.dictAdd") }}
             </button>
           </div>
-        </div>
-        <p v-else-if="scanned && !scanning" class="dictmgr-scan-empty">
-          {{ t("books.dictScanEmpty") }}
-        </p>
-
-        <!-- 添加方式 2：上传 -->
-        <p class="dictmgr-section-title">{{ t("books.dictUpload") }}</p>
-        <p class="dictmgr-hint small">{{ t("books.dictUploadHint") }}</p>
-        <label class="dictmgr-upload">
-          <Loader2 v-if="uploading" :size="15" class="dictmgr-spin" />
-          <Upload v-else :size="15" />
-          {{ uploading ? t("books.dictUploading") : t("books.dictUpload") }}
-          <input type="file" accept=".mdx,.mdd" :disabled="uploading" @change="onFilePicked" />
-        </label>
-        <div v-if="uploading" class="dictmgr-progress">
-          <div class="dictmgr-progress-bar">
-            <div class="dictmgr-progress-fill" :style="{ width: uploadProgress + '%' }" />
+          <div v-if="scanCandidates.length" class="dictmgr-candidates">
+            <div v-for="c in scanCandidates" :key="c.path" class="dictmgr-candidate">
+              <input
+                v-model="selectedPaths"
+                type="checkbox"
+                class="dictmgr-candidate-check"
+                :value="c.path"
+                :disabled="adding"
+              />
+              <span class="dictmgr-candidate-name">{{ c.name }}</span>
+              <span class="dictmgr-candidate-meta">
+                {{ fmtSize(c.size) }}{{ c.mddExists ? " +mdd" : "" }}
+              </span>
+            </div>
+            <button
+              class="dictmgr-btn primary dictmgr-add-selected"
+              :disabled="adding || !selectedPaths.length"
+              @click="addSelected"
+            >
+              {{ t("books.dictAddSelected", { n: selectedPaths.length }) }}
+            </button>
           </div>
-          <span class="dictmgr-progress-text">{{ uploadName }} {{ uploadProgress }}%</span>
+          <p v-else-if="scanned && !scanning" class="dictmgr-scan-empty">
+            {{ t("books.dictScanEmpty") }}
+          </p>
         </div>
       </div>
     </div>
@@ -131,18 +172,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { BookMarked, FolderSearch, Loader2, Trash2, Upload, X } from "@lucide/vue";
 import type { DictConfig, DictScanCandidate } from "./types";
 import {
   activateDict,
   addDict,
+  addDictBatch,
   deleteDict,
   fetchDictSettings,
   scanDictPath,
   setDictEnabled,
-  uploadDictFile,
+  uploadDictFiles,
 } from "./annotations";
 import { showToast, toastError } from "../composables/useToast.js";
 
@@ -150,10 +192,16 @@ const emit = defineEmits<{ close: []; changed: [] }>();
 
 const { t } = useI18n();
 
+// 壳环境（Swift 壳 atDocumentStart 注入 window.qqplayerNative === true）
+const isNative =
+  typeof window !== "undefined" && (window as { qqplayerNative?: boolean }).qqplayerNative === true;
+
 const dicts = ref<DictConfig[]>([]);
 const activeDictId = ref("");
+const mode = ref<"copy" | "link">("copy");
 const pathInput = ref("");
 const scanCandidates = ref<DictScanCandidate[]>([]);
+const selectedPaths = ref<string[]>([]);
 const scanned = ref(false);
 const scanning = ref(false);
 const adding = ref(false);
@@ -184,6 +232,7 @@ async function scan() {
   scanning.value = true;
   scanned.value = true;
   scanCandidates.value = [];
+  selectedPaths.value = [];
   try {
     scanCandidates.value = await scanDictPath(p);
     if (!scanCandidates.value.length) showToast(t("books.dictScanEmpty"));
@@ -212,17 +261,45 @@ async function addByPath() {
   }
 }
 
-async function addByCandidate(c: DictScanCandidate) {
+/** 批量添加路径（壳内选文件 / 候选多选共用）；成功/跳过分别 toast */
+async function addPaths(paths: string[]) {
   adding.value = true;
   try {
-    await addDict(c.path);
-    showToast(t("books.dictAdded"));
+    const r = await addDictBatch(paths);
+    if (r.added.length) showToast(t("books.dictImportDone", { n: r.added.length }));
+    if (r.skipped.length) showToast(t("books.dictImportSkipped", { n: r.skipped.length }));
     await refresh();
   } catch (e) {
     toastError(e instanceof Error ? e.message : t("books.dictLoadFailed"));
   } finally {
     adding.value = false;
   }
+}
+
+/** 候选多选批量添加 */
+async function addSelected() {
+  const paths = selectedPaths.value.slice();
+  if (!paths.length) return;
+  await addPaths(paths);
+  selectedPaths.value = [];
+}
+
+/** 壳内：触发原生文件选择（pickDictFiles） */
+function pickNativeFiles() {
+  const bridge = (
+    window as {
+      webkit?: { messageHandlers?: { native?: { postMessage: (msg: unknown) => void } } };
+    }
+  ).webkit?.messageHandlers?.native;
+  bridge?.postMessage({ type: "pickDictFiles" });
+}
+
+/** 壳内：原生选文件结果（e.detail.paths，取消为空数组） */
+function onNativeDictFiles(e: Event) {
+  const detail = (e as CustomEvent<{ paths?: string[] }>).detail;
+  const paths = Array.isArray(detail?.paths) ? detail.paths : [];
+  if (!paths.length) return; // 用户取消
+  void addPaths(paths);
 }
 
 async function toggleEnabled(d: DictConfig) {
@@ -256,19 +333,21 @@ async function remove(d: DictConfig) {
   }
 }
 
-async function onFilePicked(e: Event) {
+async function onFilesPicked(e: Event) {
   const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = ""; // 允许重复选择同一文件
-  if (!file) return;
+  const files = Array.from(input.files ?? []);
+  input.value = ""; // 允许重复选择同一批文件
+  if (!files.length) return;
   uploading.value = true;
   uploadProgress.value = 0;
-  uploadName.value = file.name;
+  uploadName.value =
+    files.length > 1 ? t("books.dictFileCount", { n: files.length }) : files[0].name;
   try {
-    await uploadDictFile(file, (p) => {
+    const r = await uploadDictFiles(files, (p) => {
       uploadProgress.value = p;
     });
-    showToast(t("books.dictUploadDone"));
+    if (r.added.length) showToast(t("books.dictImportDone", { n: r.added.length }));
+    if (r.ignored.length) showToast(t("books.dictUploadIgnored", { m: r.ignored.length }));
     await refresh();
   } catch (err) {
     toastError(t("books.dictUploadFailed", { msg: err instanceof Error ? err.message : "" }));
@@ -277,7 +356,14 @@ async function onFilePicked(e: Event) {
   }
 }
 
-onMounted(refresh);
+onMounted(() => {
+  window.addEventListener("qqplayer:nativeDictFiles", onNativeDictFiles);
+  void refresh();
+});
+
+onUnmounted(() => {
+  window.removeEventListener("qqplayer:nativeDictFiles", onNativeDictFiles);
+});
 </script>
 
 <style scoped>
@@ -510,10 +596,59 @@ onMounted(refresh);
   font-size: 12px;
   color: var(--text3);
 }
+.dictmgr-mode-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.dictmgr-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.dictmgr-mode:hover {
+  border-color: var(--accent);
+}
+.dictmgr-mode.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.dictmgr-mode input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.dictmgr-copy .dictmgr-upload {
+  margin-top: 4px;
+}
+.dictmgr-link > .dictmgr-btn.primary {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 8px;
+}
 .dictmgr-path-row {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.dictmgr-candidate-check {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  margin: 0;
+}
+.dictmgr-add-selected {
+  align-self: flex-end;
+  margin-top: 2px;
 }
 .dictmgr-input {
   flex: 1;
