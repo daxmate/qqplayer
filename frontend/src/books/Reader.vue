@@ -1907,9 +1907,15 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-/* epub.js marks-pane 下划线红色覆盖：marks-pane 的 Underline 把 stroke/stroke-width 硬编码
-   为黑色表现属性（0.3.93 实测），而 view.underline 传的 styles 只落到 <g> 上被 line 显式属性盖掉。
-   SVG 表现属性优先级低于任何 CSS 规则 → 用类选择器强制红色，与 UNDERLINE_STYLE 常量一致。 */
+/* epub.js marks-pane 下划线修复（0.3.93 实测）：
+   1. Underline.render 对每个文本行画 <rect fill="none">（覆盖整个文本区域）+ <line>（底部）两个元素；
+      view.underline 传的 styles 只落到 <g> 上，rect 继承 <g> 的 stroke → 画出红色方框（“下划线是框” bug）。
+      去掉 rect 的 stroke（fill 本来就是 none），只留底部真正的下划线。
+   2. line 的 stroke/stroke-width 被硬编码为黑色表现属性，显式属性盖掉 <g> 继承；
+      SVG 表现属性优先级低于任何 CSS 规则 → 用类选择器强制红色，与 UNDERLINE_STYLE 常量一致。 */
+.epubjs-ul rect {
+  stroke: none;
+}
 .epubjs-ul line {
   stroke: #e5484d;
   stroke-width: 2;
