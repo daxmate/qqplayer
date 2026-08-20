@@ -265,14 +265,18 @@ class MdxDict:
                     key_id,
                 )
         # 回退：词典同目录实体文件（很多词典 css/图片外置，如 ldoce6ec.css）
-        if not norm or ".." in norm.split("/"):
-            return None
-        side = self._path.parent / norm
-        try:
-            if side.is_file():
-                return side.read_bytes()
-        except OSError:
-            return None
+        # 先按原始相对路径（保留大小写；Linux 等大小写敏感文件系统必须原样匹配），
+        # 再按小写规范化路径（mdd key 侧同规则）；两个候选都做安全清洗
+        for cand in (relpath, norm):
+            cand = cand.replace("\\", "/").lstrip("/")
+            if not cand or ".." in cand.split("/"):
+                continue
+            side = self._path.parent / cand
+            try:
+                if side.is_file():
+                    return side.read_bytes()
+            except OSError:
+                return None
         return None
 
     def _extract_bytes(
