@@ -80,6 +80,8 @@ final class MainWebView: WKWebView {
     static var readerHasSelection = false
     static var readerSelectedText = ""
     static var readerHasHighlight = false
+    // 当前选区已有高亮的样式（"highlight" 底色 | "underline" 下划线 | nil 无高亮），驱动右键菜单「下划线」项标题
+    static var readerHighlightStyle: String? = nil
 
     // 歌曲列表/侧边栏歌单右键菜单上下文缓存：前端 mousedown(button===2) 时经 "native" 通道推送
     // { type: 'ctxState', kind: 'song'|'playlist'|nil, path, songIndex, playlistId, songName, isFav, hasPath, canGoArtist, canGoAlbum }
@@ -154,8 +156,12 @@ final class MainWebView: WKWebView {
         }
         highlightItem.submenu = colorSubmenu
 
-        // 下划线（V4：固定红色）
-        let underlineItem = NSMenuItem(title: zh ? "下划线" : "Underline", action: #selector(underlineAction(_:)), keyEquivalent: "")
+        // 下划线（iBooks 语义：下划线也是高亮的一种，一个部分只能有一种标注）
+        // 已有下划线 → 标题变「移除下划线」（点击走前端 toggle 矩阵 = 移除）；否则 → 「下划线」（点击 = 新建）
+        let isUnderline = MainWebView.readerHighlightStyle == "underline"
+        let underlineItem = NSMenuItem(
+            title: isUnderline ? (zh ? "移除下划线" : "Remove Underline") : (zh ? "下划线" : "Underline"),
+            action: #selector(underlineAction(_:)), keyEquivalent: "")
         underlineItem.target = self
 
         // 移除高亮（仅当选区已有高亮时显示；无高亮隐藏，避免误删）
@@ -914,6 +920,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             MainWebView.readerHasSelection = dict["hasSelection"] as? Bool ?? false
             MainWebView.readerSelectedText = dict["text"] as? String ?? ""
             MainWebView.readerHasHighlight = dict["hasHighlight"] as? Bool ?? false
+            // 高亮样式（"highlight" | "underline" | nil），供右键菜单「下划线」项动态标题
+            MainWebView.readerHighlightStyle = dict["highlightStyle"] as? String
         case "ctxState":
             // 歌曲列表/侧边栏歌单右键上下文缓存（前端 useNativeCtxMenu mousedown(button===2) 上报，
             // 驱动 willOpenMenu 注入菜单项）。kind 为 null（空白区右键）→ as? String 得 nil → 清空上下文，
