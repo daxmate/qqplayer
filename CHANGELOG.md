@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### 📦 打包与分发（首个自包含安装包）
+
+- **macOS 桌面版首个 DMG 安装包（arm64，自包含）**：内置 Python 运行时与全部后端依赖（PyInstaller onedir，`packaging/build-backend.sh`），目标机器零依赖双击即用
+- **QQPlayer.app 壳自带后端子进程**：启动探测 `localhost:17627`——launchd 开发版在跑则直连共用（不抢端口），否则拉起内置后端，健康检查通过后开窗；退出自动清理子进程（只杀自己拉起的，绝不碰外部服务）
+- **DMG 打包脚本** `packaging/make-dmg.sh`：构建 app → 组装 staging（含「安装.command」自动移除 Gatekeeper 隔离标记 + Applications 软链）→ hdiutil 压缩
+- **后端环境变量覆盖**：`QQPLAYER_PORT`（端口，默认 17627）、`QQPLAYER_DATA_DIR`（用户数据目录，测试隔离/多实例用）；frozen 模式下资源定位走 `sys._MEIPASS`
+
 ### ✨ 新功能
 
 - **封面/歌词区尺寸：自适应保底 + 桌面拖拽调整 + 记忆 + 恢复默认**
