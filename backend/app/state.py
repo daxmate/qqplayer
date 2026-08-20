@@ -6,20 +6,33 @@
 """
 
 import os
+import sys
 import threading
 from pathlib import Path
 
 from app.storage import JsonStore
 
-# 仓库根（backend/app/state.py 上溯 3 级；dist/frontend/scripts 等相对路径均以仓库根为基准）
-ROOT = Path(__file__).resolve().parent.parent.parent
+# 仓库根（backend/app/state.py 上溯 3 级；dist/frontend/scripts 等相对路径均以仓库根为基准）。
+# PyInstaller 打包（frozen）时资源位于解包目录 _MEIPASS：前端 dist 以 datas=[('dist','dist')]
+# 打进包，运行时 ROOT 指向 _MEIPASS 才能挂载静态文件。
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys._MEIPASS)
+else:
+    ROOT = Path(__file__).resolve().parent.parent.parent
 # 默认歌曲库：系统推荐位置 ~/Music/QQPlayer（不在仓库内，仓库不存音频文件；
 # 用户可在设置/命令行参数指定其他路径，argv 覆盖逻辑在 app/main.py）
 DEFAULT_LIBRARY = Path.home() / "Music" / "QQPlayer"
-DEFAULT_PORT = 17627
+# 端口：QQPLAYER_PORT 环境变量覆盖（测试/多实例隔离用），默认 17627 不变
+DEFAULT_PORT = int(os.environ.get("QQPLAYER_PORT", "17627"))
 
-# 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）
-DATA_DIR = Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
+# 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）；
+# QQPLAYER_DATA_DIR 环境变量存在时优先（打包版冒烟测试隔离用，防污染真实数据）
+_env_data_dir = os.environ.get("QQPLAYER_DATA_DIR")
+DATA_DIR = (
+    Path(_env_data_dir)
+    if _env_data_dir
+    else Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
+)
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
