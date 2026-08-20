@@ -4,8 +4,8 @@
     :x="x"
     :y="y"
     :visible="visible"
-    :color="null"
-    :underline-active="false"
+    :color="color"
+    :underline-active="underlineActive"
     @color="(c) => emit('highlight', text, c)"
     @underline="() => emit('highlight', text, UNDERLINE_EMIT_COLOR, 'underline')"
   >
@@ -52,14 +52,21 @@ import type { HighlightColor, HighlightStyle } from "./types";
 import { showToast, toastError } from "../composables/useToast.js";
 import HighlightMenu from "./HighlightMenu.vue";
 
-const props = defineProps<{
-  x: number;
-  y: number;
-  visible: boolean;
-  text: string;
-  /** 选中 cfi 是否已有高亮（Reader 计算传入，控制"移除"项显示） */
-  hasHighlight: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    x: number;
+    y: number;
+    visible: boolean;
+    text: string;
+    /** 选中 cfi 是否已有高亮（Reader 计算传入，控制"移除"项显示） */
+    hasHighlight: boolean;
+    /** 选中已有底色高亮时传其颜色（Reader 计算传入，控制色点 active 态）；无高亮/下划线 → null */
+    color?: HighlightColor | null;
+    /** 选中已有下划线时 true（Reader 计算传入，控制 U active 态） */
+    underlineActive?: boolean;
+  }>(),
+  { color: null, underlineActive: false },
+);
 const emit = defineEmits<{
   lookup: [text: string];
   highlight: [text: string, color: HighlightColor, style?: HighlightStyle];
