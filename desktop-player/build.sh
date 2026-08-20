@@ -87,6 +87,17 @@ else
     echo "⚠️ 未找到图标，跳过"
 fi
 
+# 内置后端子进程（DMG 打包版自包含）：packaging/dist/qqplayer-backend 存在（PyInstaller onedir）
+# → 整体拷入 Resources/backend/（含 _internal/）；不存在 → 跳过（开发模式直连 launchd 服务）
+BACKEND_SRC="../packaging/dist/qqplayer-backend"
+if [ -d "$BACKEND_SRC" ]; then
+    echo "📦 拷贝内置后端子进程..."
+    cp -R "$BACKEND_SRC" "$APP/Contents/Resources/backend"
+    echo "✅ 内置后端已就位: $APP/Contents/Resources/backend"
+else
+    echo "ℹ️  未找到内置后端（$BACKEND_SRC），跳过（开发模式直连 launchd 服务）"
+fi
+
 codesign --force --sign - "$APP" 2>/dev/null || true
 
 echo "✅ 构建完成: $APP"

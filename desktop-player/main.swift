@@ -18,7 +18,6 @@ import WebKit
 import MediaPlayer
 
 let BACKEND_BASE = "http://localhost:17627"
-let LAUNCHD_LABEL = "com.daxmate.qqplayer"
 
 // ============ 迷你窗面板（无边框 / 置顶 / 可聚焦） ============
 final class MiniPanel: NSPanel {
@@ -331,6 +330,104 @@ final class MainWebView: WKWebView {
     }
 }
 
+// ============ 后端子进程生命周期（打包版自包含，DMG 分发用） ============
+// 启动契约：先探测 localhost:17627（launchd 开发版）→ 有则直连、绝不 spawn；
+// 无则拉起 Bundle 内 Contents/Resources/backend/qqplayer-backend（PyInstaller onedir）→
+// 轮询 /api/settings 健康检查（0.5s 间隔，最多 15s）→ 就绪后才建窗口；
+// 退出只 terminate 自己拉起的子进程（SIGTERM，2s 未退 SIGKILL），外部服务一概不碰。
+enum BackendStartResult {
+    case external        // 外部服务（launchd 开发版）在跑 → 直连
+    case embedded        // 内置后端已拉起并通过健康检查
+    case noEmbedded      // 无外部服务且 Bundle 内无内置后端（开发模式异常）
+    case spawnFailed     // 内置后端启动失败（exec 错误）
+    case timeout         // 内置后端 15s 内未就绪
+}
+
+final class BackendLauncher {
+    private(set) var spawnedProcess: Process?
+    private let probeURL = URL(string: "\(BACKEND_BASE)/api/settings")!
+
+    // 探测外部服务：GET /api/settings，1.5s 超时；200 即认为在跑
+    func probeExternal() -> Bool {
+        let sem = DispatchSemaphore(value: 0)
+        var alive = false
+        var req = URLRequest(url: probeURL)
+        req.timeoutInterval = 1.5
+        URLSession.shared.dataTask(with: req) { _, resp, _ in
+            if let r = resp as? HTTPURLResponse, r.statusCode == 200 { alive = true }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + 2)
+        return alive
+    }
+
+    // Bundle 内内置后端路径：<Bundle.main.resourceURL>/backend/qqplayer-backend（动态获取，不硬编码绝对路径）
+    func embeddedBackendURL() -> URL? {
+        guard let res = Bundle.main.resourceURL else { return nil }
+        let url = res.appendingPathComponent("backend/qqplayer-backend")
+        return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+    }
+
+    // 拉起内置后端：env 继承；stdout/stderr → ~/Library/Logs/qqplayer/pkg-backend.log（目录不存在先建）
+    func launchEmbedded() -> Process? {
+        guard let exe = embeddedBackendURL() else { return nil }
+        let logDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/qqplayer")
+        try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        let logPath = logDir.appendingPathComponent("pkg-backend.log")
+        FileManager.default.createFile(atPath: logPath.path, contents: nil)
+        guard let fh = FileHandle(forWritingAtPath: logPath.path) else { return nil }
+
+        let p = Process()
+        p.executableURL = exe
+        p.currentDirectoryURL = exe.deletingLastPathComponent()
+        p.standardOutput = fh
+        p.standardError = fh
+        do {
+            try p.run()
+        } catch {
+            try? fh.close()
+            return nil
+        }
+        spawnedProcess = p
+        return p
+    }
+
+    // 健康检查：0.5s 间隔轮询 /api/settings，最多 timeout 秒
+    func waitReady(timeout: TimeInterval = 15) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if probeExternal() { return true }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        return probeExternal()
+    }
+
+    // 启动编排：探测 → 有外部服务直连 / 无则 spawn 内置 + 健康检查
+    func start() -> BackendStartResult {
+        if probeExternal() { return .external }
+        guard embeddedBackendURL() != nil else { return .noEmbedded }
+        guard launchEmbedded() != nil else { return .spawnFailed }
+        return waitReady() ? .embedded : .timeout
+    }
+
+    // 退出清理：只杀自己拉起的（spawnedProcess 非 nil 才动），外部服务绝不碰
+    func terminateSpawned() {
+        guard let p = spawnedProcess else { return }
+        spawnedProcess = nil
+        guard p.isRunning else { return }
+        p.terminate() // SIGTERM
+        // 2s 后仍未退出 → SIGKILL（同步等待，保证退出路径上能生效）
+        let deadline = Date().addingTimeInterval(2)
+        while p.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        if p.isRunning {
+            kill(p.processIdentifier, SIGKILL)
+        }
+    }
+}
+
 // ============ App 入口 ============
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDelegate {
     // 三窗口
@@ -349,64 +446,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var lastNowPlayingPath: String?
     var lastNowPlayingKey = ""
 
-    // ============ 后端健康检查 / 兜底拉起 ============
-    func backendAlive() -> Bool {
-        let sem = DispatchSemaphore(value: 0)
-        var alive = false
-        var req = URLRequest(url: URL(string: "\(BACKEND_BASE)/api/library")!)
-        req.timeoutInterval = 1.5
-        URLSession.shared.dataTask(with: req) { _, resp, _ in
-            if let r = resp as? HTTPURLResponse, r.statusCode == 200 { alive = true }
-            sem.signal()
-        }.resume()
-        _ = sem.wait(timeout: .now() + 2)
-        return alive
-    }
+    // ============ 后端子进程生命周期（打包版自包含） ============
+    let backendLauncher = BackendLauncher()
 
-    func ensureBackend() {
-        guard !backendAlive() else { return }
-        // 1) 尝试拉起 launchd 托管的服务（登录会话内最稳，避免双进程抢端口）
-        let uid = getuid()
-        let kick = Process()
-        kick.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        kick.arguments = ["kickstart", "gui/\(uid)/\(LAUNCHD_LABEL)"]
-        try? kick.run()
-        // 2) 2s 后复查，仍不通则 NSTask 直接跑 backend.py（开发目录兜底）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            if let self, !self.backendAlive() {
-                self.spawnBackendDirect()
-            }
+    // 启动失败弹窗（含日志路径提示），点「退出」后终止 app
+    func showBackendFailureAlert(_ result: BackendStartResult) {
+        let logHint = "日志：~/Library/Logs/qqplayer/pkg-backend.log"
+        let detail: String
+        switch result {
+        case .noEmbedded:
+            detail = "本地服务（http://localhost:17627）未响应，且应用包内未找到内置后端（Contents/Resources/backend/qqplayer-backend）。\n请先启动开发版后端（launchd 服务），或使用带内置后端的打包版。"
+        case .spawnFailed:
+            detail = "本地服务未响应，且内置后端启动失败。\n\(logHint)"
+        case .timeout:
+            detail = "内置后端已拉起但 15 秒内未就绪。\n\(logHint)"
+        case .external, .embedded:
+            return
         }
-    }
-
-    func spawnBackendDirect() {
-        let dir = ProcessInfo.processInfo.environment["QQPLAYER_DIR"]
-            ?? (NSHomeDirectory() + "/codes/qqplayer")
-        let py = dir + "/venv/bin/python"
-        let script = dir + "/backend.py"
-        guard FileManager.default.fileExists(atPath: script) else { return }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: py)
-        p.arguments = [script]
-        p.currentDirectoryURL = URL(fileURLWithPath: dir)
-        try? p.run()
-        // 不 wait：后台常驻；壳退出不杀（launchd/浏览器版可继续使用）
+        let alert = NSAlert()
+        alert.messageText = "无法连接 QQPlayer 后端服务"
+        alert.informativeText = detail + "\n\n应用即将退出。"
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "退出")
+        alert.runModal()
     }
 
     // ============ 应用启动 ============
     func applicationDidFinishLaunching(_ notification: Notification) {
-        ensureBackend()
+        // 后端启动时序：探测外部服务（launchd 开发版）→ 无则拉起 Bundle 内置后端 → 健康检查。
+        // 全部在后台队列完成（探测 ≤2s + 健康检查 ≤15s），主线程不阻塞、app 不闪退；
+        // 就绪后才建窗口/load URL（现有三窗口流程不变）；失败弹 NSAlert 后退出。
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let result = self.backendLauncher.start()
+            DispatchQueue.main.async {
+                switch result {
+                case .external, .embedded:
+                    break
+                case .noEmbedded, .spawnFailed, .timeout:
+                    self.showBackendFailureAlert(result)
+                    NSApp.terminate(nil)
+                    return
+                }
+                self.setupMainWindow()
+                self.setupMiniPanel()
+                self.setupLyricPanel()
 
-        setupMainWindow()
-        setupMiniPanel()
-        setupLyricPanel()
+                self.setupMainMenu()
+                self.setupRemoteCommands()
+                self.startNowPlayingPoll()
 
-        setupMainMenu()
-        setupRemoteCommands()
-        startNowPlayingPoll()
-
-        mainWindow.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+                self.mainWindow.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
 
     // 加载页面：URL 附加时间戳绕过 WKWebView 磁盘缓存（WKWebView 不尊重 URLRequest.cachePolicy，
@@ -1092,6 +1185,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     func applicationWillTerminate(_ notification: Notification) {
         nowPlayingTimer?.invalidate()
         if miniVisible { reportMiniStatusSync(false) }
+        // 只清理自己拉起的子进程（spawnedProcess 非 nil 才动），外部已有服务绝不 kill
+        backendLauncher.terminateSpawned()
     }
 }
 
@@ -1128,6 +1223,8 @@ Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
         if gDelegate?.miniVisible == true {
             gDelegate?.reportMiniStatusSync(false)
         }
+        // SIGTERM 路径直接 exit(0) 不触发 applicationWillTerminate，这里兜底清理自拉起的子进程
+        gDelegate?.backendLauncher.terminateSpawned()
         exit(0)
     }
 }
