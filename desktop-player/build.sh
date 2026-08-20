@@ -19,6 +19,7 @@ BUILD_DIR="build"
 echo "📦 编译 Swift 壳..."
 mkdir -p "$BUILD_DIR"
 swiftc main.swift dict_events.swift -o "$BUILD_DIR/$APP_NAME" \
+    -target arm64-apple-macos13.0 \
     -framework Cocoa -framework WebKit -framework MediaPlayer -O
 
 echo "🏗️  组装 .app bundle..."
