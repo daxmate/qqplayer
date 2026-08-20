@@ -4,6 +4,7 @@
 运行：cd ~/codes/qqplayerB && ~/codes/qqplayer/venv/bin/python -m pytest tests/test_dict_api.py -q
 """
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -255,7 +256,9 @@ class _FakeSend2Trash:
     def send2trash(self, path):
         self.calls.append(path)
         p = Path(path)
-        if p.exists():
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.exists():
             p.unlink()
 
 
@@ -444,3 +447,187 @@ def test_dict_settings_via_api(dicts_dir):
     assert s["dictionaries"] == []
     # 其他 namespace 不受影响
     assert client.get("/api/settings").json()["settings"]["playback"]["playMode"] == "order"
+
+
+# ============ 批量上传（upload-batch）============
+def _upload_batch(*items):
+    """items: (filename, bytes) → multipart 批量上传（字段名 files）"""
+    return client.post(
+        "/api/dict/upload-batch",
+        files=[("files", (name, data)) for name, data in items],
+    )
+
+
+def test_upload_batch_group_with_attachments(dicts_dir, tmp_path):
+    """Oxford.mdx + Oxford.mdd + Oxford.css 一组 → 1 本配置 + 3 文件落盘子目录（保留原文件名）"""
+    r = _upload_batch(
+        ("Oxford.mdx", (dicts_dir / "mini.mdx").read_bytes()),
+        ("Oxford.mdd", b"MDD-DATA"),
+        ("Oxford.css", b"body{}"),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ignored"] == []
+    assert len(body["added"]) == 1
+    item = body["added"][0]
+    assert item["name"] == "Oxford"
+    assert item["kind"] == "uploaded"
+    assert item["role"] == "define"
+    assert item["enabled"] is True
+    assert item["addedAt"] > 0
+    cid = item["id"][2:]
+    ddir = state.DICTS_DIR / cid
+    assert item["path"] == str(ddir / "Oxford.mdx")
+    assert sorted(p.name for p in ddir.iterdir()) == ["Oxford.css", "Oxford.mdd", "Oxford.mdx"]
+    assert (ddir / "Oxford.mdd").read_bytes() == b"MDD-DATA"
+    assert (ddir / "Oxford.css").read_bytes() == b"body{}"
+    assert client.get("/api/dict").json()["dictionaries"] == body["added"]
+
+
+def test_upload_batch_two_groups(dicts_dir, tmp_path):
+    """两个不同 mdx 组 → 2 本配置，role 各自检测（按 mdx 文件名）"""
+    r = _upload_batch(
+        ("Alpha.mdx", (dicts_dir / "mini.mdx").read_bytes()),
+        ("COCA Frequency.mdx", (dicts_dir / "COCA Frequency 60000.mdx").read_bytes()),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ignored"] == []
+    assert {d["name"] for d in body["added"]} == {"Alpha", "COCA Frequency"}
+    assert {d["name"]: d["role"] for d in body["added"]} == {
+        "Alpha": "define",
+        "COCA Frequency": "frequency",
+    }
+    assert len(client.get("/api/dict").json()["dictionaries"]) == 2
+
+
+def test_upload_batch_orphan_attachments(dicts_dir, tmp_path):
+    """孤立 mdd/css（组内无 mdx）→ ignored 且不落盘"""
+    r = _upload_batch(("Lonely.mdd", b"MDD-DATA"), ("Lonely.css", b"body{}"))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["added"] == []
+    assert body["ignored"] == [{"name": "Lonely", "reason": "缺少对应的 .mdx 主文件"}]
+    assert client.get("/api/dict").json()["dictionaries"] == []
+    assert list(state.DICTS_DIR.iterdir()) == []  # 未落盘
+
+
+def test_upload_batch_all_invalid_ext():
+    """全非法扩展名 → 400"""
+    r = _upload_batch(("readme.txt", b"hi"), ("photo.png.txt", b"x"))
+    assert r.status_code == 400
+    assert r.json()["detail"] == "未选择有效的词典文件"
+
+
+def test_upload_batch_duplicate_mdx_in_group(dicts_dir, tmp_path):
+    """同组两个 mdx（Oxford.mdx + Oxford.MDX）→ 400，且未写盘"""
+    r = _upload_batch(
+        ("Oxford.mdx", (dicts_dir / "mini.mdx").read_bytes()),
+        ("Oxford.MDX", (dicts_dir / "mini.mdx").read_bytes()),
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "重复的词典文件: Oxford.MDX"
+    assert client.get("/api/dict").json()["dictionaries"] == []
+    assert list(state.DICTS_DIR.iterdir()) == []
+
+
+def test_upload_batch_external_css_served(tmp_path):
+    """外置 css 保留原文件名落盘子目录：查询可用 + 资源接口按名可取（同目录回退）"""
+    build_mdx(tmp_path / "Oxford.mdx", [("hello", '<link href="Oxford.css"><b>hello</b>')])
+    r = _upload_batch(
+        ("Oxford.mdx", (tmp_path / "Oxford.mdx").read_bytes()),
+        ("Oxford.css", b"body{}"),
+    )
+    assert r.status_code == 200
+    item = r.json()["added"][0]
+    # 词典可查（mdx 在子目录可加载）
+    q = client.get("/api/dict/query", params={"word": "hello", "dictId": item["id"]})
+    assert q.status_code == 200
+    assert q.json()["found"] is True
+    # 外置 css 按原文件名从同目录取到
+    res = client.get(f"/api/dict/resource/{item['id']}/Oxford.css")
+    assert res.status_code == 200
+    assert res.content == b"body{}"
+    assert res.headers["content-type"].startswith("text/css")
+
+
+# ============ 批量添加（add-batch）============
+def test_add_batch_mixed(dicts_dir):
+    """正常 / 不存在 / 非 mdx / 重复 四态 → added/skipped 正确"""
+    mini = str(dicts_dir / "mini.mdx")
+    coca = str(dicts_dir / "COCA Frequency 60000.mdx")
+    r = client.post(
+        "/api/dict/add-batch",
+        json={
+            "paths": [
+                mini,
+                coca,
+                str(dicts_dir / "nope.mdx"),  # 不存在
+                str(dicts_dir / "mini.mdd"),  # 非 mdx
+                mini,  # 同批重复（前面已 added）
+            ]
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert {d["path"] for d in body["added"]} == {mini, coca}
+    assert {d["name"]: d["role"] for d in body["added"]} == {
+        "mini": "define",
+        "COCA Frequency 60000": "frequency",
+    }
+    assert all(d["kind"] == "local" for d in body["added"])
+    assert body["skipped"] == [
+        {"path": str(dicts_dir / "nope.mdx"), "reason": "path not found"},
+        {"path": str(dicts_dir / "mini.mdd"), "reason": "仅支持 .mdx 文件"},
+        {"path": mini, "reason": "already added"},
+    ]
+    assert len(client.get("/api/dict").json()["dictionaries"]) == 2
+
+
+def test_add_batch_cross_request_duplicate(dicts_dir):
+    """已入库的 path 跨请求再批量添加 → skipped already added"""
+    mini = str(dicts_dir / "mini.mdx")
+    _add(mini)
+    r = client.post("/api/dict/add-batch", json={"paths": [mini]})
+    assert r.status_code == 200
+    assert r.json() == {"added": [], "skipped": [{"path": mini, "reason": "already added"}]}
+
+
+def test_add_batch_missing_paths():
+    assert client.post("/api/dict/add-batch", json={}).status_code == 400
+    assert client.post("/api/dict/add-batch", json={"paths": "mini.mdx"}).status_code == 400
+
+
+# ============ 删除（子目录格式 + 旧散装兼容）============
+def test_delete_uploaded_batch_subdir(dicts_dir, tmp_path, monkeypatch):
+    """子目录格式上传的词典：删除后目录没了、配置没了"""
+    calls = []
+    monkeypatch.setattr("app.routers.dict.send2trash", _FakeSend2Trash(calls))
+    r = _upload_batch(
+        ("Oxford.mdx", (dicts_dir / "mini.mdx").read_bytes()),
+        ("Oxford.mdd", b"MDD-DATA"),
+    )
+    item = r.json()["added"][0]
+    cid = item["id"][2:]
+    ddir = state.DICTS_DIR / cid
+    assert ddir.is_dir()
+    assert client.delete(f"/api/dict/{item['id']}").status_code == 204
+    assert ddir.exists() is False  # 整目录已移废纸篓
+    assert client.get("/api/dict").json()["dictionaries"] == []
+    assert any(str(ddir) == c for c in calls)
+
+
+def test_delete_uploaded_legacy_scattered(dicts_dir, tmp_path, monkeypatch):
+    """旧散装格式（<uuid>.mdx + <uuid>.mdd）删除兼容"""
+    calls = []
+    monkeypatch.setattr("app.routers.dict.send2trash", _FakeSend2Trash(calls))
+    item = _upload(tmp_path, "legacy.mdx", (dicts_dir / "mini.mdx").read_bytes()).json()
+    _upload(tmp_path, "legacy.mdd", (dicts_dir / "mini.mdd").read_bytes())
+    cid = item["id"][2:]
+    assert (state.DICTS_DIR / f"{cid}.mdx").exists()
+    assert (state.DICTS_DIR / f"{cid}.mdd").exists()
+    assert client.delete(f"/api/dict/{item['id']}").status_code == 204
+    assert (state.DICTS_DIR / f"{cid}.mdx").exists() is False
+    assert (state.DICTS_DIR / f"{cid}.mdd").exists() is False
+    assert client.get("/api/dict").json()["dictionaries"] == []
+    assert len(calls) == 2

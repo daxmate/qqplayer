@@ -1,7 +1,8 @@
 """词典域路由：MDX/MDD 词典配置 / 扫描 / 上传 / 激活 / 启停 / 删除 / 查询 / 资源 / 词频。
 
 配置存 settings.json 的 dict namespace（dictionaries 数组 + activeDictId），
-词典文件本身不动（local = 用户指定路径；uploaded = DATA_DIR/dicts/ 下 <uuid>.mdx/.mdd）。
+词典文件本身不动（local = 用户指定路径；uploaded = DATA_DIR/dicts/ 下 <uuid>/ 子目录，
+保留原文件名；旧格式 <uuid>.mdx/.mdd 散装文件兼容读写/删除）。
 词条查询失败（词典打开失败，含 iCloud dataless 占位）返回 200 + error 字段，不 500。
 """
 
@@ -23,6 +24,21 @@ router = APIRouter()
 
 _UPLOAD_CHUNK = 1024 * 1024  # 上传流式写入块大小（牛津 mdd 可达 1GB+，禁止整文件进内存）
 _UPLOAD_EXTS = {".mdx", ".mdd"}
+# 批量上传允许的扩展名（mdx 主文件 + mdd/css/js/图片/音频附属资源）
+_BATCH_EXTS = {
+    ".mdx",
+    ".mdd",
+    ".css",
+    ".js",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".svg",
+    ".mp3",
+    ".woff",
+    ".woff2",
+}
 
 # 资源 Content-Type（契约指定；未列出的扩展名一律 octet-stream）
 _CONTENT_TYPES = {
@@ -147,6 +163,44 @@ def api_dict_add(body: dict):
     return item
 
 
+@router.post("/api/dict/add-batch")
+def api_dict_add_batch(body: dict):
+    """批量添加本地 .mdx 路径（kind=local）：逐条校验，合法建配置，其余 skipped 不中断"""
+    paths = body.get("paths")
+    if not isinstance(paths, list):
+        raise HTTPException(400, "paths 必填")
+    s = _load_dict_settings()
+    dictionaries = s["dictionaries"]
+    added: list[dict] = []
+    skipped: list[dict] = []
+    for raw in paths:
+        path = raw.strip() if isinstance(raw, str) else str(raw)
+        if not isinstance(raw, str) or not path.lower().endswith(".mdx"):
+            skipped.append({"path": path, "reason": "仅支持 .mdx 文件"})
+            continue
+        p = Path(path)
+        if not p.exists():
+            skipped.append({"path": path, "reason": "path not found"})
+            continue
+        norm = str(p)
+        if any(d.get("path") == norm for d in dictionaries):
+            skipped.append({"path": path, "reason": "already added"})
+            continue
+        item = {
+            "id": "d_" + uuid.uuid4().hex,
+            "name": p.stem,
+            "path": norm,
+            "kind": "local",
+            "role": _detect_role(p.name),
+            "enabled": True,
+            "addedAt": int(time.time() * 1000),
+        }
+        dictionaries = [*dictionaries, item]
+        added.append(item)
+    _save_dict_settings(dictionaries, s["activeDictId"])
+    return {"added": added, "skipped": skipped}
+
+
 @router.post("/api/dict/upload")
 async def api_dict_upload(file: Annotated[UploadFile, File()]):
     """上传 mdx/mdd（流式 1MB 分块写 DATA_DIR/dicts/）；mdd 按上传文件名匹配补挂已有配置"""
@@ -193,6 +247,76 @@ async def api_dict_upload(file: Annotated[UploadFile, File()]):
     return {"ok": True}
 
 
+@router.post("/api/dict/upload-batch")
+async def api_dict_upload_batch(files: Annotated[list[UploadFile], File()]):
+    """批量上传：按文件名词干分组，一组一个 mdx 主文件 → DICTS_DIR/<uuid>/ 子目录保留原文件名
+
+    附属文件（mdd/css/js/图片/音频）与 mdx 同目录存放（dict_reader 外置资源按 mdx 同目录
+    原文件名引用）；组内无 mdx → ignored 不落盘；全非法扩展名 → 400；同组第二个 mdx → 400。
+    """
+    state.DICTS_DIR.mkdir(parents=True, exist_ok=True)
+    # 1. 只收允许扩展名的文件（保持出现顺序）
+    valid: list[tuple[str, UploadFile]] = []
+    for f in files:
+        name = (f.filename or "").strip()
+        if not name or Path(name).suffix.lower() not in _BATCH_EXTS:
+            continue
+        valid.append((name, f))
+    if not valid:
+        raise HTTPException(400, "未选择有效的词典文件")
+    # 2. 按文件名词干（原始大小写）分组
+    groups: dict[str, list[tuple[str, UploadFile]]] = {}
+    order: list[str] = []
+    for name, f in valid:
+        stem = Path(name).stem
+        if stem not in groups:
+            groups[stem] = []
+            order.append(stem)
+        groups[stem].append((name, f))
+    # 3. 同组第二个 .mdx → 400（写盘前统一检查，避免部分写入）
+    for stem in order:
+        mdx_names = [n for n, _ in groups[stem] if Path(n).suffix.lower() == ".mdx"]
+        if len(mdx_names) > 1:
+            raise HTTPException(400, f"重复的词典文件: {mdx_names[1]}")
+    # 4. 逐组处理：含 mdx → 子目录流式写入 + 建配置；无 mdx → ignored
+    s = _load_dict_settings()
+    dictionaries = s["dictionaries"]
+    added: list[dict] = []
+    ignored: list[dict] = []
+    for stem in order:
+        names = groups[stem]
+        if not any(Path(n).suffix.lower() == ".mdx" for n, _ in names):
+            ignored.append({"name": stem, "reason": "缺少对应的 .mdx 主文件"})
+            continue
+        uid = uuid.uuid4().hex
+        ddir = state.DICTS_DIR / uid
+        try:
+            ddir.mkdir(parents=True, exist_ok=True)
+            for name, f in names:
+                with (ddir / name).open("wb") as out:
+                    while True:  # 大文件流式写入，不一次性进内存
+                        chunk = await f.read(_UPLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+        except OSError as e:
+            raise HTTPException(500, f"写入失败: {e}") from None
+        mdx_name = next(n for n, _ in names if Path(n).suffix.lower() == ".mdx")
+        item = {
+            "id": "d_" + uid,
+            "name": stem,
+            "path": str(ddir / mdx_name),
+            "kind": "uploaded",
+            "role": _detect_role(mdx_name),
+            "enabled": True,
+            "addedAt": int(time.time() * 1000),
+        }
+        dictionaries = [*dictionaries, item]
+        added.append(item)
+    _save_dict_settings(dictionaries, s["activeDictId"])
+    return {"added": added, "ignored": ignored}
+
+
 @router.post("/api/dict/activate")
 def api_dict_activate(body: dict):
     """设置激活词典（查词缺省目标）"""
@@ -234,6 +358,14 @@ def api_dict_delete(dict_id: str):
         active = ""
     if d.get("kind") == "uploaded":
         cid = d["id"][2:]
+        # 新格式：DICTS_DIR/<uuid>/ 子目录整删（mdx/mdd/css 等一并进废纸篓）
+        ddir = state.DICTS_DIR / cid
+        try:
+            if ddir.is_dir():
+                send2trash.send2trash(str(ddir))
+        except Exception:
+            pass  # 移废纸篓失败不阻断（目录留原地）
+        # 旧格式兼容：DICTS_DIR/<uuid>.mdx / <uuid>.mdd 散装文件
         for ext in (".mdx", ".mdd"):
             f = state.DICTS_DIR / f"{cid}{ext}"
             try:
