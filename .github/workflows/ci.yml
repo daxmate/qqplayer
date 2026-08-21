@@ -162,6 +162,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-target }}
+      # rsproxy 是本机（国内网络）用的镜像；GitHub runner 在美国，直连 crates.io 更快
+      # （实测 rsproxy 在 runner 上下载依赖 30s 传 0 字节超时）。CI 一律用默认 crates.io。
+      - name: 移除 rsproxy 镜像（CI 直连 crates.io）
+        shell: pwsh
+        run: Remove-Item -Force desktop/Windows/src-tauri/.cargo/config.toml
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/Windows/src-tauri
@@ -187,10 +192,14 @@ jobs:
         working-directory: desktop/Windows
         run: pnpm tauri build --target ${{ matrix.rust-target }} --bundles nsis
       # 冒烟：起壳 → 壳 spawn 内置后端 → 轮询 /api/settings 200（杀进程树收尾）
+      # 注意：release 目录下的裸 exe 旁边没有内置后端（集成在 src-tauri/resources/backend/，
+      # 打包时才进安装目录）→ 先拷到 exe 同目录 backend/（BackendLauncher 候选 1）模拟打包布局
       - name: Smoke test
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File packaging/win-smoke-shell.ps1 -ExePath "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release/qqplayer-desktop.exe"
+          $rel = "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release"
+          Copy-Item -Recurse "desktop/Windows/src-tauri/resources/backend" $rel -Force
+          powershell -ExecutionPolicy Bypass -File packaging/win-smoke-shell.ps1 -ExePath "$rel/qqplayer-desktop.exe"
       # 便携版 zip（exe + WebView2Loader + resources），与 NSIS 安装器双出
       - name: 便携 zip
         shell: pwsh
