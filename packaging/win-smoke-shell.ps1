@@ -2,22 +2,25 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ExePath
 )
-# QQPlayer Tauri 壳冒烟测试（Windows CI 用）：
-# 启动打包后的壳 → 壳探测 17627 无服务 → spawn 内置后端 → 健康检查 → 服务就绪
-# → 主窗口 External 加载后端页面 → 前端自检（经 qqlog 通道写 webview-console.log）。
-#   阶段1：轮询 http://127.0.0.1:17627/api/settings 返回 200（后端就绪）；
-#   阶段2：轮询 <logs>/webview-console.log 出现
-#          `[info] frontend-selftest ok origin=http://127.0.0.1:17627`（自检通过）
-#          或 `[error] frontend-selftest FAIL ...`（立即失败）。
-# 总轮询上限 90s（壳启动 + 后端 ready + WebView 加载页面 + 自检，链路更长）。
-# 退出码: 0 冒烟通过；1 启动失败/接口异常/前端自检失败/超时。
+# QQPlayer Tauri shell smoke test (Windows CI):
+# 1. Launch the packaged shell -> it probes 17627 (no service) -> spawns the embedded
+#    backend -> health check until ready.
+# 2. Main window loads the backend page (External URL) -> the frontend selftest reports
+#    through the qqlog channel into webview-console.log.
+#    Phase 1: poll http://127.0.0.1:17627/api/settings for HTTP 200 (backend ready);
+#    Phase 2: poll <logs>/webview-console.log for
+#          `[info] frontend-selftest ok origin=http://127.0.0.1:17627` (passed)
+#          or `[error] frontend-selftest FAIL ...` (fail immediately).
+# Total polling budget 90s (shell boot + backend ready + WebView page load + selftest).
+# Exit code: 0 = smoke passed; 1 = startup failure / API error / selftest failure / timeout.
 $ErrorActionPreference = "Stop"
 
-# 壳失败时直接退出（不弹错误框——runner 上无人点击，弹框会永久阻塞冒烟）
+# Exit directly on backend failure (no dialog box -- CI runners have nobody to click it,
+# a modal dialog would block the smoke test forever)
 $env:QQPLAYER_NO_DIALOG = "1"
 
 if (-not (Test-Path $ExePath)) {
-    Write-Error "壳可执行文件不存在: $ExePath"
+    Write-Error "Shell executable not found: $ExePath"
     exit 1
 }
 
@@ -31,30 +34,30 @@ $selftestOkMark = "frontend-selftest ok origin=http://127.0.0.1:17627"
 $selftestFailMark = "frontend-selftest FAIL"
 
 Write-Output "[smoke] exe: $ExePath"
-Write-Output "[smoke] backend dir 存在: $(Test-Path $backendDir)\qqplayer-backend.exe: $(Test-Path (Join-Path $backendDir 'qqplayer-backend.exe'))"
-if (Test-Path (Join-Path $backendDir '_internal')) { Write-Output "[smoke] _internal/ 存在" } else { Write-Output "[smoke] ⚠️ _internal/ 缺失" }
+Write-Output "[smoke] backend dir exists: $(Test-Path $backendDir)\qqplayer-backend.exe: $(Test-Path (Join-Path $backendDir 'qqplayer-backend.exe'))"
+if (Test-Path (Join-Path $backendDir '_internal')) { Write-Output "[smoke] _internal/ exists" } else { Write-Output "[smoke] WARNING _internal/ missing" }
 
-# 失败诊断：打印 webview-console.log / backend-launcher.log / pkg-backend.log 尾部
+# Failure diagnostics: print tails of webview-console.log / backend-launcher.log / pkg-backend.log
 function Print-SmokeLogs {
     if (Test-Path $webviewLog) {
-        Write-Output "===== webview-console.log 尾部 ====="
+        Write-Output "===== webview-console.log tail ====="
         Get-Content $webviewLog -Tail 30
     } else {
-        Write-Output "[smoke] webview-console.log 不存在（$webviewLog）——前端未走 qqlog 通道或页面未加载"
+        Write-Output "[smoke] webview-console.log not found ($webviewLog) -- frontend never reported via qqlog or page never loaded"
     }
     $procs = Get-Process -Name "qqplayer-backend" -ErrorAction SilentlyContinue
-    if ($procs) { Write-Output "[smoke] qqplayer-backend 进程在跑: $($procs.Count) 个" } else { Write-Output "[smoke] qqplayer-backend 进程不存在（spawn 失败或秒退）" }
+    if ($procs) { Write-Output "[smoke] qqplayer-backend running: $($procs.Count) process(es)" } else { Write-Output "[smoke] qqplayer-backend process not found (spawn failed or exited immediately)" }
     if (Test-Path $launcherLog) {
-        Write-Output "===== backend-launcher.log 尾部 ====="
+        Write-Output "===== backend-launcher.log tail ====="
         Get-Content $launcherLog -Tail 15
     } else {
-        Write-Output "[smoke] backend-launcher.log 不存在"
+        Write-Output "[smoke] backend-launcher.log not found"
     }
     if (Test-Path $logPath) {
-        Write-Output "===== pkg-backend.log 尾部 ====="
+        Write-Output "===== pkg-backend.log tail ====="
         Get-Content $logPath -Tail 20
     } else {
-        Write-Output "[smoke] pkg-backend.log 不存在（$logPath）——壳未走到 spawn 内置后端"
+        Write-Output "[smoke] pkg-backend.log not found ($logPath) -- shell never reached embedded backend spawn"
     }
 }
 
@@ -64,37 +67,37 @@ try {
     $deadline = (Get-Date).AddSeconds(90)
     $backendOk = $false
 
-    # ---- 阶段1：内置后端就绪（/api/settings 200）----
+    # ---- Phase 1: embedded backend ready (/api/settings returns 200) ----
     while ((Get-Date) -lt $deadline) {
         if ($proc.HasExited) {
             $backendExited = $true
-            Write-Output "[smoke] 壳进程已退出 code=$($proc.ExitCode)"
+            Write-Output "[smoke] shell process exited code=$($proc.ExitCode)"
             break
         }
         try {
-            # 127.0.0.1 显式 IPv4（Windows 上 localhost 优先 ::1，后端绑定 127.0.0.1）
+            # explicit 127.0.0.1 IPv4 (Windows resolves localhost to ::1 first, backend binds 127.0.0.1)
             $r = Invoke-WebRequest -Uri "http://127.0.0.1:17627/api/settings" -TimeoutSec 2 -UseBasicParsing
             if ($r.StatusCode -eq 200) { $backendOk = $true; break }
         } catch {
-            # 后端未就绪，继续轮询
+            # backend not ready yet, keep polling
         }
         Start-Sleep -Milliseconds 500
     }
     if (-not $backendOk) {
-        Write-Output "[smoke] 阶段1失败（后端未就绪），壳退出=$backendExited"
+        Write-Output "[smoke] Phase 1 failed (backend not ready), shell exited=$backendExited"
         Print-SmokeLogs
-        Write-Error "90s 内后端未就绪（17627 /api/settings 无 200）"
+        Write-Error "Backend not ready within 90s (no HTTP 200 from 17627 /api/settings)"
         exit 1
     }
-    Write-Output "[smoke] 后端就绪：/api/settings 200，等待前端自检…"
+    Write-Output "[smoke] backend ready: /api/settings 200, waiting for frontend selftest..."
 
-    # ---- 阶段2：前端自检标记（webview-console.log 尾部 200 行）----
+    # ---- Phase 2: frontend selftest marker (tail 200 lines of webview-console.log) ----
     $selftestFailed = $false
     $selftestPassed = $false
     while ((Get-Date) -lt $deadline) {
         if ($proc.HasExited) {
             $backendExited = $true
-            Write-Output "[smoke] 壳进程已退出 code=$($proc.ExitCode)（后端就绪但前端未完成自检）"
+            Write-Output "[smoke] shell process exited code=$($proc.ExitCode) (backend ready but selftest never completed)"
             break
         }
         if (Test-Path $webviewLog) {
@@ -111,20 +114,20 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if ($selftestFailed) {
-        Write-Output "[smoke] 前端自检报告 FAIL，壳退出=$backendExited"
+        Write-Output "[smoke] frontend selftest reported FAIL, shell exited=$backendExited"
         Print-SmokeLogs
-        Write-Error "前端自检 FAIL（webview-console.log 见上）"
+        Write-Error "Frontend selftest FAIL (see webview-console.log above)"
         exit 1
     }
     if (-not $selftestPassed) {
-        Write-Output "[smoke] 阶段2超时（前端自检标记未出现），壳退出=$backendExited"
+        Write-Output "[smoke] Phase 2 timeout (selftest marker never appeared), shell exited=$backendExited"
         Print-SmokeLogs
-        Write-Error "90s 内前端自检标记未出现（webview-console.log 无 'frontend-selftest ok'）"
+        Write-Error "Frontend selftest marker not found within 90s (no 'frontend-selftest ok' in webview-console.log)"
         exit 1
     }
-    Write-Output "SMOKE OK: 壳启动 + 内置后端 + 前端自检通过（origin=http://127.0.0.1:17627）"
+    Write-Output "SMOKE OK: shell boot + embedded backend + frontend selftest passed (origin=http://127.0.0.1:17627)"
 } finally {
-    # 杀进程树（壳 + 它拉起的后端），避免 runner 残留
+    # kill the process tree (shell + backend it spawned), avoid runner residue
     if (-not $proc.HasExited) {
         & taskkill /PID $proc.Id /T /F 2>$null | Out-Null
     }
