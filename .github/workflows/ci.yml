@@ -190,13 +190,14 @@ jobs:
       - name: Smoke test
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File packaging/win-smoke-shell.ps1 -ExePath "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release/QQPlayer.exe"
+          powershell -ExecutionPolicy Bypass -File packaging/win-smoke-shell.ps1 -ExePath "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release/qqplayer-desktop.exe"
       # 便携版 zip（exe + WebView2Loader + resources），与 NSIS 安装器双出
       - name: 便携 zip
         shell: pwsh
         run: |
           $rel = "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release"
-          Compress-Archive -Path "$rel\QQPlayer.exe", "$rel\WebView2Loader.dll", "$rel\resources" -DestinationPath "qqplayer-shell-win-${{ matrix.arch }}-portable.zip" -Force
+          # 编译二进制名 = Cargo package name（qqplayer-desktop.exe）；安装器/安装后名 = productName（QQPlayer）
+          Compress-Archive -Path "$rel\qqplayer-desktop.exe", "$rel\WebView2Loader.dll", "$rel\resources" -DestinationPath "qqplayer-shell-win-${{ matrix.arch }}-portable.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
           name: qqplayer-shell-win-${{ matrix.arch }}
