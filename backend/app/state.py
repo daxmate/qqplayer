@@ -25,14 +25,26 @@ DEFAULT_LIBRARY = Path.home() / "Music" / "QQPlayer"
 # 端口：QQPLAYER_PORT 环境变量覆盖（测试/多实例隔离用），默认 17627 不变
 DEFAULT_PORT = int(os.environ.get("QQPLAYER_PORT", "17627"))
 
-# 用户数据目录：macOS 标准应用数据位置（收藏等，不放仓库）；
-# QQPLAYER_DATA_DIR 环境变量存在时优先（打包版冒烟测试隔离用，防污染真实数据）
-_env_data_dir = os.environ.get("QQPLAYER_DATA_DIR")
-DATA_DIR = (
-    Path(_env_data_dir)
-    if _env_data_dir
-    else Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
-)
+
+def _default_data_dir() -> Path:
+    """平台默认用户数据目录（QQPLAYER_DATA_DIR 环境变量存在时优先，冒烟测试隔离用）。
+
+    - Windows: %APPDATA%\\QQPlayer（APPDATA 缺失时 fallback ~/AppData/Roaming/QQPlayer）
+    - 其他平台（macOS/Linux）: ~/Library/Application Support/qqplayer，保持原行为不变
+    """
+    env_dir = os.environ.get("QQPLAYER_DATA_DIR")
+    if env_dir:
+        return Path(env_dir)
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "QQPlayer"
+        return Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "QQPlayer"
+    return Path(os.path.expanduser("~")) / "Library" / "Application Support" / "qqplayer"
+
+
+# 用户数据目录（收藏等，不放仓库）；打包版冒烟测试用 QQPLAYER_DATA_DIR 覆盖防污染真实数据
+DATA_DIR = _default_data_dir()
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"

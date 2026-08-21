@@ -59,3 +59,72 @@ jobs:
         run: pnpm vitest run
       - name: Build
         run: pnpm build
+
+  backend-windows:
+    name: Backend Windows ${{ matrix.arch }} (PyInstaller + smoke)
+    # 双架构：x64（windows-latest）+ ARM64（windows-11-arm，GA 标准 runner）。
+    # fail-fast: false —— ARM64 失败不取消 x64（python-lzo 等原生依赖在 arm64 可能更早暴露问题，先保 x64）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: windows-latest
+            pyarch: x64
+            triplet: x64-windows
+          - arch: arm64
+            os: windows-11-arm
+            pyarch: ARM64
+            triplet: arm64-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.pyarch }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      # python-lzo 只发 sdist（无 Windows wheel），且 setup.py 在 win32 上要求
+      # LZO_DIR 指向含 include/lzo/ 头文件 + lzo2.lib（或 lzo.lib）的目录，否则直接 raise。
+      # runner 不自带 LZO → 用 vcpkg 装并整理成 setup.py 期望的布局（LZO_DIR 根下直接放 lib）。
+      - name: Install LZO (python-lzo 编译依赖)
+        shell: pwsh
+        run: |
+          vcpkg install lzo:${{ matrix.triplet }}
+          $inst = "$env:VCPKG_INSTALLATION_ROOT\installed\${{ matrix.triplet }}"
+          if (-not (Test-Path $inst)) { $inst = "C:\vcpkg\installed\${{ matrix.triplet }}" }
+          $layout = Join-Path $inst "lzo-setup"
+          New-Item -ItemType Directory -Force (Join-Path $layout "include") | Out-Null
+          Copy-Item -Recurse (Join-Path $inst "include\*") (Join-Path $layout "include\") -Force
+          $libs = Get-ChildItem (Join-Path $inst "lib\*.lib") -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'lzo' }
+          foreach ($lib in $libs) { Copy-Item $lib.FullName (Join-Path $layout $lib.Name) -Force }
+          if ($libs) {
+            # setup.py 优先找 lzo2.lib，其次 lzo.lib；两者都保证存在
+            $chosen = $libs | Where-Object { $_.Name -in @('lzo2.lib','lzo.lib') } | Select-Object -First 1
+            if (-not $chosen) { $chosen = $libs | Select-Object -First 1 }
+            Copy-Item $chosen.FullName (Join-Path $layout "lzo2.lib") -Force
+            Copy-Item $chosen.FullName (Join-Path $layout "lzo.lib") -Force
+          }
+          "LZO_DIR=$layout" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install deps
+        run: pip install -r backend/requirements.txt pyinstaller
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+      - name: PyInstaller package
+        run: python -m PyInstaller --noconfirm --clean --distpath packaging/dist --workpath packaging/build packaging/qqplayer-backend.spec
+      - name: Smoke test
+        run: python packaging/win-smoke.py
+      - name: Zip artifact
+        run: Compress-Archive -Path packaging/dist/qqplayer-backend -DestinationPath packaging/dist/qqplayer-backend-win-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qqplayer-backend-win-${{ matrix.arch }}
+          path: packaging/dist/qqplayer-backend-win-${{ matrix.arch }}.zip
