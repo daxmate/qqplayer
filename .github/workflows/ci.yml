@@ -200,13 +200,16 @@ jobs:
           $rel = "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release"
           Copy-Item -Recurse "desktop/Windows/src-tauri/resources/backend" $rel -Force
           powershell -ExecutionPolicy Bypass -File packaging/win-smoke-shell.ps1 -ExePath "$rel/qqplayer-desktop.exe"
-      # 便携版 zip（exe + WebView2Loader + resources），与 NSIS 安装器双出
+      # 便携版 zip（exe + resources；WebView2 用系统 runtime，无 WebView2Loader.dll——Tauri 2 默认
+      # downloadBootstrapper 模式不生成它，存在才打包，容错）
       - name: 便携 zip
         shell: pwsh
         run: |
           $rel = "desktop/Windows/src-tauri/target/${{ matrix.rust-target }}/release"
-          # 编译二进制名 = Cargo package name（qqplayer-desktop.exe）；安装器/安装后名 = productName（QQPlayer）
-          Compress-Archive -Path "$rel\qqplayer-desktop.exe", "$rel\WebView2Loader.dll", "$rel\resources" -DestinationPath "qqplayer-shell-win-${{ matrix.arch }}-portable.zip" -Force
+          Get-ChildItem $rel | Select-Object Name | Format-Table -HideTableHeaders | Out-String | Write-Output
+          $items = @("$rel\qqplayer-desktop.exe", "$rel\resources")
+          if (Test-Path "$rel\WebView2Loader.dll") { $items += "$rel\WebView2Loader.dll" }
+          Compress-Archive -Path $items -DestinationPath "qqplayer-shell-win-${{ matrix.arch }}-portable.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
           name: qqplayer-shell-win-${{ matrix.arch }}
