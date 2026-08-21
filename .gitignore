@@ -28,3 +28,8 @@ desktop-player/assets/icon.iconset/
 .cache/
 frontend/node_modules
 uv.lock
+
+# 打包产物（Release 资产走 GitHub Release，不入库）
+packaging/*.dmg
+packaging/dist/
+packaging/build/
