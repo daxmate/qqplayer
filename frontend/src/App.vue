@@ -391,7 +391,35 @@ function onOpenBrowse(e) {
 
 let cleanupDragImport = null;
 
+// 启动自检（静默，不弹 UI、不影响正常流程）：验证相对 /api 请求在当前页面源下可直达后端。
+// 关键判据：res.ok 且 body 能按 JSON 解析——tauri:// 资源协议源时请求打到资源服务器返回 index.html，
+// res.ok 为 true 但 JSON.parse 抛错 → 捕获后走 FAIL 分支。结果经现有 qqlog 通道落盘供 CI/壳侧验证。
+async function runStartupSelfTest() {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    await res.json(); // 非 JSON body（如 index.html）在此抛 SyntaxError
+    bridge.report({
+      type: "qqlog",
+      level: "info",
+      msg: "frontend-selftest ok origin=" + window.location.origin,
+    });
+  } catch (err) {
+    bridge.report({
+      type: "qqlog",
+      level: "error",
+      msg:
+        "frontend-selftest FAIL origin=" +
+        window.location.origin +
+        " err=" +
+        (err && err.message ? err.message : String(err)),
+    });
+  }
+}
+
 onMounted(() => {
+  // 启动自检：与正常启动加载并发，GET /api/settings 只读无副作用
+  runStartupSelfTest();
   // 队列顺序持久化：先拉取再加载歌曲（loadSongs 恢复顺序依赖该缓存）
   loadQueueOrder().then(() => {
     loadSongs().then(() => restoreLastPlayed());
