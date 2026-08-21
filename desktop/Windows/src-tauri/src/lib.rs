@@ -95,6 +95,8 @@ pub fn run() {
 }
 
 /// 后端启动失败：弹错误框（含原因 + 日志路径）后由调用方退出（对齐 macOS showBackendFailureAlert）
+/// 环境变量 QQPLAYER_NO_DIALOG=1 时跳过弹框直接退出（CI 冒烟用——runner 上无人点对话框，
+/// 弹框会永久阻塞；命令行诊断场景也不需要弹框）
 fn show_backend_failure(app: &tauri::AppHandle, result: BackendStartResult) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
@@ -113,6 +115,10 @@ fn show_backend_failure(app: &tauri::AppHandle, result: BackendStartResult) {
         BackendStartResult::Timeout => "内置后端已拉起但 15 秒内未就绪。".to_string(),
         BackendStartResult::External | BackendStartResult::Embedded => return, // 正常路径不会进来
     };
+    if std::env::var("QQPLAYER_NO_DIALOG").map(|v| v == "1").unwrap_or(false) {
+        eprintln!("[qqplayer-shell] 后端启动失败: {detail} {log_hint}");
+        return;
+    }
     let message = format!("无法连接 QQPlayer 后端服务\n\n{detail}\n{log_hint}\n\n应用即将退出。");
     app.dialog()
         .message(message)
