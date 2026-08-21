@@ -39,6 +39,35 @@ pub fn run() {
             commands::report
         ])
         .setup(|app| {
+            // 主窗口运行时创建（conf 不再定义）：builder 才有 on_page_load——页面加载诊断日志，
+            // 排查“页面没加载 vs IPC 被拦”关键分叉（conf 创建的窗口无法挂载）。
+            // 初始不可见，后端就绪后由 reveal_main 导航（带时间戳防缓存）并显示。
+            let main_win = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::External(
+                    windows::page_url("")
+                        .parse()
+                        .expect("invalid backend page url"),
+                ),
+            )
+            .title("QQPlayer")
+            .inner_size(1200.0, 800.0)
+            .min_inner_size(900.0, 600.0)
+            .center()
+            .visible(false)
+            .on_page_load(|_window, payload| {
+                // 页面加载诊断日志（定位“页面没加载 vs IPC 被拦”等启动链路问题）
+                crate::backend::launcher_log(&format!(
+                    "main page_load: {:?} {}",
+                    payload.event(),
+                    payload.url()
+                ));
+            })
+            .build()
+            .expect("failed to create main window");
+            drop(main_win);
+
             // 后端子进程生命周期托管：启动线程写入、退出路径读取，共用一把锁
             let launcher = Arc::new(Mutex::new(BackendLauncher::new()));
             app.manage(launcher.clone());
