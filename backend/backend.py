@@ -4,10 +4,19 @@
 用法: ./venv/bin/python backend.py [歌曲库路径]
 """
 
+import contextlib
 import subprocess  # 保留：测试 patch backend.subprocess
 import sys
 import threading
 import webbrowser
+
+# Windows 控制台默认 GBK/cp1252，emoji/非 ASCII 输出直接 UnicodeEncodeError
+# （启动横幅 🎵 在 win 打包版实测崩溃，开发环境 GBK 控制台同样会炸）。
+# 统一切 UTF-8 + errors=replace 兜底；macOS/Linux 不受影响。
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
 
 import httpx  # 保留：测试 patch backend.httpx（全局模块对象）
 
