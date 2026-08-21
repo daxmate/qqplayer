@@ -15,6 +15,7 @@
 退出码: 0 冒烟通过；1 启动失败/接口异常/超时（打印子进程 stdout/stderr 尾部）。
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -24,6 +25,13 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+# Windows 控制台默认 cp1252/GBK，✅/✗ 等 emoji 输出直接 UnicodeEncodeError
+# （CI runner 实测）。统一切 UTF-8，errors=replace 兜底。
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
 
 SMOKE_PORT = 17629
 SMOKE_URL = f"http://127.0.0.1:{SMOKE_PORT}/api/settings"
