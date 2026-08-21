@@ -73,7 +73,7 @@ launchctl bootout gui/$(id -u)/com.daxmate.qqplayer        # 停止服务
 独立小窗置顶显示当前歌词（原文 + 中文翻译双行），Swift 原生壳（NSPanel 无边框 / 透明 / 置顶 / 不占 Dock）：
 
 ```bash
-./desktop-player/build.sh --install   # 三合一壳（主窗口 + 迷你窗 + 桌面歌词），编译并安装到 /Applications
+./desktop/macOS/build.sh --install   # 三合一壳（主窗口 + 迷你窗 + 桌面歌词），编译并安装到 /Applications
 ```
 
 安装后：播放器顶栏按钮调起，或直接打开 QQPlayer.app（`open qqplayerlyric://` 直达歌词窗）。窗口可拖动、可调大小；设置 → 歌词 → 桌面歌词可调字体 / 字号 / 对齐 / 配色 / 窗体大小 / 中文翻译开关。
@@ -83,7 +83,7 @@ launchctl bootout gui/$(id -u)/com.daxmate.qqplayer        # 停止服务
 右下角独立小窗（封面 + 歌名/歌手 + 上一首/播放暂停/下一首 + 可拖动进度条 + 音量滑杆），Swift 原生壳，控制指令经后端队列回主播放器执行：
 
 ```bash
-./desktop-player/build.sh --install   # 三合一壳（主窗口 + 迷你窗 + 桌面歌词），编译并安装到 /Applications
+./desktop/macOS/build.sh --install   # 三合一壳（主窗口 + 迷你窗 + 桌面歌词），编译并安装到 /Applications
 ```
 
 安装后：播放器顶栏画中画按钮调起（或 `open qqplayermini://`）。迷你窗悬浮右下角，顶部拖动条可拖动，双击拖动条或点 ✕ 关闭；顶栏按钮实时反映运行状态（关闭后自动熄灭）。注意：控制依赖主播放器页面保持打开（指令由页面轮询执行）。

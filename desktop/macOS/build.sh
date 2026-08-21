@@ -90,7 +90,8 @@ fi
 
 # 内置后端子进程（DMG 打包版自包含）：packaging/dist/qqplayer-backend 存在（PyInstaller onedir）
 # → 整体拷入 Resources/backend/（含 _internal/）；不存在 → 跳过（开发模式直连 launchd 服务）
-BACKEND_SRC="../packaging/dist/qqplayer-backend"
+# 注意：本脚本在 desktop/macOS/ 下，packaging/ 在仓库根（../../packaging）
+BACKEND_SRC="../../packaging/dist/qqplayer-backend"
 if [ -d "$BACKEND_SRC" ]; then
     echo "📦 拷贝内置后端子进程..."
     cp -R "$BACKEND_SRC" "$APP/Contents/Resources/backend"

@@ -13,8 +13,8 @@ frontend/node_modules/
 dist/
 
 # 桌面歌词/迷你窗/三合一壳构建产物（swiftc 编译生成，build.sh 可重建）
-desktop-player/build/
-desktop-player/assets/icon.iconset/
+desktop/macOS/build/
+desktop/macOS/assets/icon.iconset/
 
 # macOS
 .DS_Store

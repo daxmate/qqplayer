@@ -122,12 +122,12 @@ fi
 
 # 6. 编译安装桌面壳（代码有更新时一并部署；运行中的 app 下次启动才用新壳）
 echo "── 编译安装桌面壳"
-if [ -f desktop-player/build.sh ]; then
-  if ./desktop-player/build.sh --install >/dev/null 2>&1; then
+if [ -f desktop/macOS/build.sh ]; then
+  if ./desktop/macOS/build.sh --install >/dev/null 2>&1; then
     echo "✅ 桌面壳已更新（/Applications/QQPlayer.app），重启 QQPlayer.app 生效"
   else
-    echo "⚠️ 桌面壳编译安装失败（不影响后端服务），手动排查: cd desktop-player && ./build.sh --install"
+    echo "⚠️ 桌面壳编译安装失败（不影响后端服务），手动排查: cd desktop/macOS && ./build.sh --install"
   fi
 else
-  echo "── 跳过：desktop-player/build.sh 不存在"
+  echo "── 跳过：desktop/macOS/build.sh 不存在"
 fi

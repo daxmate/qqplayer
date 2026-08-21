@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 VERSION="${1:-1.0.0-rc.1}"
-APP_SRC="desktop-player/build/QQPlayer.app"
+APP_SRC="desktop/macOS/build/QQPlayer.app"
 STAGE="packaging/dmg-staging"
 DMG="packaging/QQPlayer-${VERSION}.dmg"
 
@@ -17,7 +17,7 @@ if [ ! -x packaging/dist/qqplayer-backend/qqplayer-backend ]; then
 fi
 
 echo "📦 1/3 构建 QQPlayer.app（含内置后端）..."
-(cd desktop-player && ./build.sh)
+(cd desktop/macOS && ./build.sh)
 
 echo "🏗️  2/3 组装 dmg staging..."
 rm -rf "$STAGE"
