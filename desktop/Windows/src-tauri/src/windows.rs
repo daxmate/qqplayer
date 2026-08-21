@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use crate::backend::BACKEND_BASE;
+use crate::backend::{launcher_log, BACKEND_BASE};
 
 /// 当前 unix 时间戳（URL 防缓存参数 v=）
 pub fn cache_buster() -> String {
@@ -89,6 +89,7 @@ pub fn reveal_main(app: &AppHandle) {
         return;
     };
     let url = page_url("");
+    launcher_log(&format!("reveal_main: navigate main -> {url}"));
     if let Ok(u) = url.parse() {
         let _ = main.navigate(u);
     }
