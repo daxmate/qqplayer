@@ -176,6 +176,7 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { BookMarked, FolderSearch, Loader2, Trash2, Upload, X } from "@lucide/vue";
 import type { DictConfig, DictScanCandidate } from "./types";
+import { useShellBridge } from "../composables/useShellBridge.js";
 import {
   activateDict,
   addDict,
@@ -284,14 +285,9 @@ async function addSelected() {
   selectedPaths.value = [];
 }
 
-/** 壳内：触发原生文件选择（pickDictFiles） */
+/** 壳内：触发原生文件选择（统一壳桥：webkit 走 postMessage / tauri 走 invoke / 浏览器 noop） */
 function pickNativeFiles() {
-  const bridge = (
-    window as {
-      webkit?: { messageHandlers?: { native?: { postMessage: (msg: unknown) => void } } };
-    }
-  ).webkit?.messageHandlers?.native;
-  bridge?.postMessage({ type: "pickDictFiles" });
+  useShellBridge().pickDictFiles();
 }
 
 /** 壳内：原生选文件结果（e.detail.paths，取消为空数组） */

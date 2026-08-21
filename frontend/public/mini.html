@@ -355,6 +355,13 @@
     </div>
 
     <script>
+      // ============ 统一壳桥（内联：public/ 静态文件不走 Vite 打包，不能 import composable） ============
+      // Tauri 2（Windows 壳）→ invoke('report')；WebKit（macOS 壳）→ postMessage；浏览器直连 → 静默 noop
+      const bridge = window.__TAURI_INTERNALS__
+        ? {
+            report: (m) => window.__TAURI__.core.invoke("report", { msg: m }).catch(() => {}),
+          }
+        : { report: (m) => window.webkit?.messageHandlers?.native?.postMessage?.(m) };
       // ============ 状态与轮询 ============
       // 进度本地平滑：轮询拿到 (currentTime, isPlaying) 后本地时钟推算，避免进度条一跳一跳
       let snap = { currentTime: 0, duration: 0, isPlaying: false, at: 0 };
@@ -524,7 +531,7 @@
       if (restoreBtn) {
         restoreBtn.addEventListener("click", () => {
           try {
-            window.webkit.messageHandlers.native.postMessage({ type: "restore" });
+            bridge.report({ type: "restore" });
           } catch {
             /* 浏览器环境无原生桥：忽略 */
           }
@@ -534,7 +541,7 @@
       // 关闭：通知 Swift 壳隐藏面板（不再退出整个 app）
       $("close").addEventListener("click", () => {
         try {
-          window.webkit.messageHandlers.native.postMessage("close");
+          bridge.report("close");
         } catch {
           // 浏览器环境无原生桥：尝试退出当前窗口
           window.close();
@@ -546,7 +553,7 @@
       document.addEventListener("pointerdown", (e) => {
         if (e.target.closest("button, input, a")) return; // 控件交给网页交互
         try {
-          window.webkit.messageHandlers.native.postMessage({ type: "nativeDrag" });
+          bridge.report({ type: "nativeDrag" });
         } catch {
           /* 浏览器环境无原生桥：忽略 */
         }

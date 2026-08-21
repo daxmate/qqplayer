@@ -91,6 +91,13 @@
     <div id="jp" class="line-jp"></div>
     <div id="zh" class="line-zh"></div>
     <script>
+      // ============ 统一壳桥（内联：public/ 静态文件不走 Vite 打包，不能 import composable） ============
+      // Tauri 2（Windows 壳）→ invoke('report')；WebKit（macOS 壳）→ postMessage；浏览器预览 → 静默 noop
+      const bridge = window.__TAURI_INTERNALS__
+        ? {
+            report: (m) => window.__TAURI__.core.invoke("report", { msg: m }).catch(() => {}),
+          }
+        : { report: (m) => window.webkit?.messageHandlers?.native?.postMessage?.(m) };
       // 桌面歌词悬浮窗页面
       // 轮询后端 /api/now-playing 拿 {path, lineIndex}；歌词全文拉一次缓存，切歌重拉
       // 设置走后端统一 GET /api/settings 的 desktopLyric namespace（主播放器与悬浮窗跨引擎共享）：{ showZh, ... }
@@ -161,7 +168,7 @@
         const w = s.width || 460;
         const h = s.height || 140;
         try {
-          window.webkit?.messageHandlers?.native?.postMessage({
+          bridge.report({
             type: "resize",
             width: w,
             height: h,

@@ -14,6 +14,7 @@
 // 浏览器环境（无 window.qqplayerNative）init 直接返回，不挂任何监听、不装全局 API，右键行为零影响。
 
 import { state, isFavorite } from "./usePlayer.js";
+import { useShellBridge } from "./useShellBridge.js";
 
 // 模块级右键上下文：最近一次右键命中的目标（壳菜单动作的数据源）
 let ctxTarget = null; // { kind: 'song', path, songIndex, songName, artist, album, isFav, hasPath, canGoArtist, canGoAlbum }
@@ -86,7 +87,7 @@ function buildCtx(e) {
   return null;
 }
 
-/** 上报 ctxState 给 Swift 壳（channel "native"）；非壳环境 / 发送失败静默 */
+/** 上报 ctxState 给壳（统一壳桥：webkit 走 postMessage / tauri 走 invoke / 浏览器 noop）；非壳环境 / 发送失败静默 */
 function postCtxState() {
   if (!inNativeShell()) return;
   const msg = ctxTarget
@@ -105,7 +106,7 @@ function postCtxState() {
       }
     : { type: "ctxState", kind: null };
   try {
-    window.webkit?.messageHandlers?.native?.postMessage?.(msg);
+    useShellBridge().report(msg);
   } catch {
     /* 壳消息发送失败忽略（不影响列表交互） */
   }

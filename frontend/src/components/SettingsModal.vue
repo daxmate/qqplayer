@@ -1282,6 +1282,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
+import { useShellBridge } from "../composables/useShellBridge.js";
 import {
   Settings,
   X,
@@ -1415,9 +1416,7 @@ function onQuarkLoginSuccess() {
 const isNative = typeof window !== "undefined" && !!window.qqplayerNative;
 
 function browseLibrary() {
-  if (window.webkit?.messageHandlers?.native) {
-    window.webkit.messageHandlers.native.postMessage("pickLibrary");
-  }
+  useShellBridge().pickLibrary();
 }
 
 // 原生壳切库完成 → 同步输入框与当前库路径（Swift POST /api/library 后派发 CustomEvent）

@@ -232,6 +232,7 @@ import VideosView from "./videos/VideosView.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
+import { useShellBridge } from "./composables/useShellBridge.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import {
   coverSizePx,
@@ -266,6 +267,9 @@ import {
 
 const { t } = useI18n();
 
+// 统一壳桥（Tauri 2 Windows / WebKit macOS Swift / 浏览器直连静默降级）
+const bridge = useShellBridge();
+
 const centerRef = ref(null);
 let cleanupCoverObserve = null;
 
@@ -299,7 +303,7 @@ function closeFloatingForReader() {
   if (desktopLyricSettings.enabled) {
     desktopLyricSettings.enabled = false;
     if (window.qqplayerNative) {
-      window.webkit.messageHandlers.native.postMessage({ type: "lyric", show: false });
+      bridge.report({ type: "lyric", show: false });
     } else {
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";
@@ -310,7 +314,7 @@ function closeFloatingForReader() {
   }
   if (miniRunning.value) {
     if (window.qqplayerNative) {
-      window.webkit.messageHandlers.native.postMessage({ type: "closeMini" });
+      bridge.report({ type: "closeMini" });
     } else {
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";
@@ -334,8 +338,8 @@ watch(
 function toggleDesktopLyric() {
   desktopLyricSettings.enabled = !desktopLyricSettings.enabled;
   if (window.qqplayerNative) {
-    // Swift 壳内：通知壳显示/隐藏歌词面板（壳会回写面板状态保持同步）
-    window.webkit.messageHandlers.native.postMessage({
+    // 壳内：通知壳显示/隐藏歌词面板（壳会回写面板状态保持同步）
+    bridge.report({
       type: "lyric",
       show: desktopLyricSettings.enabled,
     });
@@ -352,7 +356,7 @@ function toggleDesktopLyric() {
 // 控制指令走 /api/player/action 队列回主页面执行；运行状态由 miniRunning 轮询点亮开关
 function openMiniPlayer() {
   if (window.qqplayerNative) {
-    window.webkit.messageHandlers.native.postMessage({ type: "openMini" });
+    bridge.report({ type: "openMini" });
   } else {
     const iframe = document.createElement("iframe");
     iframe.style.display = "none";

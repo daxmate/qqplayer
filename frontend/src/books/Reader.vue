@@ -271,6 +271,7 @@ import {
 } from "./annotations";
 import { showToast, toastError } from "../composables/useToast.js";
 import { uiSettings } from "../composables/useSettings.js";
+import { useShellBridge } from "../composables/useShellBridge.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
 import HighlightMenu from "./HighlightMenu.vue";
@@ -1150,7 +1151,7 @@ function findHighlightForSelection(): HighlightAnnotation | null {
   );
 }
 
-/** 上报选区状态给 Swift 壳（channel "native"，type: readerState）；状态没变化不发，非壳环境静默跳过 */
+/** 上报选区状态给壳（统一壳桥：webkit 走 postMessage / tauri 走 invoke / 浏览器 noop）；状态没变化不发，非壳环境静默跳过 */
 function postReaderState(
   active: boolean,
   text: string,
@@ -1170,7 +1171,7 @@ function postReaderState(
   reportedHasHighlight = hasHighlight;
   reportedHighlightStyle = highlightStyle;
   try {
-    nativeShell.webkit?.messageHandlers?.native?.postMessage?.({
+    useShellBridge().report({
       type: "readerState",
       active,
       hasSelection: text.length > 0,
