@@ -1,36 +1,122 @@
 // QQPlayer Tauri 壳（Windows 主目标，Linux 顺带）
 //
 // 架构对照 macOS Swift 壳（desktop/macOS/main.swift）：
-//   - BackendLauncher 契约：探测 17627 → 有外部服务直连（开发模式）/
-//     无则 spawn 内置后端（PyInstaller onedir）→ 轮询 /api/settings → 建窗
-//   - 三窗口：main（主窗）+ mini（迷你）+ lyric（歌词），事件按窗口路由
-//   - 前端桥接：window.__TAURI__ 探测（vs macOS webkit.messageHandlers）
+//   - backend.rs  BackendLauncher：探测 17627 → 有外部服务直连（开发模式）/
+//     无则 spawn 内置后端（backend/qqplayer-backend[.exe]，PyInstaller onedir）→
+//     轮询 /api/settings（0.5s × ≤15s）→ 就绪后建窗；退出只 terminate 自己拉起的
+//   - windows.rs 三窗口：main（tauri.conf.json 定义）+ mini（运行时创建）+ lyric（运行时创建），
+//     窗口 ✕ → prevent_close + hide（隐藏不退出，对齐 macOS；只有显式退出才退）
+//   - commands.rs invoke 命令：start_dragging / pick_library / pick_dict_files / report
+//     （report = 三窗口共用消息通道，对齐 macOS "native" 通道，按 msg["type"] 分发）
+//   - media.rs   媒体键占位：本期不做原生绑定（WebView2 MediaSession → SMTC 待 spike）
 //
-// 阶段 3 待实现（见任务包）：BackendLauncher、三窗口创建、事件路由、
-// 媒体键 spike（WebView MediaSession → SMTC 自动桥接验证）。
+// 后端启动时序（对齐 macOS applicationDidFinishLaunching）：
+//   后台线程 探测→spawn→健康检查（不阻塞主线程/事件循环），就绪后经 run_on_main_thread
+//   回调主线程：显示主窗口 + 建迷你窗/歌词窗 + POST /api/mini/status {"running": true}；
+//   失败则弹 tauri-plugin-dialog 错误框（含日志路径）后退出。
+//   退出路径（RunEvent::ExitRequested）：POST {"running": false} + backend.terminate()。
 
-use tauri::Manager;
+mod backend;
+mod commands;
+mod media;
+mod windows;
 
-/// 迷你窗/歌词窗整窗拖动：前端 pointerdown 过滤控件后调此命令
-/// （与 macOS 壳 useShellDrag.js → performDrag 同构）
-#[tauri::command]
-fn start_dragging(window: tauri::Window) {
-    let _ = window.start_dragging();
-}
+use std::sync::{Arc, Mutex};
+
+use tauri::{Manager, RunEvent, WindowEvent};
+
+use backend::{BackendLauncher, BackendStartResult};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![start_dragging])
+        .manage(commands::ShellState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::start_dragging,
+            commands::pick_library,
+            commands::pick_dict_files,
+            commands::report
+        ])
         .setup(|app| {
-            // 阶段 3：BackendLauncher::start(app) —— 探测/spawn 内置后端 + 健康检查
+            // 后端子进程生命周期托管：启动线程写入、退出路径读取，共用一把锁
+            let launcher = Arc::new(Mutex::new(BackendLauncher::new()));
+            app.manage(launcher.clone());
+
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let result = {
+                    let mut guard = launcher.lock().unwrap();
+                    guard.start()
+                };
+                let handle2 = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    match result {
+                        BackendStartResult::External | BackendStartResult::Embedded => {
+                            // 就绪后才建迷你窗/歌词窗（主窗口由 conf 创建、visible:false，此处显示）
+                            let _ = windows::create_mini(&handle2);
+                            let _ = windows::create_lyric(&handle2);
+                            windows::reveal_main(&handle2);
+                            // 迷你窗状态上报：主页面顶栏迷你按钮靠它点亮（对齐 macOS reportMiniStatus）
+                            backend::report_mini_status(true);
+                        }
+                        BackendStartResult::NoEmbedded
+                        | BackendStartResult::SpawnFailed
+                        | BackendStartResult::Timeout => {
+                            show_backend_failure(&handle2, result);
+                            handle2.exit(1);
+                        }
+                    }
+                });
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 阶段 3：迷你窗 ✕/歌词窗 ✕ = 隐藏不退出（对齐 macOS 行为）
-            let _ = (window, event);
+            // 窗口 ✕（三窗一致）：prevent_close + hide —— 隐藏不退出（对齐 macOS；
+            // 只有显式退出命令/进程终止才退）。隐藏 ≠ 销毁，窗口还在，事件循环不触发退出。
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 退出路径：上报迷你窗停止 + 清理自己拉起的后端子进程
+            if let RunEvent::ExitRequested { .. } = event {
+                backend::report_mini_status(false);
+                if let Some(launcher) = app_handle.try_state::<Arc<Mutex<BackendLauncher>>>() {
+                    if let Ok(mut guard) = launcher.lock() {
+                        guard.terminate();
+                    }
+                }
+            }
+        });
+}
+
+/// 后端启动失败：弹错误框（含原因 + 日志路径）后由调用方退出（对齐 macOS showBackendFailureAlert）
+fn show_backend_failure(app: &tauri::AppHandle, result: BackendStartResult) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+    let log_hint = format!(
+        "日志：{}",
+        backend::logs_dir().join("pkg-backend.log").display()
+    );
+    let detail = match result {
+        BackendStartResult::NoEmbedded => {
+            format!(
+                "本地服务（http://localhost:17627）未响应，且应用目录内未找到内置后端（backend/qqplayer-backend{}）。\n请先启动开发版后端，或使用带内置后端的打包版。",
+                if cfg!(windows) { ".exe" } else { "" }
+            )
+        }
+        BackendStartResult::SpawnFailed => "本地服务未响应，且内置后端启动失败。".to_string(),
+        BackendStartResult::Timeout => "内置后端已拉起但 15 秒内未就绪。".to_string(),
+        BackendStartResult::External | BackendStartResult::Embedded => return, // 正常路径不会进来
+    };
+    let message = format!("无法连接 QQPlayer 后端服务\n\n{detail}\n{log_hint}\n\n应用即将退出。");
+    app.dialog()
+        .message(message)
+        .title("无法连接 QQPlayer 后端服务")
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
 }
