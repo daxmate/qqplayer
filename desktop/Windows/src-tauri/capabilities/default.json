@@ -3,5 +3,8 @@
   "identifier": "default",
   "description": "QQPlayer 壳默认能力：主窗 + 迷你窗 + 歌词窗",
   "windows": ["main", "mini", "lyric"],
+  "remote": {
+    "urls": ["http://127.0.0.1:17627*", "http://localhost:17627*"]
+  },
   "permissions": ["core:default", "dialog:default"]
 }
