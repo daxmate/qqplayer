@@ -6,5 +6,12 @@
   "remote": {
     "urls": ["http://127.0.0.1:17627*", "http://localhost:17627*"]
   },
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "allow-start-dragging",
+    "allow-pick-library",
+    "allow-pick-dict-files",
+    "allow-report"
+  ]
 }
