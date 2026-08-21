@@ -194,6 +194,18 @@ jobs:
       # 冒烟：起壳 → 壳 spawn 内置后端 → 轮询 /api/settings 200（杀进程树收尾）
       # 注意：release 目录下的裸 exe 旁边没有内置后端（集成在 src-tauri/resources/backend/，
       # 打包时才进安装目录）→ 先拷到 exe 同目录 backend/（BackendLauncher 候选 1）模拟打包布局
+      # 语法兜底：ps1 改动后先做秒级解析检查，语法/编码错误立即红，不拖到冒烟 15 分钟才发现
+      - name: PowerShell syntax check (smoke script)
+        shell: pwsh
+        run: |
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "packaging/win-smoke-shell.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error ("{0} (line {1})" -f $_.Message, $_.Extent.StartLineNumber) }
+            exit 1
+          }
+          Write-Output "PS1 syntax OK"
       - name: Smoke test
         shell: pwsh
         run: |
