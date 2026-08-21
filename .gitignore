@@ -38,3 +38,5 @@ packaging/build/
 desktop/Windows/src-tauri/target/
 desktop/Windows/node_modules/
 desktop/Windows/src-tauri/gen/
+desktop/Windows/src-tauri/resources/backend/*
+!desktop/Windows/src-tauri/resources/backend/README.txt
