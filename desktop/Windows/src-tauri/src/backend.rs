@@ -49,10 +49,19 @@ pub fn backend_exe_name() -> &'static str {
     }
 }
 
-/// 在给定可执行文件目录下找内置后端：`<exe_dir>/backend/qqplayer-backend[.exe]`
+/// 在给定可执行文件目录下找内置后端，候选位置（按顺序取第一个存在的）：
+/// 1. `<exe_dir>/backend/qqplayer-backend[.exe]` —— 开发模式手动放置 / 脚本直接放 exe 旁
+/// 2. `<exe_dir>/resources/backend/qqplayer-backend[.exe]` —— Tauri `bundle.resources` 打包位置
+///    （安装后资源在 `<install_dir>/resources/` 下，保持相对目录结构）
 pub fn embedded_backend_path_in(exe_dir: &Path) -> Option<PathBuf> {
-    let path = exe_dir.join("backend").join(backend_exe_name());
-    path.is_file().then_some(path)
+    let candidates = [
+        exe_dir.join("backend").join(backend_exe_name()),
+        exe_dir
+            .join("resources")
+            .join("backend")
+            .join(backend_exe_name()),
+    ];
+    candidates.into_iter().find(|p| p.is_file())
 }
 
 /// 当前可执行文件同目录的内置后端路径（std::env::current_exe() 的父目录 + backend/）
@@ -340,6 +349,38 @@ mod tests {
         let dir = tmp.join("nested");
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(embedded_backend_path_in(&dir), None);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Tauri bundle.resources 打包位置：<exe_dir>/resources/backend/ 也能解析到
+    /// （安装后资源在 <install_dir>/resources/ 下保持相对结构；优先候选仍是无 resources 前缀的）
+    #[test]
+    fn embedded_backend_path_resolves_resources_candidate() {
+        let tmp = unique_temp_dir("resources");
+        let name = backend_exe_name();
+        let res_dir = tmp.join("resources").join("backend");
+        std::fs::create_dir_all(&res_dir).unwrap();
+        std::fs::write(res_dir.join(name), b"x").unwrap();
+
+        let resolved = embedded_backend_path_in(&tmp).expect("应解析到 resources 候选");
+        assert_eq!(resolved, res_dir.join(name));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// 优先候选：<exe_dir>/backend/ 与 resources 候选同时存在时取前者（开发模式优先）
+    #[test]
+    fn embedded_backend_path_prefers_direct_backend() {
+        let tmp = unique_temp_dir("prefer");
+        let name = backend_exe_name();
+        let direct = tmp.join("backend");
+        std::fs::create_dir_all(&direct).unwrap();
+        std::fs::write(direct.join(name), b"x").unwrap();
+        let res_dir = tmp.join("resources").join("backend");
+        std::fs::create_dir_all(&res_dir).unwrap();
+        std::fs::write(res_dir.join(name), b"x").unwrap();
+
+        let resolved = embedded_backend_path_in(&tmp).expect("应解析到内置后端");
+        assert_eq!(resolved, direct.join(name), "应优先直接 backend/ 候选");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
