@@ -111,7 +111,7 @@ mod tests {
     fn page_url_has_timestamp_and_page() {
         let url = page_url("mini.html");
         assert!(
-            url.starts_with("http://localhost:17627/mini.html?v="),
+            url.starts_with("http://127.0.0.1:17627/mini.html?v="),
             "URL 结构不对: {url}"
         );
         let v = url.split("v=").nth(1).unwrap();

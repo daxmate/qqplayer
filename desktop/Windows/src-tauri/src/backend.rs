@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-/// 后端服务基址（FastAPI，localhost:17627）
-pub const BACKEND_BASE: &str = "http://localhost:17627";
+/// 后端服务基址（FastAPI，127.0.0.1:17627）
+/// 注意：用 127.0.0.1 不用 localhost——Windows 上 localhost 优先解析 IPv6 ::1，
+/// 而后端 uvicorn 默认绑定 127.0.0.1（IPv4），探测会一直失败（CI 冒烟实测）
+pub const BACKEND_BASE: &str = "http://127.0.0.1:17627";
 /// 健康检查探针路径
 const PROBE_PATH: &str = "/api/settings";
 /// 外部服务探测超时
@@ -115,6 +117,28 @@ pub fn logs_dir() -> PathBuf {
     let dir = data_dir().join("logs");
     let _ = std::fs::create_dir_all(&dir);
     dir
+}
+
+/// 启动链路日志（诊断用，CI 冒烟/用户反馈时能看完整链路）：<logs>/backend-launcher.log
+pub fn launcher_log(msg: &str) {
+    use std::io::Write;
+    let path = logs_dir().join("backend-launcher.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "[{}] {msg}", chrono_now());
+    }
+}
+
+/// 简易时间戳（避免引入 chrono 依赖）
+fn chrono_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "?".to_string())
 }
 
 /// GET 探针：目标返回 HTTP 200 即认为服务存活（连接拒绝/超时/非 200 都算不活）
@@ -260,18 +284,25 @@ impl BackendLauncher {
 
     /// 启动编排：探测 → 有外部服务直连 / 无则 spawn 内置 + 健康检查
     pub fn start(&mut self) -> BackendStartResult {
+        launcher_log(&format!("start: probe_external={} exe={:?}", self.probe_external(), std::env::current_exe()));
         if self.probe_external() {
             return BackendStartResult::External;
         }
         let Some(exe) = embedded_backend_path() else {
+            launcher_log("start: NoEmbedded（未找到内置后端）");
             return BackendStartResult::NoEmbedded;
         };
+        launcher_log(&format!("start: 内置后端 = {}", exe.display()));
         if self.launch_embedded(&exe).is_none() {
+            launcher_log("start: SpawnFailed（spawn 失败）");
             return BackendStartResult::SpawnFailed;
         }
+        launcher_log("start: spawned，等待健康检查…");
         if self.wait_ready(READY_TIMEOUT) {
+            launcher_log("start: Embedded（后端就绪）");
             BackendStartResult::Embedded
         } else {
+            launcher_log("start: Timeout（15s 未就绪）");
             BackendStartResult::Timeout
         }
     }

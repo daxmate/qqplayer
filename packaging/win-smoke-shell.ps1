@@ -18,7 +18,9 @@ if (-not (Test-Path $ExePath)) {
 
 $relDir = Split-Path $ExePath
 $backendDir = Join-Path $relDir "backend"
-$logPath = Join-Path $env:LOCALAPPDATA "QQPlayer\logs\pkg-backend.log"
+$logDir = Join-Path $env:LOCALAPPDATA "QQPlayer\logs"
+$logPath = Join-Path $logDir "pkg-backend.log"
+$launcherLog = Join-Path $logDir "backend-launcher.log"
 
 Write-Output "[smoke] exe: $ExePath"
 Write-Output "[smoke] backend dir 存在: $(Test-Path $backendDir)\qqplayer-backend.exe: $(Test-Path (Join-Path $backendDir 'qqplayer-backend.exe'))"
@@ -36,7 +38,8 @@ try {
             break
         }
         try {
-            $r = Invoke-WebRequest -Uri "http://localhost:17627/api/settings" -TimeoutSec 2 -UseBasicParsing
+            # 127.0.0.1 显式 IPv4（Windows 上 localhost 优先 ::1，后端绑定 127.0.0.1）
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:17627/api/settings" -TimeoutSec 2 -UseBasicParsing
             if ($r.StatusCode -eq 200) { $ok = $true; break }
         } catch {
             # 后端未就绪，继续轮询
@@ -45,6 +48,14 @@ try {
     }
     if (-not $ok) {
         Write-Output "[smoke] 超时/失败，壳退出=$backendExited"
+        $procs = Get-Process -Name "qqplayer-backend" -ErrorAction SilentlyContinue
+        if ($procs) { Write-Output "[smoke] qqplayer-backend 进程在跑: $($procs.Count) 个" } else { Write-Output "[smoke] qqplayer-backend 进程不存在（spawn 失败或秒退）" }
+        if (Test-Path $launcherLog) {
+            Write-Output "===== backend-launcher.log 尾部 ====="
+            Get-Content $launcherLog -Tail 15
+        } else {
+            Write-Output "[smoke] backend-launcher.log 不存在"
+        }
         if (Test-Path $logPath) {
             Write-Output "===== pkg-backend.log 尾部 ====="
             Get-Content $logPath -Tail 20

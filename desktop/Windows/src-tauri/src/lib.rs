@@ -117,6 +117,8 @@ fn show_backend_failure(app: &tauri::AppHandle, result: BackendStartResult) {
     };
     if std::env::var("QQPLAYER_NO_DIALOG").map(|v| v == "1").unwrap_or(false) {
         eprintln!("[qqplayer-shell] 后端启动失败: {detail} {log_hint}");
+        // 同时落盘（GUI 应用 stderr 不可见，冒烟脚本靠它拿根因）
+        crate::backend::launcher_log(&format!("show_backend_failure(no-dialog): {detail}"));
         return;
     }
     let message = format!("无法连接 QQPlayer 后端服务\n\n{detail}\n{log_hint}\n\n应用即将退出。");
