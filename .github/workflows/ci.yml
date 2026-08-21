@@ -71,11 +71,13 @@ jobs:
           - arch: x64
             os: windows-latest
             pyarch: x64
-            triplet: x64-windows
+            # static-md：把 lzo 静态编进 lzo.pyd，无 lzo2.dll 分发（动态版 dll 不会被 PyInstaller 收集，
+            # 运行时 import lzo 报 DLL load failed）；/MD 与 Python 扩展 CRT 匹配
+            triplet: x64-windows-static-md
           - arch: arm64
             os: windows-11-arm
             pyarch: ARM64
-            triplet: arm64-windows
+            triplet: arm64-windows-static-md
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -93,7 +95,8 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       # python-lzo 只发 sdist（无 Windows wheel），且 setup.py 在 win32 上要求
       # LZO_DIR 指向含 include/lzo/ 头文件 + lzo2.lib（或 lzo.lib）的目录，否则直接 raise。
-      # runner 不自带 LZO → 用 vcpkg 装并整理成 setup.py 期望的布局（LZO_DIR 根下直接放 lib）。
+      # runner 不自带 LZO → 用 vcpkg 装（static-md，静态库避免 DLL 分发）并整理成
+      # setup.py 期望的布局（LZO_DIR 根下直接放 lib）。
       - name: Install LZO (python-lzo 编译依赖)
         shell: pwsh
         run: |
