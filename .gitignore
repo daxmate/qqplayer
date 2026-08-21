@@ -33,3 +33,8 @@ uv.lock
 packaging/*.dmg
 packaging/dist/
 packaging/build/
+
+# Tauri (desktop/Windows)
+desktop/Windows/src-tauri/target/
+desktop/Windows/node_modules/
+desktop/Windows/src-tauri/gen/
