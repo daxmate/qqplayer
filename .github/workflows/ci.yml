@@ -223,9 +223,11 @@ jobs:
         with:
           workspaces: desktop/Windows/src-tauri
       - name: Install system deps (webkit2gtk 等 Tauri Linux 依赖)
+        # 官方清单（v2.tauri.app/start/prerequisites）：libayatana-appindicator3-dev 是 tauri 2 需要的
+        # （libappindicator3-dev 旧版会链接失败）；build-essential/libssl-dev 补全编译链
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev xdg-utils
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
       - name: Install frontend deps + build
         working-directory: frontend
         run: pnpm install --frozen-lockfile && pnpm build
