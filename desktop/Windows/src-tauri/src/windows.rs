@@ -80,18 +80,17 @@ pub fn hide_window(app: &AppHandle, label: &str) {
 }
 
 /// 后端就绪回调：显示主窗口（conf 里 visible:false，避免后端未起时闪现加载失败页）。
-/// dev 模式下首载 URL 可能撞上后端未就绪，且 WebView2 会缓存页面 → 带新时间戳重导航；
-/// release 模式加载的是打包 dist，直接显示即可。
+/// dev 与 release 模式都导航到后端源：前端全部用相对路径 fetch（/api/library 等），
+/// release 下从 tauri://localhost 资源协议加载会把请求打到资源服务器，SPA 回退返回
+/// index.html（`<!doctype html>`）导致解析报错；后端 StaticFiles html=True 在 / 返回
+/// index.html，内容与打包 dist 一致。WebView2 会缓存页面 → 带新时间戳重导航。
 pub fn reveal_main(app: &AppHandle) {
     let Some(main) = app.get_webview_window("main") else {
         return;
     };
-    #[cfg(debug_assertions)]
-    {
-        let url = page_url("");
-        if let Ok(u) = url.parse() {
-            let _ = main.navigate(u);
-        }
+    let url = page_url("");
+    if let Ok(u) = url.parse() {
+        let _ = main.navigate(u);
     }
     let _ = main.show();
     let _ = main.set_focus();
