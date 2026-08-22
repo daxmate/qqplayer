@@ -1,6 +1,7 @@
 # QQPlayer 多平台规划（PLANNING）
 
 > 2026-08-16 与大象讨论记录。桌面端完成后启动移动端，**优先 iOS**。
+> 2026-08-22 补充：桌面端配对 API 定案（见下）。
 > 本文件放仓库内，多台机器开发时 git pull 即可同步信息。
 
 ## 定位：移动端是 companion 产品，不是桌面版全功能迁移
@@ -25,15 +26,50 @@
 - 移动端本地播放已缓存音频（音频 + 歌词 + 封面）
 - 收藏/歌单/播放记录/阅读进度本地记录，回网后合并回服务器
 
-## 待决策
+## 已定决策（2026-08-16 / 2026-08-22 拷问定案）
 
-1. **同步协议**：manifest + Range（个人场景够用，不上 WebDAV/S3）——倾向这个
-2. **单用户 vs 家庭共享**：只有自己设备 → 局域网信任免认证；家人共享 → 加简单 token（决定同步 API 是否带鉴权）
+1. **移动端定位**：companion 产品，同网同步 + 离线播放/跟唱/阅读
+2. **iOS 技术路线**：Swift 原生壳 + WKWebView 复用前端（52k 行 Vue3，mobile.css 移动布局已有）+ AVPlayer 桥 + 同步数据层；不 Swift 重写 UI
+3. **配对服务范围**：只服务移动端 → 桌面端；桌面实例间互访不做（以后做分享歌单）
+4. **同步协议**：manifest + HTTP Range 断点续传（个人场景够用，不上 WebDAV/S3）
+5. **鉴权**：全 API 加 Bearer token（localhost 免鉴权），配对引入信任 + token 持续验证
+6. **配对确认**：壳内原生弹窗（macOS Swift / Windows Tauri 都要做）
+7. **token**：永久有效 + 手动撤销；明文 HTTP 传输（内容非机密，家庭局域网信任）
+
+## 桌面端配对 API 定案（2026-08-22）
+
+```
+【发现】Python zeroconf 广播 _qqplayer._tcp @ :17627
+  TXT: v=版本号, name=设备名（hostname）→ iOS 自动列出局域网桌面端
+
+【配对流程】
+  iOS  POST /api/pairing/request {device_id, device_name, device_type}
+       → pending 队列，返 request_id；同一 device_id 限流（3 次后指数退避，base 60s）
+  壳   GET  /api/pairing/pending（1-2s 轮询）→ 弹原生窗（设备名 + 确认/拒绝）
+       确认 → POST /api/pairing/request/:id/approve → 生成 64 位 token（SHA-256 哈希存储）
+       拒绝 → POST /api/pairing/request/:id/reject
+  iOS  GET  /api/pairing/request/:id/status
+       pending → 等 / approved → 拿 token（iOS 存 Keychain）
+       rejected / expired（pending 5 分钟超时）
+
+【鉴权中间件】
+  白名单: /api/pairing/*  |  来源 127.0.0.1 免鉴权  |  其余所有 /api/* 校验 Bearer token，无效 401
+
+【设备管理】GET /api/pairing/devices · DELETE /api/pairing/devices/:device_id（撤销立即失效）
+
+【存储】~/Library/Application Support/qqplayer/pairing.json
+  [{ device_id, device_name, device_type, token_hash, created_at, last_seen_at }]
+```
+
+**实现要点**：配对模块独立 router + service（backend/app/routers/pairing.py）；壳轮询 pending 用普通 HTTP 定时器即可，不上推送；限流按 device_id 记请求时间，两次间隔 >10min 重置计数。
 
 ## 路线
 
-1. 桌面端完善（进行中）：阅读器 ~2 天 + 视频 ~数天
-2. 移动端启动，**优先 iOS**，再 Android / 鸿蒙 / Windows（Windows 最简单，基本就是壳）
+1. 桌面端完善 ✅（阅读器/歌词对齐/Windows Tauri 壳/打包链路均已完）
+2. 移动端启动（进行中）：**优先 iOS**（Swift 壳 + WKWebView 复用前端 + AVPlayer 桥），再 Android / 鸿蒙
+   - ① 桌面端配对 API（2026-08-22 定案，待开发）
+   - ② 前端数据层抽象（apiClient 统一出口 + 离线缓存层）
+   - ③ iOS 壳（mDNS 发现 + 配对 + AVPlayer 桥 + 同步/缓存）
 
 ## 平台难度参考（复用现有代码前提下）
 
