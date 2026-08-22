@@ -10,6 +10,8 @@ pycryptodome
 qrcode
 pillow
 send2trash
+# iOS companion 自动发现：mDNS 广播 _qqplayer._tcp（配对 API 依赖）
+zeroconf
 # 视频模块在线源：yt-dlp 引擎（锁版本，与系统 CLI 2026.07.04 一致）
 yt-dlp==2026.07.04
 # yt-dlp 可选增强：curl 指纹伪装（部分站点反爬必需，不装自动降级）

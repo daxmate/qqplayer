@@ -52,6 +52,15 @@ PLAYBACK_FILE = DATA_DIR / "playback.json"
 QUEUE_ORDER_FILE = DATA_DIR / "queue_order.json"
 # 网络曲库条目（网易云等在线源登记，播放时实时取直链，不落盘音频）
 NETWORK_SONGS_FILE = DATA_DIR / "network_songs.json"
+# 移动端配对（companion 配对 API）：已配对设备 + 待确认请求（token 只存 SHA-256 哈希，绝不存明文）
+PAIRING_FILE = DATA_DIR / "pairing.json"
+# 配对鉴权开关：QQPLAYER_ENABLE_AUTH=0 关闭（测试默认关闭；生产默认开启）
+AUTH_ENABLED = os.environ.get("QQPLAYER_ENABLE_AUTH", "1") != "0"
+# pending 请求超时（秒）：超时后 status 返 expired 并从待确认队列清理
+PAIRING_TTL_SECONDS = 300
+# 配对请求限流：连续 3 次内正常；第 4 次起指数退避（base 60s）；两次间隔 >10min 重置计数
+PAIRING_RATE_BASE_SECONDS = 60
+PAIRING_RATE_RESET_SECONDS = 600
 # 电子书书架：书籍目录（books/<id>/ 下 book.epub + cover + index.json）与书架元数据
 BOOKS_DIR = DATA_DIR / "books"
 BOOKS_FILE = DATA_DIR / "books.json"
@@ -263,3 +272,4 @@ playback_store = JsonStore(lambda: PLAYBACK_FILE, default=[])
 books_store = JsonStore(lambda: BOOKS_FILE, default=[])
 annotations_store = JsonStore(lambda: ANNOTATIONS_FILE, default={})
 vocab_store = JsonStore(lambda: VOCAB_FILE, default=[])
+pairing_store = JsonStore(lambda: PAIRING_FILE, default={"devices": [], "pending": []})

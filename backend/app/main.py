@@ -15,20 +15,27 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app import state
+from app.middleware import register_auth_middleware
 from app.routers import include_routers
+from app.services import mdns
 from app.services import settings as settings_service
 from app.services.library_scan import _lyric_cleanup_loop, init_library
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """启动时挂后台任务：每周一 03:00 清理孤儿手动歌词（不阻塞启动）"""
+    """启动时挂后台任务：mDNS 广播（iOS 发现）+ 每周一 03:00 清理孤儿手动歌词（均不阻塞启动）"""
+    mdns_handle = await mdns.start()
     if state.LYRIC_CLEANUP_ENABLED:
         asyncio.get_running_loop().create_task(_lyric_cleanup_loop())
     yield
+    await mdns.stop(mdns_handle)
 
 
 app = FastAPI(title="music-player", lifespan=_lifespan)
+
+# 鉴权中间件：保护除白名单外所有 /api/*（localhost 免鉴权；QQPLAYER_ENABLE_AUTH=0 关闭）
+register_auth_middleware(app)
 
 # 运行时歌曲库路径（可通过命令行参数修改；等价原 backend.py 模块级逻辑）
 if len(sys.argv) > 1:

@@ -10,6 +10,7 @@ from . import (
     library,
     lyrics,
     media,
+    pairing,
     playback,
     playlists,
     quark,
@@ -38,6 +39,7 @@ _ROUTER_MODULES = (
     dict,
     video_online,
     videos,
+    pairing,
 )
 
 
