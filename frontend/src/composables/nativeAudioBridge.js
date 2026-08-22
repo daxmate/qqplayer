@@ -48,6 +48,35 @@ const nativeState = {
   ended: false,
 };
 
+// ---------- 通用原生事件订阅（sync 等模块注册，避免各自抢占 qqplayerOnNativeEvent） ----------
+// window.qqplayerOnNativeEvent 是全局唯一事件入口（本模块 installNativeEventSink 安装）；
+// 播放事件（timeupdate/playing/…）走上面的 listeners，其余事件（syncAssetProgress /
+// syncAssetDone / assetStatus / appState 等）经 onNativeEvent 分发给订阅者——
+// 订阅方无需关心事件入口的归属，也不会出现多个模块争相覆盖入口的双处理问题。
+const nativeEventHandlers = new Map(); // name → Set<fn(payload)>
+
+/** 订阅某类原生事件（syncAssetProgress/syncAssetDone/assetStatus/appState…）；返回取消订阅函数 */
+export function onNativeEvent(name, fn) {
+  if (typeof fn !== "function") return () => {};
+  if (!nativeEventHandlers.has(name)) nativeEventHandlers.set(name, new Set());
+  nativeEventHandlers.get(name).add(fn);
+  return () => {
+    nativeEventHandlers.get(name)?.delete(fn);
+  };
+}
+
+function dispatchNativeEvent(name, payload) {
+  const set = nativeEventHandlers.get(name);
+  if (!set || !set.size) return;
+  for (const fn of [...set]) {
+    try {
+      fn(payload);
+    } catch {
+      /* 单个订阅者异常不拖垮派发 */
+    }
+  }
+}
+
 // ---------- 事件派发（模拟 DOM EventTarget，playerCore bindAudioEvents 直接挂） ----------
 const listeners = new Map();
 
@@ -229,6 +258,8 @@ export function installNativeEventSink() {
         handleRemoteCommand(payload);
         break;
       default:
+        // 通用事件（sync 资产进度/回执、appState 生命周期等）转给订阅者
+        dispatchNativeEvent(event, payload);
         break;
     }
   };

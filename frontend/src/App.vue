@@ -242,6 +242,7 @@ import {
   resolveServerUrl,
 } from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
+import { initSync } from "./utils/sync.js";
 import {
   coverSizePx,
   startCoverDrag,
@@ -452,6 +453,9 @@ onMounted(() => {
   setupAutoRefresh();
   setupPlayerActions();
   setupMiniStatus();
+  // iOS 同步模块：订阅原生事件（syncAssetProgress/assetStatus/appState）+ 首次 manifest 同步
+  // （桌面浏览器内部静默 no-op；事件经 nativeAudioBridge 全局入口分发，无双重监听）
+  initSync();
   // 桌面全局拖拽导入：window 级监听，卸载时清理
   cleanupDragImport = setupDragImport();
   // 封面/歌词区尺寸：RO 量 center 高度（自适应保底 + 拖拽范围硬保护依赖）

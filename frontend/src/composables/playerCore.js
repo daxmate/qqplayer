@@ -26,6 +26,7 @@ import {
   nativeSendMetadata,
   nativePost,
 } from "./nativeAudioBridge.js";
+import { ensureAsset, assetForSong } from "../utils/sync.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -1607,6 +1608,8 @@ export async function selectSong(index, opts = {}) {
   }
   audio.src = streamProxyUrl(src);
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
+  // iOS 同步：本地歌资产后台预取（不阻塞远程播放；已下载时回执后切本地播放）
+  maybePrefetchAsset(state.currentSong);
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   audio.volume = state.muted ? 0 : state.volume;
   state.currentTime = 0;
@@ -1637,6 +1640,42 @@ export async function selectSong(index, opts = {}) {
     },
     { once: true },
   );
+}
+
+// ============ iOS 同步：本地歌资产后台预取（阶段3 · E1） ============
+// 选歌播放时对本地歌（path 非空）发起 ensureAsset：
+//   - 已下载（assetStatus exists=true）→ 回执 localURL，切本地播放（快、省流量）
+//   - 未下载 → 后台发起 syncDownload，远程 URL 照常播（不阻塞、下载完成不强行切换）
+// 桌面浏览器 / macOS 壳（无 iOS 桥）→ ensureAsset 静默 no-op，行为零变化。
+async function maybePrefetchAsset(song) {
+  try {
+    if (!isNativePlayback() || !song || !song.path) return;
+    const item = await assetForSong(song);
+    if (!item) return;
+    const localURL = await ensureAsset(item);
+    if (!localURL) return; // 未下载 / 已发起后台下载：保持远程播放
+    // 回执已存在 → 切本地播放；仅当仍是同一首歌且源未被用户切换时生效
+    if (state.currentSong !== song) return;
+    const curSrc = audio.src;
+    if (!curSrc || curSrc === localURL) return;
+    const wasPlaying = !audio.paused;
+    const t = audio.currentTime || 0;
+    audio.removeAttribute("src");
+    audio.src = localURL; // 本地文件秒开（原生 load → AVPlayer 本地播放）
+    audio.volume = state.muted ? 0 : state.volume;
+    if (wasPlaying) audio.play().catch(() => {});
+    // 保留进度：loadedmetadata 后再 seek（原生 load 未就绪时 seek 可能被丢弃）
+    const onMeta = () => {
+      audio.removeEventListener("loadedmetadata", onMeta);
+      if (t > 0) {
+        audio.currentTime = t;
+        state.currentTime = t;
+      }
+    };
+    audio.addEventListener("loadedmetadata", onMeta, { once: true });
+  } catch {
+    /* 预取失败静默：远程播放不受影响 */
+  }
 }
 
 // ============ 播放控制 ============

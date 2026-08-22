@@ -14,6 +14,7 @@ export default {
       library: "音乐库",
       video: "视频",
       download: "下载",
+      sync: "同步",
       lyric: "歌词",
       ui: "界面",
       shortcuts: "快捷键",
@@ -141,6 +142,19 @@ export default {
     quarkLogin: "登录夸克",
     quarkLogout: "退出登录",
     quarkLoggedInAs: "已登录：{nickname}",
+
+    // ============ 同步（iOS 壳） ============
+    sync: "同步",
+    syncNow: "立即同步",
+    syncNowDesc: "从桌面端拉取最新清单，缓存曲库/收藏/歌单/书架/词典元数据",
+    syncing: "同步中…",
+    syncLastTime: "上次同步",
+    syncLastTimeNever: "尚未同步",
+    syncPending: "待下载资产",
+    syncProgress: "下载进度",
+    syncFailed: "同步失败：{msg}",
+    syncMobileOnly: "仅移动端可用",
+    syncMobileOnlyDesc: "同步与离线资产下载需要 iOS 壳（QQPlayer companion）",
 
     // ============ 歌词（APP） ============
     lyricApp: "APP 歌词",

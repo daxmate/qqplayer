@@ -540,6 +540,48 @@
               </div>
             </section>
 
+            <!-- ============ 同步（iOS 壳） ============ -->
+            <section v-else-if="tab === 'sync'" class="settings-scroll">
+              <div class="group">
+                <div class="group-title">
+                  <RefreshCw :size="13" />
+                  {{ t("settings.sync") }}
+                </div>
+                <template v-if="isNative">
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncNow") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncNowDesc") }}</div>
+                    <div class="setting-control">
+                      <button class="btn primary" :disabled="syncState.syncing" @click="doSync">
+                        {{ syncState.syncing ? t("settings.syncing") : t("settings.syncNow") }}
+                      </button>
+                      <span v-if="syncState.lastError" class="setting-error">{{
+                        t("settings.syncFailed", { msg: syncState.lastError })
+                      }}</span>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncLastTime") }}</div>
+                    <div class="setting-desc">{{ lastSyncText }}</div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncPending") }}</div>
+                    <div class="setting-desc">{{ syncState.pendingCount }}</div>
+                  </div>
+                  <div v-if="syncTotal > 0" class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncProgress") }}</div>
+                    <div class="progress-bar">
+                      <div class="progress-fill" :style="{ width: syncPercent + '%' }" />
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="setting-item">
+                  <div class="setting-label">{{ t("settings.syncMobileOnly") }}</div>
+                  <div class="setting-desc">{{ t("settings.syncMobileOnlyDesc") }}</div>
+                </div>
+              </div>
+            </section>
+
             <!-- ============ 歌词 ============ -->
             <section v-else-if="tab === 'lyric'" class="settings-scroll">
               <!-- 子 tab：APP 歌词 / 桌面歌词 -->
@@ -1317,6 +1359,7 @@ import {
   FileAudio,
   Palette,
   Repeat2,
+  RefreshCw,
   Download,
   Video,
 } from "@lucide/vue";
@@ -1356,6 +1399,7 @@ import {
 } from "../composables/usePlayer.js";
 import { showToast } from "../composables/useToast.js";
 import { apiGet, apiPost } from "../utils/apiClient.js";
+import { syncNow, syncState } from "../utils/sync.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import {
   COVER_MIN,
@@ -1521,6 +1565,7 @@ const categories = [
   { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
   { key: "video", labelKey: "settings.category.video", icon: Video },
   { key: "download", labelKey: "settings.category.download", icon: Download },
+  { key: "sync", labelKey: "settings.category.sync", icon: RefreshCw },
   { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
   { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
   { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
@@ -1701,6 +1746,22 @@ watch(
 watch(tab, (v) => {
   if (v === "download") refreshQuarkState();
 });
+
+// ============ 同步区块（iOS 壳；桌面浏览器显示“仅移动端可用”） ============
+const lastSyncText = computed(() => {
+  if (!syncState.lastSyncAt) return t("settings.syncLastTimeNever");
+  return new Date(syncState.lastSyncAt).toLocaleString();
+});
+const syncTotal = computed(() => syncState.progress.total || 0);
+const syncPercent = computed(() => {
+  const { received, total } = syncState.progress;
+  if (!total) return 0;
+  return Math.min(100, Math.round((received / total) * 100));
+});
+async function doSync() {
+  if (syncState.syncing) return;
+  await syncNow();
+}
 
 async function save() {
   const p = libInput.value.trim();
@@ -1968,6 +2029,22 @@ onBeforeUnmount(() => {
 .setting-error {
   font-size: 12px;
   color: #ff6b6b;
+}
+
+/* 同步区块：下载总进度条 */
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  transition: width 0.2s ease;
 }
 
 /* 行内小按钮（重置等） */

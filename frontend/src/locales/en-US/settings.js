@@ -15,5 +15,18 @@ export default {
     amllEffects: "AMLL Effects",
     amllPerfHint:
       "These three AMLL effects are performance-heavy; turning them off can significantly reduce CPU usage (especially in the browser).",
+    // Sync (iOS shell)
+    sync: "Sync",
+    syncNow: "Sync Now",
+    syncNowDesc: "Pull the latest manifest from the desktop and cache library metadata",
+    syncing: "Syncing…",
+    syncLastTime: "Last sync",
+    syncLastTimeNever: "Not synced yet",
+    syncPending: "Pending downloads",
+    syncProgress: "Download progress",
+    syncFailed: "Sync failed: {msg}",
+    syncMobileOnly: "Mobile only",
+    syncMobileOnlyDesc:
+      "Sync and offline asset downloads require the iOS shell (QQPlayer companion)",
   },
 };
