@@ -215,7 +215,7 @@ export function ensureAsset({ path, url, sha256, size } = {}) {
   }
   // 惰性注册事件订阅：不依赖 initSync 先行调用（幂等；桌面浏览器早退不注册）
   ensureSubscribed();
-  const requestId = ++requestSeq;
+  const requestId = String(++requestSeq); // 字符串类型：与 Swift 侧 as? String 解析对齐（数字会被静默丢弃）
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       if (pendingQueries.has(requestId)) {
