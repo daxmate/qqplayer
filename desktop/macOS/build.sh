@@ -22,6 +22,8 @@ esac
 APP_NAME="QQPlayer"
 BUNDLE_ID="com.daxmate.qqplayer"
 BUILD_DIR="build"
+# 版本号唯一真源：仓库根 VERSION 文件（desktop/macOS/../../VERSION）
+VERSION="$(cat "$(dirname "$0")/../../VERSION")"
 
 echo "📦 编译 Swift 壳..."
 mkdir -p "$BUILD_DIR"
@@ -48,8 +50,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <string>en</string>
     </array>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleVersion</key><string>1.0.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>icon</string>

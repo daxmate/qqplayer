@@ -2,11 +2,11 @@
 # QQPlayer DMG 打包（arm64，自包含）：构建 app（含内置后端）→ 组装 staging → hdiutil 压 dmg
 #
 # 前置：packaging/dist/qqplayer-backend 存在（PyInstaller 产物，见 build-backend.sh）
-# 用法：./packaging/make-dmg.sh [版本号，默认 1.0.0-rc.1]
+# 用法：./packaging/make-dmg.sh [版本号，默认读仓库根 VERSION 文件]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-$(cat VERSION)}"
 # 目标架构：arm64（默认）/ x86_64，环境变量 ARCH 覆盖（DMG 命名带架构后缀）
 ARCH="${ARCH:-arm64}"
 case "$ARCH" in
