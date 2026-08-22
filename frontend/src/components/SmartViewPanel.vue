@@ -149,6 +149,7 @@ import {
 } from "../composables/useLibrary.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import { showToast, toastError } from "../composables/useToast.js";
+import { resolveServerUrl } from "../utils/apiClient.js";
 import {
   SMART_VIEWS,
   smartViewState,
@@ -611,7 +612,7 @@ function markCoverError(path) {
   coverErrors.value.add(path);
 }
 function coverUrl(path) {
-  return "/api/cover?path=" + encodeURIComponent(path);
+  return resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
 }
 </script>
 

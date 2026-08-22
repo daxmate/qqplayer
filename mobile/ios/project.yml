@@ -1,0 +1,65 @@
+# QQPlayer iOS 壳（xcodegen 工程定义，唯一工程真源）
+# 用法：build.sh（前端构建 → 复制 www → xcodegen generate → xcodebuild）
+# 工程文件 QQPlayer.xcodeproj 不入库（.gitignore 排除），由 xcodegen 生成。
+name: QQPlayer
+options:
+  bundleIdPrefix: com.daxmate.qqplayer
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+targets:
+  QQPlayer:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      # 前端 bundle（build.sh 复制 dist → Resources/www；顶层 resources: 键在 xcodegen 2.46
+      # 实测被静默忽略，改 sources + buildPhase: resources + type: folder → 蓝色文件夹引用，
+      # bundle 内保留 www/ 结构）
+      - path: Resources/www
+        type: folder
+        buildPhase: resources
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: QQPlayer
+        CFBundleDevelopmentRegion: zh_CN
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # 局域网访问桌面端（mDNS 发现 + HTTP 配对/流媒体）
+        NSLocalNetworkUsageDescription: QQPlayer 需要访问局域网以发现并连接你的桌面端音乐服务器（配对、播放、同步）。
+        NSBonjourServices:
+          - _qqplayer._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            localhost:
+              NSExceptionAllowsInsecureHTTPLoads: true
+        # 后台播放（锁屏/息屏继续播）
+        UIBackgroundModes:
+          - audio
+        UIApplicationSupportsIndirectInputEvents: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.daxmate.qqplayer.ios
+        PRODUCT_NAME: QQPlayer
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        CODE_SIGN_STYLE: Automatic
+        # 免费签名：真机留空由 Xcode 自动（个人团队）；命令行模拟器构建免签名
+        CODE_SIGN_IDENTITY: "-"
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
+        SWIFT_EMIT_LOC_STRINGS: NO
+    scheme:
+      gatherCoverageData: false

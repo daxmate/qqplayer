@@ -16,6 +16,11 @@ dist/
 desktop/macOS/build/
 desktop/macOS/assets/icon.iconset/
 
+# iOS 壳（mobile/ios）：构建产物与生成工程不入库（build.sh 可重建）
+mobile/ios/build/
+mobile/ios/QQPlayer.xcodeproj/
+mobile/ios/Resources/www/
+
 # macOS
 .DS_Store
 

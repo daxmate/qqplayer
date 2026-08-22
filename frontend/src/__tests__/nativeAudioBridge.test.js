@@ -1,0 +1,174 @@
+// nativeAudioBridge 适配层测试：iOS 原生播放桥（window.qqplayerIosBridge 存在时启用）
+// - 桌面浏览器（无桥）：isNativePlayback() false，全部函数空转/不安装
+// - 有桥：Audio 代理语义（src/play/pause/seek/volume/rate）+ 事件派发 + 相对路径解析
+//   + 远端命令路由 + 401 通知
+//
+// 注意：nativeAudioBridge 有模块级状态（proxy 单例/listeners/事件入口），且模块加载时
+// 就按「当时是否有桥」决定是否安装事件入口 → 每个用例用动态 import 拿全新实例，
+// 全程只用该实例的导出（不混静态导入），保证状态隔离。
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// localStorage stub（与既有测试同款：Node 实验性 localStorage 在无 --localstorage-file 时不可用）
+const lsStore = {};
+const localStorageStub = {
+  getItem: (k) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k, v) => {
+    lsStore[k] = String(v);
+  },
+  removeItem: (k) => {
+    delete lsStore[k];
+  },
+  clear: () => {
+    for (const k of Object.keys(lsStore)) delete lsStore[k];
+  },
+};
+
+function resetLS() {
+  for (const k of Object.keys(lsStore)) delete lsStore[k];
+}
+
+describe("nativeAudioBridge 桌面环境（无 qqplayerIosBridge）", () => {
+  beforeEach(() => {
+    vi.stubGlobal("localStorage", localStorageStub);
+    delete window.qqplayerIosBridge;
+    delete window.qqplayerOnNativeEvent;
+    resetLS();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("isNativePlayback() 为 false，不安装事件入口", async () => {
+    const m = await import("../composables/nativeAudioBridge.js?t=desk1");
+    expect(m.isNativePlayback()).toBe(false);
+    expect(window.qqplayerOnNativeEvent).toBeUndefined();
+  });
+
+  it("resolveNativeUrl 无服务器 base 时原样返回相对路径", async () => {
+    const m = await import("../composables/nativeAudioBridge.js?t=desk2");
+    expect(m.resolveNativeUrl("/api/cover?path=x")).toBe("/api/cover?path=x");
+  });
+});
+
+describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => {
+  let posts;
+  let m;
+
+  beforeEach(async () => {
+    vi.stubGlobal("localStorage", localStorageStub);
+    posts = [];
+    localStorage.setItem("qqplayer.server", "http://192.168.1.50:17627");
+    window.qqplayerIosBridge = {
+      postMessage: (msg) => posts.push(msg),
+    };
+    m = await import("../composables/nativeAudioBridge.js?t=ios" + Math.random());
+  });
+
+  afterEach(() => {
+    delete window.qqplayerIosBridge;
+    delete window.qqplayerOnNativeEvent;
+    resetLS();
+    vi.unstubAllGlobals();
+  });
+
+  it("isNativePlayback() 为 true", () => {
+    expect(m.isNativePlayback()).toBe(true);
+  });
+
+  it("resolveNativeUrl：相对 /api 路径 → 服务器绝对 URL", () => {
+    expect(m.resolveNativeUrl("/api/audio?path=%2Fm.mp3")).toBe(
+      "http://192.168.1.50:17627/api/audio?path=%2Fm.mp3",
+    );
+  });
+
+  it("resolveNativeUrl：stream/proxy 解出上游直链（AVPlayer 免代理）", () => {
+    const enc = encodeURIComponent("http://m.example.com/a.mp3");
+    expect(m.resolveNativeUrl(`/api/stream/proxy?url=${enc}`)).toBe("http://m.example.com/a.mp3");
+  });
+
+  it("resolveNativeUrl：绝对 URL 原样", () => {
+    expect(m.resolveNativeUrl("https://x.com/a.mp3")).toBe("https://x.com/a.mp3");
+  });
+
+  it("代理 src 赋值 → 发 load 命令（已解析绝对 URL）", () => {
+    const p = m.createNativeAudioProxy();
+    p.src = "/api/audio?path=%2Fm.mp3";
+    expect(posts).toEqual([
+      { cmd: "load", url: "http://192.168.1.50:17627/api/audio?path=%2Fm.mp3" },
+    ]);
+  });
+
+  it("代理 play/pause/seek/volume/rate → 对应命令", () => {
+    const p = m.createNativeAudioProxy();
+    p.play();
+    p.pause();
+    p.currentTime = 12.5;
+    p.volume = 0.7;
+    p.playbackRate = 1.25;
+    expect(posts).toEqual([
+      { cmd: "play" },
+      { cmd: "pause" },
+      { cmd: "seek", t: 12.5 },
+      { cmd: "setVolume", v: 0.7 },
+      { cmd: "setRate", r: 1.25 },
+    ]);
+  });
+
+  it("代理 getter：paused/duration/currentTime 读原生状态镜像", () => {
+    const p = m.createNativeAudioProxy();
+    expect(p.paused).toBe(true);
+    // 原生推 playing + timeupdate（模块加载时已装事件入口）
+    window.qqplayerOnNativeEvent("playing", { t: 1 });
+    window.qqplayerOnNativeEvent("timeupdate", { t: 30, duration: 210 });
+    expect(p.paused).toBe(false);
+    expect(p.duration).toBe(210);
+    expect(p.currentTime).toBe(30);
+  });
+
+  it("事件派发：timeupdate/playing/ended 触发对应 DOM 事件", () => {
+    const p = m.createNativeAudioProxy();
+    const events = [];
+    for (const type of ["timeupdate", "play", "pause", "ended", "loadedmetadata"]) {
+      p.addEventListener(type, (e) => events.push(e.type));
+    }
+    window.qqplayerOnNativeEvent("timeupdate", { t: 5, duration: 100 });
+    window.qqplayerOnNativeEvent("playing", { t: 5 });
+    window.qqplayerOnNativeEvent("paused", { t: 6 });
+    window.qqplayerOnNativeEvent("ended", {});
+    expect(events).toEqual(["loadedmetadata", "timeupdate", "play", "pause", "ended"]);
+  });
+
+  it("远端命令：registerRemoteCommandHandler 收到 play/pause/next/prev/seekto/toggle", () => {
+    const calls = [];
+    m.registerRemoteCommandHandler((cmd, t) => calls.push([cmd, t]));
+    window.qqplayerOnNativeEvent("remoteCommand", { cmd: "play" });
+    window.qqplayerOnNativeEvent("remoteCommand", { cmd: "pause" });
+    window.qqplayerOnNativeEvent("remoteCommand", { cmd: "next" });
+    window.qqplayerOnNativeEvent("remoteCommand", { cmd: "prev" });
+    window.qqplayerOnNativeEvent("remoteCommand", { cmd: "seekto", t: 42 });
+    window.qqplayerOnNativeEvent("remoteCommand", { cmd: "toggle" });
+    expect(calls).toEqual([
+      ["play", undefined],
+      ["pause", undefined],
+      ["next", undefined],
+      ["prev", undefined],
+      ["seekto", 42],
+      ["toggle", undefined],
+    ]);
+  });
+
+  it("nativeSendMetadata：本地歌 → coverUrl 解析为服务器绝对 URL", () => {
+    m.nativeSendMetadata({ name: "歌", artist: "艺人", album: "专", path: "/m/a.mp3" });
+    const msg = posts.find((p) => p.cmd === "setMetadata");
+    expect(msg.title).toBe("歌");
+    expect(msg.artist).toBe("艺人");
+    expect(msg.coverUrl).toBe("http://192.168.1.50:17627/api/cover?path=%2Fm%2Fa.mp3");
+  });
+
+  it("nativeSendMetadata：流媒体歌用网络封面 URL 原样", () => {
+    m.nativeSendMetadata({ name: "s", coverUrl: "https://img.example.com/c.jpg" });
+    const msg = posts.find((p) => p.cmd === "setMetadata");
+    expect(msg.coverUrl).toBe("https://img.example.com/c.jpg");
+  });
+});

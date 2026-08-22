@@ -55,6 +55,19 @@ function clearToken() {
   }
 }
 
+/**
+ * 相对 /api 路径 → 桌面服务器绝对 URL。
+ * iOS 壳（file:// 加载前端）里 <img src="/api/cover…"> 等无法自动解析相对路径（会变成
+ * file:///api/…），统一经此转换；桌面同源环境 qqplayer.server 未设置时原样返回，行为零变化。
+ */
+export function resolveServerUrl(path) {
+  if (!path || typeof path !== "string") return path;
+  if (/^https?:\/\//i.test(path) || path.startsWith("data:")) return path;
+  const base = baseURL();
+  if (!base) return path;
+  return base.replace(/\/+$/, "") + (path.startsWith("/") ? path : "/" + path);
+}
+
 // ---------- 在线状态（离线模式事件） ----------
 let offline = false;
 const offlineListeners = new Set();

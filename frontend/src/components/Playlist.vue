@@ -427,7 +427,7 @@ import {
 } from "../composables/usePlayer.js";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
-import { apiPost } from "../utils/apiClient.js";
+import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import ContextMenu from "./ContextMenu.vue";
@@ -514,7 +514,7 @@ const albumGroups = computed(() => {
         album,
         artists: new Set([artist]),
         count: 1,
-        coverUrl: `/api/cover?path=${encodeURIComponent(s.path)}`,
+        coverUrl: resolveServerUrl(`/api/cover?path=${encodeURIComponent(s.path)}`),
       });
     }
   }

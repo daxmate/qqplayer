@@ -21,6 +21,7 @@ import { ref, watch, computed } from "vue";
 import { Music } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { state, uiSettings } from "../composables/usePlayer.js";
+import { resolveServerUrl } from "../utils/apiClient.js";
 
 const { t } = useI18n();
 
@@ -64,7 +65,7 @@ watch(
       cache.set(key, props.song.coverUrl);
       return;
     }
-    coverUrl.value = "/api/cover?path=" + encodeURIComponent(key);
+    coverUrl.value = resolveServerUrl("/api/cover?path=" + encodeURIComponent(key));
   },
   { immediate: true },
 );

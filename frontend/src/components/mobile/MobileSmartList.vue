@@ -53,7 +53,7 @@
             <div class="msv-cover">
               <img
                 v-if="coverOk(row.song.path)"
-                :src="'/api/cover?path=' + encodeURIComponent(row.song.path)"
+                :src="coverSrc(row.song.path)"
                 :alt="row.song.name"
                 loading="lazy"
                 @error="markCoverError(row.song.path)"
@@ -104,8 +104,12 @@ import {
   playSmartRow,
   fmtSmartSub,
 } from "../../composables/useSmartViews.js";
+import { resolveServerUrl } from "../../utils/apiClient.js";
 
 const { t } = useI18n();
+
+// 封面 URL（iOS 壳 file:// 下相对路径需转服务器绝对 URL；桌面同源原样返回）
+const coverSrc = (path) => resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
 
 const props = defineProps({
   kind: { type: String, required: true }, // recentAdded | recentPlayed | topPlayed

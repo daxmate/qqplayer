@@ -234,7 +234,13 @@ import { isMobile } from "./composables/useMobileViewport.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
 import { useShellBridge } from "./composables/useShellBridge.js";
 import { showToast } from "./composables/useToast.js";
-import { apiGet, onOfflineChange, onUnauthorized, flushPendingOps } from "./utils/apiClient.js";
+import {
+  apiGet,
+  onOfflineChange,
+  onUnauthorized,
+  flushPendingOps,
+  resolveServerUrl,
+} from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import {
   coverSizePx,
@@ -281,7 +287,7 @@ const blurCoverUrl = computed(() => {
   const s = state.currentSong;
   if (s.coverUrl) return s.coverUrl;
   if (!s.path) return "";
-  return "/api/cover?path=" + encodeURIComponent(s.path);
+  return resolveServerUrl("/api/cover?path=" + encodeURIComponent(s.path));
 });
 
 // 面板组合 class：控制 grid 列数/区域（4 种状态）

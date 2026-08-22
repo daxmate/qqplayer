@@ -19,6 +19,13 @@ import { showToast } from "./useToast.js";
 import { apiGet, apiPost, apiPut, invalidate, scheduleFlush } from "../utils/apiClient.js";
 import { enqueuePendingOp } from "../utils/cacheDb.js";
 import i18n from "../locales/i18n.js";
+import {
+  isNativePlayback,
+  createNativeAudioProxy,
+  registerRemoteCommandHandler,
+  nativeSendMetadata,
+  nativePost,
+} from "./nativeAudioBridge.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -27,9 +34,11 @@ import i18n from "../locales/i18n.js";
 // WebKit 中 createMediaElementSource 接管后变速（尤其 0.75 减速）走缺陷链路会卡顿，
 // 且元素被接管后无法归还（规范限制）→ 变速时切到裸元素走原生媒体管线（流畅），
 // 回 1.0 切回图元素（EQ 照常）。audio 为当前活动元素引用（live binding，其他模块自动跟随）。
+// iOS 原生壳（window.qqplayerIosBridge 存在）：audio = Audio 语义代理（转发 AVPlayer），
+// 双元素/Web Audio 图均不参与（原生管线），桌面浏览器行为完全不变。
 export const audioEq = new Audio();
 export const audioBare = new Audio();
-export let audio = audioEq;
+export let audio = isNativePlayback() ? createNativeAudioProxy() : audioEq;
 audio.preload = "auto";
 audioBare.preload = "auto";
 // 包装 play：每次播放前确保 Web Audio 图就绪（懒创建 + resume，autoplay policy 需要用户手势）
@@ -199,6 +208,8 @@ let swappingAudio = false;
 // 1.0 → audioEq（Web Audio 图，EQ/频谱生效）。
 // 切换瞬间有短暂中断（~100ms：pause → src/seek → play），变速是主动操作，可接受。
 function swapAudioElement(next) {
+  // iOS 原生播放：双元素切换不参与（变速走 AVPlayer rate），保持 audio=代理不变
+  if (isNativePlayback()) return;
   if (next === audio) return;
   const cur = audio;
   const wasPlaying = !cur.paused;
@@ -911,6 +922,20 @@ function syncMediaPosition() {
 let mediaSessionStop = null;
 
 export function setupMediaSession() {
+  // iOS 原生播放：无 navigator.mediaSession，锁屏元数据/远端命令走原生桥
+  // （currentSong 变化 → setMetadata；锁屏/线控命令 → playerCore 同一套动作）
+  if (isNativePlayback()) {
+    mediaSessionStop?.();
+    mediaSessionStop = watch(
+      () => state.currentSong,
+      (song) => nativeSendMetadata(song),
+      { immediate: true },
+    );
+    return () => {
+      mediaSessionStop?.();
+      mediaSessionStop = null;
+    };
+  }
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
     return () => {};
   }
@@ -956,6 +981,37 @@ export function setupMediaSession() {
       }
     }
   };
+}
+
+// iOS 原生播放：锁屏/耳机线控命令（壳 MPRemoteCommandCenter → remoteCommand 事件）
+// 与桌面 MediaSession 同一套动作（队列/切歌逻辑复用）；桌面浏览器不注册（行为零变化）
+if (isNativePlayback()) {
+  registerRemoteCommandHandler((cmd, t) => {
+    switch (cmd) {
+      case "play":
+        play();
+        break;
+      case "pause":
+        pause();
+        break;
+      case "toggle":
+        togglePlay();
+        break;
+      case "next":
+        nextSong({ autoPlay: true, source: "media" });
+        break;
+      case "prev":
+        prevSong({ autoPlay: true, source: "media" });
+        break;
+      case "seekto":
+        if (typeof t === "number" && Number.isFinite(t)) seek(t);
+        break;
+      default:
+        break;
+    }
+  });
+  // 桥就绪上报：壳收到 nativeReady 后才开始推播放事件（防事件早于适配层）
+  nativePost({ cmd: "nativeReady" });
 }
 
 const SPEEDS = [0.75, 1.0, 1.25];
@@ -1995,6 +2051,8 @@ function bindAudioEvents(el) {
 }
 bindAudioEvents(audioEq);
 bindAudioEvents(audioBare);
+// iOS 原生播放：事件绑到 Audio 代理（原生 timeupdate/playing/paused/ended 驱动同一套 UI 逻辑）
+if (isNativePlayback()) bindAudioEvents(audio);
 
 // ============ 页面标题 ============
 watch(

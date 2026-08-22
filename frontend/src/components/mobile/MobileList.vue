@@ -82,7 +82,7 @@
             <div class="ml-row-cover">
               <img
                 v-if="coverOk(song.path)"
-                :src="'/api/cover?path=' + encodeURIComponent(song.path)"
+                :src="coverSrc(song.path)"
                 :alt="song.name"
                 loading="lazy"
                 @error="markCoverError(song.path)"
@@ -214,6 +214,7 @@ import {
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
 import { deleteSongs } from "../../composables/useDeleteSong.js";
+import { resolveServerUrl } from "../../utils/apiClient.js";
 
 const props = defineProps({
   kind: { type: String, required: true }, // songs | favorites | playlist | artist | album | playlists | artists | albums
@@ -224,6 +225,9 @@ const props = defineProps({
 const emit = defineEmits(["back", "play", "open"]);
 
 const { t } = useI18n();
+
+// 封面 URL（iOS 壳 file:// 下相对路径需转服务器绝对 URL；桌面同源原样返回）
+const coverSrc = (path) => resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
 
 const query = ref("");
 
@@ -317,7 +321,7 @@ const groupRows = computed(() => {
           album,
           artists: new Set([artist]),
           count: 1,
-          coverUrl: `/api/cover?path=${encodeURIComponent(s.path)}`,
+          coverUrl: coverSrc(s.path),
         });
       }
     }

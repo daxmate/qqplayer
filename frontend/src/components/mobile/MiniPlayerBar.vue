@@ -44,6 +44,7 @@ import { ref, watch } from "vue";
 import { Music2, Play, Pause, SkipForward } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { state, togglePlay, nextSong } from "../../composables/usePlayer.js";
+import { resolveServerUrl } from "../../utils/apiClient.js";
 
 const { t } = useI18n();
 
@@ -57,7 +58,7 @@ watch(
   () => state.currentSong?.path,
   (p) => {
     coverError.value = false;
-    coverUrl.value = p ? "/api/cover?path=" + encodeURIComponent(p) : "";
+    coverUrl.value = p ? resolveServerUrl("/api/cover?path=" + encodeURIComponent(p)) : "";
   },
   { immediate: true },
 );

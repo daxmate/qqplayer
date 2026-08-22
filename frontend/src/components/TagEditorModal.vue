@@ -166,7 +166,7 @@ import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from "vue"
 import { useI18n } from "vue-i18n";
 import { Loader2, Music, Sparkles, Tags, X } from "@lucide/vue";
 import { state, loadSongs } from "../composables/usePlayer.js";
-import { apiPost } from "../utils/apiClient.js";
+import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -202,7 +202,9 @@ const songName = computed(() =>
 const previewUrl = computed(() => {
   if (previewBroken.value) return "";
   if (remoteCover.value) return remoteCover.value;
-  return song.value ? "/api/cover?path=" + encodeURIComponent(song.value.path) : "";
+  return song.value
+    ? resolveServerUrl("/api/cover?path=" + encodeURIComponent(song.value.path))
+    : "";
 });
 
 // 每次打开：从当前歌曲同步表单 + 清空上次刮削结果
