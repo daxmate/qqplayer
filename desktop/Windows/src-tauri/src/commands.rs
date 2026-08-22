@@ -247,10 +247,14 @@ pub fn report(app: AppHandle, window: Window, msg: serde_json::Value) {
         ReportAction::OpenMini => {
             crate::windows::show_window(&app, "mini");
             crate::windows::hide_window(&app, "main");
+            // 迷你窗实际显示才点亮主页面顶栏开关（对齐 macOS showMiniPanel）
+            crate::backend::report_mini_status(true);
         }
         ReportAction::CloseMini => {
             crate::windows::hide_window(&app, "mini");
             crate::windows::show_window(&app, "main");
+            // 迷你窗隐藏 → 开关熄灭（对齐 macOS hideMiniPanel）
+            crate::backend::report_mini_status(false);
         }
         ReportAction::Lyric(show) => {
             if show {
@@ -261,6 +265,8 @@ pub fn report(app: AppHandle, window: Window, msg: serde_json::Value) {
         }
         ReportAction::HideMini => {
             crate::windows::hide_window(&app, "mini");
+            // 迷你窗自身关闭（✕/双击）→ 开关熄灭（对齐 macOS hideMiniPanel）
+            crate::backend::report_mini_status(false);
         }
         ReportAction::Resize { width, height } => {
             // 缩放目标 = 发出消息的窗口（迷你窗或歌词窗，对齐 macOS 按窗口路由 resize）

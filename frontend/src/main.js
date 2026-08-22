@@ -1,3 +1,13 @@
+// Tauri 壳（Windows/Linux）等价于 Swift 原生壳：统一补注入 qqplayerNative 标记。
+// 背景：macOS Swift 壳在 WKWebView 注入 window.qqplayerNative=true（main.swift atDocumentStart），
+// Tauri 壳没有这个标记，而前端大量逻辑（迷你窗/桌面歌词开关、选库、右键菜单、拖拽等）
+// 靠它区分"壳内 vs 浏览器"——缺失时退化为 URL scheme 调起分支（qqplayermini:// 等），
+// Windows/Linux 未注册 scheme → 面板静默打不开。此处检测到 Tauri 运行时补注入，
+// 所有壳分支（内部已统一走 useShellBridge 三端桥）即刻在 Windows/Linux 生效。
+if (typeof window !== "undefined" && window.__TAURI_INTERNALS__ && !window.qqplayerNative) {
+  window.qqplayerNative = true;
+}
+
 import { createApp } from "vue";
 import App from "./App.vue";
 import i18n from "./locales/i18n.js";

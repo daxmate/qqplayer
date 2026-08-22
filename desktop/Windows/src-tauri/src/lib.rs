@@ -86,8 +86,9 @@ pub fn run() {
                             let _ = windows::create_mini(&handle2);
                             let _ = windows::create_lyric(&handle2);
                             windows::reveal_main(&handle2);
-                            // 迷你窗状态上报：主页面顶栏迷你按钮靠它点亮（对齐 macOS reportMiniStatus）
-                            backend::report_mini_status(true);
+                            // 迷你窗状态不再启动即点亮：对齐 macOS——只有迷你窗实际显示才上报
+                            // true（commands.rs OpenMini/CloseMini/HideMini 各自上报），
+                            // 否则主页面顶栏开关一直常亮（Windows 实测 bug）。
                         }
                         BackendStartResult::NoEmbedded
                         | BackendStartResult::SpawnFailed
