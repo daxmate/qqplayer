@@ -3057,8 +3057,10 @@ describe("音乐库设置 librarySettings", () => {
 // ============ 迷你窗控制指令消费（setupPlayerActions） ============
 describe("setupPlayerActions（迷你窗控制指令消费）", () => {
   afterEach(() => {
-    vi.useRealTimers();
+    // 先清 timer 再恢复真实 timers：顺序反了 fake interval id 在真实环境 clear 无效，
+    // timer 泄漏到下一测试（CI 全量跑偶发多一次 fetch 的 flaky 根因）
     stopPlayerActions();
+    vi.useRealTimers();
   });
 
   function stubActions(actions) {
@@ -3159,9 +3161,10 @@ describe("setupPlayerActions（迷你窗控制指令消费）", () => {
 // ============ 迷你窗运行状态（顶栏开关点亮） ============
 describe("setupMiniStatus（迷你窗运行状态轮询）", () => {
   afterEach(() => {
-    vi.useRealTimers();
+    // 先清 timer 再恢复真实 timers（同上：避免 fake interval 泄漏到下一测试）
     stopMiniStatus();
     miniRunning.value = false;
+    vi.useRealTimers();
   });
 
   function stubStatus(running) {
