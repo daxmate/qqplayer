@@ -102,11 +102,23 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 窗口 ✕（三窗一致）：prevent_close + hide —— 隐藏不退出（对齐 macOS；
-            // 只有显式退出命令/进程终止才退）。隐藏 ≠ 销毁，窗口还在，事件循环不触发退出。
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                // 窗口 ✕（三窗一致）：prevent_close + hide —— 隐藏不退出（对齐 macOS；
+                // 只有显式退出命令/进程终止才退）。隐藏 ≠ 销毁，窗口还在，事件循环不触发退出。
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // 互斥守卫：主窗口被 OS 级路径调起（任务栏点击/Alt+Tab 恢复）获得焦点时
+                // 自动隐藏迷你窗（对齐 macOS showMainWindow 里 hideMiniPanel）。
+                // 正常 openMini 路径已 hide main，这里兜住绕过 report 分发的直接显示路径，
+                // 保证 main/mini 任意时刻只显示一个。hide_window 幂等，closeMini 重复调用无副作用。
+                WindowEvent::Focused(true) if window.label() == "main" => {
+                    let app = window.app_handle();
+                    crate::windows::hide_window(app, "mini");
+                    crate::backend::report_mini_status(false);
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

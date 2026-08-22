@@ -688,6 +688,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     func showMainWindow() {
         mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // 互斥守卫：主窗口被任何路径调起（Dock 点击/URL scheme/restore）时隐藏迷你窗，
+        // 保证 main/mini 任意时刻只显示一个（对齐 Windows 壳 on_window_event Focused 守卫；
+        // hideMiniPanel 幂等，closeMini 路径重复调用无副作用）
+        hideMiniPanel()
     }
 
     func showMiniPanel() {
