@@ -260,13 +260,13 @@ describe("assetForSong / assetForDict / assetForBook：沙盒路径内容寻址"
     sync._resetSyncForTests();
   });
 
-  it("assetForSong：url 绝对化，path = audio/<sha256>.<ext>", async () => {
+  it("assetForSong：url 绝对化，path = audio/<sha256>.<ext>，sha256 暂为空（内容校验待后端补哈希）", async () => {
     const item = await sync.assetForSong({ path: "/Music/foo.mp3", size: 100 });
     expect(item.url).toBe(
       "http://192.168.1.50:17627/api/audio?path=" + encodeURIComponent("/Music/foo.mp3"),
     );
     expect(item.path).toMatch(/^audio\/[0-9a-f]{64}\.mp3$/);
-    expect(item.sha256).toBe(item.path.slice(6, 70));
+    expect(item.sha256).toBe("");
     expect(item.size).toBe(100);
   });
 

@@ -160,7 +160,9 @@ async function assetHash(identity) {
   return h.toString(16).padStart(16, "0");
 }
 
-/** 歌曲 → 下载项 {url, path, sha256, size}（url 为桌面服务器绝对 URL） */
+/** 歌曲 → 下载项 {url, path, sha256, size}（url 为桌面服务器绝对 URL）
+ *  sha256 暂为 ""（后端 manifest 未提供内容哈希；原生侧空值跳过内容校验，
+ *  文件名仍用资产标识哈希做内容寻址） */
 export async function assetForSong(song) {
   if (!song || !song.path) return null;
   const url = resolveServerUrl("/api/audio?path=" + encodeURIComponent(song.path));
@@ -168,12 +170,12 @@ export async function assetForSong(song) {
   return {
     url,
     path: "audio/" + hash + (extOf(song.path) || ".m4a"),
-    sha256: hash,
+    sha256: "",
     size: song.size || 0,
   };
 }
 
-/** 词典 → 下载项（manifest dicts 条目：{name, path, size, mtime}） */
+/** 词典 → 下载项（manifest dicts 条目：{name, path, size, mtime}）；sha256 暂为空（同上） */
 export async function assetForDict(dict) {
   if (!dict || !dict.path) return null;
   const url = resolveServerUrl("/api/sync/dicts/file?path=" + encodeURIComponent(dict.path));
@@ -181,17 +183,17 @@ export async function assetForDict(dict) {
   return {
     url,
     path: "dicts/" + hash + (extOf(dict.path) || ".mdx"),
-    sha256: hash,
+    sha256: "",
     size: dict.size || 0,
   };
 }
 
-/** 书 → 下载项（manifest books 条目：{id, title, progress}） */
+/** 书 → 下载项（manifest books 条目：{id, title, progress}）；sha256 暂为空（同上） */
 export async function assetForBook(book) {
   if (!book || !book.id) return null;
   const url = resolveServerUrl("/api/books/" + encodeURIComponent(book.id) + "/file");
   const hash = await assetHash(book.id);
-  return { url, path: "books/" + hash + ".epub", sha256: hash, size: book.size || 0 };
+  return { url, path: "books/" + hash + ".epub", sha256: "", size: book.size || 0 };
 }
 
 // ---------- 资产查询与下载（ensureAsset） ----------

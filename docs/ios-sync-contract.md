@@ -16,7 +16,7 @@ Web（WKWebView 内前端）与 Native（Swift 壳）之间同步相关消息格
 ```
 - `url`：桌面服务器绝对 URL（media_url_template 展开后）
 - `path`：App 沙盒内相对存储路径（`Documents/qqplayer-assets/<path>`），下载完成后 AVPlayer 播 `file://` 全路径
-- `sha256`：期望校验值（hex）；下载完校验，不匹配则删除重下（最多 2 次）
+- `sha256`：期望内容校验值（hex）。**后端 manifest 暂未提供内容哈希时传空字符串 ""**，原生侧跳过内容校验（size 校验仍生效）；非空时严格校验，不匹配则删除重下（最多 2 次）
 - `size`：期望大小（可选，用于进度展示）
 - Native 侧串行/并发下载（并发 ≤3），断点续传（已有部分文件 + `Range` 请求），完成/失败逐条回传事件
 

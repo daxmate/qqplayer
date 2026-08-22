@@ -114,8 +114,8 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             if FileManager.default.fileExists(atPath: item.fileURL.path) {
                 if let size = r.size, fileSize(item.fileURL) != size {
                     try? FileManager.default.removeItem(at: item.fileURL)
-                } else if let hash = sha256(of: item.fileURL), hash == item.sha256 {
-                    emitDone(item, ok: true, sha256: hash, localURL: item.fileURL.absoluteString, error: nil)
+                } else if contentHashMatches(item, hash: sha256(of: item.fileURL)) {
+                    emitDone(item, ok: true, sha256: sha256(of: item.fileURL) ?? "", localURL: item.fileURL.absoluteString, error: nil)
                     continue
                 } else {
                     try? FileManager.default.removeItem(at: item.fileURL)
@@ -124,9 +124,9 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             // .part 已完整（上次下载完未落盘）→ 校验后直接落盘
             if !FileManager.default.fileExists(atPath: item.fileURL.path),
                let size = r.size, fileSize(item.partURL) >= size {
-                if let hash = sha256(of: item.partURL), hash == item.sha256 {
+                if contentHashMatches(item, hash: sha256(of: item.partURL)) {
                     try? FileManager.default.moveItem(at: item.partURL, to: item.fileURL)
-                    emitDone(item, ok: true, sha256: hash, localURL: item.fileURL.absoluteString, error: nil)
+                    emitDone(item, ok: true, sha256: sha256(of: item.partURL) ?? "", localURL: item.fileURL.absoluteString, error: nil)
                     continue
                 }
                 try? FileManager.default.removeItem(at: item.partURL)
@@ -301,7 +301,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             retry(item, reason: "临时文件读取失败")
             return
         }
-        guard hash == item.sha256 else {
+        guard contentHashMatches(item, hash: hash) else {
             retry(item, reason: "sha256 不匹配")
             return
         }
@@ -313,6 +313,15 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             return
         }
         emitDone(item, ok: true, sha256: hash, localURL: item.fileURL.absoluteString, error: nil)
+    }
+
+    /// 内容校验：sha256 为空或非 64 位 hex（后端 manifest 暂未提供真实内容哈希时前端传空占位）
+    /// → 跳过内容校验（size 校验仍生效）；真实内容校验待后端补 sha256 字段后启用
+    private func contentHashMatches(_ item: Item, hash: String?) -> Bool {
+        let expected = item.sha256
+        if expected.isEmpty || expected.count != 64 { return true }
+        guard let hash else { return false }
+        return hash == expected
     }
 
     /// 校验失败：删 .part 重下（≤2 次）；超限判失败
