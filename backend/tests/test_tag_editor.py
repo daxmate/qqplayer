@@ -276,7 +276,11 @@ def test_fetch_cover_ok_and_fail(monkeypatch):
 
 # ============ API 路由 ============
 def _api_files(tmp_path, monkeypatch, old):
-    """把三个数据文件指到临时目录并预置旧路径引用；返回数据目录"""
+    """预置三个旧 JSON 数据文件（favorites/playlists/playback）含旧路径引用。
+
+    SQLite 版：JSON 文件由首次 DB 访问时的自动迁移导入（旧文件改 .migrated.bak），
+    迁移源路径与 DB 都落在 tmp 临时目录（DB 路径由 conftest 注入）。
+    """
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(state, "DATA_DIR", data_dir)
@@ -311,7 +315,9 @@ def _api_files(tmp_path, monkeypatch, old):
 
 
 def test_api_tags_write_and_migrate_refs(tmp_path, monkeypatch):
-    """写标签 + 改名 + favorites/playlists/playback 三文件旧路径自动迁移"""
+    """写标签 + 改名 + favorites/playlists/playback 旧路径自动迁移（JSON → SQLite）"""
+    from app import db as app_db
+
     f = tmp_path / "song.mp3"
     make_mp3(f)
     data_dir = _api_files(tmp_path, monkeypatch, str(f))
@@ -326,17 +332,17 @@ def test_api_tags_write_and_migrate_refs(tmp_path, monkeypatch):
     assert data["renamed"] is True
     assert data["name"] == "安静"
     assert not f.exists() and new.exists()
-    # 三文件迁移
-    assert json.loads((data_dir / "favorites.json").read_text(encoding="utf-8")) == [
-        str(new),
-        "/other/fav.mp3",
-    ]
-    pls = json.loads((data_dir / "playlists.json").read_text(encoding="utf-8"))
+    # 首次 DB 访问触发自动迁移：三个旧 JSON 改名 .migrated.bak
+    assert (data_dir / "favorites.json.migrated.bak").exists()
+    assert (data_dir / "playlists.json.migrated.bak").exists()
+    assert (data_dir / "playback.json.migrated.bak").exists()
+    # 三表迁移 + 旧路径引用替换为改名后路径
+    assert app_db.favorites_load() == [str(new), "/other/fav.mp3"]
+    pls = app_db.playlists_load()
     assert pls[0]["songPaths"] == [str(new), "/other/song.mp3", str(new)]
     assert pls[1]["songPaths"] == []
-    pb = json.loads((data_dir / "playback.json").read_text(encoding="utf-8"))
-    assert pb[0]["path"] == str(new)
-    assert pb[1]["path"] == "/other/rec.mp3"
+    records = app_db.playback_all()
+    assert [r_["path"] for r_ in records] == [str(new), "/other/rec.mp3"]
 
 
 def test_api_tags_all_empty_400(tmp_path):

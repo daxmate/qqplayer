@@ -274,17 +274,14 @@ def test_api_cover_from_file(tmp_path):
 
 
 # ============ 收藏 ============
-def test_api_favorites_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
+# ============ 收藏（SQLite favorites 表；DB 路径由 conftest 注入临时目录） ============
+def test_api_favorites_empty():
     r = client.get("/api/favorites")
     assert r.status_code == 200
     assert r.json() == {"paths": []}
 
 
-def test_api_favorites_toggle(tmp_path, monkeypatch):
-    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
+def test_api_favorites_toggle():
     # 收藏
     r = client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
     assert r.json() == {"path": "/a.mp3", "favorited": True}
@@ -297,18 +294,14 @@ def test_api_favorites_toggle(tmp_path, monkeypatch):
     assert r.json() == {"paths": []}
 
 
-def test_api_favorites_multi(tmp_path, monkeypatch):
-    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
+def test_api_favorites_multi():
     client.post("/api/favorites/toggle", json={"path": "/a.mp3"})
     client.post("/api/favorites/toggle", json={"path": "/b.mp3"})
     r = client.get("/api/favorites")
     assert r.json() == {"paths": ["/a.mp3", "/b.mp3"]}
 
 
-def test_api_favorites_missing_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(state, "FAVORITES_FILE", tmp_path / "favorites.json")
+def test_api_favorites_missing_path():
     r = client.post("/api/favorites/toggle", json={})
     assert r.status_code == 400
 
@@ -317,11 +310,11 @@ def test_api_favorites_missing_path(tmp_path, monkeypatch):
 
 
 def _playback(tmp_path, monkeypatch):
-    """把 PLAYBACK_FILE 指到临时目录并返回该路径"""
-    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
-    p = tmp_path / "playback.json"
-    monkeypatch.setattr(state, "PLAYBACK_FILE", p)
-    return p
+    """播放记录隔离由 conftest 的 SQLite fixture 保证（DB_PATH → tmp）
+
+    保留此签名以便用例显式指定 PLAYBACK_LIMIT 等行为；返回 None。
+    """
+    return None
 
 
 def _rec(**overrides):
@@ -344,14 +337,14 @@ def _rec(**overrides):
 
 
 def test_api_playback_append(tmp_path, monkeypatch):
-    p = _playback(tmp_path, monkeypatch)
+    _playback(tmp_path, monkeypatch)
     r = client.post("/api/playback", json=_rec())
     assert r.json() == {"ok": True}
-    data = json.loads(p.read_text(encoding="utf-8"))
-    assert len(data) == 1
-    assert data[0]["path"] == "/songs/a.mp3"
-    assert data[0]["played"] == 180.5
-    assert data[0]["ratio"] == 0.9
+    body = client.get("/api/playback").json()
+    assert body["count"] == 1
+    assert body["records"][0]["path"] == "/songs/a.mp3"
+    assert body["records"][0]["played"] == 180.5
+    assert body["records"][0]["ratio"] == 0.9
 
 
 def test_api_playback_too_short_skipped(tmp_path, monkeypatch):
@@ -360,7 +353,7 @@ def test_api_playback_too_short_skipped(tmp_path, monkeypatch):
     assert r.json() == {"ok": False, "reason": "invalid"}
     # 2.9s 也不记（阈值 3s）
     client.post("/api/playback", json=_rec(played=2.9))
-    assert not (tmp_path / "playback.json").exists()
+    assert client.get("/api/playback").json() == {"records": [], "count": 0, "limit": 5000}
 
 
 def test_api_playback_missing_path(tmp_path, monkeypatch):
@@ -370,16 +363,16 @@ def test_api_playback_missing_path(tmp_path, monkeypatch):
 
 
 def test_api_playback_rollover_limit(tmp_path, monkeypatch):
-    p = _playback(tmp_path, monkeypatch)
+    _playback(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "PLAYBACK_LIMIT", 5)
     for i in range(7):
         client.post(
             "/api/playback", json=_rec(path=f"/songs/{i}.mp3", ts=f"2026-08-12T12:0{i}:00+00:00")
         )
-    data = json.loads(p.read_text(encoding="utf-8"))
-    assert len(data) == 5  # 只留最近 5 条
-    assert data[0]["path"] == "/songs/2.mp3"
-    assert data[-1]["path"] == "/songs/6.mp3"
+    body = client.get("/api/playback").json()
+    assert body["count"] == 5  # 只留最近 5 条（SQLite 滚动截断）
+    assert body["records"][0]["path"] == "/songs/6.mp3"  # 最新在前
+    assert body["records"][-1]["path"] == "/songs/2.mp3"
 
 
 def test_api_playback_list_sorted(tmp_path, monkeypatch):
@@ -501,14 +494,13 @@ def test_merge_translation_none():
 
 
 # ============ 歌单 ============
-def _pl_client(tmp_path, monkeypatch):
-    monkeypatch.setattr(state, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(state, "PLAYLISTS_FILE", tmp_path / "playlists.json")
+def _pl_client():
+    """歌单隔离由 conftest 的 SQLite fixture 保证（DB_PATH → tmp）"""
     return client
 
 
-def test_api_playlists_create_and_list(tmp_path, monkeypatch):
-    _pl_client(tmp_path, monkeypatch)
+def test_api_playlists_create_and_list():
+    _pl_client()
     assert client.get("/api/playlists").json() == {"playlists": []}
     r = client.post("/api/playlists", json={"name": "日语歌"})
     assert r.status_code == 200
@@ -520,8 +512,8 @@ def test_api_playlists_create_and_list(tmp_path, monkeypatch):
     assert len(r.json()["playlists"]) == 1
 
 
-def test_api_playlists_rename_delete(tmp_path, monkeypatch):
-    _pl_client(tmp_path, monkeypatch)
+def test_api_playlists_rename_delete():
+    _pl_client()
     pid = client.post("/api/playlists", json={"name": "旧名"}).json()["id"]
     r = client.patch(f"/api/playlists/{pid}", json={"name": "新名"})
     assert r.json()["name"] == "新名"
@@ -531,10 +523,10 @@ def test_api_playlists_rename_delete(tmp_path, monkeypatch):
     assert client.get("/api/playlists").json() == {"playlists": []}
 
 
-def test_api_playlists_songs_add_remove_order(tmp_path, monkeypatch):
+def test_api_playlists_songs_add_remove_order(tmp_path):
     from urllib.parse import quote
 
-    _pl_client(tmp_path, monkeypatch)
+    _pl_client()
     pid = client.post("/api/playlists", json={"name": "测试"}).json()["id"]
     # 加歌（去重）
     r = client.post(f"/api/playlists/{pid}/songs", json={"path": "/a.mp3"})
@@ -555,14 +547,24 @@ def test_api_playlists_songs_add_remove_order(tmp_path, monkeypatch):
     assert client.put("/api/playlists/xxx/order", json={"paths": []}).status_code == 404
 
 
-def test_api_playlists_persist(tmp_path, monkeypatch):
-    """歌单写入文件后重新加载仍在（持久化）"""
-    _pl_client(tmp_path, monkeypatch)
+def test_api_playlists_persist(tmp_path):
+    """歌单写入 SQLite 后重新连接数据库仍在（磁盘持久化）"""
+    _pl_client()
     pid = client.post("/api/playlists", json={"name": "持久"}).json()["id"]
     client.post(f"/api/playlists/{pid}/songs", json={"path": "/x.mp3"})
-    # 模拟重启：重新加载
-    data = json.loads((tmp_path / "playlists.json").read_text(encoding="utf-8"))
-    assert data[0]["name"] == "持久" and data[0]["songPaths"] == ["/x.mp3"]
+    # 模拟重启：用全新连接直查数据库文件
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / "qqplayer_test.db")
+    try:
+        row = conn.execute("SELECT name FROM playlists WHERE id = ?", (pid,)).fetchone()
+        songs = conn.execute(
+            "SELECT path FROM playlist_songs WHERE playlist_id = ? ORDER BY position", (pid,)
+        ).fetchall()
+    finally:
+        conn.close()
+    assert row[0] == "持久"
+    assert [s[0] for s in songs] == ["/x.mp3"]
 
 
 # ============ 库监听（watchdog）与扫描缓存 ============

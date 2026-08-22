@@ -1,6 +1,6 @@
-"""标签服务：mutagen 元数据提取 + 改名后数据文件路径引用迁移。"""
+"""标签服务：mutagen 元数据提取 + 改名后 SQLite 路径引用迁移。"""
 
-from app import state
+from app import db
 
 try:
     from mutagen import File as MutagenFile
@@ -43,27 +43,10 @@ def extract_tags(f):
 
 
 def _migrate_path_refs(old: str, new: str):
-    """改名后迁移数据文件里的旧路径引用：favorites / playlists(songPaths) / playback(path)
+    """改名后迁移数据里的旧路径引用：favorites / playlists(songPaths) / playback(path)
 
-    只在实际命中旧路径时才写文件（避免无谓写入）。
+    SQLite 版：三个 DAO 各自先查命中再写（等价原「只在实际命中旧路径时才写文件」）。
     """
-    favs = state.favorites_store.load()
-    if old in favs:
-        state.favorites_store.save([new if p == old else p for p in favs])
-    playlists = state.playlists_store.load()
-    changed = False
-    for pl in playlists:
-        song_paths = pl.get("songPaths")
-        if isinstance(song_paths, list) and old in song_paths:
-            pl["songPaths"] = [new if p == old else p for p in song_paths]
-            changed = True
-    if changed:
-        state.playlists_store.save(playlists)
-    records = state.playback_store.load()
-    changed = False
-    for rec in records:
-        if isinstance(rec, dict) and rec.get("path") == old:
-            rec["path"] = new
-            changed = True
-    if changed:
-        state.playback_store.save(records)
+    db.favorites_replace_path(old, new)
+    db.playlists_replace_path(old, new)
+    db.playback_replace_path(old, new)

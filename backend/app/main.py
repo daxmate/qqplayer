@@ -14,7 +14,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app import state
+from app import db, state
 from app.middleware import register_auth_middleware
 from app.routers import include_routers
 from app.services import mdns
@@ -73,9 +73,12 @@ def main():
     # 默认曲库目录不存在时自动创建（默认库 / argv / 持久化路径已定，最后统一建）
     state.LIBRARY.mkdir(parents=True, exist_ok=True)
     init_library()
+    # SQLite 存储：建表 + 旧 JSON 自动迁移（幂等；迁移失败只记 warning 不阻断启动）
+    db.init_and_migrate()
     url = f"http://localhost:{state.DEFAULT_PORT}"
     print(f"🎵 music-player 已启动: {url}")
     print(f"   歌曲库: {state.LIBRARY}")
+    print(f"   数据存储: {db.db_path()} (SQLite, WAL)")
     if settings_service.load_settings()["autoRefresh"]:
         print(f"   📁 监听歌曲库变动（去抖 {state.WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
     else:

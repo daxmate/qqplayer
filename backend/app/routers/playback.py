@@ -1,6 +1,6 @@
 """播放记录 / 桌面歌词迷你窗状态路由。
 
-- /api/playback(POST 上报 / GET 列表 / GET stats 统计)
+- /api/playback(POST 上报 / GET 列表 / GET stats 统计；SQLite playback_events 表持久化)
 - /api/now-playing(GET/POST)、/api/player/action、/api/player/actions
 - /api/mini/status(GET/POST)
 """
@@ -10,29 +10,19 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from app import state
+from app import db, state
 
 router = APIRouter()
 
 
 def _load_playback() -> list[dict]:
-    """加载全部播放记录（文件不存在/损坏返回空）"""
-    return state.playback_store.load()
-
-
-def _save_playback(records: list[dict]):
-    """保存播放记录（写失败不影响播放功能）"""
-    state.playback_store.save(records)
+    """加载全部播放记录（SQLite；空库返回空列表）"""
+    return db.playback_all()
 
 
 def _append_playback(record: dict):
-    """追加一条播放记录；超过 PLAYBACK_LIMIT 时删最旧（带锁防并发读改写丢数据）"""
-    with state._playback_lock:
-        records = _load_playback()
-        records.append(record)
-        if len(records) > state.PLAYBACK_LIMIT:
-            records = records[-state.PLAYBACK_LIMIT :]
-        _save_playback(records)
+    """追加一条播放记录；超过 PLAYBACK_LIMIT 时删最旧（db 层单事务 + 全局写锁）"""
+    db.playback_append(record)
 
 
 def _playback_record(body: dict) -> dict | None:

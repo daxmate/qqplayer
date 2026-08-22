@@ -12,7 +12,7 @@ from typing import Annotated
 import send2trash
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app import state
+from app import db, state
 from app.services import download, library_scan
 from app.services import settings as settings_service
 
@@ -105,27 +105,13 @@ async def api_set_library(body: dict):
 
 # ============ 曲库删除（移废纸篓 + 引用清理）============
 def _remove_paths_from_favorites(paths: list[str]):
-    """从收藏中移除给定路径（无匹配则不动文件）"""
-    favs = state.favorites_store.load()
-    removed = set(paths)
-    new_favs = [p for p in favs if p not in removed]
-    if len(new_favs) != len(favs):
-        state.favorites_store.save(new_favs)
+    """从收藏中移除给定路径（SQLite；无匹配则不动）"""
+    db.favorites_remove(paths)
 
 
 def _remove_paths_from_playlists(paths: list[str]):
-    """从所有歌单的 songPaths 中移除给定路径（无匹配则不动文件）"""
-    playlists = state.playlists_store.load()
-    removed = set(paths)
-    changed = False
-    for pl in playlists:
-        song_paths = pl.get("songPaths") or []
-        new_paths = [p for p in song_paths if p not in removed]
-        if len(new_paths) != len(song_paths):
-            pl["songPaths"] = new_paths
-            changed = True
-    if changed:
-        state.playlists_store.save(playlists)
+    """从所有歌单的 songPaths 中移除给定路径（SQLite；无匹配则不动）"""
+    db.playlists_remove_paths(paths)
 
 
 @router.delete("/api/library/songs")

@@ -2,6 +2,8 @@
 
 磁盘布局：books/<id>/ 下 book.epub + cover.jpg|png + index.json
 书架元数据：DATA_DIR/books.json（books_store，JsonStore 延迟解析路径）
+阅读进度：SQLite reading_progress 表（books.json 的 progress 字段只读不再写入；
+首次启动自动迁移，见 app/db.py）
 """
 
 import json
@@ -15,7 +17,7 @@ import send2trash
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 
-from app import state
+from app import db, state
 from app.services.book_import import BadEpubError, parse_epub
 
 router = APIRouter()
@@ -33,10 +35,19 @@ def _book_dir(bid: str) -> Path:
 
 
 # ============ 书架 ============
+def _books_with_progress() -> list[dict]:
+    """书架列表：书籍元数据 + SQLite 进度合并（无进度记录则保持 progress=None）"""
+    progs = db.progress_all()
+    return [
+        {**b, "progress": progs.get(b.get("id"), b.get("progress"))}
+        for b in state.books_store.load()
+    ]
+
+
 @router.get("/api/books")
 def api_books():
-    """书架全部书籍（按 addedAt 倒序）"""
-    books = state.books_store.load()
+    """书架全部书籍（按 addedAt 倒序；progress 来自 SQLite）"""
+    books = _books_with_progress()
     return sorted(books, key=lambda b: b.get("addedAt", 0), reverse=True)
 
 
@@ -123,15 +134,14 @@ def api_books_cover(bid: str):
 @router.get("/api/books/{bid}/progress")
 def api_books_progress_get(bid: str):
     """阅读进度 {cfi, location?, updatedAt}，未读返回 null"""
-    b = _find_book(state.books_store.load(), bid)
-    if b is None:
+    if _find_book(state.books_store.load(), bid) is None:
         raise HTTPException(404, "书籍不存在")
-    return b.get("progress")
+    return db.progress_get(bid)
 
 
 @router.put("/api/books/{bid}/progress")
 def api_books_progress_put(bid: str, body: dict):
-    """保存阅读进度：body {cfi: str, location?: number, updatedAt: int}"""
+    """保存阅读进度：body {cfi: str, location?: number, updatedAt: int}（写 SQLite）"""
     cfi = body.get("cfi")
     if not isinstance(cfi, str) or not cfi.strip():
         raise HTTPException(400, "cfi 必须是字符串")
@@ -141,16 +151,12 @@ def api_books_progress_put(bid: str, body: dict):
     location = body.get("location")
     if location is not None and not isinstance(location, (int, float)):
         raise HTTPException(400, "location 必须是数字")
-    books = state.books_store.load()
-    b = _find_book(books, bid)
-    if b is None:
+    if _find_book(state.books_store.load(), bid) is None:
         raise HTTPException(404, "书籍不存在")
     progress = {"cfi": cfi, "updatedAt": updated_at}
     if location is not None:
         progress["location"] = location
-    b["progress"] = progress
-    state.books_store.save(books)
-    return progress
+    return db.progress_set(bid, progress)
 
 
 @router.delete("/api/books/{bid}")
@@ -163,6 +169,7 @@ def api_books_delete(bid: str):
     if _find_book(books, bid) is None:
         raise HTTPException(404, "书籍不存在")
     state.books_store.save([b for b in books if b.get("id") != bid])
+    db.progress_delete(bid)  # 阅读进度一并清理（SQLite）
     d = _book_dir(bid)
     try:
         if d.exists():

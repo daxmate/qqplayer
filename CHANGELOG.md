@@ -5,6 +5,17 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 🔧 SQLite 持久化升级（iOS companion 同步底座）
+
+- **引入 SQLite 存储层**（标准库 sqlite3，无新依赖）：`app/db.py` DAO，WAL 模式 + busy_timeout + 每操作短连接 + 全局写锁，FastAPI 多线程安全
+- **五张表首次启动自动建表**：`favorites`（path/name/artist/album/ts）、`playlists` + `playlist_songs` 关联表（重复路径保留）、`playback_events`（对齐 playback.json 全字段，滚动截断 5000 条语义保留）、`reading_progress`（cfi/location/updatedAt）、`ops`（append + list since 游标，同步 API 待任务 B）
+- **旧 JSON 首次启动自动迁移（幂等）**：favorites.json / playlists.json / playback.json 存在且对应表为空 → 导入 → 旧文件改名 `<name>.migrated.bak`（不删除）；books.json 只迁出 progress 字段（books.json 仍是书架元数据源，不改名）；迁移失败只记 warning 不阻断启动，下次再试
+- **服务层切 SQLite，对外 API 零变化**：favorites/playlists/playback 路由与 library 删除引用清理、tags 改名路径迁移、books 阅读进度读写全走 SQLite；GET /api/books 合并 SQLite 进度；settings/pairing/queue_order/network_songs/annotations/vocab 仍走 JSON 不动
+- **存储路径可配置**：DB 在 `DATA_DIR/qqplayer.db`（QQPLAYER_DATA_DIR 可覆盖），测试通过 conftest autouse fixture 注入临时 DB + 迁移源路径，绝不触碰真实用户数据
+- 测试：新增 tests/test_sqlite_storage.py 20 用例（建表/迁移含幂等与失败容错/DAO 读写/ops 游标/滚动截断/多线程并发/API 集成），全量 684 全绿（原 664 零回归）
+
 ## [1.0.0] - 2026-08-22
 
 ### 📦 打包与分发（首个自包含安装包）

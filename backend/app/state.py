@@ -45,6 +45,11 @@ def _default_data_dir() -> Path:
 
 # 用户数据目录（收藏等，不放仓库）；打包版冒烟测试用 QQPLAYER_DATA_DIR 覆盖防污染真实数据
 DATA_DIR = _default_data_dir()
+# SQLite 存储（标准库 sqlite3，WAL）：favorites/playlists/playback_events/reading_progress/ops 表
+# （iOS companion 同步底座；旧 JSON 首次启动自动迁移，settings/pairing/大文件仍走原 JSON）
+DB_PATH = DATA_DIR / "qqplayer.db"
+# sqlite3 连接 busy 超时（秒）：并发写锁等待上限
+DB_BUSY_TIMEOUT = 5
 FAVORITES_FILE = DATA_DIR / "favorites.json"
 PLAYLISTS_FILE = DATA_DIR / "playlists.json"
 PLAYBACK_FILE = DATA_DIR / "playback.json"
@@ -258,17 +263,12 @@ ALIGN_MODEL_URL = "https://modelscope.cn/models/mlx-community/Qwen3-ForcedAligne
 # 词典上传目录：上传的 MDX/MDD 文件（<uuid>.mdx / <uuid>.mdd，同 uuid 自动配对）
 DICTS_DIR = DATA_DIR / "dicts"
 
-# ============ 播放记录写锁（避免并发上报时读改写竞争丢数据）============
-_playback_lock = threading.Lock()
-
 # ============ P1 存储抽象：JSON store 实例 ============
 # 路径全部延迟解析（path_getter 可调用）：测试 patch state.XXX_FILE 后
 # load/save 自动走新路径，import 时不需要固化路径。
-favorites_store = JsonStore(lambda: FAVORITES_FILE, default=[])
-playlists_store = JsonStore(lambda: PLAYLISTS_FILE, default=[])
+# 注：favorites/playlists/playback 已迁 SQLite（app/db.py），此处只保留仍用 JSON 的域。
 queue_order_store = JsonStore(lambda: QUEUE_ORDER_FILE, default=[])
 network_songs_store = JsonStore(lambda: NETWORK_SONGS_FILE, default=[])
-playback_store = JsonStore(lambda: PLAYBACK_FILE, default=[])
 books_store = JsonStore(lambda: BOOKS_FILE, default=[])
 annotations_store = JsonStore(lambda: ANNOTATIONS_FILE, default={})
 vocab_store = JsonStore(lambda: VOCAB_FILE, default=[])
