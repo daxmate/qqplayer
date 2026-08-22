@@ -46,12 +46,18 @@ struct WebShellView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         let server: PairingRecord
         let playerBridge = AVPlayerBridge()
+        let downloadManager = DownloadManager()
         var loadedServerId: String
         var webView: WKWebView?
         private var webReady = false
 
         /// 排队待 Web 的事件（nativeReady 前不推，防事件早于适配层安装）
         private var pendingEvents: [(String, [String: Any])] = []
+
+        /// scenePhase → appState 事件（App 侧 NotificationCenter 中转）
+        private var scenePhaseObserver: NSObjectProtocol?
+        /// hasAsset 请求的 requestId 队列（path → [requestId]，逐个消费）
+        private var pendingAssetStatus: [String: [String]] = [:]
 
         let userContentController: WKUserContentController
 
@@ -70,6 +76,40 @@ struct WebShellView: UIViewRepresentable {
                 if let t { payload["t"] = t }
                 self?.pushToWeb(event: "remoteCommand", payload: payload)
             }
+            // 下载管理器事件 → Web（syncAssetProgress / syncAssetDone / assetStatus）
+            downloadManager.onProgress = { [weak self] path, received, total in
+                self?.pushToWeb(event: "syncAssetProgress", payload: ["path": path, "received": received, "total": total])
+            }
+            downloadManager.onDone = { [weak self] path, ok, sha256, localURL, error in
+                var payload: [String: Any] = ["path": path, "ok": ok, "sha256": sha256]
+                if let localURL { payload["localURL"] = localURL }
+                if let error { payload["error"] = error }
+                self?.pushToWeb(event: "syncAssetDone", payload: payload)
+            }
+            downloadManager.onAssetStatus = { [weak self] path, exists, localURL in
+                guard let self else { return }
+                var payload: [String: Any] = ["path": path, "exists": exists]
+                if let localURL { payload["localURL"] = localURL }
+                if var ids = self.pendingAssetStatus[path], !ids.isEmpty {
+                    payload["requestId"] = ids.removeFirst()
+                    self.pendingAssetStatus[path] = ids.isEmpty ? nil : ids
+                }
+                self.pushToWeb(event: "assetStatus", payload: payload)
+            }
+            // scenePhase 变化（App 生命周期）→ appState 事件
+            scenePhaseObserver = NotificationCenter.default.addObserver(
+                forName: .qqplayerScenePhase, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let state = note.userInfo?["state"] as? String else { return }
+                self?.pushToWeb(event: "appState", payload: ["state": state])
+            }
+        }
+
+        deinit {
+            if let scenePhaseObserver {
+                NotificationCenter.default.removeObserver(scenePhaseObserver)
+            }
+            downloadManager.shutdown()
         }
 
         // MARK: 注入脚本
@@ -212,10 +252,33 @@ struct WebShellView: UIViewRepresentable {
             switch cmd {
             case "nativeReady":
                 webReady = true
-                for (name, payload) in pendingEvents {
-                    pushToWeb(event: name, payload: payload)
+                flushPendingEvents()
+            case "syncDownload":
+                // 批量下载资产：{url, path, sha256, size?}[]（path 为沙盒相对路径）
+                guard let items = body["items"] as? [[String: Any]] else { break }
+                var requests: [DownloadManager.Request] = []
+                for it in items {
+                    guard let urlString = it["url"] as? String,
+                          let url = URL(string: urlString),
+                          url.scheme == "http" || url.scheme == "https",
+                          let path = it["path"] as? String,
+                          let sha256 = it["sha256"] as? String,
+                          DownloadManager.isSafePath(path)
+                    else { continue }
+                    let size = (it["size"] as? NSNumber)?.int64Value
+                    requests.append(DownloadManager.Request(url: url, path: path, sha256: sha256, size: size))
                 }
-                pendingEvents.removeAll()
+                downloadManager.enqueue(requests)
+            case "hasAsset":
+                // 查本地资产：回传 assetStatus {requestId, path, exists, localURL}
+                if let path = body["path"] as? String,
+                   let requestId = body["requestId"] as? String,
+                   DownloadManager.isSafePath(path) {
+                    pendingAssetStatus[path, default: []].append(requestId)
+                    downloadManager.checkAsset(path: path)
+                }
+            case "cancelDownloads":
+                downloadManager.cancelAll()
             case "unauthorized":
                 // 401：token 失效 → 清 Keychain 配对 → 回发现页重新配对
                 DispatchQueue.main.async {
@@ -238,10 +301,7 @@ struct WebShellView: UIViewRepresentable {
                 guard let self, let ok = result as? Bool, ok else { return }
                 if !self.webReady {
                     self.webReady = true
-                    for (name, payload) in self.pendingEvents {
-                        self.pushToWeb(event: name, payload: payload)
-                    }
-                    self.pendingEvents.removeAll()
+                    self.flushPendingEvents()
                 }
                 // 兑底重注入：documentStart user script 可能错过（页面已加载），
                 // 这里再设一次 bridge.server/token + localStorage（apiClient 读得到）
@@ -256,6 +316,15 @@ struct WebShellView: UIViewRepresentable {
         }
 
         // MARK: Native → Web 事件
+
+        /// 就绪后统一冲刷排队事件；并补发当前生命周期状态（Web 适配层一就绪即知，不用等变化）
+        private func flushPendingEvents() {
+            for (name, payload) in pendingEvents {
+                pushToWeb(event: name, payload: payload)
+            }
+            pendingEvents.removeAll()
+            pushToWeb(event: "appState", payload: ["state": ScenePhaseStore.current])
+        }
 
         func pushToWeb(event: String, payload: [String: Any]) {
             guard let webView else { return }
@@ -325,4 +394,5 @@ struct WebShellView: UIViewRepresentable {
 
 extension Notification.Name {
     static let qqplayerTokenInvalid = Notification.Name("qqplayerTokenInvalid")
+    static let qqplayerScenePhase = Notification.Name("qqplayerScenePhase")
 }
