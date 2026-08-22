@@ -16,7 +16,7 @@ esac
 ARCH="${ARCH:-arm64}"
 case "$ARCH" in
   arm64|x86_64) : ;;
-  *) echo "⚠️ 不支持的 ARCH: $ARCH（仅支持 arm64 / x86_64）" >&2; exit 1 ;;
+  *) echo "⚠️ 不支持的 ARCH: ${ARCH}（仅支持 arm64 / x86_64）" >&2; exit 1 ;;
 esac
 
 APP_NAME="QQPlayer"
@@ -109,7 +109,7 @@ if [ -d "$BACKEND_SRC" ]; then
     cp -R "$BACKEND_SRC" "$APP/Contents/Resources/backend"
     echo "✅ 内置后端已就位: $APP/Contents/Resources/backend"
 else
-    echo "ℹ️  未找到内置后端（$BACKEND_SRC），跳过（开发模式直连 launchd 服务）"
+    echo "ℹ️  未找到内置后端（${BACKEND_SRC}），跳过（开发模式直连 launchd 服务）"
 fi
 
 codesign --force --sign - "$APP" 2>/dev/null || true
