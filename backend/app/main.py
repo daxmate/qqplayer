@@ -12,6 +12,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import db, state
@@ -33,6 +34,15 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="music-player", lifespan=_lifespan)
+
+# iOS 壳 file:// 页面（origin=null）访问局域网 API 需要 CORS 放行；
+# 鉴权由 pairing 中间件兜底（localhost 免鉴权 + Bearer token），公开 API 仅配对/发现。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 鉴权中间件：保护除白名单外所有 /api/*（localhost 免鉴权；QQPLAYER_ENABLE_AUTH=0 关闭）
 register_auth_middleware(app)

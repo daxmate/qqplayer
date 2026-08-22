@@ -62,6 +62,7 @@ struct DiscoveryView: View {
                             }
                         }
                     }
+            }
                 Section {
                     Button {
                         manualAddress = ""
@@ -72,7 +73,6 @@ struct DiscoveryView: View {
                 } footer: {
                     Text("mDNS 未发现时手动输入桌面端 IP:端口（如 192.168.1.5:17627）")
                 }
-            }
             }
             .navigationTitle("QQPlayer")
             .alert("手动添加服务器", isPresented: $showManualAdd) {
