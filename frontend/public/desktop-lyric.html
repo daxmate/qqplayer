@@ -261,6 +261,17 @@
         }
       }
 
+      // 整窗拖动：歌词窗无交互控件，按住任意处拖动窗口（对齐 mini.html 的 nativeDrag；
+      // macOS 壳靠 NSPanel isMovableByWindowBackground 原生兜底，Tauri 壳（Windows/Linux）
+      // 无边框透明窗口没有系统标题栏，必须显式调 start_dragging）
+      document.addEventListener("pointerdown", () => {
+        try {
+          bridge.report({ type: "nativeDrag" });
+        } catch {
+          /* 浏览器预览无原生桥：忽略 */
+        }
+      });
+
       // 启动立即查一次（设置+播放状态），然后 500ms 轮询
       tick();
       setInterval(tick, 500);
