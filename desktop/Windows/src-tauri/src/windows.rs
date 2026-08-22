@@ -38,6 +38,7 @@ pub fn create_mini(app: &AppHandle) -> tauri::Result<()> {
     .resizable(false)
     .decorations(false)
     .transparent(true)
+    .shadow(false) // 无边框透明窗默认 shadow=true 会带 1px 白边 + Win11 圆角（对齐 macOS 壳纯透明）
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(false)
@@ -57,6 +58,7 @@ pub fn create_lyric(app: &AppHandle) -> tauri::Result<()> {
     .resizable(true)
     .decorations(false)
     .transparent(true)
+    .shadow(false) // 无边框透明窗默认 shadow=true 会带 1px 白边 + Win11 圆角（对齐 macOS 壳纯透明）
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(false)
