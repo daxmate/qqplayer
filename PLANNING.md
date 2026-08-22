@@ -88,9 +88,14 @@
 
 1. 桌面端完善 ✅（阅读器/歌词对齐/Windows Tauri 壳/打包链路均已完）
 2. 移动端启动（进行中）：**优先 iOS**（Swift 壳 + WKWebView 复用前端 + AVPlayer 桥），再 Android / 鸿蒙
-   - ① 桌面端配对 API（2026-08-22 定案，待开发）
-   - ② 前端数据层抽象（2026-08-22 定案：apiClient 统一出口 + IndexedDB 缓存 + 声明式缓存 + 写路径 dirty 队列，待开发）
-   - ③ iOS 壳（mDNS 发现 + 配对 + AVPlayer 桥 + 同步/缓存 + 桌面端同步 API）
+   - ① 桌面端配对 API（✅ 已合入 main `65aa22e`，待部署生效）
+   - ② 前端数据层抽象（✅ 已合入 main `50ef79e`）
+   - ③ iOS 壳（定案完成 2026-08-22）：
+     - 任务 A：SQLite 持久化升级（favorites/playlists/playback/进度/ops 表，JSON 迁移）
+     - 任务 B：桌面端同步 API（manifest + ops 双向，依赖 A）
+     - 任务 C：① 增强——多桌面配对（device_id 多 token，按 server_id 维度）
+     - 任务 D：iOS 壳阶段1+2（SwiftUI 骨架 + 发现配对 + AVPlayer 桥 + 后台锁屏，bundle 前端）
+     - 任务 E：阶段3+4（同步层对接 + 跟唱/阅读/词典全功能验证）
 
 ## 平台难度参考（复用现有代码前提下）
 
@@ -101,6 +106,35 @@
 | Android | 🟡 中等 | Capacitor 壳 + 后端 TS 移植 + SAF 文件访问 + 音频插件 |
 | iOS | 🔴 偏难 | 沙盒/后台/审核三座大山 + 无 Python |
 | 鸿蒙 | 🟡 中等 | ArkWeb 壳，逻辑复用，生态/API 适配 |
+
+## ③ iOS 壳定案（2026-08-22）
+
+```
+【工程】mobile/ios/（SwiftUI + WKWebView + xcodeproj，命令行 xcodebuild 可构建）
+【前端加载】frontend 构建产物 bundle 进 App（离线可用）；apiClient 注入 qqplayer.server/token
+【播放】playerCore 原生适配层（window.qqplayerNative 分支，桌面浏览器行为不变）+ AVPlayer（毫秒 seek）
+【后台/锁屏】AVAudioSession .playback + UIBackgroundModes audio + MPNowPlayingInfoCenter
+           + MPRemoteCommandCenter（含耳机线控）
+【发现/配对】NWBrowser 搜 _qqplayer._tcp → 调 ① API → token 存 Keychain；多桌面配对（多 token）
+【同步】启动 + 前台恢复 + 手动三触发；元数据全量 + 音频/词典按需（sha256 差量 + Range 断点）
+【范围】全量：播放（AB循环/歌词）/跟唱/阅读器（点词查义 + 独立查词页）/词典/后台锁屏/全资源同步
+【账号】免费 Apple ID 开发（7 天重签）；TestFlight/公开分发等遥测数据近 1 万再买付费账号
+【遥测】匿名最小集（设备UUID/版本/平台/启动事件）→ 用户轻量服务器 → 默认开 + 设置可关 → 后端实现
+【iOS 技术坑】ATS 加 NSAllowsLocalNetworking（HTTP 明文）；Info.plist 加 NSLocalNetworkUsageDescription
+
+【同步 API（桌面端新增）】
+  GET /api/sync/manifest —— 全量元数据清单 {version, songs[], playlists[], favorites[], books[], dicts[]}
+  POST /api/sync/ops —— 手机 push dirty 队列（带 ts）
+  GET  /api/sync/ops?since= —— 拉桌面端增量（append-only 游标）
+  双向 last-write-wins（ts 大者胜）；鉴权由 ① 中间件覆盖
+
+【新增前置任务：SQLite 持久化升级】
+  favorites/playlists/playback/阅读进度/ops 表 → SQLite（qqplayer.db，标准库 sqlite3，WAL）
+  旧 JSON 首次启动自动迁移（幂等，旧文件改名 .migrated.bak）；settings/pairing/大文件不动
+  理由：ops 日志游标查询 + 多端并发写 + last-write-wins 合并是数据库舒适区，JSON 撑不住
+```
+
+**开发阶段**：阶段1 壳骨架+发现配对 → 阶段2 AVPlayer 桥+后台锁屏 → 阶段3 同步层（依赖 SQLite 升级）→ 阶段4 全功能接入验证（跟唱/阅读/词典）。
 
 ## 仓库结构规划（2026-08-22 定）
 
