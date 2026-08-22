@@ -63,7 +63,9 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         let config = URLSessionConfiguration.ephemeral
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 60
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        let s = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        print("[Download] session created")
+        return s
     }()
 
     override init() {
@@ -97,6 +99,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
 
     /// 批量入队。已存在且校验通过 → 立即回 done（不下载）。
     func enqueue(_ requests: [Request]) {
+        print("[Download] enqueue \(requests.count) items: \(requests.map { $0.path })")
         for r in requests {
             guard Self.isSafePath(r.path) else { continue }
             let fileURL = storageRoot.appendingPathComponent(r.path)
@@ -111,8 +114,9 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             stateLock.unlock()
             if dup { continue }
             // 最终文件已存在：size/哈希校验通过 → 直接完成；不通过 → 删除重下
+            // size 未知（0）时不比对大小（避免把已存在文件误删）
             if FileManager.default.fileExists(atPath: item.fileURL.path) {
-                if let size = r.size, fileSize(item.fileURL) != size {
+                if let size = r.size, size > 0, fileSize(item.fileURL) != size {
                     try? FileManager.default.removeItem(at: item.fileURL)
                 } else if contentHashMatches(item, hash: sha256(of: item.fileURL)) {
                     emitDone(item, ok: true, sha256: sha256(of: item.fileURL) ?? "", localURL: item.fileURL.absoluteString, error: nil)
@@ -122,8 +126,9 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
                 }
             }
             // .part 已完整（上次下载完未落盘）→ 校验后直接落盘
+            // 注意：size 未知（0）时不能做此判断——fileSize(part)>=0 恒真会把不存在的 .part 误判为完整
             if !FileManager.default.fileExists(atPath: item.fileURL.path),
-               let size = r.size, fileSize(item.partURL) >= size {
+               let size = r.size, size > 0, fileSize(item.partURL) >= size {
                 if contentHashMatches(item, hash: sha256(of: item.partURL)) {
                     try? FileManager.default.moveItem(at: item.partURL, to: item.fileURL)
                     emitDone(item, ok: true, sha256: sha256(of: item.partURL) ?? "", localURL: item.fileURL.absoluteString, error: nil)
@@ -181,12 +186,14 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             toStart.append(task)
         }
         stateLock.unlock()
+        print("[Download] startNext: active=\(active.count) queue=\(queue.count) starting=\(toStart.count)")
         for task in toStart {
             task.resume()
         }
     }
 
     private func makeDataTask(for item: Item) -> URLSessionDataTask {
+        print("[Download] make task: \(item.path)")
         let partSize = fileSize(item.partURL)
         if partSize == 0 {
             try? FileManager.default.removeItem(at: item.partURL)
@@ -212,6 +219,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        print("[Download] didReceive response: \(String(describing: (response as? HTTPURLResponse)?.statusCode)) for \(dataTask.originalRequest?.url?.lastPathComponent ?? "?")")
         guard let item = active[dataTask] else {
             completionHandler(.cancel)
             return
@@ -273,6 +281,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        print("[Download] didComplete: \(error?.localizedDescription ?? "OK")")
         guard let dataTask = task as? URLSessionDataTask,
               let item = active.removeValue(forKey: dataTask) else { return }
         closeHandle(for: dataTask)
@@ -293,22 +302,29 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     // MARK: - 校验与落盘
 
     private func verifyAndFinalize(_ item: Item) {
-        if let size = item.size, fileSize(item.partURL) != size {
+        print("[Download] verify: path=\(item.path) partSize=\(fileSize(item.partURL)) expectSize=\(item.size ?? -1)")
+        // size 未知（0）时跳过大小校验（前端未提供 size 时传 0）
+        if let size = item.size, size > 0, fileSize(item.partURL) != size {
+            print("[Download] retry reason: size mismatch")
             retry(item, reason: "size 不匹配（期望 \(size)，实际 \(fileSize(item.partURL))）")
             return
         }
         guard let hash = sha256(of: item.partURL) else {
+            print("[Download] retry reason: 临时文件读取失败")
             retry(item, reason: "临时文件读取失败")
             return
         }
         guard contentHashMatches(item, hash: hash) else {
+            print("[Download] retry reason: sha256 不匹配")
             retry(item, reason: "sha256 不匹配")
             return
         }
         try? FileManager.default.removeItem(at: item.fileURL)
         do {
             try FileManager.default.moveItem(at: item.partURL, to: item.fileURL)
+            print("[Download] 落盘成功: \(item.fileURL.path)")
         } catch {
+            print("[Download] 落盘失败: \(error.localizedDescription)")
             emitDone(item, ok: false, sha256: item.sha256, localURL: nil, error: "落盘失败: \(error.localizedDescription)")
             return
         }

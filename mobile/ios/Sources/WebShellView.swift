@@ -238,6 +238,7 @@ struct WebShellView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "qqplayerIos" else { return }
+            print("[WebShell] native msg: \(message.body)")
             let body: [String: Any]
             if let dict = message.body as? [String: Any] {
                 body = dict

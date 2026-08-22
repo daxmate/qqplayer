@@ -113,7 +113,8 @@ function serverBase() {
 
 export function resolveNativeUrl(url) {
   if (!url || typeof url !== "string") return url;
-  if (/^https?:\/\//i.test(url)) return url;
+  // http(s) 与 file（本地资产）都是绝对 URL，原样传给原生播放
+  if (/^(https?|file):\/\//i.test(url)) return url;
   // 同源代理 URL → 解出上游直链（AVPlayer 直接拉，跨域无 CORS 限制）
   const m = url.match(/^\/api\/stream\/proxy\?url=([^&]+)/);
   if (m) {
