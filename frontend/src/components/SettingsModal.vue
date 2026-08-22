@@ -1231,9 +1231,22 @@
                   <Info :size="13" />
                   {{ t("settings.about") }}
                 </div>
+                <div class="about-author">
+                  <img
+                    class="about-logo"
+                    src="https://github.com/daxmate.png?size=96"
+                    alt="daxmate"
+                  />
+                  <div class="about-author-info">
+                    <div class="about-name">daxmate</div>
+                    <div class="about-tagline">{{ t("settings.aboutTagline") }}</div>
+                  </div>
+                </div>
                 <div class="about-item">
                   <span class="about-label">{{ t("settings.version") }}</span>
-                  <span class="about-value">v{{ version }}</span>
+                  <span class="about-value about-version" @click="onVersionClick"
+                    >v{{ version }}</span
+                  >
                 </div>
                 <div class="about-item">
                   <span class="about-label">{{ t("settings.dataDir") }}</span>
@@ -1254,6 +1267,7 @@
                 <p class="about-desc">
                   {{ t("settings.aboutDesc") }}
                 </p>
+                <p v-if="eggVisible" class="about-easter-egg">🐘</p>
               </div>
             </section>
           </div>
@@ -1364,6 +1378,23 @@ const emit = defineEmits(["close"]);
 const { t } = useI18n();
 
 const version = pkg.version;
+
+// ---- 关于页彩蛋：连点版本号 5 次 → 🐘 ----
+const eggVisible = ref(false);
+let eggClicks = 0;
+let eggTimer = null;
+function onVersionClick() {
+  eggClicks++;
+  clearTimeout(eggTimer);
+  eggTimer = setTimeout(() => (eggClicks = 0), 1500);
+  if (eggClicks >= 5) {
+    eggClicks = 0;
+    eggVisible.value = true;
+    setTimeout(() => (eggVisible.value = false), 3200);
+    window.alert(t("settings.aboutEasterEggText"));
+  }
+}
+
 const dataDir = "~/Library/Application Support/qqplayer";
 const localUrl = "http://localhost:17627";
 const repoUrl = "https://github.com/daxmate/qqplayer";
@@ -1700,6 +1731,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
   window.removeEventListener("qqplayer:nativelibrary", onNativeLibrary);
   window.removeEventListener("keydown", onRecordKeydown, true);
+  clearTimeout(eggTimer);
 });
 </script>
 
@@ -2516,6 +2548,58 @@ kbd {
 }
 
 /* 关于 */
+.about-author {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 2px 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.about-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.about-author-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.about-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.about-tagline {
+  font-size: 12px;
+  color: var(--text2);
+}
+.about-version {
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.1s ease;
+}
+.about-version:active {
+  transform: scale(0.92);
+}
+.about-easter-egg {
+  font-size: 34px;
+  text-align: center;
+  margin: 12px 0 0;
+  animation: about-egg-bounce 0.8s ease infinite;
+}
+@keyframes about-egg-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
 .about-item {
   display: flex;
   align-items: center;

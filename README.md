@@ -194,3 +194,14 @@ kimi ga mae ni tsuki atte ita hito no koto
 | `POST /api/lyric/align` | AI 歌词对齐（本地 ForcedAligner 生成时间戳） |
 | `GET/PUT /api/queue/order` | 播放队列顺序持久化 |
 | `DELETE /api/library/songs` | 批量删除歌曲（移到废纸篓） |
+
+## Made by
+
+这个播放器是从一堆散落的工具里长出来的 🐘：
+
+- 想建自己的个人曲库 → 用 [coco-downloader](https://github.com/markcxx/coco-downloader) 下载歌曲、[MusicBrainz](https://musicbrainz.org) 刮削 tag、[Cosmos Music Player](https://github.com/clquwu/Cosmos-Music-Player) 播放
+- 浏览器下载总被拦 → 写了 [aria2-bridge](https://github.com/daxmate/aria2-bridge) 插件
+- 想让小千千读英文原版书 → 做了点读项目
+- 有一天发现这些可以合成一个 → QQPlayer 诞生了
+
+由 [daxmate](https://github.com/daxmate) 维护，如果觉得好用，欢迎 [Star](https://github.com/daxmate/qqplayer)，或在 [Issues](https://github.com/daxmate/qqplayer/issues) 聊聊你的想法。

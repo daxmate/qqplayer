@@ -314,5 +314,7 @@ export default {
     localAccess: "本地访问",
     repoHome: "项目主页",
     aboutDesc: "QQ Player —— 本地音乐播放器 · AB 循环复读机 · 有声书同步阅读器。",
+    aboutTagline: "从散落的工具里长出来的播放器 🐘",
+    aboutEasterEggText: "最初只是 🐘 想有个自己的曲库，后来它长成了 QQPlayer。",
   },
 };
