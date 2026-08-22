@@ -7,17 +7,25 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 VERSION="${1:-1.0.0-rc.1}"
+# 目标架构：arm64（默认）/ x86_64，环境变量 ARCH 覆盖（DMG 命名带架构后缀）
+ARCH="${ARCH:-arm64}"
+case "$ARCH" in
+  arm64|x86_64) : ;;
+  *) echo "⚠️ 不支持的 ARCH: $ARCH（仅支持 arm64 / x86_64）" >&2; exit 1 ;;
+esac
+# 内置后端目录（仓库根相对路径），x86_64 打包时指向 packaging/dist-x64/qqplayer-backend
+BACKEND_DIR="${BACKEND_DIR:-packaging/dist/qqplayer-backend}"
 APP_SRC="desktop/macOS/build/QQPlayer.app"
 STAGE="packaging/dmg-staging"
-DMG="packaging/QQPlayer-${VERSION}.dmg"
+DMG="packaging/QQPlayer-${VERSION}-${ARCH}.dmg"
 
-if [ ! -x packaging/dist/qqplayer-backend/qqplayer-backend ]; then
-    echo "✗ 未找到内置后端 packaging/dist/qqplayer-backend，先跑 ./packaging/build-backend.sh" >&2
+if [ ! -x "$BACKEND_DIR/qqplayer-backend" ]; then
+    echo "✗ 未找到内置后端 $BACKEND_DIR，先跑 ./packaging/build-backend.sh" >&2
     exit 1
 fi
 
-echo "📦 1/3 构建 QQPlayer.app（含内置后端）..."
-(cd desktop/macOS && ./build.sh)
+echo "📦 1/3 构建 QQPlayer.app（含内置后端，ARCH=$ARCH）..."
+(cd desktop/macOS && ARCH="$ARCH" BACKEND_SRC="$BACKEND_DIR" ./build.sh)
 
 echo "🏗️  2/3 组装 dmg staging..."
 rm -rf "$STAGE"

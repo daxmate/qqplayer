@@ -31,8 +31,8 @@ uv.lock
 
 # 打包产物（Release 资产走 GitHub Release，不入库）
 packaging/*.dmg
-packaging/dist/
-packaging/build/
+packaging/dist*/
+packaging/build*/
 
 # Tauri (desktop/Windows)
 desktop/Windows/src-tauri/target/

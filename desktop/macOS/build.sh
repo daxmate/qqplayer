@@ -12,6 +12,13 @@ case "${1:-}" in
   *) echo "⚠️ 未知参数: $1（仅支持 install / --install）" >&2 ;;
 esac
 
+# 目标架构：arm64（默认）/ x86_64（Intel），环境变量 ARCH 覆盖
+ARCH="${ARCH:-arm64}"
+case "$ARCH" in
+  arm64|x86_64) : ;;
+  *) echo "⚠️ 不支持的 ARCH: $ARCH（仅支持 arm64 / x86_64）" >&2; exit 1 ;;
+esac
+
 APP_NAME="QQPlayer"
 BUNDLE_ID="com.daxmate.qqplayer"
 BUILD_DIR="build"
@@ -19,7 +26,7 @@ BUILD_DIR="build"
 echo "📦 编译 Swift 壳..."
 mkdir -p "$BUILD_DIR"
 swiftc main.swift dict_events.swift -o "$BUILD_DIR/$APP_NAME" \
-    -target arm64-apple-macos13.0 \
+    -target ${ARCH}-apple-macos13.0 \
     -framework Cocoa -framework WebKit -framework MediaPlayer -O
 
 echo "🏗️  组装 .app bundle..."
@@ -91,7 +98,12 @@ fi
 # 内置后端子进程（DMG 打包版自包含）：packaging/dist/qqplayer-backend 存在（PyInstaller onedir）
 # → 整体拷入 Resources/backend/（含 _internal/）；不存在 → 跳过（开发模式直连 launchd 服务）
 # 注意：本脚本在 desktop/macOS/ 下，packaging/ 在仓库根（../../packaging）
-BACKEND_SRC="../../packaging/dist/qqplayer-backend"
+# BACKEND_SRC 环境变量可覆盖（x86_64 打包时指向 dist-x64/qqplayer-backend）
+BACKEND_SRC="${BACKEND_SRC:-packaging/dist/qqplayer-backend}"
+case "$BACKEND_SRC" in
+  /*) : ;;                                # 绝对路径直接用
+  *)  BACKEND_SRC="../../$BACKEND_SRC" ;; # 相对仓库根路径 → 转成相对本目录（desktop/macOS/）
+esac
 if [ -d "$BACKEND_SRC" ]; then
     echo "📦 拷贝内置后端子进程..."
     cp -R "$BACKEND_SRC" "$APP/Contents/Resources/backend"

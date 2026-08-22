@@ -260,3 +260,80 @@ jobs:
       - name: Tauri build (no bundle)
         working-directory: desktop/Windows
         run: pnpm tauri build --no-bundle
+
+  backend-macos:
+    # macOS 后端 + 壳 + dmg 全量打包（双架构）：arm64（macos-15）+ x86_64（macos-15-intel，Intel runner）。
+    # 与本地打包链路一致：standalone python（控制 deployment target 11.0，Homebrew python 会带打包机系统版本）→
+    # PyInstaller → Swift 壳（build.sh ARCH 参数）→ hdiutil dmg → 冒烟 + 架构验证。
+    # 版本：macos-13 (Intel) 已退役（2025-12），Intel 用 macos-15-intel（可用到 2027 秋）。
+    # standalone python 版本固定 3.14.7+20260805（与本地 packenv 一致，升级需两处同步）。
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            pyarch: aarch64
+            os: macos-15
+          - arch: x86_64
+            pyarch: x86_64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend deps + build
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+      - name: Download standalone python ${{ matrix.pyarch }}
+        run: |
+          curl -fL --retry 3 -o /tmp/cpython.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20260805/cpython-3.14.7+20260805-${{ matrix.pyarch }}-apple-darwin-install_only.tar.gz"
+          mkdir -p /tmp/cpython && tar -xzf /tmp/cpython.tar.gz -C /tmp/cpython --strip-components=1
+          /tmp/cpython/bin/python3 -c "import platform; print('python arch:', platform.machine())"
+      - name: Create venv
+        run: /tmp/cpython/bin/python3 -m venv /tmp/venv
+      # python-lzo 只发 sdist，需要 lzo 头文件 + 库（runner 自带 brew，Intel runner 前缀 /usr/local，arm64 为 /opt/homebrew）
+      - name: Install LZO (python-lzo 编译依赖)
+        run: |
+          brew install lzo
+          echo "LZO_PREFIX=$(brew --prefix lzo)" >> "$GITHUB_ENV"
+      - name: Install deps
+        run: |
+          CPPFLAGS="-I$LZO_PREFIX/include" LDFLAGS="-L$LZO_PREFIX/lib" \
+            /tmp/venv/bin/pip install -r backend/requirements.txt pyinstaller
+      - name: PyInstaller package
+        run: /tmp/venv/bin/python -m PyInstaller --noconfirm --clean --distpath packaging/dist --workpath packaging/build packaging/qqplayer-backend.spec
+      - name: Smoke test (backend)
+        run: |
+          QQPLAYER_PORT=17630 QQPLAYER_DATA_DIR=/tmp/qqp-ci-smoke packaging/dist/qqplayer-backend/qqplayer-backend &
+          BPID=$!
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:17630/api/settings > /dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          kill $BPID 2>/dev/null || true
+          [ "$ok" = 1 ] || { echo "✗ 后端冒烟失败"; exit 1; }
+          echo "✓ 后端冒烟 OK (port 17630)"
+      - name: Shell build (ARCH=${{ matrix.arch }})
+        working-directory: desktop/macOS
+        run: ARCH=${{ matrix.arch }} BACKEND_SRC=packaging/dist/qqplayer-backend ./build.sh
+      - name: Make dmg
+        run: ARCH=${{ matrix.arch }} BACKEND_DIR=packaging/dist/qqplayer-backend ./packaging/make-dmg.sh "${GITHUB_REF_NAME:-dev}"
+      - name: Verify dmg (mount + arch check)
+        run: |
+          DMG=$(ls packaging/QQPlayer-*.dmg | head -1)
+          hdiutil attach -mountpoint /tmp/qqp-dmg-mnt "$DMG"
+          file /tmp/qqp-dmg-mnt/QQPlayer.app/Contents/MacOS/QQPlayer
+          file /tmp/qqp-dmg-mnt/QQPlayer.app/Contents/Resources/backend/qqplayer-backend
+          hdiutil detach /tmp/qqp-dmg-mnt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qqplayer-macos-${{ matrix.arch }}
+          path: packaging/QQPlayer-*.dmg
