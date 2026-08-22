@@ -30,7 +30,8 @@ if ! ./backend/venv/bin/python -m pip install -r backend/requirements.txt; then
 fi
 
 # 3. 前端构建（失败自动回滚上一版 dist）
-DIST="frontend/dist"
+# vite outDir 为 "../dist"（相对 frontend/），产物落在项目根 dist/（已 gitignore）
+DIST="dist"
 BACKUP="${TMPDIR:-/tmp}/qqplayer-dist-backup"
 if [ -d "$DIST" ]; then
   echo "── 备份当前前端构建产物"
