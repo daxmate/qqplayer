@@ -63,13 +63,34 @@
 
 **实现要点**：配对模块独立 router + service（backend/app/routers/pairing.py）；壳轮询 pending 用普通 HTTP 定时器即可，不上推送；限流按 device_id 记请求时间，两次间隔 >10min 重置计数。
 
+## ② 前端数据层抽象定案（2026-08-22）
+
+```
+【apiClient 统一出口】
+  53 处裸 fetch（17 文件）一次性全迁；统一 baseURL + Bearer token header + 缓存钩子
+  baseURL：桌面浏览器=localhost:17627；iOS=配对后桌面 IP（壳注入）
+
+【缓存分层】
+  小数据全量同步 → 元数据/歌词/封面/电子书（存 IndexedDB，纯前端可测）
+  大文件按需     → 音频/词典（手动选择下载，可管理删除；MDX/MDD 词典单本 GB 级）
+  声明式缓存：调用点标注 {cache: {ttl, offline}}
+
+【写路径】本地乐观写入（即时生效）→ dirty 队列（IndexedDB）→ 回网批量 push → last-write-wins
+
+【离线行为】请求失败自动降级（切离线读缓存，成功自动恢复，轻提示）；401 特判 → 清配对信息 → 引导重新配对（绝不静默）
+
+【播放记录】全量同步（几百 KB 无所谓，合并逻辑简单）
+```
+
+**边界**：②只做前端侧；桌面端同步 API（manifest/dirty 合并）归③ iOS 壳阶段一起开发。
+
 ## 路线
 
 1. 桌面端完善 ✅（阅读器/歌词对齐/Windows Tauri 壳/打包链路均已完）
 2. 移动端启动（进行中）：**优先 iOS**（Swift 壳 + WKWebView 复用前端 + AVPlayer 桥），再 Android / 鸿蒙
    - ① 桌面端配对 API（2026-08-22 定案，待开发）
-   - ② 前端数据层抽象（apiClient 统一出口 + 离线缓存层）
-   - ③ iOS 壳（mDNS 发现 + 配对 + AVPlayer 桥 + 同步/缓存）
+   - ② 前端数据层抽象（2026-08-22 定案：apiClient 统一出口 + IndexedDB 缓存 + 声明式缓存 + 写路径 dirty 队列，待开发）
+   - ③ iOS 壳（mDNS 发现 + 配对 + AVPlayer 桥 + 同步/缓存 + 桌面端同步 API）
 
 ## 平台难度参考（复用现有代码前提下）
 
