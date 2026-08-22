@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 手动触发：不发版（不打 tag）时也能手动跑打包 job（workflow_dispatch 时打包 job 的 if 放行）
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -62,6 +64,8 @@ jobs:
 
   backend-windows:
     name: Backend Windows ${{ matrix.arch }} (PyInstaller + smoke)
+    # 只在发版（push tag v*）或手动触发时打包；日常 push main 只跑 lint/test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     # 双架构：x64（windows-latest）+ ARM64（windows-11-arm，GA 标准 runner）。
     # fail-fast: false —— ARM64 失败不取消 x64（python-lzo 等原生依赖在 arm64 可能更早暴露问题，先保 x64）
     strategy:
@@ -134,6 +138,8 @@ jobs:
 
   backend-linux:
     name: Backend Linux x64 (PyInstaller + smoke)
+    # 只在发版（push tag v*）或手动触发时打包；日常 push main 只跑 lint/test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -176,6 +182,8 @@ jobs:
 
   tauri-windows:
     name: Tauri Shell Windows ${{ matrix.arch }} (build + smoke)
+    # 只在发版（push tag v*）或手动触发时打包；日常 push main 只跑 lint/test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     # Windows 壳：x64（windows-latest）+ ARM64（windows-11-arm）。
     # 需要 backend-windows 的 zip 产物（内置后端集成进壳），所以 needs 它。
     # fail-fast: false —— arm64 失败不取消 x64（arm64 NSIS 等可能暴露新问题，先保 x64 可验收）
@@ -273,6 +281,8 @@ jobs:
 
   tauri-linux:
     name: Tauri Shell Linux (build deb/AppImage + smoke)
+    # 只在发版（push tag v*）或手动触发时打包；日常 push main 只跑 lint/test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     # Linux 壳：ubuntu-latest（x86_64）。真打包 deb + AppImage，集成内置后端后 xvfb 无头冒烟。
     # 需要 backend-linux 的 zip 产物（内置后端集成进壳），所以 needs 它。
     needs: [backend-linux]
@@ -344,6 +354,8 @@ jobs:
             desktop/Windows/src-tauri/target/release/bundle/appimage/*.AppImage
 
   backend-macos:
+    # 只在发版（push tag v*）或手动触发时打包；日常 push main 只跑 lint/test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     # macOS 后端 + 壳 + dmg 全量打包（双架构）：arm64（macos-15）+ x86_64（macos-15-intel，Intel runner）。
     # 与本地打包链路一致：standalone python（控制 deployment target 11.0，Homebrew python 会带打包机系统版本）→
     # PyInstaller → Swift 壳（build.sh ARCH 参数）→ hdiutil dmg → 冒烟 + 架构验证。
@@ -407,7 +419,7 @@ jobs:
         working-directory: desktop/macOS
         run: ARCH=${{ matrix.arch }} BACKEND_SRC=packaging/dist/qqplayer-backend ./build.sh
       - name: Make dmg
-        run: ARCH=${{ matrix.arch }} BACKEND_DIR=packaging/dist/qqplayer-backend ./packaging/make-dmg.sh "${GITHUB_REF_NAME:-dev}"
+        run: ARCH=${{ matrix.arch }} BACKEND_DIR=packaging/dist/qqplayer-backend ./packaging/make-dmg.sh "1.0.0"
       - name: Verify dmg (mount + arch check)
         run: |
           DMG=$(ls packaging/QQPlayer-*.dmg | head -1)
