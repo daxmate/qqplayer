@@ -16,6 +16,8 @@ import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
 import { isSearchOpen } from "./searchState.js";
 import { isSettingsOpen } from "./settingsState.js";
 import { showToast } from "./useToast.js";
+import { apiGet, apiPost, apiPut, invalidate, scheduleFlush } from "../utils/apiClient.js";
+import { enqueuePendingOp } from "../utils/cacheDb.js";
 import i18n from "../locales/i18n.js";
 
 // 全局唯一 audio 元素
@@ -442,16 +444,15 @@ function songSessionKey(song) {
   return "song:" + song.name;
 }
 
-// 上报一条播放记录（POST /api/playback；失败静默，不影响播放）
+// 上报一条播放记录（POST /api/playback；失败进 dirty 队列，离线时本地积累、回网后重放）
 async function reportPlayback(rec) {
   try {
-    await fetch("/api/playback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(rec),
-    });
+    const r = await apiPost("/api/playback", rec);
+    if (!r.ok) throw new Error();
   } catch {
-    /* 忽略 */
+    // 失败（网络/HTTP）→ 进队列，稍后 flushPendingOps 重放
+    await enqueuePendingOp({ url: "/api/playback", method: "POST" }, rec).catch(() => {});
+    scheduleFlush();
   }
 }
 
@@ -1085,8 +1086,10 @@ export function toggleControls() {
 // ============ 歌曲列表 ============
 export async function loadLibrary() {
   try {
-    const res = await fetch("/api/library", { cache: "no-store" });
-    const data = await res.json();
+    // 曲库路径元数据：60s + 离线兜底；setLibrary 后失效
+    const r = await apiGet("/api/library", { cache: { ttl: 60, offline: true } });
+    if (r.network) return;
+    const data = r.data || {};
     state.libraryPath = data.path;
   } catch {
     /* 忽略 */
@@ -1096,8 +1099,10 @@ export async function loadLibrary() {
 // 音乐库设置：文件类型多选 / 忽略隐藏 / 自动刷新 / 启动自动扫描（后端持久化）
 export async function loadLibrarySettings() {
   try {
-    const res = await fetch("/api/library/settings", { cache: "no-store" });
-    const data = await res.json();
+    // 设置类元数据：60s + 离线兜底；保存后失效
+    const r = await apiGet("/api/library/settings", { cache: { ttl: 60, offline: true } });
+    if (r.network) return;
+    const data = r.data || {};
     state.librarySettings = data.settings;
   } catch {
     /* 忽略 */
@@ -1105,39 +1110,38 @@ export async function loadLibrarySettings() {
 }
 
 export async function saveLibrarySettings(patch) {
-  const res = await fetch("/api/library/settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
+  const r = await apiPut("/api/library/settings", patch);
+  if (!r.ok) {
+    const data = r.data || {};
     throw new Error(data.detail || i18n.global.t("errors.saveLibrarySettings"));
   }
-  const data = await res.json();
+  const data = r.data || {};
   state.librarySettings = data.settings;
+  invalidate("/api/library/settings");
   return data;
 }
 
 export async function setLibrary(path) {
-  const res = await fetch("/api/library", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
+  const r = await apiPost("/api/library", { path });
+  if (!r.ok) {
+    const data = r.data || {};
     throw new Error(data.detail || i18n.global.t("errors.setLibrary"));
   }
-  await loadSongs();
+  invalidate("/api/library");
+  await loadSongs({ force: true });
 }
 
-export async function loadSongs() {
+export async function loadSongs(opts = {}) {
   state.loading = true;
   state.error = "";
   try {
-    const res = await fetch("/api/songs", { cache: "no-store" });
-    const songs = await res.json();
+    // 曲库元数据：60s + 离线兜底（离线启动也能看到上次曲库）；force 跳过缓存读（刷新场景）
+    const r = await apiGet("/api/songs", {
+      cache: { ttl: 60, offline: true },
+      force: !!opts.force,
+    });
+    if (r.network) throw new Error(r.message); // 网络失败走 catch（state.error 提示）
+    const songs = r.data;
     state.songs = songs;
     // 拖拽排序持久化的队列顺序：刷新/启动时恢复（loadQueueOrder 需先于首次 loadSongs 完成，见 App.vue）
     applyQueueOrder();
@@ -1186,9 +1190,10 @@ function queueKey(song) {
 // 拉取持久化队列顺序（App 启动时先于 loadSongs 调用一次，之后走本地缓存）
 export async function loadQueueOrder() {
   try {
-    const res = await fetch("/api/queue/order", { cache: "no-store" });
-    if (res.ok) {
-      const data = await res.json();
+    // 队列顺序元数据：60s + 离线兜底；persistQueueOrder 后失效
+    const r = await apiGet("/api/queue/order", { cache: { ttl: 60, offline: true } });
+    if (r.ok) {
+      const data = r.data || {};
       if (Array.isArray(data.paths)) queueOrder = data.paths;
     }
   } catch {
@@ -1200,12 +1205,9 @@ export async function loadQueueOrder() {
 export async function persistQueueOrder() {
   const paths = state.songs.map(queueKey).filter((k) => typeof k === "string");
   queueOrder = paths; // 本地缓存先行：刷新时立即恢复，不依赖后端往返
-  const res = await fetch("/api/queue/order", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paths }),
-  });
-  if (!res.ok) throw new Error(i18n.global.t("errors.reorderQueue"));
+  const r = await apiPut("/api/queue/order", { paths });
+  if (!r.ok) throw new Error(i18n.global.t("errors.reorderQueue"));
+  invalidate("/api/queue/order");
 }
 
 // 按持久化顺序重排 state.songs：匹配到的按保存顺序前置，其余（新歌/试听残留等）保持相对顺序补在末尾。
@@ -1275,13 +1277,15 @@ export function setupAutoRefresh(intervalMs = 3000) {
   if (refreshTimer) return;
   refreshTimer = setInterval(async () => {
     try {
-      const res = await fetch("/api/library/version", { cache: "no-store" });
-      const { version } = await res.json();
+      // 版本号是实时探活，不走缓存
+      const r = await apiGet("/api/library/version");
+      if (!r.ok) return; // 接口异常：静默，状态保持，下轮重试
+      const { version } = r.data || {};
       if (state.libraryVersion == null) {
         state.libraryVersion = version;
       } else if (version !== state.libraryVersion) {
         state.libraryVersion = version;
-        await loadSongs(); // 刷新后保持当前选中/播放（loadSongs 已处理）
+        await loadSongs({ force: true }); // 刷新后保持当前选中/播放（loadSongs 已处理）
       }
     } catch {
       // 后端暂不可用：静默，下轮重试
@@ -1370,15 +1374,9 @@ export async function fetchStreamUrl(provider, id, level = "exhigh") {
     "&level=" +
     encodeURIComponent(level);
   for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(url, { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.url) return data.url;
-      }
-    } catch {
-      // 网络错误：重试一次
-    }
+    // 流媒体直链有时效，每次播放前实时取（不缓存）
+    const r = await apiGet(url);
+    if (r.ok && r.data && r.data.url) return r.data.url;
   }
   return null;
 }
@@ -1689,13 +1687,12 @@ function flushNowPlaying() {
   const p = nowPlayingPending;
   nowPlayingPending = null;
   if (!p) return;
+  // 当前无歌曲时不报（节流窗口内歌曲被清空/测试复位场景；避免脏上报）
+  if (!state.currentSong) return;
   // 带上强调色（桌面歌词「跟随主题」配色用）
   const accent = ACCENT_OPTIONS.find((a) => a.key === uiSettings.accent)?.color || "";
-  fetch("/api/now-playing", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...nowPlayingSnapshot(), ...p, accent }),
-  }).catch(() => {});
+  // 外部展示状态，失败静默（不排队——随时节流重发，无离线价值）
+  apiPost("/api/now-playing", { ...nowPlayingSnapshot(), ...p, accent }).catch(() => {});
 }
 
 function scheduleNowPlaying(extra = {}) {
@@ -1768,8 +1765,9 @@ export function setupPlayerActions(intervalMs = 800) {
   if (playerActionsTimer) return;
   playerActionsTimer = setInterval(async () => {
     try {
-      const res = await fetch("/api/player/actions", { cache: "no-store" });
-      const { actions } = await res.json();
+      // 控制指令队列是实时轮询，不走缓存
+      const r = await apiGet("/api/player/actions");
+      const { actions } = (r.ok && r.data) || {};
       for (const a of actions || []) executePlayerAction(a);
     } catch {
       // 后端暂不可用：静默，下轮重试
@@ -1790,8 +1788,9 @@ let miniStatusTimer = null;
 
 export async function refreshMiniStatus() {
   try {
-    const res = await fetch("/api/mini/status", { cache: "no-store" });
-    const { running } = await res.json();
+    // 迷你窗运行状态是实时探活，不走缓存
+    const r = await apiGet("/api/mini/status");
+    const { running } = (r.ok && r.data) || {};
     miniRunning.value = !!running;
   } catch {
     // 后端暂不可达：保持现状

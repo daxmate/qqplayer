@@ -280,7 +280,7 @@ describe("Playlist 多选批量", () => {
     await wrapper.findAll(".pl-item")[0].trigger("click", { metaKey: true });
     await wrapper.findAll(".pl-item")[1].trigger("click", { metaKey: true });
     await wrapper.findAll(".pl-multi-btn")[0].trigger("click"); // 批量收藏
-    await nextTick();
+    await flushPromises(); // 本地优先写：每首歌入队→同步→清队，多跳微任务后 toast
     expect(isFavorite("/a.mp3")).toBe(true); // 新增
     expect(isFavorite("/b.mp3")).toBe(true); // 原有不变
     expect(toastText()).toContain("已收藏 1 首");
@@ -300,7 +300,7 @@ describe("Playlist 多选批量", () => {
     const am = document.body.querySelector(".add-menu");
     expect(am).toBeTruthy();
     await am.querySelector(".am-item").click();
-    await nextTick();
+    await flushPromises(); // 本地优先写：每首歌入队→同步→清队，多跳微任务后完成
     expect(state.playlists[0].songPaths.sort()).toEqual(["/a.mp3", "/b.mp3"]);
   });
 

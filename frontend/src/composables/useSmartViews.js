@@ -6,6 +6,7 @@
 // 视图进入时拉取一次；recentAdded 为纯前端计算，曲库变化（添加/删除）时自动重算。
 import { reactive, watch } from "vue";
 import { state, selectSong, play, findSongIndex } from "./usePlayer.js";
+import { apiGet } from "../utils/apiClient.js";
 import i18n from "../locales/i18n.js";
 
 export const SMART_VIEW_LIMIT = 50;
@@ -77,15 +78,14 @@ export async function loadSmartView(kind) {
     if (kind === "recentAdded") {
       smartViewState.rows = mapRecentAdded(state.songs);
     } else if (kind === "recentPlayed") {
-      const res = await fetch("/api/playback", { cache: "no-store" });
-      if (!res.ok) throw new Error(i18n.global.t("errors.loadPlayback"));
-      const data = await res.json();
-      smartViewState.rows = mapRecentPlayed(data && data.records, libById);
+      // 播放记录是统计类数据，保持实时拉取（不走缓存）
+      const r = await apiGet("/api/playback");
+      if (!r.ok) throw new Error(i18n.global.t("errors.loadPlayback"));
+      smartViewState.rows = mapRecentPlayed(r.data && r.data.records, libById);
     } else if (kind === "topPlayed") {
-      const res = await fetch("/api/playback/stats", { cache: "no-store" });
-      if (!res.ok) throw new Error(i18n.global.t("errors.loadPlaybackStats"));
-      const data = await res.json();
-      smartViewState.rows = mapTopPlayed(data && data.songs, libById);
+      const r = await apiGet("/api/playback/stats");
+      if (!r.ok) throw new Error(i18n.global.t("errors.loadPlaybackStats"));
+      smartViewState.rows = mapTopPlayed(r.data && r.data.songs, libById);
     }
   } catch (e) {
     smartViewState.error = (e && e.message) || i18n.global.t("errors.loadFailed");

@@ -251,6 +251,7 @@ import {
 import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
 import { showToast, toastError } from "../composables/useToast.js";
+import { apiPost } from "../utils/apiClient.js";
 import { settingsIndex } from "../settingsIndex.js";
 import InlineControl from "./InlineControl.vue";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
@@ -431,27 +432,26 @@ async function downloadOnline(item) {
   downloading[item.id] = true;
   try {
     const isGequhai = onlineSource.value === "gequhai";
-    const res = await fetch(isGequhai ? "/api/gequhai/download" : "/api/online/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        isGequhai
-          ? { id: p.id, title: p.title || item.title, artist: p.artist || "" }
-          : {
-              id: p.id,
-              level: downloadSettings.defaultQuality,
-              title: p.title || item.title,
-              artist: p.artist || "",
-            },
-      ),
-    });
+    // 歌曲海下载 401 = 夸克未登录（非配对失效），skip401 关闭特判
+    const res = await apiPost(
+      isGequhai ? "/api/gequhai/download" : "/api/online/download",
+      isGequhai
+        ? { id: p.id, title: p.title || item.title, artist: p.artist || "" }
+        : {
+            id: p.id,
+            level: downloadSettings.defaultQuality,
+            title: p.title || item.title,
+            artist: p.artist || "",
+          },
+      { skip401: isGequhai },
+    );
     if (res.status === 401 && isGequhai) {
       pendingDownload.value = item; // 登录成功后自动重试
       loginOpen.value = true;
       return;
     }
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = res.data || {};
       throw new Error(data.error || data.message || "");
     }
     showToast(t("search.downloadSuccess", { title: item.title }));
@@ -486,24 +486,20 @@ async function addOnlineToLibrary(item) {
   adding[item.id] = true;
   const p = item.payload || {};
   try {
-    const res = await fetch("/api/network-songs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: p.id,
-        title: p.title || item.title,
-        artist: p.artist || "",
-        album: p.album || undefined,
-        coverUrl: p.cover || undefined,
-        duration: p.duration || undefined,
-      }),
+    const res = await apiPost("/api/network-songs", {
+      id: p.id,
+      title: p.title || item.title,
+      artist: p.artist || "",
+      album: p.album || undefined,
+      coverUrl: p.cover || undefined,
+      duration: p.duration || undefined,
     });
     // 幂等去重：409 或响应携带 alreadyExists/alreadyInLibrary 标记 → 提示已在曲库
     let already = res.status === 409;
     let failed = false;
     let errMsg = "";
     if (!already) {
-      const data = await res.json().catch(() => ({}));
+      const data = res.data || {};
       if (res.ok) {
         already = !!(data && (data.alreadyExists || data.alreadyInLibrary));
       } else {

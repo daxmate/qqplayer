@@ -4,6 +4,7 @@
  * 契约：docs/reader-v2/01-contract-backend-core.md + 02-contract-backend-dict.md。
  * 所有写操作失败抛 Error（detail 透出），调用方负责 toast。
  */
+import { api } from "../utils/apiClient.js";
 import type {
   BookAnnotations,
   BookSearchResponse,
@@ -18,19 +19,26 @@ import type {
 } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    let detail = res.statusText;
+  let body: unknown = init?.body;
+  if (typeof body === "string") {
     try {
-      const body = await res.json();
-      if (body?.detail) detail = body.detail;
+      body = JSON.parse(body);
     } catch {
-      /* 非 JSON 响应，用 statusText */
+      body = undefined;
     }
-    throw new Error(detail || `请求失败 (${res.status})`);
   }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  const r = await api({
+    url,
+    method: (init?.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | undefined) || "GET",
+    body: body as BodyInit | undefined,
+    headers: init?.headers as Record<string, string> | undefined,
+  });
+  if (!r.ok) {
+    const detail = (r.data as { detail?: string } | null)?.detail || r.message;
+    throw new Error(detail || `请求失败 (${r.status})`);
+  }
+  if (r.status === 204) return undefined as T;
+  return r.data as T;
 }
 
 function jsonInit(method: string, body: unknown): RequestInit {

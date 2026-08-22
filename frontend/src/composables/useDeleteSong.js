@@ -3,16 +3,13 @@
 //   → 200: {"deleted": 2, "missing": ["/not/in/library.mp3"], "errors": [{"path": "...", "reason": "..."}]}
 // 本模块只负责请求 + 解析（不依赖 i18n / UI），toast 提示与列表刷新由调用方处理。
 // 注意：后端接口与桌面任务并行开发中，按上方契约实现，勿依赖尚未落地的字段。
+import { apiDelete } from "../utils/apiClient.js";
 
 export async function deleteSongs(paths) {
-  const res = await fetch("/api/library/songs", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paths }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || `HTTP ${res.status}`);
+  const r = await apiDelete("/api/library/songs", { body: { paths } });
+  if (!r.ok) {
+    const data = r.data || {};
+    throw new Error(data.detail || `HTTP ${r.status}`);
   }
-  return res.json();
+  return r.data;
 }

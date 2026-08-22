@@ -239,7 +239,7 @@ async function onRescan() {
   if (refreshing.value) return; // 进行中：禁用重复点击
   refreshing.value = true;
   try {
-    await loadSongs(); // 失败时内部写 state.error（不抛），完成/失败都收 spinner
+    await loadSongs({ force: true }); // 失败时内部写 state.error（不抛），完成/失败都收 spinner
     if (state.error) toastError(state.error);
     else showToast(t("mobile.home.refreshed"));
   } finally {

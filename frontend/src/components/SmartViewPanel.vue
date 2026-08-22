@@ -431,7 +431,7 @@ async function doDelete() {
       toastError(t("errors.deleteSongs"));
     }
     // 刷新曲库；recentAdded 由 useSmartViews 的 watch 自动重算，recentPlayed/topPlayed 保持进入时数据
-    await loadSongs();
+    await loadSongs({ force: true });
   } catch (e) {
     toastError(e.message || t("errors.deleteSongs"));
   }

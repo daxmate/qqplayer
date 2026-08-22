@@ -2,7 +2,7 @@
 // 覆盖：歌曲行拖过歌单项 → 高亮（sb-drop）；离开取消高亮；drop → addToPlaylist + toast「已加入」；
 //      已在歌单 → toast「已在」不重复添加；非歌曲拖拽（文件/文本）不响应；dragend 全局清理高亮。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
@@ -136,7 +136,7 @@ describe("Sidebar 拖拽加歌单", () => {
     await plItem(wrapper, "日语歌").trigger("drop", {
       dataTransfer: songDataTransfer("/a.mp3"),
     });
-    await nextTick();
+    await flushPromises(); // 本地优先写：入队（IndexedDB）→ 同步 → 清队，多跳微任务后 toast
     const pl = state.playlists.find((p) => p.id === "p2");
     expect(pl.songPaths).toEqual(["/a.mp3"]);
     expect(toastText()).toContain("已加入歌单「日语歌」");
@@ -176,7 +176,7 @@ describe("Sidebar 拖拽加歌单", () => {
     await plItem(wrapper, "日语歌").trigger("drop", {
       dataTransfer: songDataTransfer("/a.mp3"),
     });
-    await nextTick();
+    await flushPromises(); // 本地优先写：入队 → 同步被拒 → 回滚 + 抛错，多跳微任务后 toast
     // addToPlaylist 乐观更新后回滚
     expect(state.playlists.find((p) => p.id === "p2").songPaths).toEqual([]);
     expect(toastText()).toContain("加入歌单失败");

@@ -131,6 +131,7 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
       el.textContent.includes("下载"),
     );
     await navItem.click();
+    await flushPromises(); // 等 refreshQuarkState 收尾（quarkBusy 复位，登录按钮才可点）
     await nextTick();
     return { w, root };
   }

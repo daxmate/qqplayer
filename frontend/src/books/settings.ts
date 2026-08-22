@@ -7,6 +7,7 @@
  */
 import type { ReaderFontKey, ReaderSettings } from "./types";
 import { uiSettings } from "../composables/useSettings.js";
+import { api, invalidate } from "../utils/apiClient.js";
 
 const THEMES = ["light", "sepia", "dark", "auto"] as const;
 
@@ -173,10 +174,28 @@ export function resolveReaderThemeColors(settings: ReaderSettings): { text: stri
   return { text: settings.textColor || preset.text, bg: settings.bgColor || preset.bg };
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`请求失败 (${res.status})`);
-  return res.json() as Promise<T>;
+async function request<T>(
+  url: string,
+  init?: RequestInit,
+  opts?: { cache?: { ttl?: number; offline?: boolean } },
+): Promise<T> {
+  let body: unknown = init?.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      body = undefined;
+    }
+  }
+  const r = await api({
+    url,
+    method: (init?.method as "GET" | "PUT" | undefined) || "GET",
+    body: body as BodyInit | undefined,
+    headers: init?.headers as Record<string, string> | undefined,
+    cache: opts?.cache,
+  });
+  if (!r.ok) throw new Error(`请求失败 (${r.status})`);
+  return r.data as T;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -212,7 +231,9 @@ function normalize(raw: Partial<ReaderSettings> | undefined | null): ReaderSetti
   return s;
 }
 
-/** 读取阅读设置：失败/缺字段返回默认值，不抛异常 */
+/** 读取阅读设置：失败/缺字段返回默认值，不抛异常
+ * 注意：不标声明式缓存——每次开书读一次，且测试/业务都依赖同测试内二次读取拿最新后端值；
+ * 应用级 /api/settings 缓存由 settingsSync 承担（定案「设置 60s」） */
 export async function getReaderSettings(): Promise<ReaderSettings> {
   try {
     const data = await request<{ settings?: { books?: Partial<ReaderSettings> } }>("/api/settings");
@@ -229,6 +250,9 @@ export function saveReaderSettings(patch: Partial<ReaderSettings>): Promise<bool
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ books: patch }),
   })
-    .then(() => true)
+    .then(() => {
+      invalidate("/api/settings");
+      return true;
+    })
     .catch(() => false);
 }

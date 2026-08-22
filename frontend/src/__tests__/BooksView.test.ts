@@ -13,7 +13,7 @@ vi.mock("../books/api", () => ({
 
 const mocks = vi.hoisted(() => ({
   rendition: {
-    themes: { register: vi.fn(), select: vi.fn(), fontSize: vi.fn() },
+    themes: { register: vi.fn(), select: vi.fn(), fontSize: vi.fn(), override: vi.fn() },
     on: vi.fn(),
     display: vi.fn().mockResolvedValue(undefined),
     next: vi.fn(),

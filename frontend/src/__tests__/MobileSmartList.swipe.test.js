@@ -89,6 +89,7 @@ describe("MobileSmartList 左滑操作（swipe-reveal）", () => {
     await flushPromises();
     await swipeRow(wrapper.findAll(".msv-item")[0].element, -130);
     await wrapper.find(".msv-actions .msv-act").trigger("click");
+    await flushPromises(); // 本地优先写：入队（IndexedDB）→ 同步 → 清队，多跳微任务后收起
     expect(state.favorites).toContain("/lib/a.mp3");
     const fetchCalls = vi.mocked(fetch).mock.calls;
     expect(

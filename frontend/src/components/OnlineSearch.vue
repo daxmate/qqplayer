@@ -135,6 +135,7 @@ import {
   QUARK_QUALITY_OPTIONS,
 } from "../composables/useSettings.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
+import { apiGet, apiPost } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 
@@ -238,13 +239,13 @@ async function runSearch() {
   // source 省略 = netease（现有行为不变）；歌曲海显式传 source=gequhai
   const srcParam = src === "gequhai" ? `&source=${src}` : "";
   try {
-    const res = await fetch(
+    // 在线搜索是实时数据，不走缓存
+    const res = await apiGet(
       `/api/online/search?q=${encodeURIComponent(val)}&limit=${ONLINE_LIMIT}${srcParam}`,
-      { cache: "no-store" },
     );
     if (seq !== searchSeq) return; // 过期响应丢弃
     if (!res.ok) throw new Error();
-    const data = await res.json();
+    const data = res.data || {};
     if (seq !== searchSeq) return;
     onlineItems.value = Array.isArray(data.items) ? data.items : [];
     searched.value = true;
@@ -278,17 +279,18 @@ async function download(item, opts = {}) {
   downloading[item.id] = true;
   try {
     if (source.value === "gequhai") {
-      const res = await fetch("/api/gequhai/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // 歌曲海下载 401 = 夸克未登录（非配对失效），skip401 关闭特判
+      const res = await apiPost(
+        "/api/gequhai/download",
+        {
           id: item.id,
           title: item.title,
           artist: item.artist,
-        }),
-      });
+        },
+        { skip401: true },
+      );
       if (res.status === 401) {
-        const data = await res.json().catch(() => ({}));
+        const data = res.data || {};
         // 登录成功后重试：不再弹框，失败直接提示
         if (noLoginPrompt) throw new Error(data.message || t("online.quarkLoginRequired"));
         pendingDownload = item;
@@ -296,25 +298,21 @@ async function download(item, opts = {}) {
         return;
       }
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = res.data || {};
         throw new Error(data.error || "");
       }
       showToast(t("online.downloadSuccess", { title: item.title }));
       return;
     }
     // 网易云：现有逻辑不变
-    const res = await fetch("/api/online/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: item.id,
-        level: downloadSettings.defaultQuality,
-        title: item.title,
-        artist: item.artist,
-      }),
+    const res = await apiPost("/api/online/download", {
+      id: item.id,
+      level: downloadSettings.defaultQuality,
+      title: item.title,
+      artist: item.artist,
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = res.data || {};
       throw new Error(data.error || "");
     }
     showToast(t("online.downloadSuccess", { title: item.title }));

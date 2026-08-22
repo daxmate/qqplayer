@@ -33,6 +33,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { QrCode, X, Loader2 } from "@lucide/vue";
+import { apiGet, apiPost } from "../utils/apiClient.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -74,10 +75,11 @@ async function fetchQr() {
   qrImage.value = "";
   active = true;
   try {
-    const res = await fetch("/api/quark/login/qrcode", { method: "POST", cache: "no-store" });
+    // 夸克登录链路：401 是「未登录」语义（非配对 token 失效），skip401 关闭特判
+    const res = await apiPost("/api/quark/login/qrcode", undefined, { skip401: true });
     if (!active) return;
     if (!res.ok) throw new Error();
-    const data = await res.json();
+    const data = res.data || {};
     if (!active) return;
     qrImage.value = data.qr_image || "";
     qrId.value = data.qr_id || "";
@@ -108,12 +110,12 @@ function refreshQr() {
 async function pollStatus() {
   if (!qrId.value || !active) return;
   try {
-    const res = await fetch(`/api/quark/login/status?qr_id=${encodeURIComponent(qrId.value)}`, {
-      cache: "no-store",
+    const res = await apiGet(`/api/quark/login/status?qr_id=${encodeURIComponent(qrId.value)}`, {
+      skip401: true,
     });
     if (!active) return;
     if (!res.ok) return; // 网络抖动：下一轮重试
-    const data = await res.json();
+    const data = res.data || {};
     if (!active) return;
     if (data.status === "ok") {
       clearTimers();

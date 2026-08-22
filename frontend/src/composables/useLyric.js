@@ -2,6 +2,7 @@ import { computed, watch } from "vue";
 import { audio, state } from "./playerCore.js";
 import { lyricSettings } from "./useSettings.js";
 import { parseLrcText, mergeTranslationLines } from "../utils/parseLrc.js";
+import { apiGet, apiPost, apiPut, apiDelete, invalidate } from "../utils/apiClient.js";
 import i18n from "../locales/i18n.js";
 
 // 非本地歌（stream 曲库网络条目 / 试听 / URL 播放）：没有可解析的本地歌词文件，
@@ -10,9 +11,12 @@ import i18n from "../locales/i18n.js";
 export async function loadOnlineLyricForSong(song) {
   try {
     const q = new URLSearchParams({ title: song.name || "", artist: song.artist || "" });
-    const res = await fetch("/api/lyric/search?" + q.toString(), { cache: "no-store" });
-    if (!res.ok) return { lines: [], format: null, source: null };
-    const data = await res.json();
+    // 歌词搜索结果：1h 缓存 + 离线兜底（离线也能看最近搜过的歌词）
+    const r = await apiGet("/api/lyric/search?" + q.toString(), {
+      cache: { ttl: 3600, offline: true },
+    });
+    if (!r.ok) return { lines: [], format: null, source: null };
+    const data = r.data || {};
     const results = Array.isArray(data.results) ? data.results : [];
     if (!results.length) return { lines: [], format: null, source: null };
     // 首选歌名精确匹配且有歌词的候选；否则第一个带歌词的
@@ -25,6 +29,11 @@ export async function loadOnlineLyricForSong(song) {
   } catch {
     return { lines: [], format: null, source: null };
   }
+}
+
+// 歌词加载 URL（缓存 key / 失效共用同一构造，保证路径一致）
+function lyricUrl(path, prefer) {
+  return "/api/lyric?path=" + encodeURIComponent(path) + "&prefer=" + encodeURIComponent(prefer);
 }
 
 // ============ 歌词加载（默认当前歌）；来源优先级按 lyricSettings.source：============
@@ -46,15 +55,12 @@ export async function loadLyric(index = state.currentIndex) {
     return;
   }
   try {
-    const res = await fetch(
-      "/api/lyric?path=" +
-        encodeURIComponent(state.songs[index].path) +
-        "&prefer=" +
-        lyricSettings.source,
-      { cache: "no-store" },
-    );
-    if (res.ok) {
-      const data = await res.json();
+    // 歌词正文：1h 缓存 + 离线兜底；手动指定/清除后失效
+    const r = await apiGet(lyricUrl(state.songs[index].path, lyricSettings.source), {
+      cache: { ttl: 3600, offline: true },
+    });
+    if (r.ok) {
+      const data = r.data || {};
       state.lyric = data.lines || [];
       state.lyricFormat = data.format || null;
       state.lyricSource = data.source || null;
@@ -88,10 +94,11 @@ export function closeLyricSpec() {
 // 查询歌曲是否有手动指定歌词
 export async function fetchManualLyric(path) {
   try {
-    const res = await fetch("/api/lyric/manual?path=" + encodeURIComponent(path), {
-      cache: "no-store",
+    // 手动指定状态：1h 缓存（保存/清除后失效）
+    const r = await apiGet("/api/lyric/manual?path=" + encodeURIComponent(path), {
+      cache: { ttl: 3600, offline: true },
     });
-    if (res.ok) return await res.json();
+    if (r.ok) return r.data;
   } catch {
     /* 网络错误 */
   }
@@ -100,23 +107,30 @@ export async function fetchManualLyric(path) {
 
 // 保存手动指定歌词（覆盖旧值）；tlyric 为可选中文翻译 LRC（JSON 歌词携带）
 export async function saveManualLyric({ path, format, text, source, tlyric }) {
-  const res = await fetch("/api/lyric/manual", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path, format, text, source, tlyric: tlyric || undefined }),
+  const r = await apiPut("/api/lyric/manual", {
+    path,
+    format,
+    text,
+    source,
+    tlyric: tlyric || undefined,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || i18n.global.t("errors.saveLyric"));
+  const data = r.data || {};
+  if (!r.ok) throw new Error(data.detail || i18n.global.t("errors.saveLyric"));
+  // 歌词/手动状态缓存失效：下次加载立即拿到新值
+  invalidate("/api/lyric/manual?path=" + encodeURIComponent(path));
+  invalidate(lyricUrl(path, lyricSettings.source));
   return data;
 }
 
 // 清除手动指定歌词（恢复自动获取）
 export async function deleteManualLyric(path) {
   try {
-    const res = await fetch("/api/lyric/manual?path=" + encodeURIComponent(path), {
-      method: "DELETE",
-    });
-    return res.ok;
+    const r = await apiDelete("/api/lyric/manual?path=" + encodeURIComponent(path));
+    if (r.ok) {
+      invalidate("/api/lyric/manual?path=" + encodeURIComponent(path));
+      invalidate(lyricUrl(path, lyricSettings.source));
+    }
+    return r.ok;
   } catch {
     return false;
   }
@@ -125,22 +139,18 @@ export async function deleteManualLyric(path) {
 // 在线搜索歌词候选（网易云 + lrclib）
 export async function searchLyricCandidates(title, artist) {
   const q = new URLSearchParams({ title: title || "", artist: artist || "" });
-  const res = await fetch("/api/lyric/search?" + q.toString(), { cache: "no-store" });
-  if (!res.ok) throw new Error(i18n.global.t("errors.searchLyric"));
-  return (await res.json()).results || [];
+  const r = await apiGet("/api/lyric/search?" + q.toString());
+  if (!r.ok) throw new Error(i18n.global.t("errors.searchLyric"));
+  return (r.data && r.data.results) || [];
 }
 
 // AI 歌词对齐：纯歌词文本（无时间戳）→ 后端调本地 Qwen3-ForcedAligner 生成时间戳 → LRC 字符串
 // 对齐耗时较长（模型加载 + 长音频分段），调用方负责 loading 态；失败抛带 detail 的 Error
 // language 第一版不传（后端自动检测）
 export async function alignLyric({ path, text }) {
-  const res = await fetch("/api/lyric/align", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path, text }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || i18n.global.t("spec.alignFailed"));
+  const r = await apiPost("/api/lyric/align", { path, text });
+  const data = r.data || {};
+  if (!r.ok) throw new Error(data.detail || i18n.global.t("spec.alignFailed"));
   return data; // { lrc, lines, duration? }
 }
 

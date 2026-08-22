@@ -166,6 +166,7 @@ import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from "vue"
 import { useI18n } from "vue-i18n";
 import { Loader2, Music, Sparkles, Tags, X } from "@lucide/vue";
 import { state, loadSongs } from "../composables/usePlayer.js";
+import { apiPost } from "../utils/apiClient.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -246,13 +247,9 @@ async function scrape() {
   netease.value = [];
   musicbrainz.value = [];
   try {
-    const res = await fetch("/api/tags/scrape", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: song.value.path }),
-    });
+    const res = await apiPost("/api/tags/scrape", { path: song.value.path });
     if (!res.ok) throw new Error(t("tags.scrapeFailed"));
-    const data = await res.json();
+    const data = res.data || {};
     scrapeQuery.value = data.query || "";
     netease.value = Array.isArray(data.netease) ? data.netease : [];
     musicbrainz.value = Array.isArray(data.musicbrainz) ? data.musicbrainz : [];
@@ -287,16 +284,18 @@ async function save() {
   saving.value = true;
   const path = song.value.path;
   try {
-    const res = await fetch("/api/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, title, artist, album, cover_url: remoteCover.value }),
+    const res = await apiPost("/api/tags", {
+      path,
+      title,
+      artist,
+      album,
+      cover_url: remoteCover.value,
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = res.data || {};
       throw new Error(data.error || data.detail || t("tags.saveFailed", { msg: "" }));
     }
-    const data = await res.json();
+    const data = res.data || {};
     // 当前播放的这首歌被改名：更新 path/name/artist/album，audio.src 不动 → 播放不中断
     const cur = state.currentSong;
     if (cur && data.newPath && data.newPath !== path) {
@@ -305,7 +304,7 @@ async function save() {
       if (typeof data.artist === "string") cur.artist = data.artist;
       if (typeof data.album === "string") cur.album = data.album;
     }
-    await loadSongs(); // 刷新列表（loadSongs 按 path 保持当前选中/播放）
+    await loadSongs({ force: true }); // 刷新列表（loadSongs 按 path 保持当前选中/播放）
     showToast(t("tags.saveSuccess"), false);
     emit("close");
   } catch (e) {

@@ -7,6 +7,7 @@ import { state } from "./usePlayer.js";
 import { isSearchOpen } from "./searchState.js";
 import { history, loadHistory, addHistory, removeHistory, clearHistory } from "./searchHistory.js";
 import { matchScore, kindRank } from "../utils/score.js";
+import { apiGet } from "../utils/apiClient.js";
 import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex.js";
 import i18n from "../locales/i18n.js";
 
@@ -63,13 +64,13 @@ function collectSongs(q) {
 async function fetchOnline(q, seq) {
   try {
     const src = onlineSource.value === "gequhai" ? "gequhai" : "netease";
-    const res = await fetch(
+    // 在线搜索是实时数据，不走缓存（离线时在线组不出现，本地结果照常）
+    const r = await apiGet(
       `/api/online/search?q=${encodeURIComponent(q)}&limit=${ONLINE_LIMIT}&source=${src}`,
-      { cache: "no-store" },
     );
     if (seq !== searchSeq) return []; // 过期响应丢弃
-    if (!res.ok) return [];
-    const data = await res.json();
+    if (!r.ok) return [];
+    const data = r.data || {};
     if (seq !== searchSeq) return [];
     const items = Array.isArray(data.items) ? data.items : [];
     return items

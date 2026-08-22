@@ -125,6 +125,9 @@ const {
 // 模块对象（live binding：playerMod.audio 每次读当前活动元素，跨变速切换）
 const playerMod = await import("../composables/usePlayer.js");
 
+import { getPendingOps } from "../utils/cacheDb.js";
+import { invalidate } from "../utils/apiClient.js";
+
 const {
   loadPlaylists,
   createPlaylist,
@@ -488,7 +491,7 @@ describe("收藏", () => {
     expect(state.favorites).not.toContain("/a.mp3");
   });
 
-  it("toggleFavorite：后端失败时回滚", async () => {
+  it("toggleFavorite：网络失败 → 本地保留 + 进 dirty 队列（本地优先，离线语义）", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -496,11 +499,14 @@ describe("收藏", () => {
       }),
     );
     await toggleFavorite("/a.mp3");
-    expect(state.favorites).toEqual([]);
-    // 取消收藏失败也回滚
-    state.favorites.push("/a.mp3");
+    expect(state.favorites).toEqual(["/a.mp3"]); // 不回滚：离线本地先写
+    const ops = await getPendingOps();
+    expect(ops.some((o) => o.op.url === "/api/favorites/toggle" && o.op.method === "POST")).toBe(
+      true,
+    );
+    // 取消收藏网络失败也保留
     await toggleFavorite("/a.mp3");
-    expect(state.favorites).toContain("/a.mp3");
+    expect(state.favorites).toEqual([]);
   });
 
   it("loadFavorites 拉取后端收藏列表", async () => {
@@ -2327,7 +2333,8 @@ describe("歌单", () => {
     expect(state.playlists).toHaveLength(1);
     expect(state.playlists[0].name).toBe("日语");
     expect(state.activePlaylistId).toBe("p1");
-    // 歌单没了 → 退回全部歌曲
+    // 歌单没了 → 退回全部歌曲（歌单列表有 60s 声明式缓存，先失效再拉取）
+    await invalidate("/api/playlists");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: true, json: async () => ({ playlists: [] }) })),

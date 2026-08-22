@@ -14,6 +14,7 @@
 // player 侧（playbackSettings + volume/panel/controls/lastPlayed）由 playerCore 通过
 // registerPlayerBridge 注册桥接（避免 playerCore ↔ 本模块的循环依赖）。
 import { watch } from "vue";
+import { apiGet, apiPut, invalidate } from "../utils/apiClient.js";
 import {
   uiSettings,
   lyricSettings,
@@ -73,11 +74,8 @@ function scheduleSave() {
 async function flushSave() {
   saveTimer = null;
   try {
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
-    });
+    const r = await apiPut("/api/settings", buildPayload());
+    if (r.ok) invalidate("/api/settings"); // 写透缓存：下次 GET 不走旧缓存
   } catch {
     /* 后端不可达：保留本地缓存，下次变化再试 */
   }
@@ -148,9 +146,10 @@ function ensureLoadStarted() {
 
 async function loadSettings() {
   try {
-    const res = await fetch("/api/settings", { cache: "no-store" });
-    if (!res.ok) return;
-    const data = await res.json();
+    // 设置元数据：60s + 离线兜底（离线时用上次成功设置，本地缓存仍为写透层）
+    const r = await apiGet("/api/settings", { cache: { ttl: 60, offline: true } });
+    if (!r.ok) return;
+    const data = r.data || {};
     const s = data.settings || {};
     // 快照必须在 GET 应用前捕获（写透 watch 会立刻把缓存覆写成后端值）
     const snapshots = captureLocalSnapshots();
@@ -269,12 +268,9 @@ async function importLocalDiffs(server, snaps) {
   if (!Object.keys(dirty).length) return; // 无脏字段：幂等，不上传
   let ok = false;
   try {
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(dirty),
-    });
-    ok = res.ok;
+    const r = await apiPut("/api/settings", dirty);
+    ok = r.ok;
+    if (ok) invalidate("/api/settings");
   } catch {
     /* 忽略 */
   }

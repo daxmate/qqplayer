@@ -224,6 +224,7 @@ import {
   Loader2,
 } from "@lucide/vue";
 import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
+import { apiPost } from "../utils/apiClient.js";
 import { sleepTimerText } from "../composables/useSleepTimer.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import TagEditorModal from "./TagEditorModal.vue";
@@ -279,18 +280,14 @@ async function downloadCurrent() {
   if (!id || downloadingId.value !== null) return;
   downloadingId.value = id;
   try {
-    const res = await fetch("/api/online/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        level: downloadSettings.defaultQuality,
-        title: song.name,
-        artist: song.artist || "",
-      }),
+    const res = await apiPost("/api/online/download", {
+      id,
+      level: downloadSettings.defaultQuality,
+      title: song.name,
+      artist: song.artist || "",
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = res.data || {};
       throw new Error(data.error || data.message || "");
     }
     showToast(t("control.downloadSuccess", { title: song.name }));

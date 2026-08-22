@@ -30,6 +30,10 @@ export default {
     coverDragHint: "拖动调整封面/歌词区大小",
     // 封面
     coverAlt: "封面",
+    // 数据层（apiClient 离线降级 / 配对失效提示）
+    offlineMode: "离线模式 · 播放已缓存内容",
+    backOnline: "已恢复在线",
+    repairRequired: "连接已失效，请重新配对",
     // 活动栏（ActivityBar.vue）
     activityBar: {
       label: "面板切换",

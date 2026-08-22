@@ -1355,6 +1355,7 @@ import {
   parseShortcutCombo,
 } from "../composables/usePlayer.js";
 import { showToast } from "../composables/useToast.js";
+import { apiGet, apiPost } from "../utils/apiClient.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import {
   COVER_MIN,
@@ -1415,8 +1416,9 @@ const quarkLoginOpen = ref(false);
 async function refreshQuarkState() {
   quarkBusy.value = true;
   try {
-    const res = await fetch("/api/quark/login/state", { cache: "no-store" });
-    quarkState.value = res.ok ? await res.json() : { logged_in: false };
+    // 夸克登录链路：401 是「未登录」语义（非配对 token 失效），skip401 关闭特判
+    const res = await apiGet("/api/quark/login/state", { skip401: true });
+    quarkState.value = res.ok ? res.data : { logged_in: false };
   } catch {
     quarkState.value = { logged_in: false };
   } finally {
@@ -1428,7 +1430,7 @@ async function refreshQuarkState() {
 async function quarkLogout() {
   quarkBusy.value = true;
   try {
-    await fetch("/api/quark/login/logout", { method: "POST" });
+    await apiPost("/api/quark/login/logout", undefined, { skip401: true });
   } catch {
     /* 后端不可达：本地照常置为未登录 */
   }

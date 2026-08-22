@@ -12,21 +12,16 @@
  *     GET /api/video-online/stream?url=<enc> → 视频流（防盗链代理，<video> src 直接用）
  *     GET /api/video-online/subtitles?url=<enc>&lang=<lang> → {items: [{start, end, text, translation}]}
  */
+import { api } from "../utils/apiClient.js";
 import type { OnlineVideo, SubtitleCue, VideoItem, VideoSource } from "./types";
 
 async function request<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      if (body?.detail) detail = body.detail;
-    } catch {
-      /* 非 JSON 响应，用 statusText */
-    }
-    throw new Error(detail || `请求失败 (${res.status})`);
+  const r = await api({ url });
+  if (!r.ok) {
+    const detail = (r.data as { detail?: string } | null)?.detail || r.message;
+    throw new Error(detail || `请求失败 (${r.status})`);
   }
-  return res.json() as Promise<T>;
+  return r.data as T;
 }
 
 /** 视频库列表 */
@@ -61,22 +56,12 @@ export function isLibraryVideo(source: VideoSource): source is VideoItem {
  * 都要原始视频页链接）→ 这里直接用入参页面链接覆盖直链，播放链路拿到的始终是页面链接。
  */
 export async function resolveOnline(url: string): Promise<OnlineVideo> {
-  const res = await fetch("/api/video-online/resolve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      if (body?.detail) detail = body.detail;
-    } catch {
-      /* 非 JSON 响应，用 statusText */
-    }
-    throw new Error(detail || `解析失败 (${res.status})`);
+  const r = await api({ url: "/api/video-online/resolve", method: "POST", body: { url } });
+  if (!r.ok) {
+    const detail = (r.data as { detail?: string } | null)?.detail || r.message;
+    throw new Error(detail || `解析失败 (${r.status})`);
   }
-  const data = (await res.json()) as OnlineVideo;
+  const data = r.data as OnlineVideo;
   return { ...data, url };
 }
 

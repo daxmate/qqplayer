@@ -233,6 +233,8 @@ import MobileShell from "./components/mobile/MobileShell.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
 import { useShellBridge } from "./composables/useShellBridge.js";
+import { showToast } from "./composables/useToast.js";
+import { apiGet, onOfflineChange, onUnauthorized, flushPendingOps } from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import {
   coverSizePx,
@@ -390,15 +392,18 @@ function onOpenBrowse(e) {
 }
 
 let cleanupDragImport = null;
+let offlineUnsub = null;
+let unauthorizedUnsub = null;
 
 // 启动自检（静默，不弹 UI、不影响正常流程）：验证相对 /api 请求在当前页面源下可直达后端。
 // 关键判据：res.ok 且 body 能按 JSON 解析——tauri:// 资源协议源时请求打到资源服务器返回 index.html，
 // res.ok 为 true 但 JSON.parse 抛错 → 捕获后走 FAIL 分支。结果经现有 qqlog 通道落盘供 CI/壳侧验证。
 async function runStartupSelfTest() {
   try {
-    const res = await fetch("/api/settings");
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    await res.json(); // 非 JSON body（如 index.html）在此抛 SyntaxError
+    // 自检必须真实走网络（验证相对 /api 在当前页面源可直达后端），不走缓存
+    const r = await apiGet("/api/settings");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    if (r.data === null) throw new Error("not-json"); // 非 JSON body（如 index.html）在此判 FAIL
     bridge.report({
       type: "qqlog",
       level: "info",
@@ -418,6 +423,15 @@ async function runStartupSelfTest() {
 }
 
 onMounted(() => {
+  // 数据层在线状态/配对失效监听：离线降级与 401 特判的轻提示（见 apiClient）
+  offlineUnsub = onOfflineChange((off) => {
+    showToast(off ? t("app.offlineMode") : t("app.backOnline"));
+  });
+  unauthorizedUnsub = onUnauthorized(() => {
+    showToast(t("app.repairRequired"), { type: "error" });
+  });
+  // 回放上次会话遗留的 dirty 队列（离线时的收藏/歌单/播放记录/阅读进度）
+  flushPendingOps();
   // 启动自检：与正常启动加载并发，GET /api/settings 只读无副作用
   runStartupSelfTest();
   // 队列顺序持久化：先拉取再加载歌曲（loadSongs 恢复顺序依赖该缓存）
@@ -440,6 +454,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  offlineUnsub?.();
+  unauthorizedUnsub?.();
   window.removeEventListener("qqplayer:open-browse", onOpenBrowse);
   cleanupDragImport?.();
   cleanupDragImport = null;

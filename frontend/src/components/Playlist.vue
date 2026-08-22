@@ -7,7 +7,7 @@
         class="pl-refresh"
         :class="{ spinning: state.loading }"
         :title="t('playlist.rescan')"
-        @click="loadSongs()"
+        @click="loadSongs({ force: true })"
       >
         <RefreshCw :size="17" />
       </button>
@@ -427,6 +427,7 @@ import {
 } from "../composables/usePlayer.js";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
+import { apiPost } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import ContextMenu from "./ContextMenu.vue";
@@ -946,18 +947,14 @@ async function downloadSong(song) {
   if (!id || downloading[id]) return;
   downloading[id] = true;
   try {
-    const res = await fetch("/api/online/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        level: downloadSettings.defaultQuality,
-        title: song.name,
-        artist: song.artist || "",
-      }),
+    const res = await apiPost("/api/online/download", {
+      id,
+      level: downloadSettings.defaultQuality,
+      title: song.name,
+      artist: song.artist || "",
     });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = res.data || {};
       throw new Error(data.error || data.message || "");
     }
     showToast(t("playlist.downloadSuccess", { title: song.name }));
@@ -1135,7 +1132,7 @@ async function doDelete() {
     }
     clearSelection();
     // 刷新曲库；最近添加/最近播放/常听排行由既有 watch 自动重算
-    await loadSongs();
+    await loadSongs({ force: true });
   } catch (e) {
     toastError(e.message || t("errors.deleteSongs"));
     clearSelection();

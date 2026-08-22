@@ -3,6 +3,7 @@
 // 曲库自动刷新依赖现有 3s 轮询（后端 version+1），导入成功后无需额外刷新逻辑
 import { ref, computed } from "vue";
 import { showToast, toastError } from "./useToast.js";
+import { apiPost } from "../utils/apiClient.js";
 import i18n from "../locales/i18n.js";
 
 // 音频扩展名白名单（大小写不敏感）
@@ -34,9 +35,9 @@ export function isFileDrag(e) {
 export async function uploadFiles(files) {
   const fd = new FormData();
   for (const f of files) fd.append("files", f);
-  const res = await fetch("/api/import", { method: "POST", body: fd });
-  if (!res.ok) throw new Error(`import http ${res.status}`);
-  return res.json();
+  const r = await apiPost("/api/import", fd);
+  if (!r.ok) throw new Error(`import http ${r.status}`);
+  return r.data;
 }
 
 // 导入 + toast：成功「已导入 n 首」（skipped/errors 非空合并提示），失败 toastError

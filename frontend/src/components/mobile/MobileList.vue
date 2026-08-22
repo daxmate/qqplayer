@@ -456,7 +456,7 @@ async function doDelete() {
       toastError(t("mobile.list.deleteFailed", { n: failed }));
     }
     confirmSong.value = null;
-    await loadSongs(); // 刷新曲库列表（与桌面同一链路）
+    await loadSongs({ force: true }); // 刷新曲库列表（与桌面同一链路）
   } catch (e) {
     toastError(e.message);
     confirmSong.value = null;
