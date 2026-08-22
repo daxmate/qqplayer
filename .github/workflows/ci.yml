@@ -132,6 +132,48 @@ jobs:
           name: qqplayer-backend-win-${{ matrix.arch }}
           path: packaging/dist/qqplayer-backend-win-${{ matrix.arch }}.zip
 
+  backend-linux:
+    name: Backend Linux x64 (PyInstaller + smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install system deps (liblzo2-dev for python-lzo, used by readmdict)
+        # apt 在 runner 上偶发挂起（曾多次卡 20+ 分钟）：加 timeout-minutes 快速失败 + 传输超时/重试
+        # azure.archive.ubuntu.com 在 runner 上持续 Ign（连不上），archive.ubuntu.com 可达。
+        # 注意：ubuntu-24.04 runner 用 /etc/apt/apt-mirrors.txt mirrorlist 选源（sources 里 URIs 是 mirror+file:...），
+        # 只改 sources 文件无效——必须把 mirrorlist 里的 azure 也换掉（sed 保留原 scheme）
+        timeout-minutes: 3
+        run: |
+          sudo sed -i 's|//azure.archive.ubuntu.com|//archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+          sudo apt-get install -y liblzo2-dev zip
+      - name: Install deps
+        run: pip install -r backend/requirements.txt pyinstaller
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+      - name: PyInstaller package
+        run: python -m PyInstaller --noconfirm --clean --distpath packaging/dist --workpath packaging/build packaging/qqplayer-backend.spec
+      - name: Smoke test
+        run: python packaging/win-smoke.py
+      - name: Zip artifact
+        run: cd packaging/dist && zip -r qqplayer-backend-linux-x64.zip qqplayer-backend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qqplayer-backend-linux-x64
+          path: packaging/dist/qqplayer-backend-linux-x64.zip
+
   tauri-windows:
     name: Tauri Shell Windows ${{ matrix.arch }} (build + smoke)
     # Windows 壳：x64（windows-latest）+ ARM64（windows-11-arm）。
@@ -230,8 +272,10 @@ jobs:
             qqplayer-shell-win-${{ matrix.arch }}-portable.zip
 
   tauri-linux:
-    name: Tauri Shell Linux (build check)
-    # Linux 只验证壳能编译 + 打包（不集成内置后端，Linux 后端尚未打包；本期目标仅构建验证）
+    name: Tauri Shell Linux (build deb/AppImage + smoke)
+    # Linux 壳：ubuntu-latest（x86_64）。真打包 deb + AppImage，集成内置后端后 xvfb 无头冒烟。
+    # 需要 backend-linux 的 zip 产物（内置后端集成进壳），所以 needs 它。
+    needs: [backend-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -244,22 +288,60 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
+      # rsproxy 是本机（国内网络）用的镜像；GitHub runner 在美国，直连 crates.io 更快
+      # （实测 rsproxy 在 runner 上下载依赖 30s 传 0 字节超时）。CI 一律用默认 crates.io。
+      - name: 移除 rsproxy 镜像（CI 直连 crates.io）
+        run: rm -f desktop/Windows/src-tauri/.cargo/config.toml
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/Windows/src-tauri
       - name: Install system deps (webkit2gtk 等 Tauri Linux 依赖)
         # 官方清单（v2.tauri.app/start/prerequisites）：libayatana-appindicator3-dev 是 tauri 2 需要的
-        # （libappindicator3-dev 旧版会链接失败）；build-essential/libssl-dev 补全编译链
+        # （libappindicator3-dev 旧版会链接失败）；build-essential/libssl-dev 补全编译链。
+        # apt 在 runner 上偶发挂起（曾多次卡 20+ 分钟）：照抄 backend job 的 sed 换源 + timeout-minutes
+        # + Acquire 超时/重试；webkit2gtk 等大包安装放宽到 10min。
+        # azure.archive.ubuntu.com 在 runner 上持续 Ign（连不上），archive.ubuntu.com 可达。
+        # 注意：ubuntu-24.04 runner 用 /etc/apt/apt-mirrors.txt mirrorlist 选源（sources 里 URIs 是 mirror+file:...），
+        # 只改 sources 文件无效——必须把 mirrorlist 里的 azure 也换掉（sed 保留原 scheme）
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo sed -i 's|//azure.archive.ubuntu.com|//archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils xvfb dbus-x11
       - name: Install frontend deps + build
         working-directory: frontend
         run: pnpm install --frozen-lockfile && pnpm build
-      # --no-bundle：只验证编译，不打包（避免 bundle.resources 指向不存在的内置后端报错）
-      - name: Tauri build (no bundle)
+      - uses: actions/download-artifact@v4
+        with:
+          name: qqplayer-backend-linux-x64
+          path: packaging/dist
+      # 解压内置后端 → src-tauri/resources/backend/（bundle.resources "resources/backend/**" 打包进安装目录 resources/backend/；
+      # 注意 zip 内是 qqplayer-backend/ 目录，需把内容拷进 backend/ 才能匹配 glob）
+      - name: 集成内置后端
+        run: |
+          mkdir -p "$RUNNER_TEMP/qqp-backend"
+          unzip -q -o packaging/dist/qqplayer-backend-linux-x64.zip -d "$RUNNER_TEMP/qqp-backend"
+          mkdir -p desktop/Windows/src-tauri/resources/backend
+          cp -r "$RUNNER_TEMP/qqp-backend/qqplayer-backend/." desktop/Windows/src-tauri/resources/backend/
+          ls desktop/Windows/src-tauri/resources/backend | head -6
+      - name: Tauri build (deb + AppImage)
         working-directory: desktop/Windows
-        run: pnpm tauri build --no-bundle
+        run: pnpm tauri build --bundles deb,appimage
+      # 冒烟：起壳 → 壳 spawn 内置后端 → 轮询 /api/settings 200（收尾杀壳 + pkill 兜底）。
+      # 注意：release 目录下的裸二进制旁边没有内置后端（集成在 src-tauri/resources/backend/，
+      # 打包时才进安装目录）→ 先拷到 exe 同目录 backend/（BackendLauncher 候选 1）模拟打包布局。
+      # 无头环境：xvfb-run + dbus-run-session 起壳，WebKitGTK 防 GPU 崩溃环境变量在脚本内设置。
+      - name: Smoke test
+        run: |
+          rel="desktop/Windows/src-tauri/target/release"
+          cp -r desktop/Windows/src-tauri/resources/backend "$rel"
+          bash packaging/linux-smoke.sh "$rel/qqplayer-desktop"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qqplayer-shell-linux-x64
+          path: |
+            desktop/Windows/src-tauri/target/release/bundle/deb/*.deb
+            desktop/Windows/src-tauri/target/release/bundle/appimage/*.AppImage
 
   backend-macos:
     # macOS 后端 + 壳 + dmg 全量打包（双架构）：arm64（macos-15）+ x86_64（macos-15-intel，Intel runner）。
