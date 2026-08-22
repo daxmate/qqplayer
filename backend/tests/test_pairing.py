@@ -62,6 +62,13 @@ def _pair_device(device_id="iphone-01", name="iPhone 15", dtype="ios") -> tuple[
     return request_id, st["token"]
 
 
+def _switch_server_id(server_id: str) -> None:
+    """模拟"换了一台桌面实例"：改写 pairing.json 里的 server_id（get_server_id 返回新值）"""
+    data = state.pairing_store.load()
+    data["server_id"] = server_id
+    state.pairing_store.save(data)
+
+
 # ============ 配对流程 ============
 
 
@@ -190,7 +197,14 @@ def test_devices_list_no_token_hash():
     devices = client.get("/api/pairing/devices").json()["devices"]
     assert len(devices) == 1
     d = devices[0]
-    assert set(d) == {"device_id", "device_name", "device_type", "created_at", "last_seen_at"}
+    assert set(d) == {
+        "server_id",
+        "device_id",
+        "device_name",
+        "device_type",
+        "created_at",
+        "last_seen_at",
+    }
     assert "token_hash" not in d
 
 
@@ -286,3 +300,88 @@ def test_auth_localhost_exempt(monkeypatch):
 def test_auth_disabled_passes_through():
     """AUTH_ENABLED=False（测试默认）→ 全部放行"""
     assert client.get("/api/library").status_code == 200
+
+
+# ============ 多桌面配对（server_id 维度，任务 C）============
+
+
+def test_same_device_two_servers_two_tokens(monkeypatch):
+    """同一 device 配对两台桌面（两个 server_id）→ 两个独立 token 共存，互不顶替"""
+    monkeypatch.setattr(state, "AUTH_ENABLED", True)
+    _, token1 = _pair_device()  # 桌面实例 A（默认 server_id）
+    server_a = pairing_service.get_server_id()
+    _switch_server_id("server-B")  # 模拟另一台桌面实例（各自 pairing.json 的 server_id 不同）
+    _, token2 = _pair_device()
+    assert server_a != pairing_service.get_server_id()
+    assert token1 != token2
+    # 两个 token 都有效（各自绑定 (server_id, device_id)，经鉴权中间件通过）
+    assert pairing_service.verify_token(token1)
+    assert pairing_service.verify_token(token2)
+    code, _ = _remote("GET", "/api/library", headers={"Authorization": f"Bearer {token1}"})
+    assert code == 200
+    code, _ = _remote("GET", "/api/library", headers={"Authorization": f"Bearer {token2}"})
+    assert code == 200
+    # 落盘两个独立条目，server_id + device_id 联合唯一，token 哈希各不相同
+    data = state.pairing_store.load()
+    assert len(data["devices"]) == 2
+    assert {d["server_id"] for d in data["devices"]} == {server_a, "server-B"}
+    hashes = {d["token_hash"] for d in data["devices"]}
+    assert hashes == {
+        hashlib.sha256(token1.encode()).hexdigest(),
+        hashlib.sha256(token2.encode()).hexdigest(),
+    }
+    # 列表接口带 server_id（iOS 端区分"哪台桌面"）
+    listed = client.get("/api/pairing/devices").json()["devices"]
+    assert {d["server_id"] for d in listed} == {server_a, "server-B"}
+
+
+def test_same_server_repair_replaces_token_only_that_instance():
+    """同一桌面实例重复配对 → 替换该实例的旧 token；另一台桌面的 token 不受影响"""
+    _, token1 = _pair_device()
+    server_a = pairing_service.get_server_id()
+    _switch_server_id("server-B")
+    _, token_b = _pair_device()
+    assert pairing_service.verify_token(token1)
+    assert pairing_service.verify_token(token_b)
+    # 回到桌面 A 再配对同一设备 → 只替换 A 的 token
+    _switch_server_id(server_a)
+    _, token2 = _pair_device()
+    assert token2 != token1
+    assert not pairing_service.verify_token(token1)  # A 的旧 token 立即失效
+    assert pairing_service.verify_token(token2)
+    assert pairing_service.verify_token(token_b)  # B 桌面的 token 仍有效
+    data = state.pairing_store.load()
+    assert len(data["devices"]) == 2  # 两台桌面各一条，不合并
+    by_server = {d["server_id"]: d for d in data["devices"]}
+    assert by_server[server_a]["token_hash"] == hashlib.sha256(token2.encode()).hexdigest()
+    assert by_server["server-B"]["token_hash"] == hashlib.sha256(token_b.encode()).hexdigest()
+
+
+def test_revoke_one_server_keeps_other():
+    """按 (server_id, device_id) 撤销：只删该实例的配对，另一台桌面配对与 token 不受影响"""
+    _, token1 = _pair_device()
+    server_a = pairing_service.get_server_id()
+    _switch_server_id("server-B")
+    _, token2 = _pair_device()
+    # 新接口：DELETE /api/pairing/devices/{server_id}/{device_id}
+    assert client.delete(f"/api/pairing/devices/{server_a}/iphone-01").status_code == 200
+    assert not pairing_service.verify_token(token1)
+    assert pairing_service.verify_token(token2)  # B 桌面 token 仍有效
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert len(devices) == 1
+    assert devices[0]["server_id"] == "server-B"
+    # 幂等：重复撤销仍 200
+    assert client.delete(f"/api/pairing/devices/{server_a}/iphone-01").status_code == 200
+
+
+def test_revoke_all_servers_legacy_endpoint():
+    """旧单参 DELETE /devices/{device_id} 兼容：删除该设备在所有桌面实例的配对"""
+    _, token1 = _pair_device()
+    _switch_server_id("server-B")
+    _, token2 = _pair_device()
+    assert client.delete("/api/pairing/devices/iphone-01").status_code == 200
+    assert client.get("/api/pairing/devices").json()["devices"] == []
+    assert not pairing_service.verify_token(token1)
+    assert not pairing_service.verify_token(token2)
+    # 幂等：重复撤销仍 200
+    assert client.delete("/api/pairing/devices/iphone-01").status_code == 200

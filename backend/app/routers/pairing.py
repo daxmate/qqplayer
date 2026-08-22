@@ -5,8 +5,12 @@
 - POST   /api/pairing/request/:id/approve  确认 → 生成 token（SHA-256 哈希落盘）
 - POST   /api/pairing/request/:id/reject   拒绝
 - GET    /api/pairing/request/:id/status   查询状态（approved 时附 token，仅一次）
-- GET    /api/pairing/devices              已配对设备列表
-- DELETE /api/pairing/devices/:device_id   撤销配对（token 立即失效）
+- GET    /api/pairing/devices              已配对设备列表（含 server_id，区分"哪台桌面"）
+- DELETE /api/pairing/devices/:server_id/:device_id  撤销该设备在某台桌面的配对（新增）
+- DELETE /api/pairing/devices/:device_id   旧接口兼容：撤销该设备在所有桌面的配对
+
+多桌面语义（任务 C 定案）：配对条目 (server_id, device_id) 联合唯一，同一 iPhone 可同时
+配对多台桌面（各 token 独立共存）；同实例重复配对才替换旧 token。
 """
 
 from fastapi import APIRouter, HTTPException
@@ -78,7 +82,13 @@ def api_pairing_devices():
     return {"devices": pairing_service.list_devices()}
 
 
+@router.delete("/api/pairing/devices/{server_id}/{device_id}")
+def api_pairing_revoke_on_server(server_id: str, device_id: str):
+    """撤销该设备在某台桌面的配对（按 server_id + device_id 维度，token 立即失效）"""
+    return pairing_service.revoke(device_id=device_id, server_id=server_id)
+
+
 @router.delete("/api/pairing/devices/{device_id}")
 def api_pairing_revoke(device_id: str):
-    """撤销配对：删除设备记录，该 token 立即失效（幂等）"""
-    return pairing_service.revoke(device_id)
+    """撤销配对（旧接口兼容）：删除该设备在所有桌面实例的配对记录，token 立即失效（幂等）"""
+    return pairing_service.revoke(device_id=device_id)

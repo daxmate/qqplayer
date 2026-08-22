@@ -6,6 +6,15 @@
 - token 明文仅经 status 端点返回一次给发起方（内存态，取出即焚）
 - 限流按 device_id：连续 3 次内正常，第 4 次起指数退避（base 60s：60/120/240…），
   两次请求间隔 >10min 重置计数（state.PAIRING_RATE_RESET_SECONDS）
+
+多桌面配对（任务 C 定案）：
+- 每台桌面实例持有一个持久化 instance_id（server_id，UUID，首次启动生成存 pairing.json；
+  不用 mDNS hostname——主机名会变）
+- 配对条目以 (server_id, device_id) 联合唯一：同一 iPhone 可同时配对家里 Mac、公司 Mac，
+  各 token 独立共存互不顶替；同一桌面实例内重复配对才替换旧 token（原语义缩小到同实例）
+- 撤销按 (server_id, device_id) 维度（DELETE /devices/{server_id}/{device_id}）；
+  旧单参 DELETE /devices/{device_id} 保留，语义 = 删除该设备在所有实例的配对
+- verify_token 按 token 哈希命中即通过（token 本身已绑定 (server_id, device_id)），刷新 last_seen_at
 """
 
 import hashlib
@@ -40,6 +49,27 @@ def _parse_iso(value: str) -> datetime:
         return datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return datetime.fromtimestamp(0)
+
+
+def get_server_id() -> str:
+    """桌面实例 ID（持久化）：首次调用生成 UUID 并落盘 pairing.json，之后恒返回同一值。
+
+    多桌面配对按 (server_id, device_id) 维度区分 token 归属。UUID 在首次启动生成后不再变，
+    不用 mDNS hostname（主机名会变，同一台机器改主机名后配对关系会错乱）。
+    """
+    data = state.pairing_store.load()
+    sid = data.get("server_id")
+    if not sid:
+        sid = uuid.uuid4().hex
+        data["server_id"] = sid
+        state.pairing_store.save(data)
+    return sid
+
+
+def _server_id_of(entry: dict) -> str:
+    """条目的有效 server_id：老数据（多桌面功能前的配对）没有 server_id 字段，
+    视为属于当前实例（数据目录归本机所有，旧配对必然是本实例配的）。"""
+    return entry.get("server_id") or get_server_id()
 
 
 def load_pending() -> list[dict]:
@@ -133,6 +163,8 @@ def _clear_rate_limits() -> None:
 def approve(request_id: str) -> dict:
     """确认配对：生成 64 位 token（SHA-256 哈希落盘），返回结果描述。
 
+    多桌面语义：配对条目以 (server_id, device_id) 联合唯一——同一设备在另一台桌面实例上
+    配对生成独立 token 互不顶替；仅同一实例内重复配对替换旧 token（原语义缩小到同实例）。
     返回 {"status": "approved"}；请求不存在/已过期抛 KeyError（Router 层转 404）。
     """
     req = find_pending(request_id)
@@ -141,13 +173,18 @@ def approve(request_id: str) -> dict:
     token = secrets.token_urlsafe(48)  # 64 字符
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     device_id = req["device_id"]
+    server_id = get_server_id()
     now = _now_iso()
     data = state.pairing_store.load()
     devices = data.setdefault("devices", [])
-    existing = next((d for d in devices if d.get("device_id") == device_id), None)
+    existing = next(
+        (d for d in devices if d.get("device_id") == device_id and _server_id_of(d) == server_id),
+        None,
+    )
     if existing is None:
         devices.append(
             {
+                "server_id": server_id,
                 "device_id": device_id,
                 "device_name": req.get("device_name", ""),
                 "device_type": req.get("device_type", ""),
@@ -157,7 +194,8 @@ def approve(request_id: str) -> dict:
             }
         )
     else:
-        # 重复配对（同一设备再次发起）：替换 token，旧 token 立即失效
+        # 同实例重复配对（同一设备再次发起）：替换 token，旧 token 立即失效
+        existing["server_id"] = server_id  # 老数据迁移：补上 server_id 字段
         existing["device_name"] = req.get("device_name", existing.get("device_name", ""))
         existing["device_type"] = req.get("device_type", existing.get("device_type", ""))
         existing["token_hash"] = token_hash
@@ -232,10 +270,11 @@ def status(request_id: str) -> dict:
 
 
 def list_devices() -> list[dict]:
-    """已配对设备列表（不含 token_hash）"""
+    """已配对设备列表（不含 token_hash）；每条含 server_id（iOS 端区分"哪台桌面"）"""
     devices = state.pairing_store.load().get("devices", [])
     return [
         {
+            "server_id": _server_id_of(d),
             "device_id": d.get("device_id", ""),
             "device_name": d.get("device_name", ""),
             "device_type": d.get("device_type", ""),
@@ -246,19 +285,33 @@ def list_devices() -> list[dict]:
     ]
 
 
-def revoke(device_id: str) -> dict:
-    """撤销配对：删除设备记录，该 token 立即失效（幂等，重复撤销仍 200）。"""
+def revoke(device_id: str, server_id: str | None = None) -> dict:
+    """撤销配对：删除设备记录，对应 token 立即失效（幂等，重复撤销仍 200）。
+
+    server_id 指定 → 只撤销该设备在该桌面实例的配对（DELETE /devices/{server_id}/{device_id}）；
+    server_id 省略 → 撤销该设备在所有实例的配对（旧单参 DELETE /devices/{device_id} 兼容）。
+    """
     data = state.pairing_store.load()
     devices = data.get("devices", [])
-    kept = [d for d in devices if d.get("device_id") != device_id]
+    if server_id:
+        kept = [
+            d
+            for d in devices
+            if not (d.get("device_id") == device_id and _server_id_of(d) == server_id)
+        ]
+    else:
+        kept = [d for d in devices if d.get("device_id") != device_id]
     if len(kept) != len(devices):
         data["devices"] = kept
         state.pairing_store.save(data)
-    return {"status": "revoked", "device_id": device_id}
+    return {"status": "revoked", "device_id": device_id, "server_id": server_id or "*"}
 
 
 def verify_token(token: str) -> bool:
-    """鉴权：token SHA-256 后与已配对设备比对；命中则刷新该设备 last_seen_at。"""
+    """鉴权：token SHA-256 后与已配对设备比对；命中则刷新该条目 last_seen_at。
+
+    token 本身已绑定 (server_id, device_id)，哈希命中即通过（不额外校验 server_id——
+    本实例的 pairing.json 里所有条目都是本实例发的 token）。"""
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     data = state.pairing_store.load()
     devices = data.get("devices", [])
