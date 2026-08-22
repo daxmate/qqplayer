@@ -102,6 +102,20 @@
 | iOS | 🔴 偏难 | 沙盒/后台/审核三座大山 + 无 Python |
 | 鸿蒙 | 🟡 中等 | ArkWeb 壳，逻辑复用，生态/API 适配 |
 
+## 仓库结构规划（2026-08-22 定）
+
+```
+desktop/          # 桌面形态（功能完整版）
+  macOS/          # Swift 壳（已有）
+  Windows/        # Tauri 壳（已有）
+mobile/           # 移动形态（companion 定位，与桌面功能差异大）
+  ios/            # Swift 壳（待建，① 配对 API + ② 数据层已就绪）
+  android/        # 未来
+  harmonyos/      # 未来
+```
+
+移动端与桌面端是两个产品定位：companion（同步+离线）vs 完整版，不混放。
+
 ## 并行开发约定（多机器协作）
 
 后端已拆 app 包（routers/services/state/storage/main），新功能按模块建独立 router + service 文件，冲突极小。
