@@ -153,8 +153,8 @@ def test_pending_list_prunes_expired(monkeypatch):
 
 
 def test_rate_limit_exponential_backoff(monkeypatch):
-    """连续 3 次内正常；第 4 次起指数退避（base 60s → 测试缩短为 0.05s）"""
-    monkeypatch.setattr(state, "PAIRING_RATE_BASE_SECONDS", 0.05)
+    """连续 3 次内正常；第 4 次起指数退避（base 60s → 测试缩短为 0.3s）"""
+    monkeypatch.setattr(state, "PAIRING_RATE_BASE_SECONDS", 0.3)
     for i in range(3):
         r = client.post("/api/pairing/request", json={"device_id": "spam-01"})
         assert r.status_code == 200, f"第 {i + 1} 次应放行"
@@ -162,13 +162,14 @@ def test_rate_limit_exponential_backoff(monkeypatch):
     r = client.post("/api/pairing/request", json={"device_id": "spam-01"})
     assert r.status_code == 429
     # 等待 base 后第 4 次放行；随后第 5 次需 base*2^1 → 立即再发仍 429
-    time.sleep(0.06)
+    # （base 取 0.3s：退避窗口 0.6s，慢 CI 机器上请求间隔也不易超过，防 flaky）
+    time.sleep(0.35)
     assert client.post("/api/pairing/request", json={"device_id": "spam-01"}).status_code == 200
     assert client.post("/api/pairing/request", json={"device_id": "spam-01"}).status_code == 429
 
 
 def test_rate_limit_other_device_unaffected(monkeypatch):
-    monkeypatch.setattr(state, "PAIRING_RATE_BASE_SECONDS", 0.05)
+    monkeypatch.setattr(state, "PAIRING_RATE_BASE_SECONDS", 0.3)
     for _ in range(5):
         assert client.post("/api/pairing/request", json={"device_id": "spam-01"}).status_code in (
             200,
