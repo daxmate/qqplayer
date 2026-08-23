@@ -51,7 +51,7 @@
             @click="playLineAt(i)"
           >
             <span
-              v-if="uiSettings.karaokeShowNum || abBadge(i)"
+              v-if="(!headless && uiSettings.karaokeShowNum) || abBadge(i)"
               class="kline-num"
               :class="{ 'ab-badge': abBadge(i) }"
               >{{ abBadge(i) || lineNumber(i) }}</span
