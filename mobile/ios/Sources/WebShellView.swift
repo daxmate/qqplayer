@@ -198,7 +198,8 @@ struct WebShellView: UIViewRepresentable {
         /// 绕开 file:// 的 fetch 跨源 / localStorage / IndexedDB 硬限制（2026-08-22 换路定案）。
         private lazy var localServer: MiniHTTPServer? = {
             guard let www = Bundle.main.resourceURL?.appendingPathComponent("www") else { return nil }
-            return MiniHTTPServer(root: www)
+            let assets = URL(fileURLWithPath: downloadManager.storageRootPath, isDirectory: true)
+            return MiniHTTPServer(root: www, assetsRoot: assets)
         }()
         private var localServerPort: UInt16 = 0
 
@@ -238,7 +239,6 @@ struct WebShellView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "qqplayerIos" else { return }
-            print("[WebShell] native msg: \(message.body)")
             let body: [String: Any]
             if let dict = message.body as? [String: Any] {
                 body = dict

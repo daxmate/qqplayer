@@ -64,7 +64,6 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 60
         let s = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        print("[Download] session created")
         return s
     }()
 
@@ -99,7 +98,6 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
 
     /// 批量入队。已存在且校验通过 → 立即回 done（不下载）。
     func enqueue(_ requests: [Request]) {
-        print("[Download] enqueue \(requests.count) items: \(requests.map { $0.path })")
         for r in requests {
             guard Self.isSafePath(r.path) else { continue }
             let fileURL = storageRoot.appendingPathComponent(r.path)
@@ -186,14 +184,12 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             toStart.append(task)
         }
         stateLock.unlock()
-        print("[Download] startNext: active=\(active.count) queue=\(queue.count) starting=\(toStart.count)")
         for task in toStart {
             task.resume()
         }
     }
 
     private func makeDataTask(for item: Item) -> URLSessionDataTask {
-        print("[Download] make task: \(item.path)")
         let partSize = fileSize(item.partURL)
         if partSize == 0 {
             try? FileManager.default.removeItem(at: item.partURL)
@@ -219,7 +215,6 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-        print("[Download] didReceive response: \(String(describing: (response as? HTTPURLResponse)?.statusCode)) for \(dataTask.originalRequest?.url?.lastPathComponent ?? "?")")
         guard let item = active[dataTask] else {
             completionHandler(.cancel)
             return
@@ -281,11 +276,11 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        print("[Download] didComplete: \(error?.localizedDescription ?? "OK")")
         guard let dataTask = task as? URLSessionDataTask,
               let item = active.removeValue(forKey: dataTask) else { return }
         closeHandle(for: dataTask)
         if let error {
+            print("[Download] didComplete error: \(error.localizedDescription)")
             if (error as NSError).code == NSURLErrorCancelled {
                 emitDone(item, ok: false, sha256: item.sha256, localURL: nil, error: "cancelled")
             } else {
@@ -302,10 +297,8 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     // MARK: - 校验与落盘
 
     private func verifyAndFinalize(_ item: Item) {
-        print("[Download] verify: path=\(item.path) partSize=\(fileSize(item.partURL)) expectSize=\(item.size ?? -1)")
         // size 未知（0）时跳过大小校验（前端未提供 size 时传 0）
         if let size = item.size, size > 0, fileSize(item.partURL) != size {
-            print("[Download] retry reason: size mismatch")
             retry(item, reason: "size 不匹配（期望 \(size)，实际 \(fileSize(item.partURL))）")
             return
         }
@@ -322,9 +315,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         try? FileManager.default.removeItem(at: item.fileURL)
         do {
             try FileManager.default.moveItem(at: item.partURL, to: item.fileURL)
-            print("[Download] 落盘成功: \(item.fileURL.path)")
         } catch {
-            print("[Download] 落盘失败: \(error.localizedDescription)")
             emitDone(item, ok: false, sha256: item.sha256, localURL: nil, error: "落盘失败: \(error.localizedDescription)")
             return
         }
