@@ -83,10 +83,24 @@ vi.mock("../books/annotations", () => ({
 
 vi.mock("../utils/sync.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/sync.js")>();
-  return { ...actual, ensureAsset: vi.fn(actual.ensureAsset) };
+  return {
+    ...actual,
+    // 默认桌面环境（false）；iOS 分支测试显式 mockReturnValue(true)。
+    // 不读真实 window.qqplayerNative（sync.test.js 会设置它，并行时污染全局）。
+    // assetForBook 也 mock：真实实现里 crypto.subtle.digest 是真异步，
+    // 全量并发时 digest 变慢 → 调用跨测试漂移 → flaky（CI/全量实测）。
+    syncEnabled: vi.fn(() => false),
+    ensureAsset: vi.fn(async () => null),
+    assetForBook: vi.fn(async (book) => ({
+      url: `/api/books/${book?.id ?? "b1"}/file`,
+      path: `books/${book?.id ?? "b1"}.epub`,
+      sha256: "",
+      size: 0,
+    })),
+  };
 });
 
-import { ensureAsset } from "../utils/sync.js";
+import { assetForBook, ensureAsset, syncEnabled } from "../utils/sync.js";
 import { saveBookProgress } from "../books/api";
 
 import { getReaderSettings, saveReaderSettings, READER_SETTINGS_DEFAULTS } from "../books/settings";
@@ -759,10 +773,11 @@ describe("settings 模块（/api/settings 契约）", () => {
 describe("Reader iOS 离线资产", () => {
   afterEach(() => {
     delete (window as unknown as Record<string, unknown>).qqplayerNative;
+    (syncEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
   });
 
   it("iOS 本地资产命中：fetch 本地 HTTP /assets/，不请求远程 fileUrl", async () => {
-    (window as unknown as Record<string, unknown>).qqplayerNative = true;
+    (syncEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (ensureAsset as ReturnType<typeof vi.fn>).mockResolvedValue(
       "file:///var/mobile/Containers/Data/Application/UUID/Documents/qqplayer-assets/books/abc123.epub",
     );
@@ -779,7 +794,7 @@ describe("Reader iOS 离线资产", () => {
   });
 
   it("iOS 本地未下载：回退远程 fileUrl（ensureAsset 返回 null，不阻塞）", async () => {
-    (window as unknown as Record<string, unknown>).qqplayerNative = true;
+    (syncEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (ensureAsset as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
@@ -791,7 +806,7 @@ describe("Reader iOS 离线资产", () => {
     wrapper.unmount();
   });
 
-  it("桌面环境（无 qqplayerNative）：ensureAsset 不被调用，走远程零变化", async () => {
+  it("桌面环境（syncEnabled false）：ensureAsset 不被调用，走远程零变化", async () => {
     const wrapper = mount(Reader, { props: { book: makeBook() } });
     await flushPromises();
 

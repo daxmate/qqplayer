@@ -34,6 +34,19 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("epubjs", () => ({ default: mocks.ePub }));
 
+// 本文件只测注解/选中逻辑，不测同步：mock 掉 sync.js（Reader.vue 阶段4 起静态依赖它），
+// 避免真实模块（含 cacheDb IndexedDB 初始化）加载时序影响 mount 后 handler 注册（全量并行 flaky）。
+vi.mock("../utils/sync.js", () => ({
+  syncEnabled: vi.fn(() => false),
+  ensureAsset: vi.fn(async () => null),
+  assetForBook: vi.fn(async () => null),
+  localAssetHTTPURL: vi.fn(() => null),
+  initSync: vi.fn(),
+  stopSync: vi.fn(),
+  cancelDownloads: vi.fn(),
+  getSyncState: vi.fn(() => ({})),
+}));
+
 vi.mock("../books/api", () => ({
   fetchBooks: vi.fn(),
   importBook: vi.fn(),
