@@ -100,7 +100,7 @@ vi.mock("../utils/sync.js", async (importOriginal) => {
   };
 });
 
-import { assetForBook, ensureAsset, syncEnabled } from "../utils/sync.js";
+import { ensureAsset, syncEnabled } from "../utils/sync.js";
 import { saveBookProgress } from "../books/api";
 
 import { getReaderSettings, saveReaderSettings, READER_SETTINGS_DEFAULTS } from "../books/settings";
