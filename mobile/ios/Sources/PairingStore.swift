@@ -1,6 +1,6 @@
+import Combine
 import Foundation
 import UIKit
-import Combine
 
 /// 全局配对状态：已配对服务器列表、当前连接、Keychain 读写。
 /// 多桌面支持：Keychain 按 serverId 存多组 (url, token)，发现列表里已配对显示"已连接"，可切换。

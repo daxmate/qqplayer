@@ -9,7 +9,6 @@ import Foundation
 
 @main
 struct TestDictEvents {
-
     static var passed = 0
 
     static func expect(_ condition: Bool, _ name: String) {

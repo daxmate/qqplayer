@@ -130,9 +130,9 @@ final class MiniHTTPServer {
         default: statusText = "Error"
         }
         let head = "HTTP/1.1 \(status) \(statusText)\r\n" +
-                   "Content-Type: \(contentType)\r\n" +
-                   "Content-Length: \(body.count)\r\n" +
-                   "Connection: close\r\n\r\n"
+            "Content-Type: \(contentType)\r\n" +
+            "Content-Length: \(body.count)\r\n" +
+            "Connection: close\r\n\r\n"
         var out = Data(head.utf8)
         out.append(body)
         conn.send(content: out, completion: .contentProcessed { _ in

@@ -25,7 +25,7 @@ enum PairingClient {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 429 { return .failure(.rateLimited) }
-            guard (200..<300).contains(status) else { return .failure(.http(status)) }
+            guard (200 ..< 300).contains(status) else { return .failure(.http(status)) }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let requestId = obj["request_id"] as? String, !requestId.isEmpty
             else { return .failure(.badResponse) }
@@ -46,7 +46,7 @@ enum PairingClient {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 404 { return .unknown }
-            guard (200..<300).contains(status),
+            guard (200 ..< 300).contains(status),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let st = obj["status"] as? String
             else { return .unknown }

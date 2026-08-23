@@ -1,6 +1,6 @@
+import Combine
 import Foundation
 import Network
-import Combine
 
 /// 发现的桌面端服务器（mDNS）
 struct DiscoveredServer: Identifiable, Equatable {

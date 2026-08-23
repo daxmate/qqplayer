@@ -226,7 +226,7 @@ struct WebShellView: UIViewRepresentable {
                 // 缺前端产物：显示提示（build.sh 未跑 / 未打包）
                 webView.loadHTMLString(
                     "<html><body style='font-family:-apple-system;padding:40px;text-align:center;color:#888'>" +
-                    "前端资源缺失：请先运行 mobile/ios/build.sh（构建并复制 www）</body></html>",
+                        "前端资源缺失：请先运行 mobile/ios/build.sh（构建并复制 www）</body></html>",
                     baseURL: nil
                 )
                 return
@@ -238,7 +238,7 @@ struct WebShellView: UIViewRepresentable {
             guard localServerPort > 0 else {
                 webView.loadHTMLString(
                     "<html><body style='font-family:-apple-system;padding:40px;text-align:center;color:#888'>" +
-                    "本地服务器启动失败</body></html>",
+                        "本地服务器启动失败</body></html>",
                     baseURL: nil
                 )
                 return

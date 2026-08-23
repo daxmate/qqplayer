@@ -14,8 +14,8 @@
 //   （build.sh 负责完整打包 .app）
 
 import Cocoa
-import WebKit
 import MediaPlayer
+import WebKit
 
 let BACKEND_BASE = "http://localhost:17627"
 
@@ -80,15 +80,15 @@ final class MainWebView: WKWebView {
     static var readerSelectedText = ""
     static var readerHasHighlight = false
     // 当前选区已有高亮的样式（"highlight" 底色 | "underline" 下划线 | nil 无高亮），驱动右键菜单「下划线」项标题
-    static var readerHighlightStyle: String? = nil
+    static var readerHighlightStyle: String?
 
     // 歌曲列表/侧边栏歌单右键菜单上下文缓存：前端 mousedown(button===2) 时经 "native" 通道推送
     // { type: 'ctxState', kind: 'song'|'playlist'|nil, path, songIndex, playlistId, songName, isFav, hasPath, canGoArtist, canGoAlbum }
     // willOpenMenu 时按 kind 注入菜单项；kind 为 nil（空白区右键）或上下文过期 → 不注入，保留系统菜单
-    static var ctxKind: String? = nil
-    static var ctxPath: String? = nil
+    static var ctxKind: String?
+    static var ctxPath: String?
     static var ctxSongIndex = -1
-    static var ctxPlaylistId: String? = nil
+    static var ctxPlaylistId: String?
     static var ctxSongName = ""
     static var ctxIsFav = false
     static var ctxHasPath = false

@@ -62,7 +62,7 @@ struct DiscoveryView: View {
                             }
                         }
                     }
-            }
+                }
                 Section {
                     Button {
                         manualAddress = ""
