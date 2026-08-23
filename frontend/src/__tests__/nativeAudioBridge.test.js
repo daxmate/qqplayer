@@ -49,6 +49,12 @@ describe("nativeAudioBridge 桌面环境（无 qqplayerIosBridge）", () => {
     const m = await import("../composables/nativeAudioBridge.js?t=desk2");
     expect(m.resolveNativeUrl("/api/cover?path=x")).toBe("/api/cover?path=x");
   });
+
+  it("resolveNativeUrl 无服务器 base 时有 token 也不附加", async () => {
+    localStorage.setItem("qqplayer.token", "tok-desk");
+    const m = await import("../composables/nativeAudioBridge.js?t=desk3");
+    expect(m.resolveNativeUrl("/api/cover?path=x")).toBe("/api/cover?path=x");
+  });
 });
 
 describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => {
@@ -89,6 +95,38 @@ describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => 
 
   it("resolveNativeUrl：绝对 URL 原样", () => {
     expect(m.resolveNativeUrl("https://x.com/a.mp3")).toBe("https://x.com/a.mp3");
+  });
+
+  it("resolveNativeUrl：有 token 时相对路径附加 token（已有 query 用 &）", async () => {
+    localStorage.setItem("qqplayer.token", "tok-123");
+    const m2 = await import("../composables/nativeAudioBridge.js?t=iostok" + Math.random());
+    expect(m2.resolveNativeUrl("/api/cover?path=%2Fm.mp3")).toBe(
+      "http://192.168.1.50:17627/api/cover?path=%2Fm.mp3&token=tok-123",
+    );
+    // 无 query 的相对路径 → 用 ?
+    expect(m2.resolveNativeUrl("/api/audio")).toBe(
+      "http://192.168.1.50:17627/api/audio?token=tok-123",
+    );
+  });
+
+  it("resolveNativeUrl：有 token 时绝对 URL / 上游直链不加 token", async () => {
+    localStorage.setItem("qqplayer.token", "tok-123");
+    const m2 = await import("../composables/nativeAudioBridge.js?t=iosabs" + Math.random());
+    expect(m2.resolveNativeUrl("https://x.com/a.mp3")).toBe("https://x.com/a.mp3");
+    const enc = encodeURIComponent("http://m.example.com/a.mp3");
+    expect(m2.resolveNativeUrl(`/api/stream/proxy?url=${enc}`)).toBe("http://m.example.com/a.mp3");
+  });
+
+  it("authToken 兑底：localStorage 无 token 时读桥对象 token", async () => {
+    window.qqplayerIosBridge = {
+      postMessage: (msg) => posts.push(msg),
+      server: "http://192.168.1.50:17627",
+      token: "bridge-tok",
+    };
+    const m2 = await import("../composables/nativeAudioBridge.js?t=iosbridge" + Math.random());
+    expect(m2.resolveNativeUrl("/api/cover")).toBe(
+      "http://192.168.1.50:17627/api/cover?token=bridge-tok",
+    );
   });
 
   it("代理 src 赋值 → 发 load 命令（已解析绝对 URL）", () => {
@@ -164,6 +202,16 @@ describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => 
     expect(msg.title).toBe("歌");
     expect(msg.artist).toBe("艺人");
     expect(msg.coverUrl).toBe("http://192.168.1.50:17627/api/cover?path=%2Fm%2Fa.mp3");
+  });
+
+  it("nativeSendMetadata：本地歌封面 URL 附加 token（真机锁屏鉴权）", async () => {
+    localStorage.setItem("qqplayer.token", "tok-abc");
+    const m2 = await import("../composables/nativeAudioBridge.js?t=iosmeta" + Math.random());
+    m2.nativeSendMetadata({ name: "歌", artist: "艺人", album: "专", path: "/m/a.mp3" });
+    const msg = posts.find((p) => p.cmd === "setMetadata");
+    expect(msg.coverUrl).toBe(
+      "http://192.168.1.50:17627/api/cover?path=%2Fm%2Fa.mp3&token=tok-abc",
+    );
   });
 
   it("nativeSendMetadata：流媒体歌用网络封面 URL 原样", () => {

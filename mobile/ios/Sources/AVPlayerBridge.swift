@@ -268,7 +268,8 @@ final class AVPlayerBridge {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    /// 封面图：data: URL 直接解码；http(s) 异步拉取；相对路径按服务器 base 前缀补全（调用方已处理）
+    /// 封面图：data: URL 直接解码；http(s) 异步拉取（附加 Bearer 鉴权头——真机 /api/cover
+    /// 401 兑底，2026-08-23）；相对路径按服务器 base 前缀补全（调用方已处理）
     private func loadArtwork(_ cover: String, completion: @escaping (MPMediaItemArtwork?) -> Void) {
         if cover.hasPrefix("data:image/") {
             let base64 = cover.split(separator: ",").dropFirst().joined(separator: ",")
@@ -283,7 +284,13 @@ final class AVPlayerBridge {
             completion(nil)
             return
         }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        var request = URLRequest(url: url)
+        // 与前端 resolveNativeUrl 的 ?token= 双保险：URLSession 拉图带 Authorization 头
+        // （后端两者都认；第三方直链/本地资产无 token 时不带，保持原样）
+        if let token = authToken, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        URLSession.shared.dataTask(with: request) { data, _, _ in
             DispatchQueue.main.async {
                 if let data, let img = UIImage(data: data) {
                     completion(MPMediaItemArtwork(boundsSize: img.size) { _ in img })

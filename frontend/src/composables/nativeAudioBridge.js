@@ -111,11 +111,27 @@ function serverBase() {
   }
 }
 
+/** 配对 token：localStorage 优先，桥对象兜底（与 apiClient.authToken 同源策略，file:// 下桥注入更可靠） */
+function authToken() {
+  try {
+    const t = localStorage.getItem("qqplayer.token");
+    if (t) return t;
+  } catch {
+    /* 忽略 */
+  }
+  try {
+    const b = nativeBridge();
+    return b && typeof b.token === "string" ? b.token : "";
+  } catch {
+    return "";
+  }
+}
+
 export function resolveNativeUrl(url) {
   if (!url || typeof url !== "string") return url;
-  // http(s) 与 file（本地资产）都是绝对 URL，原样传给原生播放
+  // http(s) 与 file（本地资产）都是绝对 URL，原样传给原生播放（第三方直链不加 token）
   if (/^(https?|file):\/\//i.test(url)) return url;
-  // 同源代理 URL → 解出上游直链（AVPlayer 直接拉，跨域无 CORS 限制）
+  // 同源代理 URL → 解出上游直链（AVPlayer 直接拉，跨域无 CORS 限制；直链是外部 URL，不加 token）
   const m = url.match(/^\/api\/stream\/proxy\?url=([^&]+)/);
   if (m) {
     try {
@@ -126,7 +142,15 @@ export function resolveNativeUrl(url) {
   }
   const base = serverBase();
   if (!base) return url;
-  return base.replace(/\/+$/, "") + (url.startsWith("/") ? url : "/" + url);
+  let full = base.replace(/\/+$/, "") + (url.startsWith("/") ? url : "/" + url);
+  // 原生资源（AVPlayer 拉流 / URLSession 拉锁屏封面）带不了 Authorization header
+  // → token 附加 query（与 apiClient.resolveServerUrl 对齐；后端中间件支持 ?token=；
+  //   2026-08-23 真机锁屏封面 401 根因）。URL 已有 query 时用 & 连接。
+  const token = authToken();
+  if (token) {
+    full += (full.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+  }
+  return full;
 }
 
 // ---------- Audio 代理（对 playerCore 呈现原生 Audio 元素语义） ----------
