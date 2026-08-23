@@ -1,6 +1,6 @@
 <template>
   <div class="karaoke-panel">
-    <div class="kp-head">
+    <div v-if="!headless" class="kp-head">
       <button
         v-if="expandBtn"
         class="kp-expand"
@@ -110,6 +110,9 @@ const props = defineProps({
   lyric: { type: Array, default: () => [] },
   current: { type: Number, default: -1 },
   expandBtn: { type: Boolean, default: false }, // 面板全关时显示展开按钮（跟唱模式无悬浮按钮区）
+  // 纯歌词展示模式（移动端音乐模式）：隐藏面板头（逐句练习标题/AB 提示/歌词库入口），
+  // 只留滚动歌词区；无歌词时 kp-empty 仍自带歌词库入口，不丢能力
+  headless: { type: Boolean, default: false },
 });
 
 function expandPanels() {

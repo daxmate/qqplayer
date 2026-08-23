@@ -32,12 +32,21 @@
 
     <!-- 主体 -->
     <div class="mp-body">
-      <!-- 连播模式：封面大图 + 歌名/歌手（控制条在底部） -->
+      <!-- 连播模式：封面 + 频谱 + 滚动歌词 + 歌名/歌手（控制条在底部） -->
       <template v-if="state.mode === 'continuous'">
         <div class="mp-cover-area">
           <Cover :song="state.currentSong" :size="mobileCoverSize" />
         </div>
         <Visualizer small />
+        <!-- 滚动歌词：复用 KaraokePanel（headless：隐藏逐句练习面板头，只留滚动/高亮/点句） -->
+        <div class="mp-lyric-area">
+          <KaraokePanel
+            :lyric="state.lyric"
+            :current="currentLineIndex"
+            :expand-btn="false"
+            headless
+          />
+        </div>
         <div class="mp-song-info">
           <div class="mp-song-name">{{ state.currentSong?.name || t("control.noSong") }}</div>
           <div class="mp-song-artist">
@@ -148,21 +157,35 @@ const { t } = useI18n();
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   padding: 8px 16px 0;
 }
 .mp-cover-area {
   display: flex;
   justify-content: center;
+  flex-shrink: 0;
 }
 .mp-body :deep(.visualizer) {
   margin-top: 14px;
+  flex-shrink: 0;
+}
+/* 连播模式歌词区：占据封面/歌名之间的剩余空间（flex:1），KaraokePanel 内部滚动 */
+.mp-lyric-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+}
+.mp-lyric-area > * {
+  flex: 1;
+  min-height: 0;
 }
 .mp-song-info {
   text-align: center;
-  margin-top: 18px;
+  margin-top: 14px;
   min-width: 0;
   padding: 0 12px;
+  flex-shrink: 0;
 }
 .mp-song-name {
   font-size: 18px;

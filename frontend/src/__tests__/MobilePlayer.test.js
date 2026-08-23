@@ -38,6 +38,8 @@ beforeEach(() => {
     currentIndex: 0,
     currentSong: song,
     isPlaying: false,
+    currentTime: 0,
+    duration: 0,
     favorites: [],
     playlists: [],
     activePlaylistId: null,
@@ -56,7 +58,7 @@ afterEach(() => {
 });
 
 describe("MobilePlayer 音乐模式（continuous）", () => {
-  it("渲染歌曲名/歌手/专辑 + 封面 + 频谱 + 控制条", () => {
+  it("渲染歌曲名/歌手/专辑 + 封面 + 频谱 + 歌词区 + 控制条", () => {
     const wrapper = mount(MobilePlayer);
     expect(wrapper.find(".mp-song-name").text()).toBe("雪の華");
     expect(wrapper.find(".mp-song-artist").text()).toContain("中島美嘉");
@@ -65,6 +67,40 @@ describe("MobilePlayer 音乐模式（continuous）", () => {
       wrapper.find(".mp-cover-area .cover").exists() || wrapper.find(".mp-cover-area img").exists(),
     ).toBe(true);
     expect(wrapper.find(".controls").exists()).toBe(true); // ControlBar
+    // 歌词区：复用 KaraokePanel（headless，隐藏逐句练习面板头）
+    expect(wrapper.find(".mp-lyric-area .karaoke-panel").exists()).toBe(true);
+  });
+
+  it("continuous 模式显示滚动歌词（复用 KaraokePanel）", () => {
+    state.lyric = [
+      { type: "line", s: 0, e: 10, text: ["第一句"] },
+      { type: "line", s: 10, e: 20, text: ["第二句"] },
+    ];
+    const wrapper = mount(MobilePlayer);
+    const klines = wrapper.findAll(".mp-lyric-area .kline");
+    expect(klines.length).toBe(2);
+    expect(klines[0].text()).toContain("第一句");
+    expect(klines[1].text()).toContain("第二句");
+    // headless：不显示跟唱面板头（逐句练习标题/AB 提示）
+    expect(wrapper.find(".mp-lyric-area .kp-head").exists()).toBe(false);
+    // 跟唱模式的面板头不受影响（headless 默认 false）
+  });
+
+  it("continuous 模式当前句高亮（跟随播放进度）", () => {
+    state.lyric = [
+      { type: "line", s: 0, e: 10, text: ["第一句"] },
+      { type: "line", s: 10, e: 20, text: ["第二句"] },
+    ];
+    state.currentTime = 12; // 落在第二句 [10, 20)
+    const wrapper = mount(MobilePlayer);
+    const active = wrapper.find(".mp-lyric-area .kline.active");
+    expect(active.exists()).toBe(true);
+    expect(active.text()).toContain("第二句");
+  });
+
+  it("continuous 模式无歌词时显示占位（kp-empty）", () => {
+    const wrapper = mount(MobilePlayer);
+    expect(wrapper.find(".mp-lyric-area .kp-empty").exists()).toBe(true);
   });
 
   it("顶栏显示当前模式标签；ControlBar 跟唱按钮进入/退出跟唱", async () => {
@@ -109,6 +145,13 @@ describe("MobilePlayer 跟唱模式（karaoke）", () => {
     expect(wrapper.find(".mp-karaoke .karaoke-panel").exists()).toBe(true);
     // ControlBar 收到 karaoke prop → 切换为跟唱控制条
     expect(wrapper.find(".controls.karaoke").exists()).toBe(true);
+  });
+
+  it("面板头默认显示（headless 仅连播模式启用）", () => {
+    state.mode = "karaoke";
+    state.lyric = [{ type: "line", s: 0, e: 10, text: ["第一句"] }];
+    const wrapper = mount(MobilePlayer);
+    expect(wrapper.find(".mp-karaoke .kp-head").exists()).toBe(true);
   });
 });
 
