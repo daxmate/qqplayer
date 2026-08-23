@@ -89,6 +89,7 @@ const {
   LAST_PLAYED_KEY,
   lastPlayedState,
   _resetKaraokeAnchor,
+  _resetKaraokeJump,
   _resetPlayMode,
   setVolume,
   toggleMute,
@@ -188,6 +189,7 @@ beforeEach(() => {
     playbackSettings[s.settingKey] = s.defaultCode;
   }
   _resetKaraokeAnchor();
+  _resetKaraokeJump();
   _resetPlayMode();
   _resetPlaybackSession();
   _resetQueueOrder();

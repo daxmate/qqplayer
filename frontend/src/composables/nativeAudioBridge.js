@@ -192,10 +192,15 @@ export function createNativeAudioProxy() {
   });
 
   p.play = () => {
+    // 同步本地播放意图：原生事件回传前 currentKaraokeIndex 等本地逻辑立即感知
+    // （否则句末暂停瞬间按"下一句"会因 isPlaying 仍为 true 走播放分支 → 定位下一句再 +1 = 跳两句）
+    nativeState.isPlaying = true;
+    nativeState.ended = false;
     nativePost({ cmd: "play" });
     return Promise.resolve();
   };
   p.pause = () => {
+    nativeState.isPlaying = false;
     nativePost({ cmd: "pause" });
   };
   p.load = () => {};

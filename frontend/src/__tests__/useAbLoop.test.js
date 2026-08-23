@@ -55,7 +55,8 @@ const {
   startKaraokeTicker,
   stopKaraokeTicker,
 } = await import("../composables/playerCore.js");
-const { playLine, _resetKaraokeAnchor, karaokeState } = await import("../composables/useLyric.js");
+const { playLine, _resetKaraokeAnchor, _resetKaraokeJump, karaokeState } =
+  await import("../composables/useLyric.js");
 const { enterAbLoop, setAbEnd, exitAbLoop, clickLine, _getAbLoopCount, resetAbLoopCount } =
   await import("../composables/useAbLoop.js");
 
@@ -91,6 +92,7 @@ beforeEach(() => {
   playbackSettings.abLoopMaxCount = 10;
   playbackSettings.abVisual = true;
   _resetKaraokeAnchor();
+  _resetKaraokeJump();
   _resetPlayMode();
   resetAbLoopCount();
   vi.restoreAllMocks();

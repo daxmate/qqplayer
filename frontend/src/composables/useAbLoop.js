@@ -4,6 +4,7 @@ import {
   playLine,
   jumpToLine,
   karaokeState,
+  karaokeJumpQuiet,
   lineItems,
   lyricTime,
   locateLine,
@@ -125,8 +126,11 @@ export function handleKaraokeTick(t) {
   const lines = lineItems.value;
   if (!lines.length) return;
   const lt = lyricTime(t);
-  // 锚点失效（前奏/间隙未锚定，或 seek/回退到锚点句之前）→ 重新定位
-  if (karaokeState.line < 0 || lt < lines[karaokeState.line].s) {
+  // 锚点失效（前奏/间隙未锚定，或 seek/回退到锚点句之前）→ 重新定位。
+  // 跳转静默窗口（jumpToLine/playLine 后 300ms）内不重定位：AVPlayer seek 异步 +
+  // timeupdate 回传延迟会让 ticker 读到旧时间 → 误把新锚点重定位回旧句 →
+  // 跳转完成后被判"旧句句末"立即暂停（"下一句马上停"根因，2026-08-23）。
+  if (!karaokeJumpQuiet() && (karaokeState.line < 0 || lt < lines[karaokeState.line].s)) {
     karaokeState.line = locateLine(t);
   }
   if (karaokeState.line >= 0 && lt >= lines[karaokeState.line].e) {

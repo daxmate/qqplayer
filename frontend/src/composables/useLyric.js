@@ -174,6 +174,26 @@ export const audioTime = (t) => t + lyricSettings.offset;
 // 用对象包一层便于跨模块（playerCore/useAbLoop）读写。
 export const karaokeState = { line: -1 };
 
+// 跳句静默窗口（2026-08-23 跟唱"下一句马上停"根因修复）：
+// playLine/jumpToLine 跳转后，AVPlayer seek 异步 + timeupdate 250ms 回传延迟的窗口内，
+// ticker 会读到旧播放时间 → 误判锚点失效重定位回旧句 → 跳转完成后被判定"旧句句末"→ 立即暂停。
+// 跳转后 300ms 内 ticker 不做锚点重定位（句末判定仍生效，不受影响）。
+let jumpQuietUntil = 0;
+
+export function markKaraokeJump() {
+  jumpQuietUntil = performance.now() + 300;
+}
+
+/** ticker 是否处于跳转静默窗口（静默期内不重定位锚点） */
+export function karaokeJumpQuiet() {
+  return performance.now() < jumpQuietUntil;
+}
+
+/** 仅供测试：重置跳转静默窗口（防跨测试 300ms 窗口泄漏） */
+export function _resetKaraokeJump() {
+  jumpQuietUntil = 0;
+}
+
 // 严格区间匹配：t 落在哪一句内（不含间隙/前奏/尾声）
 export function locateLine(t) {
   const lines = lineItems.value;
@@ -199,6 +219,7 @@ export function jumpToLine(lineIndex, keepPlaying) {
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   karaokeState.line = lineIndex;
+  markKaraokeJump(); // 跳转静默窗口：防 ticker 用旧时间重定位锚点
   audio.currentTime = Math.max(0, audioTime(lines[lineIndex].s));
   state.currentTime = audio.currentTime;
   if (keepPlaying && audio.paused) audio.play().catch(() => {});
@@ -209,7 +230,9 @@ export function playLine(lineIndex) {
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   const ln = lines[lineIndex];
   karaokeState.line = lineIndex;
+  markKaraokeJump(); // 跳转静默窗口：防 ticker 用旧时间重定位锚点
   audio.currentTime = Math.max(0, audioTime(ln.s));
+  state.currentTime = audio.currentTime; // 同步本地视图时间（jumpToLine 同款；iOS 无 timeupdate 回传前定位依赖它）
   audio.play().catch(() => {});
 }
 
@@ -218,7 +241,14 @@ export function playLine(lineIndex) {
 // 连续按键（n 后立即 p）时 computed 可能返回缓存旧值，导致上一句/下一句跳错。
 // 这里直接读最新值：暂停时用锚点句，播放中用时间反推。
 function currentKaraokeIndex() {
-  if (state.mode === "karaoke" && karaokeState.line >= 0 && !state.isPlaying) {
+  // 暂停判断用 audio.paused（本地同步）：iOS 上 state.isPlaying 靠原生事件回传有桥往返延迟，
+  // 句末暂停瞬间按上一句/下一句会误走"播放中"分支（locateLine 在句末边界返回下一句 → +1 跳两句）
+  if (state.mode === "karaoke" && karaokeState.line >= 0 && audio.paused) {
+    // 锚点过期校验（同 currentLineIndex）：时间已越过锚点句句末 → 按时间反推
+    const lines = lineItems.value;
+    if (lyricTime(state.currentTime) >= lines[karaokeState.line].e) {
+      return locateLine(state.currentTime);
+    }
     return karaokeState.line;
   }
   return locateLine(state.currentTime);
@@ -244,7 +274,15 @@ export const currentLineIndex = computed(() => {
   // 跟唱模式暂停（含句末自动停）时保持锚点句：句尾边界 e == 下一句 s 时，
   // 时间反推（t >= s）会把停在句尾的音频判进下一句 → 视觉上"播完自动跳下一句"；
   // 跟唱要反复练同一句，暂停时应该始终停留在刚唱完的那句
-  if (state.mode === "karaoke" && karaokeState.line >= 0 && !state.isPlaying) {
+  // （暂停判断用 audio.paused 同步值，见 currentKaraokeIndex 注释）
+  if (state.mode === "karaoke" && karaokeState.line >= 0 && audio.paused) {
+    // 锚点过期校验（2026-08-23 高亮卡死兜底）：iOS 播放状态靠原生事件回传，
+    // seek 抖动/事件乱序可能让 audio.paused 在播放中误报 true → 走暂停分支返回旧锚点。
+    // 若当前时间已越过锚点句句末（不可能"暂停在句内但时间过了"），按时间反推。
+    const lt = lyricTime(state.currentTime);
+    if (lt >= lines[karaokeState.line].e) {
+      return locateLine(state.currentTime);
+    }
     return karaokeState.line;
   }
   const t = lyricTime(state.currentTime);

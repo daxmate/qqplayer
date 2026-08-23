@@ -26,6 +26,13 @@ final class AVPlayerBridge {
     /// 当前加载的 URL（setMetadata 时确认封面归属）
     private(set) var currentURL: URL?
 
+    /// seek 串行化状态（2026-08-23 跟唱跳句竞态修复）：
+    /// Web 侧 currentTime setter 与 play() 是两个独立桥消息，AVPlayer.seek 异步完成前
+    /// 若收到 play → 从旧位置开始播（"下一句没用"/乱跳）。
+    /// 这里：seek 到达记 pendingSeek，完成回调里若期间收到过 play 请求则接着播放。
+    private var pendingSeek: CMTime?
+    private var playAfterSeek = false
+
     init() {
         configureAudioSession()
         setupTimeObserver()
@@ -39,12 +46,14 @@ final class AVPlayerBridge {
             self?.push("ended", [:])
         }
         // 播放/暂停状态（含 remote/线控/插拔耳机中断恢复）统一回传 Web；
-        // 缓冲等待（waitingToPlayAtSpecifiedRate）不算暂停，避免网络抖一下 UI 闪暂停
+        // 缓冲等待（waitingToPlayAtSpecifiedRate）不算暂停，避免网络抖一下 UI 闪暂停。
+        // seek 期间（pendingSeek 非 nil）不推 paused：精确 seek 会短暂 rate=0，
+        // 误推 paused 会乱序覆盖 Web 侧播放状态（跟唱高亮卡死/跳句后状态错乱，2026-08-23）。
         rateObservation = player.observe(\.rate, options: [.new]) { [weak self] p, _ in
             guard let self else { return }
             if p.rate > 0 {
                 self.push("playing", ["t": self.playerTime()])
-            } else if p.timeControlStatus != .waitingToPlayAtSpecifiedRate {
+            } else if self.pendingSeek == nil && p.timeControlStatus != .waitingToPlayAtSpecifiedRate {
                 self.push("paused", ["t": self.playerTime()])
             }
         }
@@ -59,18 +68,21 @@ final class AVPlayerBridge {
                 load(url: url)
             }
         case "play":
-            player.play()
-            updateNowPlayingPlaybackState()
+            if pendingSeek != nil {
+                // seek 进行中：标记待播，seek 完成回调里再 play（跳句/断点恢复场景）
+                playAfterSeek = true
+            } else {
+                player.play()
+                updateNowPlayingPlaybackState()
+            }
         case "pause":
             player.pause()
             updateNowPlayingPlaybackState()
         case "seek":
             if let t = payload["t"] as? Double {
-                let time = CMTime(seconds: max(0, t), preferredTimescale: 600)
-                player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
             } else if let t = payload["t"] as? Int {
-                let time = CMTime(seconds: max(0, Double(t)), preferredTimescale: 600)
-                player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                seek(to: CMTime(seconds: max(0, Double(t)), preferredTimescale: 600))
             }
         case "setVolume":
             if let v = payload["v"] as? Double {
@@ -94,6 +106,28 @@ final class AVPlayerBridge {
     }
 
     // MARK: - 播放原语
+
+    /// seek + 完成回调：完成前到达的 play 请求延迟到 seek 完成后执行。
+    /// 重复 seek 会覆盖 pendingSeek（AVPlayer 自动取消前一个 seek）。
+    private func seek(to time: CMTime) {
+        pendingSeek = time
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.pendingSeek = nil
+                if self.playAfterSeek {
+                    self.playAfterSeek = false
+                    self.player.play()
+                    self.updateNowPlayingPlaybackState()
+                } else if self.player.rate == 0
+                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
+                    // seek 完成后仍是暂停（跳转暂停场景）：seek 期间 rate=0 的 paused 被抑制，
+                    // 这里补推一次，Web 侧暂停状态不错失
+                    self.push("paused", ["t": self.playerTime()])
+                }
+            }
+        }
+    }
 
     private func load(url: URL) {
         currentURL = url
