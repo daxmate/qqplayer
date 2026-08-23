@@ -577,7 +577,7 @@
                     <div class="setting-label">{{ t("settings.syncAllSongs") }}</div>
                     <div class="setting-desc">{{ t("settings.syncAllSongsDesc") }}</div>
                     <div class="setting-control">
-                      <button class="btn" :disabled="syncBusy" @click="syncAllSongs">
+                      <button class="btn primary" :disabled="syncBusy" @click="syncAllSongs">
                         {{ t("settings.syncStart") }}
                       </button>
                     </div>
@@ -593,7 +593,7 @@
                         </option>
                       </select>
                       <button
-                        class="btn"
+                        class="btn primary"
                         :disabled="syncBusy || !syncPlaylistId"
                         @click="syncSelectedPlaylist"
                       >
@@ -605,7 +605,7 @@
                     <div class="setting-label">{{ t("settings.syncPickSongs") }}</div>
                     <div class="setting-desc">{{ t("settings.syncPickDesc") }}</div>
                     <div class="setting-control">
-                      <button class="btn" :disabled="syncBusy" @click="openPicker('songs')">
+                      <button class="btn primary" :disabled="syncBusy" @click="openPicker('songs')">
                         {{ t("settings.syncPickOpen") }}
                       </button>
                     </div>
@@ -660,7 +660,7 @@
                     <div class="setting-label">{{ t("settings.syncAllBooks") }}</div>
                     <div class="setting-desc">{{ t("settings.syncAllBooksDesc") }}</div>
                     <div class="setting-control">
-                      <button class="btn" :disabled="syncBusy" @click="syncAllBooks">
+                      <button class="btn primary" :disabled="syncBusy" @click="syncAllBooks">
                         {{ t("settings.syncStart") }}
                       </button>
                     </div>
@@ -669,7 +669,7 @@
                     <div class="setting-label">{{ t("settings.syncPickBooks") }}</div>
                     <div class="setting-desc">{{ t("settings.syncPickDesc") }}</div>
                     <div class="setting-control">
-                      <button class="btn" :disabled="syncBusy" @click="openPicker('books')">
+                      <button class="btn primary" :disabled="syncBusy" @click="openPicker('books')">
                         {{ t("settings.syncPickOpen") }}
                       </button>
                     </div>
@@ -726,56 +726,70 @@
                   </div>
                 </div>
 
-                <!-- 下载状态面板 -->
+                <!-- 下载状态面板（聚合视图：hash 文件名无意义，只显示汇总进度 + 活跃项 + 失败重试） -->
                 <div class="group">
                   <div class="group-title">
                     <Download :size="13" />
                     {{ t("settings.syncDownloads") }}
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-desc sync-stats">
-                      <span>{{ t("settings.syncDlActive", { n: downloadStats.active }) }}</span>
-                      <span>·</span>
-                      <span>{{ t("settings.syncDlDone", { n: downloadStats.done }) }}</span>
-                      <span>·</span>
-                      <span>{{ t("settings.syncDlFailed", { n: downloadStats.failed }) }}</span>
+                  <template v-if="downloadSummary.total">
+                    <div class="setting-item">
+                      <div class="setting-desc sync-dl-progress-text">
+                        {{
+                          t("settings.syncDlProgress", {
+                            done: downloadSummary.done,
+                            total: downloadSummary.total,
+                          })
+                        }}
+                      </div>
+                      <div class="progress-bar">
+                        <div class="progress-fill" :style="{ width: downloadSummary.pct + '%' }" />
+                      </div>
                     </div>
-                    <div class="setting-control">
-                      <button
-                        class="btn"
-                        :disabled="!downloadStats.finished"
-                        @click="clearFinished"
-                      >
-                        {{ t("settings.syncClearFinished") }}
-                      </button>
-                    </div>
-                  </div>
-                  <div v-if="downloadList.length" class="sync-dl-list">
-                    <div v-for="d in downloadList" :key="d.path" class="sync-dl-item">
-                      <div class="sync-dl-head">
-                        <span class="sync-dl-name" :title="d.path">{{ d.name }}</span>
-                        <span class="sync-dl-status" :class="'st-' + d.status">{{
-                          statusLabel(d.status)
-                        }}</span>
+                    <div class="setting-item">
+                      <div class="setting-desc sync-stats">
+                        <span>{{ t("settings.syncDlActive", { n: downloadStats.active }) }}</span>
+                        <span>·</span>
+                        <span>{{ t("settings.syncDlQueued", { n: downloadStats.queued }) }}</span>
+                        <span>·</span>
+                        <span>{{ t("settings.syncDlFailed", { n: downloadStats.failed }) }}</span>
+                      </div>
+                      <div class="setting-control">
                         <button
-                          v-if="d.status === 'failed'"
-                          class="mini-btn"
-                          @click="retryFailed(d.path)"
+                          class="btn"
+                          :disabled="!downloadStats.finished"
+                          @click="clearFinished"
                         >
-                          {{ t("settings.syncRetry") }}
+                          {{ t("settings.syncClearFinished") }}
                         </button>
                       </div>
-                      <div
-                        v-if="d.status === 'queued' || d.status === 'downloading'"
-                        class="progress-bar"
-                      >
-                        <div class="progress-fill" :style="{ width: dlPercent(d) + '%' }" />
-                      </div>
-                      <div v-else-if="d.status === 'failed' && d.error" class="setting-error">
-                        {{ d.error }}
+                    </div>
+                    <!-- 活跃下载（真正在下的，原生并发 ≤3，逐个实时进度） -->
+                    <div v-if="activeList.length" class="sync-dl-list">
+                      <div v-for="d in activeList" :key="d.path" class="sync-dl-item">
+                        <div class="sync-dl-head">
+                          <span class="sync-dl-name" :title="d.path">{{ d.name }}</span>
+                          <span class="sync-dl-status" :class="'st-' + d.status">{{
+                            statusLabel(d.status)
+                          }}</span>
+                        </div>
+                        <div class="progress-bar">
+                          <div class="progress-fill" :style="{ width: dlPercent(d) + '%' }" />
+                        </div>
                       </div>
                     </div>
-                  </div>
+                    <!-- 失败：计数 + 全部重试（hash 名无意义，不逐项列） -->
+                    <div v-if="downloadStats.failed" class="setting-item">
+                      <div class="setting-desc">
+                        {{ t("settings.syncDlFailedDesc", { n: downloadStats.failed }) }}
+                      </div>
+                      <div class="setting-control">
+                        <button class="btn" :disabled="syncBusy" @click="retryAllFailed">
+                          {{ t("settings.syncRetryAll") }}
+                        </button>
+                      </div>
+                    </div>
+                  </template>
                   <div v-else class="setting-item">
                     <div class="setting-desc">{{ t("settings.syncDlEmpty") }}</div>
                   </div>
@@ -2070,13 +2084,32 @@ const downloadStats = computed(() => {
   let active = 0;
   let done = 0;
   let failed = 0;
+  let queued = 0;
   for (const d of Object.values(syncDownloads)) {
     if (d.status === "done") done++;
     else if (d.status === "failed") failed++;
+    else if (d.status === "queued") queued++;
     else active++;
   }
-  return { active, done, failed, finished: done + failed };
+  return { active, done, failed, queued, finished: done + failed };
 });
+// 聚合视图：总任务数/已完成 + 完成比例（进度条宽度）
+const downloadSummary = computed(() => {
+  const total = Object.keys(syncDownloads).length;
+  const done = downloadStats.value.done;
+  return { total, done, pct: total ? Math.min(100, Math.round((done / total) * 100)) : 0 };
+});
+// 活跃下载（原生并发 ≤3）：逐个实时进度
+const activeList = computed(() =>
+  Object.values(syncDownloads).filter((d) => d.status === "downloading"),
+);
+
+/** 全部重试失败项（hash 文件名无意义，不逐项列；失败项保留在状态里供重建消息） */
+function retryAllFailed() {
+  for (const path of Object.keys(syncDownloads)) {
+    if (syncDownloads[path].status === "failed") retryFailed(path);
+  }
+}
 
 const filteredSongs = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase();
@@ -2145,7 +2178,7 @@ async function syncAllSongs() {
       return;
     }
     const items = await buildSongItems(songs);
-    syncAssets(items);
+    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
   } catch {
     toastFetchFailed();
   } finally {
@@ -2173,7 +2206,7 @@ async function syncSelectedPlaylist() {
       return;
     }
     const items = await buildSongItems(songs);
-    syncAssets(items);
+    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
   } catch {
     toastFetchFailed();
   } finally {
@@ -2192,7 +2225,7 @@ async function syncAllBooks() {
       return;
     }
     const items = await buildBookItems(books);
-    syncAssets(items);
+    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
   } catch {
     toastFetchFailed();
   } finally {
@@ -2245,7 +2278,7 @@ async function downloadPickedSongs() {
   syncBusy.value = true;
   try {
     const items = await buildSongItems(picked);
-    syncAssets(items);
+    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
     pickerSelected.value = [];
   } finally {
     syncBusy.value = false;
@@ -2259,7 +2292,7 @@ async function downloadPickedBooks() {
   syncBusy.value = true;
   try {
     const items = await buildBookItems(picked);
-    syncAssets(items);
+    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
     pickerSelected.value = [];
   } finally {
     syncBusy.value = false;
@@ -2532,6 +2565,10 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   color: var(--text2);
   background: var(--card2);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 @media (hover: hover) {
   .btn:hover {

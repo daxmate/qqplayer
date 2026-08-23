@@ -143,12 +143,17 @@ function extOf(name) {
   return m ? "." + m[1].toLowerCase() : "";
 }
 
-/** 资产标识的稳定哈希：优先 SHA-256（crypto.subtle），不可用时回落确定性 FNV-1a 64 位 */
+/** 资产标识的稳定哈希：优先 SHA-256（crypto.subtle），不可用时回落确定性 FNV-1a 64 位。
+ * 注意：WKWebView 个别场景 crypto.subtle.digest 的 Promise 可能永不 resolve（而非 reject），
+ * 用 Promise.race 500ms 超时兜底，避免调用方（如批量下载 buildSongItems）永久挂起。 */
 async function assetHash(identity) {
   const input = String(identity || "");
   try {
     if (typeof crypto !== "undefined" && crypto.subtle && typeof TextEncoder !== "undefined") {
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+      const buf = await Promise.race([
+        crypto.subtle.digest("SHA-256", new TextEncoder().encode(input)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("digest timeout")), 500)),
+      ]);
       return Array.from(new Uint8Array(buf))
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
