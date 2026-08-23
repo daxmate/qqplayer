@@ -65,7 +65,7 @@ export default {
     },
     player: {
       collapse: "收起播放器",
-      continuous: "连播",
+      continuous: "音乐",
     },
   },
 };

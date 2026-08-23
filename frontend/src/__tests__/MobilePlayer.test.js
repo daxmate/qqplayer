@@ -1,4 +1,4 @@
-// MobilePlayer 测试：移动端全屏播放器（连播/跟唱切换 + 收藏 + 收起）
+// MobilePlayer 测试：移动端全屏播放器（模式标签 + ControlBar 跟唱入口 + 收藏 + 收起）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 
@@ -55,7 +55,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("MobilePlayer 连播模式（continuous）", () => {
+describe("MobilePlayer 音乐模式（continuous）", () => {
   it("渲染歌曲名/歌手/专辑 + 封面 + 频谱 + 控制条", () => {
     const wrapper = mount(MobilePlayer);
     expect(wrapper.find(".mp-song-name").text()).toBe("雪の華");
@@ -67,25 +67,37 @@ describe("MobilePlayer 连播模式（continuous）", () => {
     expect(wrapper.find(".controls").exists()).toBe(true); // ControlBar
   });
 
-  it("跟唱模式切换 tab：state.mode 更新并渲染歌词面板", async () => {
+  it("顶栏显示当前模式标签；ControlBar 跟唱按钮进入/退出跟唱", async () => {
     const wrapper = mount(MobilePlayer);
     expect(state.mode).toBe("continuous");
-    const karaokeTab = wrapper.findAll(".mp-tab").find((b) => b.text().includes("跟唱"));
-    await karaokeTab.trigger("click");
+    expect(wrapper.find(".mp-tabs .mp-tab").text()).toContain("音乐");
+
+    // 跟唱入口：控制条按钮（非 karaoke 变体）
+    const karaokeBtn = wrapper.findAll(".controls .btn").find((b) => b.text().includes("跟唱"));
+    expect(karaokeBtn).toBeTruthy();
+    await karaokeBtn.trigger("click");
     expect(state.mode).toBe("karaoke");
     expect(wrapper.find(".mp-karaoke").exists()).toBe(true);
-    // 切回连播
-    const continuousTab = wrapper.findAll(".mp-tab").find((b) => b.text().includes("连播"));
-    await continuousTab.trigger("click");
+    expect(wrapper.find(".mp-tabs .mp-tab").text()).toContain("跟唱");
+
+    // 跟唱界面再点"跟唱"按钮 → 退出回音乐（toggle 语义）
+    const exitBtn = wrapper.findAll(".controls .btn").find((b) => b.text().includes("跟唱"));
+    expect(exitBtn).toBeTruthy();
+    await exitBtn.trigger("click");
     expect(state.mode).toBe("continuous");
     expect(wrapper.find(".mp-karaoke").exists()).toBe(false);
   });
 
-  it("当前 tab 高亮跟随 state.mode", () => {
+  it("跟唱界面提供返回音乐按钮（←）", () => {
     state.mode = "karaoke";
     const wrapper = mount(MobilePlayer);
-    const tabs = wrapper.findAll(".mp-tab");
-    expect(tabs[1].classes()).toContain("on");
+    expect(wrapper.find('.controls .btn[title="返回音乐"]').exists()).toBe(true);
+  });
+
+  it("跟唱模式时顶栏标签显示跟唱（跟随 state.mode）", () => {
+    state.mode = "karaoke";
+    const wrapper = mount(MobilePlayer);
+    expect(wrapper.find(".mp-tabs .mp-tab").text()).toContain("跟唱");
   });
 });
 

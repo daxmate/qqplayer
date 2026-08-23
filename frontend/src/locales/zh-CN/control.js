@@ -10,6 +10,8 @@ export default {
     speed: "变速",
     karaokeToggle: "跟唱开关",
     karaoke: "跟唱",
+    exitKaraoke: "退出跟唱",
+    backToMusic: "返回音乐",
     singleLine: "单句",
     toggleZh: "显示/隐藏中文",
     zh: "译",

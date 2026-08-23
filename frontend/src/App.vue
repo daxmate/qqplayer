@@ -14,19 +14,11 @@
         <div class="mode-tabs">
           <button
             class="tab"
-            :class="{ on: state.mode === 'continuous' }"
+            :class="{ on: state.mode === 'continuous' || state.mode === 'karaoke' }"
             @click="switchMode('continuous')"
           >
-            <Play :size="13" />
+            <Music :size="13" />
             {{ t("app.mode.continuous") }}
-          </button>
-          <button
-            class="tab"
-            :class="{ on: state.mode === 'karaoke' }"
-            @click="switchMode('karaoke')"
-          >
-            <Mic :size="13" />
-            {{ t("app.mode.karaoke") }}
           </button>
           <button class="tab" :class="{ on: state.mode === 'books' }" @click="switchMode('books')">
             <BookOpen :size="13" />
@@ -203,9 +195,8 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  Music,
   Music2,
-  Mic,
-  Play,
   Settings,
   PanelLeftOpen,
   ChevronUp,

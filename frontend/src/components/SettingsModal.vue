@@ -1111,6 +1111,15 @@
                   </div>
                 </div>
                 <div class="setting-item">
+                  <div class="toggle-row" @click="state.karaokeOn = !state.karaokeOn">
+                    <div>
+                      <div class="setting-label">{{ t("settings.karaokeOn") }}</div>
+                      <div class="setting-desc">{{ t("settings.karaokeOnDesc") }}</div>
+                    </div>
+                    <span class="switch" :class="{ on: state.karaokeOn }"><i /></span>
+                  </div>
+                </div>
+                <div class="setting-item">
                   <div class="toggle-row" @click="uiSettings.coverBlur = !uiSettings.coverBlur">
                     <div>
                       <div class="setting-label">{{ t("settings.coverBlur") }}</div>

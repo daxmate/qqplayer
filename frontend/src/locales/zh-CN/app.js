@@ -3,7 +3,7 @@ export default {
   app: {
     // 模式切换
     mode: {
-      continuous: "连播",
+      continuous: "音乐",
       karaoke: "跟唱",
       books: "图书",
       videos: "视频",

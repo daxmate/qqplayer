@@ -109,4 +109,18 @@ describe("App 顶栏按钮图标+文字", () => {
 
     wrapper.unmount();
   });
+
+  it("跟唱模式（音乐内功能）：音乐 tab 保持高亮", async () => {
+    state.mode = "karaoke";
+    const wrapper = mount(App);
+    await flushPromises();
+
+    const tabs = wrapper.findAll(".mode-tabs .tab");
+    const musicTab = tabs.find((b) => b.text().includes("音乐"));
+    expect(musicTab.classes()).toContain("on");
+    expect(tabs.find((b) => b.text().includes("图书")).classes()).not.toContain("on");
+    expect(tabs.find((b) => b.text().includes("视频")).classes()).not.toContain("on");
+
+    wrapper.unmount();
+  });
 });

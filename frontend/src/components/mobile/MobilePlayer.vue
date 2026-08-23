@@ -1,28 +1,17 @@
 <template>
   <div class="mobile-player">
-    <!-- 顶栏：收起 + 连播/跟唱切换 + 收藏 -->
+    <!-- 顶栏：收起 + 当前模式标签（音乐/跟唱）+ 收藏 -->
     <header class="mp-head">
       <button class="mp-btn-round" :title="t('mobile.player.collapse')" @click="$emit('back')">
         <ChevronDown :size="22" />
       </button>
 
       <div class="mp-tabs">
-        <button
-          class="mp-tab"
-          :class="{ on: state.mode === 'continuous' }"
-          @click="switchMode('continuous')"
-        >
-          <Play :size="13" />
-          {{ t("mobile.player.continuous") }}
-        </button>
-        <button
-          class="mp-tab"
-          :class="{ on: state.mode === 'karaoke' }"
-          @click="switchMode('karaoke')"
-        >
-          <Mic :size="13" />
-          {{ t("control.karaoke") }}
-        </button>
+        <span class="mp-tab on">
+          <Music v-if="state.mode === 'continuous'" :size="13" />
+          <Mic v-else :size="13" />
+          {{ state.mode === "continuous" ? t("mobile.player.continuous") : t("control.karaoke") }}
+        </span>
       </div>
 
       <button
@@ -72,7 +61,7 @@
 </template>
 
 <script setup>
-import { Play, Mic, Heart, ChevronDown } from "@lucide/vue";
+import { Music, Mic, Heart, ChevronDown } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import {
   state,
@@ -90,10 +79,6 @@ import { mobileCoverSize } from "../../composables/useCoverSize.js";
 defineEmits(["back"]);
 
 const { t } = useI18n();
-
-function switchMode(m) {
-  state.mode = m;
-}
 </script>
 
 <style scoped>

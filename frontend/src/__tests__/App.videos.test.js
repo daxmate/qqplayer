@@ -66,7 +66,7 @@ describe("App 视频模式", () => {
     await flushPromises();
 
     const tabs = wrapper.findAll(".mode-tabs .tab");
-    expect(tabs).toHaveLength(4);
+    expect(tabs).toHaveLength(3);
     const videosTab = tabs.find((b) => b.text().includes("视频"));
     expect(videosTab).toBeTruthy();
     expect(videosTab.classes()).not.toContain("on");
@@ -93,10 +93,10 @@ describe("App 视频模式", () => {
     await flushPromises();
     expect(wrapper.find("main.videos .controls").exists()).toBe(true);
 
-    // 切回连播
+    // 切回音乐
     await wrapper
       .findAll(".mode-tabs .tab")
-      .find((b) => b.text().includes("连播"))
+      .find((b) => b.text().includes("音乐"))
       .trigger("click");
     await flushPromises();
     expect(state.mode).toBe("continuous");

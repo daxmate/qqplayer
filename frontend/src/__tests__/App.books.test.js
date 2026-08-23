@@ -67,7 +67,7 @@ describe("App 图书模式", () => {
 
     // 第三个 tab
     const tabs = wrapper.findAll(".mode-tabs .tab");
-    expect(tabs).toHaveLength(4);
+    expect(tabs).toHaveLength(3);
     const booksTab = tabs.find((b) => b.text().includes("图书"));
     expect(booksTab).toBeTruthy();
     expect(booksTab.classes()).not.toContain("on");
@@ -94,10 +94,10 @@ describe("App 图书模式", () => {
     await flushPromises();
     expect(wrapper.find("main.books .controls").exists()).toBe(true);
 
-    // 切回连播
+    // 切回音乐
     await wrapper
       .findAll(".mode-tabs .tab")
-      .find((b) => b.text().includes("连播"))
+      .find((b) => b.text().includes("音乐"))
       .trigger("click");
     await flushPromises();
     expect(state.mode).toBe("continuous");

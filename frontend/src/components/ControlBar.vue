@@ -46,6 +46,9 @@
       </button>
 
       <template v-if="karaoke">
+        <button class="btn" :title="t('control.backToMusic')" @click="switchMode('continuous')">
+          <ArrowLeft :size="16" />
+        </button>
         <button class="btn" :title="t('control.prevLine')" @click="prevLine">
           <StepBack :size="17" />
         </button>
@@ -65,12 +68,7 @@
           <Gauge :size="15" />
           {{ state.speed }}x
         </button>
-        <button
-          class="btn"
-          :class="{ on: state.karaokeOn }"
-          :title="t('control.karaokeToggle')"
-          @click="toggleKaraoke"
-        >
+        <button class="btn on" :title="t('control.exitKaraoke')" @click="switchMode('continuous')">
           <Mic :size="15" />
           {{ t("control.karaoke") }}
         </button>
@@ -96,6 +94,10 @@
         </button>
         <button class="btn" :title="t('control.nextSong')" @click="nextSong">
           <SkipForward :size="17" />
+        </button>
+        <button class="btn" :title="t('control.karaoke')" @click="switchMode('karaoke')">
+          <Mic :size="15" />
+          {{ t("control.karaoke") }}
         </button>
       </template>
 
@@ -213,6 +215,7 @@ import {
   StepBack,
   StepForward,
   Mic,
+  ArrowLeft,
   Gauge,
   Link2,
   Repeat1,
@@ -237,7 +240,6 @@ import {
   prevLine,
   nextLine,
   cycleSpeed,
-  toggleKaraoke,
   toggleKaraokeLoop,
   enterAbLoop,
   exitAbLoop,
@@ -261,6 +263,11 @@ defineProps({
 });
 
 const { t } = useI18n();
+
+// 模式切换（音乐 ↔ 跟唱；顶栏 tab 已不提供跟唱入口，这里由按钮直达）
+function switchMode(m) {
+  state.mode = m;
+}
 
 // 歌曲信息编辑弹窗开关（仅当前播放歌曲存在时入口按钮可见）
 const tagEditorOpen = ref(false);
