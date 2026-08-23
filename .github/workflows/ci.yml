@@ -72,6 +72,21 @@ jobs:
       - name: Build
         run: pnpm build
 
+  swift:
+    name: Swift (swiftlint + swiftformat)
+    # Swift 代码（desktop/macOS 壳 + mobile/ios 壳）lint/format 检查；
+    # 与前端 job 平级，日常 push main / PR 都会跑（无 if 限制）。
+    # 配置在仓库根 .swiftlint.yml / .swiftformat，swiftlint/swiftformat 自动发现。
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install tools
+        run: brew install swiftlint swiftformat
+      - name: Lint (swiftlint)
+        run: swiftlint lint
+      - name: Format (swiftformat --lint)
+        run: swiftformat --lint .
+
   backend-windows:
     name: Backend Windows ${{ matrix.arch }} (PyInstaller + smoke)
     # 只在发版（push tag v*）或手动触发时打包；日常 push main 只跑 lint/test
