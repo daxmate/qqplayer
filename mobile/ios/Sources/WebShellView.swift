@@ -29,14 +29,13 @@ struct WebShellView: UIViewRepresentable {
         // 滑动翻页/触摸事件收不到；设 false 后手势判定不再延迟事件）
         webView.scrollView.delaysContentTouches = false
         webView.scrollView.canCancelContentTouches = false
-        // 左右滑动翻页（iOS 原生手势：iframe 内 touch 事件在 WKWebView 里不可靠，
-        // 原生 UISwipeGestureRecognizer 最稳；swipe 需要快速滑动，与慢速拖选/垂直滚动不冲突）
-        let swipeLeft = UISwipeGestureRecognizer(target: controller, action: #selector(Coordinator.onSwipeLeft))
-        swipeLeft.direction = .left
-        webView.addGestureRecognizer(swipeLeft)
-        let swipeRight = UISwipeGestureRecognizer(target: controller, action: #selector(Coordinator.onSwipeRight))
-        swipeRight.direction = .right
-        webView.addGestureRecognizer(swipeRight)
+        // 左右滑动翻页（iOS 原生手势：iframe 内 touch 事件在 WKWebView 里不可靠）。
+        // UISwipeGestureRecognizer 要求快速滑动（慢速拖动不触发，真机反馈"迟钝"）→
+        // 换 UIPanGestureRecognizer：水平主方向接管（shouldBegin 判断），ended 按
+        // 位移/速度判定翻页——慢速拖动、快速轻扫都能翻（垂直滚动留给 WebView）。
+        let panSwipe = UIPanGestureRecognizer(target: controller, action: #selector(Coordinator.onPanSwipe))
+        panSwipe.delegate = controller
+        webView.addGestureRecognizer(panSwipe)
         controller.webView = webView
         controller.injectServer(controller.server) // 先注入（user script 在页面加载前就位）再加载
         controller.loadFrontend() // 首次加载（服务器切换时由 updateUIView 重新加载）
@@ -56,7 +55,7 @@ struct WebShellView: UIViewRepresentable {
         Coordinator(server: server)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, UIGestureRecognizerDelegate {
         let server: PairingRecord
         let playerBridge = AVPlayerBridge()
         let downloadManager = DownloadManager()
@@ -77,6 +76,7 @@ struct WebShellView: UIViewRepresentable {
         init(server: PairingRecord) {
             self.server = server
             self.loadedServerId = server.serverId
+            playerBridge.authToken = server.token  // AVPlayer 拉流鉴权（真机 401 修复）
             userContentController = WKUserContentController()
             super.init()
             userContentController.add(self, name: "qqplayerIos")
@@ -363,14 +363,24 @@ struct WebShellView: UIViewRepresentable {
             }
         }
 
-        // MARK: 滑动翻页（原生手势 → Web swipe 事件 → Reader 翻页）
+        // MARK: 滑动翻页（UIPanGestureRecognizer → Web swipe 事件 → Reader 翻页）
 
-        @objc func onSwipeLeft() {
-            pushToWeb(event: "swipe", payload: ["dir": "left"])
+        @objc func onPanSwipe(_ g: UIPanGestureRecognizer) {
+            guard g.state == .ended, let webView else { return }
+            let v = g.velocity(in: webView)
+            let t = g.translation(in: webView)
+            guard abs(v.x) > abs(v.y) else { return }  // 水平主导才翻页（垂直留给滚动）
+            // 慢速拖动：位移足够也翻；快速轻扫：速度达标即翻（UISwipe 只认快速滑动 → 迟钝）
+            if abs(t.x) > 40 || abs(v.x) > 250 {
+                pushToWeb(event: "swipe", payload: ["dir": v.x > 0 ? "right" : "left"])
+            }
         }
 
-        @objc func onSwipeRight() {
-            pushToWeb(event: "swipe", payload: ["dir": "right"])
+        // UIGestureRecognizerDelegate：水平主方向的拖动才接管（垂直滚动、慢速拖选不受影响）
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer, let webView else { return true }
+            let v = pan.velocity(in: webView)
+            return abs(v.x) > abs(v.y)
         }
 
         // MARK: Native → Web 事件

@@ -11,6 +11,9 @@ import UIKit
 ///   （Web 是队列/切歌逻辑的真源，原生只转发命令，避免双端状态分叉）。
 final class AVPlayerBridge {
     private let player = AVPlayer()
+    /// Bearer token（配对鉴权）：AVPlayer 拉流/短音频时附加 Authorization 头。
+    /// 真机 401 根因（2026-08-23）：127.0.0.1 免鉴权模拟器正常，真机必须带 token。
+    var authToken: String?
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var didEndObserver: NSObjectProtocol?
@@ -131,7 +134,7 @@ final class AVPlayerBridge {
 
     private func load(url: URL) {
         currentURL = url
-        let item = AVPlayerItem(url: url)
+        let item = makeItem(url: url)
         statusObservation?.invalidate()
         player.replaceCurrentItem(with: item)
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -149,13 +152,25 @@ final class AVPlayerBridge {
         }
     }
 
+    /// 构造 AVPlayerItem：有 token 时用 AVURLAsset 附加 Authorization 头（真机鉴权）
+    private func makeItem(url: URL) -> AVPlayerItem {
+        guard let token = authToken, !token.isEmpty else {
+            return AVPlayerItem(url: url)
+        }
+        let asset = AVURLAsset(url: url, options: [
+            // 字面量 key（常量 AVURLAssetHTTPHeaderFieldsKey 在精简 SDK 下不可见，实为同一字符串）
+            "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(token)"],
+        ])
+        return AVPlayerItem(asset: asset)
+    }
+
     /// 词典发音等短音频（独立 AVPlayer 实例，不干扰主播放器状态/事件；无 UI 直接出声）。
     /// iOS 26 WKWebView 里 HTMLAudioElement.play() 会弹系统媒体播放器界面，词典查词
     /// 发音改走原生播放（2026-08-23 阶段4）。
     private var audioFxPlayer: AVPlayer?
     func playAudioFile(_ url: URL) {
         audioFxPlayer?.pause()
-        let item = AVPlayerItem(url: url)
+        let item = makeItem(url: url)
         audioFxPlayer = AVPlayer(playerItem: item)
         audioFxPlayer?.play()
     }

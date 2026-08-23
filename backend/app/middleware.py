@@ -25,6 +25,10 @@ def register_auth_middleware(app) -> None:
     async def _auth_middleware(request: Request, call_next):
         if not state.AUTH_ENABLED:
             return await call_next(request)
+        # CORS preflight（OPTIONS）不鉴权：浏览器跨域请求先发预检，此时不带 token 属正常
+        # （真机页面 origin=MiniHTTPServer → 目标 17627 跨域；不放过则 preflight 401 → 真实请求被浏览器拦）
+        if request.method == "OPTIONS":
+            return await call_next(request)
         path = request.url.path
         # 只保护 API：静态前端与其他路径放行
         if not path.startswith("/api/"):
@@ -39,6 +43,10 @@ def register_auth_middleware(app) -> None:
         # Bearer token 校验（SHA-256 哈希比对 pairing.json）
         auth_header = request.headers.get("authorization", "")
         token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+        # 浏览器/原生资源请求（<img>/<link>/AVPlayer/URLSession 下载）带不了 header
+        # → 支持 ?token= query（resolveServerUrl 附加；2026-08-23 真机资源 401 根因）
+        if not token:
+            token = request.query_params.get("token", "")
         if token and pairing_service.verify_token(token):
             return await call_next(request)
         return JSONResponse(status_code=401, content={"detail": "未授权：缺少或无效的配对 token"})

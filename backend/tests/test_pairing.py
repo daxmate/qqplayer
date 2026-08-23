@@ -278,6 +278,20 @@ def test_auth_200_with_valid_token(monkeypatch):
     assert code == 200 and body == []
 
 
+def test_auth_query_token(monkeypatch):
+    """?token= query 与 Bearer header 等效（浏览器/原生资源带不了 header；真机 401 修复）"""
+    monkeypatch.setattr(state, "AUTH_ENABLED", True)
+    _, token = _pair_device()
+    code, body = _remote("GET", f"/api/library?token={token}")
+    assert code == 200 and body["path"] == str(state.LIBRARY)
+    # 带 query 的端点（封面/音频）同样支持
+    code, _ = _remote("GET", f"/api/songs?token={token}")
+    assert code == 200
+    # 无效 query token → 401
+    code, _ = _remote("GET", "/api/library?token=bad-token")
+    assert code == 401
+
+
 def test_auth_pairing_whitelist(monkeypatch):
     """白名单：/api/pairing/* 全程免鉴权（远端无 token 也能发起配对）"""
     monkeypatch.setattr(state, "AUTH_ENABLED", True)

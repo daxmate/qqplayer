@@ -76,7 +76,14 @@ export function resolveServerUrl(path) {
   if (/^https?:\/\//i.test(path) || path.startsWith("data:")) return path;
   const base = baseURL();
   if (!base) return path;
-  return base.replace(/\/+$/, "") + (path.startsWith("/") ? path : "/" + path);
+  let url = base.replace(/\/+$/, "") + (path.startsWith("/") ? path : "/" + path);
+  // 浏览器/原生资源（<img>/<link>/AVPlayer/URLSession 下载）带不了 Authorization header
+  // → token 附加 query（后端中间件支持 ?token=；2026-08-23 真机资源 401 根因）
+  const token = authToken();
+  if (token) {
+    url += (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+  }
+  return url;
 }
 
 // ---------- 在线状态（离线模式事件） ----------

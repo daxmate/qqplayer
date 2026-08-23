@@ -13,6 +13,7 @@ import {
   flushPendingOps,
   writeLocal,
   resetApiClientState,
+  resolveServerUrl,
 } from "../utils/apiClient.js";
 import {
   clearCache,
@@ -85,6 +86,19 @@ describe("统一出口与归一化", () => {
     vi.stubGlobal("fetch", fetchMock);
     await apiGet("/api/x");
     expect(fetchMock.mock.calls[0][0]).toBe("http://192.168.1.5:17627/api/x");
+  });
+
+  it("resolveServerUrl 附加 token query（浏览器/原生资源带不了 header；真机 401 修复）", () => {
+    localStorage.setItem("qqplayer.server", "http://192.168.1.5:17627");
+    localStorage.setItem("qqplayer.token", "tok-abc");
+    expect(resolveServerUrl("/api/cover?path=x")).toBe(
+      "http://192.168.1.5:17627/api/cover?path=x&token=tok-abc",
+    );
+    // 已有 query 用 & 拼接；绝对 URL 原样返回（不重复附加）
+    expect(resolveServerUrl("http://cdn.example.com/a.jpg")).toBe("http://cdn.example.com/a.jpg");
+    // 无 token 时行为与旧版一致
+    localStorage.removeItem("qqplayer.token");
+    expect(resolveServerUrl("/api/cover?path=x")).toBe("http://192.168.1.5:17627/api/cover?path=x");
   });
 
   it("POST 自动 JSON.stringify + Content-Type；DELETE 无 body 不带 header", async () => {

@@ -93,7 +93,7 @@ def main():
         print(f"   📁 监听歌曲库变动（去抖 {state.WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
     else:
         print("   📁 自动刷新已关闭（设置里可开启）")
-    uvicorn.run(app, host="0.0.0.0", port=state.DEFAULT_PORT, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=state.DEFAULT_PORT, log_level="info")
 
 
 if __name__ == "__main__":

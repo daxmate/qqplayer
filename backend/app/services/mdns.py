@@ -37,17 +37,77 @@ def _app_version() -> str:
         return "1"
 
 
-def _local_ipv4() -> str:
-    """本机局域网 IPv4（UDP 探活技巧，不发包）；失败回退空串 → 让 zeroconf 自动选地址"""
+# 虚拟/回环接口前缀（代理虚拟网卡 utun、苹果内部 llw/awdl/bridge 等）——广播前必须排除
+_VIRTUAL_IFACE_PREFIXES = ("lo", "utun", "llw", "awdl", "bridge", "gif", "stf", "anpi", "ap")
+
+
+def _is_private_ipv4(ip: str) -> bool:
+    """私网 IPv4：10/8、172.16/12、192.168/16。代理虚拟网卡网段 198.18/15 不算。"""
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-        finally:
-            s.close()
-    except OSError:
+        first, second = (int(part) for part in ip.split(".")[:2])
+    except (ValueError, IndexError):
+        return False
+    if first == 10:
+        return True
+    if first == 172 and 16 <= second <= 31:
+        return True
+    return bool(first == 192 and second == 168)
+
+
+def _local_ipv4() -> str:
+    """本机局域网 IPv4（getifaddrs 枚举：排除虚拟/回环网卡，取私网段首个地址）。
+
+    失败回退空串 → 让 zeroconf 自动选地址。
+    不用 UDP 探活 8.8.8.8：代理软件（Surge/Clash）接管默认路由时 getsockname() 会返回
+    虚拟网卡 IP（如 198.18.0.1），广播出去真机连不上（2026-08-23 真机 mDNS 解析失败根因）；
+    socket.getaddrinfo(hostname) 在代理环境同样不可靠（可能解析失败或返回虚拟地址）。
+    实现：ctypes 调 libc getifaddrs，string_at 直接读 sockaddr 原始内存（ctypes 结构体
+    读指针在 Python 3.14 下会拿到空数据，已实测）。
+    """
+    import ctypes
+    import ctypes.util
+    import sys
+
+    class _Ifaddrs(ctypes.Structure):
+        pass
+
+    _Ifaddrs._fields_ = [
+        ("ifa_next", ctypes.POINTER(_Ifaddrs)),
+        ("ifa_name", ctypes.c_char_p),
+        ("ifa_flags", ctypes.c_uint),
+        ("ifa_addr", ctypes.c_void_p),  # 原始指针，后续 string_at 读内存
+        ("ifa_netmask", ctypes.c_void_p),
+        ("ifa_dstaddr", ctypes.c_void_p),
+        ("ifa_data", ctypes.c_void_p),
+    ]
+
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc.getifaddrs.argtypes = [ctypes.POINTER(ctypes.POINTER(_Ifaddrs))]
+    libc.getifaddrs.restype = ctypes.c_int
+    libc.freeifaddrs.argtypes = [ctypes.POINTER(_Ifaddrs)]
+
+    is_darwin = sys.platform == "darwin"
+    head = ctypes.POINTER(_Ifaddrs)()
+    if libc.getifaddrs(ctypes.byref(head)) != 0:
         return ""
+    try:
+        p = head
+        while p:
+            ifa = p.contents
+            name = ifa.ifa_name.decode(errors="replace") if ifa.ifa_name else ""
+            if name and not name.startswith(_VIRTUAL_IFACE_PREFIXES) and ifa.ifa_addr:
+                raw = ctypes.string_at(ifa.ifa_addr, 16)
+                # family 偏移：macOS sa_len(1)+sa_family(1)；Linux sa_family(2 小端)
+                family = raw[1] if is_darwin else raw[0]
+                if family == socket.AF_INET:
+                    # sin_addr 偏移恒为 4（macOS: 1+1+2；Linux: 2+2）
+                    ip = socket.inet_ntop(socket.AF_INET, raw[4:8])
+                    if _is_private_ipv4(ip):
+                        return ip
+            p = ifa.ifa_next
+    finally:
+        libc.freeifaddrs(head)
+    return ""
 
 
 def _build_info():
