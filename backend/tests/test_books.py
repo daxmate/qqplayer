@@ -310,6 +310,16 @@ def test_list_desc_order(tmp_path):
     assert [x["id"] for x in lst] == [b["id"], a["id"]]
 
 
+def test_list_book_size(tmp_path):
+    """列表返回每本书 size：等于 book.epub 实际字节数（>0，下载 UI 显示体积用）"""
+    epub = tmp_path / "s.epub"
+    build_epub(epub)
+    bid = import_epub(epub).json()["id"]
+    book = next(x for x in client.get("/api/books").json() if x["id"] == bid)
+    assert book["size"] == (state.BOOKS_DIR / bid / "book.epub").stat().st_size
+    assert book["size"] > 0
+
+
 # ============ 文件 / 封面 ============
 def test_file_endpoint(tmp_path):
     """GET /file 返回原 epub 字节"""

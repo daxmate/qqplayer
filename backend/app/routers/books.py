@@ -34,12 +34,26 @@ def _book_dir(bid: str) -> Path:
     return state.BOOKS_DIR / bid
 
 
+def _book_size(bid: str | None) -> int:
+    """EPUB 文件字节数（缺失/读不到 → 0；前端下载 UI 显示体积用）"""
+    if not bid:
+        return 0
+    try:
+        return (_book_dir(bid) / "book.epub").stat().st_size
+    except OSError:
+        return 0
+
+
 # ============ 书架 ============
 def _books_with_progress() -> list[dict]:
-    """书架列表：书籍元数据 + SQLite 进度合并（无进度记录则保持 progress=None）"""
+    """书架列表：书籍元数据 + SQLite 进度合并 + size（EPUB 字节数，缺失为 0）"""
     progs = db.progress_all()
     return [
-        {**b, "progress": progs.get(b.get("id"), b.get("progress"))}
+        {
+            **b,
+            "progress": progs.get(b.get("id"), b.get("progress")),
+            "size": _book_size(b.get("id")),
+        }
         for b in state.books_store.load()
     ]
 

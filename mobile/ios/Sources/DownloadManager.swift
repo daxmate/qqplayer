@@ -157,6 +157,53 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         }
     }
 
+    /// 删除本地资产。scope: "all"|"audio"|"books"|"dicts"
+    /// 只允许删除 storageRoot 下的对应子目录（audio/、books/、dicts/）；scope 非法 → no-op。
+    /// 删除前 cancelAll()（避免删掉正在写的文件）；整目录移除，删完不留 .part。
+    /// 后台执行避免阻塞主线程；completion 在主线程回调（WebShellView 回推 assetsDeleted 用）。
+    func deleteAssets(scope: String, completion: (() -> Void)? = nil) {
+        let subdirs: [String]?
+        switch scope {
+        case "all": subdirs = ["audio", "books", "dicts"]
+        case "audio": subdirs = ["audio"]
+        case "books": subdirs = ["books"]
+        case "dicts": subdirs = ["dicts"]
+        default: subdirs = nil
+        }
+        guard let subdirs else { return }  // 非法 scope → no-op
+        cancelAll()
+        let fm = FileManager.default
+        let root = storageRoot
+        let rootPrefix = root.path + "/"
+        DispatchQueue.global(qos: .utility).async {
+            for sub in subdirs {
+                let dir = root.appendingPathComponent(sub, isDirectory: true)
+                // 纵深防御：白名单子目录也再校验一次仍在 storageRoot 之下
+                guard dir.path.hasPrefix(rootPrefix) else { continue }
+                try? fm.removeItem(at: dir)
+            }
+            DispatchQueue.main.async {
+                completion?()
+            }
+        }
+    }
+
+    /// 本地资产总占用（字节）：storageRoot 递归求和全部文件（含子目录；.part 也计入）
+    func assetsSize() -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: storageRoot, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  let size = values.fileSize else { continue }
+            total += Int64(size)
+        }
+        return total
+    }
+
     /// 查本地资产（异步经 onAssetStatus 回传）
     func checkAsset(path: String) {
         guard Self.isSafePath(path) else {

@@ -308,6 +308,18 @@ struct WebShellView: UIViewRepresentable {
                    url.scheme == "http" || url.scheme == "https" {
                     playerBridge.playAudioFile(url)
                 }
+            case "deleteAssets":
+                // 删除本地资产：{scope: "all"|"audio"|"books"|"dicts"}；
+                // 删除完成后回推 assetsDeleted（前端不依赖也保留，便于调试）
+                if let scope = body["scope"] as? String {
+                    downloadManager.deleteAssets(scope: scope) { [weak self] in
+                        self?.pushToWeb(event: "assetsDeleted", payload: ["scope": scope])
+                    }
+                }
+            case "assetsSize":
+                // 本地资产总占用 → 回推 assetsSize {total}（字节，Int64 → JS number）
+                let total = downloadManager.assetsSize()
+                pushToWeb(event: "assetsSize", payload: ["total": total])
             default:
                 playerBridge.handleCommand(cmd, payload: body)
             }
