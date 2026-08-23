@@ -785,9 +785,9 @@ describe("Reader iOS 离线资产", () => {
     await flushPromises();
 
     const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.startsWith("http://127.0.0.1:17888/assets/books/abc123.epub"))).toBe(
-      true,
-    );
+    expect(
+      urls.some((u) => u.startsWith("http://127.0.0.1:17888/native-assets/books/abc123.epub")),
+    ).toBe(true);
     expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(false);
     expect(mocks.ePub.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer);
     wrapper.unmount();

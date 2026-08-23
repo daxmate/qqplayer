@@ -252,16 +252,16 @@ export const LOCAL_SERVER_ORIGIN = "http://127.0.0.1:17888";
 
 /**
  * 本地资产 file:// URL → 本地 HTTP URL（WKWebView 可 fetch 读取）。
- * 壳内 MiniHTTPServer 以 /assets/ 路由 serve 沙盒 qqplayer-assets/ 目录：
+ * 壳内 MiniHTTPServer 以 /native-assets/ 路由 serve 沙盒 qqplayer-assets/ 目录：
  *   file:///.../Documents/qqplayer-assets/books/<hash>.epub
- *     → http://127.0.0.1:17888/assets/books/<hash>.epub
+ *     → http://127.0.0.1:17888/native-assets/books/<hash>.epub
  * 解析失败返回 null（调用方回退远程加载）。
  */
 export function localAssetHTTPURL(localURL) {
   if (!localURL || typeof localURL !== "string") return null;
   const m = String(localURL).match(/qqplayer-assets\/(.+)$/);
   if (!m) return null;
-  return LOCAL_SERVER_ORIGIN + "/assets/" + m[1];
+  return LOCAL_SERVER_ORIGIN + "/native-assets/" + m[1];
 }
 
 // ---------- syncDownload 批量发送（微任务合并） ----------

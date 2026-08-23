@@ -9,7 +9,7 @@ import Network
 ///
 /// 路由：
 ///   /             → root（bundle 内 www/）
-///   /assets/...   → assetsRoot（Documents/qqplayer-assets/，离线资产：音频/EPUB/词典）
+///   /native-assets/...   → assetsRoot（Documents/qqplayer-assets/，离线资产：音频/EPUB/词典）
 final class MiniHTTPServer {
     private let listener: NWListener
     private let root: URL
@@ -85,15 +85,16 @@ final class MiniHTTPServer {
         if path.hasSuffix("/") { path += "index.html" }
         if path == "/" { path = "/index.html" }
 
-        // /assets/ 前缀 → 沙盒资产目录（离线资产读取）；否则 www 内文件
+        // /native-assets/ 前缀 → 沙盒资产目录（离线资产读取）；否则 www 内文件
+        // 注意：不用 /assets/ —— vite 构建产物也用它（www/assets/*.js），会劫持前端资源。
         let fileURL: URL
         var allowedRoot = root.path
-        if path.hasPrefix("/assets/") {
+        if path.hasPrefix("/native-assets/") {
             guard let assetsRoot else {
                 send(conn, status: 404, contentType: "text/plain", body: "Not Found")
                 return
             }
-            let rel = String(path.dropFirst("/assets/".count))
+            let rel = String(path.dropFirst("/native-assets/".count))
             // 路径穿越防护：拒绝 . / .. 段 + 标准路径必须在 assetsRoot 内
             let comps = rel.split(separator: "/", omittingEmptySubsequences: false)
             guard !comps.contains(where: { $0 == ".." || $0 == "." }) else {
