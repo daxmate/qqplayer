@@ -61,10 +61,20 @@
         >
           <Highlighter :size="18" />
         </button>
-        <button class="reader-btn icon" :title="t('books.prevPage')" @click="prevPage">
+        <button
+          v-if="!isMobile"
+          class="reader-btn icon"
+          :title="t('books.prevPage')"
+          @click="prevPage"
+        >
           <ChevronLeft :size="18" />
         </button>
-        <button class="reader-btn icon" :title="t('books.nextPage')" @click="nextPage">
+        <button
+          v-if="!isMobile"
+          class="reader-btn icon"
+          :title="t('books.nextPage')"
+          @click="nextPage"
+        >
           <ChevronRight :size="18" />
         </button>
       </div>
@@ -139,6 +149,8 @@
       </Transition>
 
       <!-- 选中工具栏（选区上方/下方悬浮，iBooks 式：顶行五色点 + U，下方功能列表）；Swift 壳内隐藏（壳用系统右键菜单，见 installNativeMenuApi），浏览器照旧 -->
+      <!-- iOS：全屏透明遮罩实现“菜单外点击关闭”（iframe 触摸事件在 WKWebView 不可靠，原生遮罩最稳） -->
+      <div v-if="toolbar.visible && isIOSShell" class="reader-toolbar-scrim" @click="hideToolbar" />
       <SelectionToolbar
         v-if="toolbar.visible && !isNativeShell"
         :x="toolbar.x"
@@ -277,6 +289,8 @@ import { assetForBook, ensureAsset, localAssetHTTPURL, syncEnabled } from "../ut
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
 import HighlightMenu from "./HighlightMenu.vue";
+import { isMobile } from "../composables/useMobileViewport.js";
+import { onNativeEvent } from "../composables/nativeAudioBridge.js";
 import SearchPanel from "./SearchPanel.vue";
 import {
   applyTempMark,
@@ -419,6 +433,8 @@ const curCfi = ref("");
 
 /** 选中工具栏位置（相对 .reader 根，px） */
 const toolbar = reactive({ x: 0, y: 0, visible: false });
+/** 工具栏锁定（iOS：弹出后自动收起选区隐藏手柄，期间选区收起不隐藏工具栏；操作后解除） */
+let toolbarLocked = false;
 /** 当前选中（工具栏操作的数据源；工具栏收起时保留到操作完成） */
 const currentSelection = ref<ReaderSelection | null>(null);
 
@@ -485,6 +501,7 @@ function cfiPath(cfi: string): string {
 
 function hideToolbar() {
   toolbar.visible = false;
+  toolbarLocked = false;
 }
 
 /** 清空 iframe 选区 + 收起工具栏（工具栏操作后调用） */
@@ -503,8 +520,10 @@ function clearSelection() {
   postReaderState(true, ""); // 壳右键菜单：选区已清（去重：仅状态变化时发送）
 }
 
-/** 选区收起（selectionchange）→ 收起工具栏；同一函数引用重复 add 自动去重 */
+/** 选区收起（selectionchange）→ 收起工具栏；同一函数引用重复 add 自动去重。
+ * 工具栏锁定（选区已自动收起）时忽略，防收起动作本身把工具栏关掉。 */
 function onContentsSelectionChange(e: Event) {
+  if (toolbarLocked && toolbar.visible) return;
   const doc = e.target as Document;
   const sel = doc.defaultView?.getSelection?.();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) hideToolbar();
@@ -540,6 +559,10 @@ let selPollLastText = "";
 let selPollStableCount = 0;
 /** 需要连续几次轮询选区相同才弹工具条（400ms/次，2 次 ≈ 800ms） */
 const SEL_POLL_STABLE = 2;
+/** 临时诊断：选区轮询各阶段日志（阶段4 排查 iOS 工具栏不出现，验证后清理） */
+let selPollDiagLogged = false; // 错误路径（contents 空 / cfi 失败）只打一次
+let selPollSeenLogged = false; // 选区检测到只打一次
+let onSelDiagLogged = false; // onSelected 内部 return 路径只打一次
 
 function stopSelPolling() {
   if (selPollTimer !== null) {
@@ -556,14 +579,40 @@ function startSelPolling() {
 function pollSelection() {
   const iframe = containerRef.value?.querySelector("iframe");
   const iw = iframe?.contentWindow;
-  const sel = iw?.getSelection?.();
-  if (!sel) return;
+  let sel: Selection | null = null;
+  try {
+    sel = iw?.getSelection?.() ?? null;
+  } catch (e) {
+    if (!selPollDiagLogged) {
+      selPollDiagLogged = true;
+      console.log(
+        "[selPoll] getSelection threw:",
+        (e as Error)?.name,
+        (e as Error)?.message,
+        "iframe?",
+        !!iframe,
+      );
+    }
+    return;
+  }
+  if (!sel) {
+    if (!selPollDiagLogged) {
+      selPollDiagLogged = true;
+      console.log("[selPoll] no selection obj; iframe?", !!iframe, "contentWindow?", !!iw);
+    }
+    return;
+  }
   const text = sel.toString().trim();
+  if (!selPollSeenLogged && !sel.isCollapsed && sel.rangeCount > 0 && text) {
+    selPollSeenLogged = true;
+    console.log("[selPoll] selection detected, text=", JSON.stringify(text.slice(0, 40)));
+  }
   postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳右键菜单：选区状态变化时上报（去重：文本/高亮态没变不重复发）
   if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
-    // 无选区：重置稳定计数 + 收起工具栏
+    // 无选区：重置稳定计数 + 收起工具栏（工具栏锁定期间保持，iOS 自动收起选区后不隐藏）
     selPollLastText = "";
     selPollStableCount = 0;
+    if (toolbar.visible && toolbarLocked) return;
     if (toolbar.visible) hideToolbar();
     return;
   }
@@ -578,14 +627,35 @@ function pollSelection() {
   // 选区已稳定（鼠标释放）→ 同一选区已处理过则跳过
   if (currentSelection.value?.text === text) return;
   const contents = getCurrentContents();
-  if (!contents) return;
+  if (!contents) {
+    if (!selPollDiagLogged) {
+      selPollDiagLogged = true;
+      console.log(
+        "[selPoll] selection ok but contents null, text=",
+        JSON.stringify(text.slice(0, 40)),
+      );
+    }
+    return;
+  }
   try {
     const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
       sel.getRangeAt(0),
     );
-    if (cfi) onSelected(cfi, contents);
-  } catch {
-    /* 轮询 CFI 生成失败忽略 */
+    if (cfi) {
+      if (!selPollDiagLogged) {
+        selPollDiagLogged = true;
+        console.log("[selPoll] cfi ok, calling onSelected");
+      }
+      onSelected(cfi, contents);
+    } else if (!selPollDiagLogged) {
+      selPollDiagLogged = true;
+      console.log("[selPoll] cfiFromRange empty, text=", JSON.stringify(text.slice(0, 40)));
+    }
+  } catch (e) {
+    if (!selPollDiagLogged) {
+      selPollDiagLogged = true;
+      console.log("[selPoll] cfiFromRange threw:", (e as Error)?.name, (e as Error)?.message);
+    }
   }
 }
 
@@ -593,18 +663,39 @@ function pollSelection() {
 function onSelected(cfi: string, contents: unknown) {
   const c = contents as { window?: Window };
   const sel = c.window?.getSelection?.();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+    if (!onSelDiagLogged) {
+      onSelDiagLogged = true;
+      console.log("[selPoll] onSelected: no valid selection");
+    }
+    return;
+  }
   const text = sel.toString().trim();
-  if (!text) return;
+  if (!text) {
+    if (!onSelDiagLogged) {
+      onSelDiagLogged = true;
+      console.log("[selPoll] onSelected: empty text");
+    }
+    return;
+  }
   const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
   const iframe = containerRef.value?.querySelector("iframe");
   const root = rootRef.value;
-  if (!iframe || !root) return;
+  if (!iframe || !root) {
+    if (!onSelDiagLogged) {
+      onSelDiagLogged = true;
+      console.log("[selPoll] onSelected: no iframe/root", !!iframe, !!root);
+    }
+    return;
+  }
   const iframeRect = iframe.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
   toolbar.x = iframeRect.left + rangeRect.left + rangeRect.width / 2 - rootRect.left;
-  toolbar.y = iframeRect.top + rangeRect.top - rootRect.top;
+  // iOS 系统“拷贝链接”胶囊固定显示在选区上方（WebKit 无法禁用，见 bug 244149），
+  // 工具栏改挂选区下方避免被盖住（2026-08-23 阶段4）
+  toolbar.y = iframeRect.top + rangeRect.bottom - rootRect.top + 12;
   toolbar.visible = true;
+  toolbarLocked = false;
   closeHighlightMenu(); // 新选区优先：收起点击高亮菜单
   currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
   postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳：选区稳定后补发精确 hasHighlight/highlightStyle（轮询首拍可能滞后）
@@ -613,6 +704,21 @@ function onSelected(cfi: string, contents: unknown) {
     "selectionchange",
     onContentsSelectionChange,
   );
+  // iOS 壳：选区手柄（原生蓝色圆点）会叠在工具栏上/旁（无 API 单独禁用），
+  // 工具栏弹出后立即收起选区隐藏手柄；先锁定工具栏防选区收起事件把它关掉（2026-08-23）
+  if (
+    typeof window !== "undefined" &&
+    (window as { qqplayerIosBridge?: unknown }).qqplayerIosBridge
+  ) {
+    toolbarLocked = true;
+    requestAnimationFrame(() => {
+      try {
+        (contents as { window?: Window }).window?.getSelection()?.removeAllRanges();
+      } catch {
+        /* 收起失败不影响 */
+      }
+    });
+  }
 }
 
 /** 高亮 SVG 样式：深色主题用 screen 混合（multiply 在深底几乎不可见） */
@@ -1114,13 +1220,24 @@ const nativeShell = window as unknown as {
   };
 };
 
-/** 是否运行在 Swift 原生壳内（壳注入 window.qqplayerNative；浏览器没有） */
+/** 是否运行在 Swift 原生壳内（壳注入 window.qqplayerNative；浏览器没有）。
+ * 桌面壳（macOS/Windows）有原生右键菜单 → 隐藏 Web 工具栏；
+ * iOS 壳无原生选区菜单（系统菜单无法禁用，WebKit bug 244149），Web 工具栏必须保留。 */
 function inNativeShell(): boolean {
-  return typeof window !== "undefined" && !!nativeShell.qqplayerNative;
+  return (
+    typeof window !== "undefined" && !!nativeShell.qqplayerNative && !nativeShell.qqplayerIosBridge
+  );
 }
 
 /** 壳内隐藏悬浮工具条（浏览器保留）；选区轮询与 currentSelection 照常维护（壳右键菜单依赖 cfi/context） */
 const isNativeShell = computed(inNativeShell);
+
+/** iOS 壳标记（qqplayerIosBridge 由壳注入）：选区工具栏遮罩等 iOS 特有逻辑用 */
+const isIOSShell = computed(
+  () =>
+    typeof window !== "undefined" &&
+    !!(window as { qqplayerIosBridge?: unknown }).qqplayerIosBridge,
+);
 
 /** 已上报给壳的选区状态（去重：仅状态变化时发送，400ms 轮询不重复刷屏） */
 let reportedActive = false;
@@ -1334,6 +1451,50 @@ function blockNativeContextMenu(contents: { document?: Document }) {
 }
 
 /**
+ * 章节内容去链接语义（2026-08-23 阶段4）：<a> → <span>（保留子节点与 class）。
+ * 原因：iOS WKWebView 选区包含 <a> 时，系统编辑菜单自动加“拷贝链接”项（绕过
+ * canPerformAction），盖住 Web 选区工具栏；阅读器导航走顶栏目录/epubjs cfi，
+ * 正文内链接无功能依赖，去掉后选区工具栏独占交互。
+ */
+function stripContentLinks(contents: { document?: Document }) {
+  const doc = contents.document;
+  if (!doc) return;
+  try {
+    doc.querySelectorAll("a").forEach((a) => {
+      const span = doc.createElement("span");
+      if (a.className) span.className = a.className;
+      while (a.firstChild) span.appendChild(a.firstChild);
+      a.replaceWith(span);
+    });
+  } catch {
+    /* 内容处理失败不影响阅读 */
+  }
+}
+
+/**
+ * iframe 内容注入 -webkit-touch-callout: none（2026-08-23 阶段4）：
+ * iOS 选区菜单里的“拷贝高亮标记的链接”胶囊是 WebKit 的 touch callout 行为，
+ * 全局 CSS 只作用于主文档，epub 章节在 iframe 内需要单独注入；
+ * 禁掉后选区交互只保留 Web 工具栏（五色点/查词/笔记/搜索/拷贝）。
+ */
+function applyNoTouchCallout(contents: { document?: Document }) {
+  const doc = contents.document;
+  if (!doc || !doc.head) return;
+  try {
+    if (doc.getElementById("__qq_no_touch_callout")) return;
+    const style = doc.createElement("style");
+    style.id = "__qq_no_touch_callout";
+    style.textContent =
+      "html, body, * { -webkit-touch-callout: none !important; }\n" +
+      // 水平手势归 JS（滑动翻页）；保留垂直滚动
+      "html, body { touch-action: pan-y !important; }";
+    doc.head.appendChild(style);
+  } catch {
+    /* 样式注入失败不影响阅读 */
+  }
+}
+
+/**
  * 高亮位置重算：marks-pane 的 SVG 矩形只在 epubjs reframe（尺寸变化）时重算，
  * 字体/字号/行距等设置变化引起的内容重排不会触发 → 高亮错位。设置应用后手动
  * 对所有 view 的 pane 重算一次（pane.render 内部遍历 mark 重新 getBoundingClientRect）。
@@ -1460,11 +1621,14 @@ function attachTapHandlers() {
   const contents = getCurrentContents();
   if (!contents || contents === tapContents) return;
   detachTapHandlers();
-  tapContents = contents;
   const doc = (contents as { document?: Document }).document;
+  // 内容未就绪时不设 tapContents（否则永不重挂），等 relocated/下一次调用重试
   if (!doc) return;
+  tapContents = contents;
   doc.addEventListener("mousedown", onTapMouseDown, true);
   doc.addEventListener("click", onTapClick, true);
+  doc.addEventListener("touchstart", onTouchStart, { passive: true });
+  doc.addEventListener("touchend", onTouchEnd, { passive: true });
 }
 
 function detachTapHandlers() {
@@ -1473,6 +1637,8 @@ function detachTapHandlers() {
   if (doc) {
     doc.removeEventListener("mousedown", onTapMouseDown, true);
     doc.removeEventListener("click", onTapClick, true);
+    doc.removeEventListener("touchstart", onTouchStart);
+    doc.removeEventListener("touchend", onTouchEnd);
   }
   tapContents = null;
 }
@@ -1480,6 +1646,63 @@ function detachTapHandlers() {
 function onTapMouseDown(e: MouseEvent) {
   tapDownX = e.clientX;
   tapDownY = e.clientY;
+}
+
+// ============ 触摸滑动翻页（iOS/移动端） ============
+// 触摸手势：横向快速滑动翻页（左滑 next / 右滑 prev）；慢速/纵向留给拖选与滚动。
+// 注意 iframe 内容已注入 touch-action: pan-y（见 applyNoTouchCallout），水平手势归 JS。
+const SWIPE_THRESHOLD = 50; // px：最小横向滑动距离
+const SWIPE_DRAG_RATIO = 1.5; // |dx| > |dy| * 1.5 才视为横向滑动（纵向滚动/拖选不翻页）
+const SWIPE_MAX_MS = 600; // 超过该时长视为慢速拖动（可能拖选），不翻页
+/** 临时诊断：滑动手势首触发只打一次（阶段4 翻页排查，验证后清理） */
+let swipeDiagLogged = false;
+/** iOS 原生滑动翻页事件订阅（onMounted 注册，onBeforeUnmount 取消） */
+let unsubSwipe: (() => void) | null = null;
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartT = 0;
+
+function onTouchStart(e: TouchEvent) {
+  if (e.touches.length !== 1) return;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  touchStartT = Date.now();
+  if (!swipeDiagLogged) {
+    swipeDiagLogged = true;
+    console.log("[swipe] touchstart at", touchStartX.toFixed(0), touchStartY.toFixed(0));
+  }
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (e.changedTouches.length !== 1) return;
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  const dt = Date.now() - touchStartT;
+  if (!swipeDiagLogged) {
+    swipeDiagLogged = true;
+    console.log(
+      "[swipe] touchend dx=",
+      dx.toFixed(0),
+      "dy=",
+      dy.toFixed(0),
+      "dt=",
+      dt,
+      "thresh=",
+      Math.abs(dx) >= SWIPE_THRESHOLD &&
+        Math.abs(dx) >= Math.abs(dy) * SWIPE_DRAG_RATIO &&
+        dt <= SWIPE_MAX_MS,
+    );
+  }
+  if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+  if (Math.abs(dx) < Math.abs(dy) * SWIPE_DRAG_RATIO) return;
+  // 慢速横向拖动可能是文字拖选（iOS 拖选为长按后拖动）→ 不翻页
+  if (dt > SWIPE_MAX_MS) return;
+  // 工具栏开着时滑动翻页？收起工具栏（选区已自动收起，仅关工具栏）
+  if (toolbar.visible) hideToolbar();
+  if (hlMenu.visible) closeHighlightMenu();
+  e.preventDefault();
+  if (dx < 0) nextPage();
+  else prevPage();
 }
 
 /**
@@ -1548,6 +1771,11 @@ function onTapClick(e: MouseEvent) {
   }
   // 菜单开着时点击内容其它区域 → 收起（iframe 内点击不冒泡到父窗口，onWindowMouseDown 收不到）
   if (hlMenu.visible) closeHighlightMenu();
+  // 选区工具栏打开时点击菜单外区域 → 收起（用户要求：点外部应消失）
+  if (toolbar.visible) {
+    hideToolbar();
+    return;
+  }
   // 链接点击交给 epubjs 默认处理，不翻页
   const target = e.target as HTMLElement | null;
   if (target?.closest?.("a")) return;
@@ -1740,9 +1968,12 @@ async function loadBook() {
     renditionRef.value = rendition;
     // 内容加载（含换章重建）后自动注入字体覆盖（body * !important，见 applyFontToContents）
     // + 禁默认右键菜单（见 blockNativeContextMenu）
+    // + 去链接语义（见 stripContentLinks：iOS 系统“拷贝链接”菜单项干扰选区工具栏）
     rendition.hooks.content.register((contents: { document?: Document }) => {
       applyFontToContents(contents);
       blockNativeContextMenu(contents);
+      stripContentLinks(contents);
+      applyNoTouchCallout(contents);
     });
     applyReaderSettings();
     rendition.on("relocated", onRelocated);
@@ -1775,6 +2006,13 @@ onMounted(() => {
   postReaderState(true, ""); // 壳：Reader 激活初始状态（无选区）
   loadReaderSettings();
   loadBook();
+  // iOS 原生滑动翻页（UISwipeGestureRecognizer → native swipe 事件 → 翻页）
+  unsubSwipe = onNativeEvent("swipe", (payload: { dir?: string }) => {
+    if (toolbar.visible) hideToolbar();
+    if (hlMenu.visible) closeHighlightMenu();
+    if (payload?.dir === "left") nextPage();
+    else if (payload?.dir === "right") prevPage();
+  });
 });
 
 onBeforeUnmount(() => {
@@ -1783,6 +2021,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("mousedown", onWindowMouseDown, true);
   stopSelPolling();
   uninstallNativeMenuApi();
+  unsubSwipe?.();
   postReaderState(false, ""); // 壳：Reader 已卸载（hasSelection:false, text:""）
   teardown();
 });
@@ -1916,6 +2155,14 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 6;
   background: rgba(0, 0, 0, 0.35);
+}
+/* iOS 选区工具栏遮罩：全屏透明，点任意处关工具栏（iframe 触摸事件在 WKWebView 不可靠，
+   用父文档遮罩实现“菜单外点击关闭”；z-index 低于工具栏 hl-menu 的 10） */
+.reader-toolbar-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  background: transparent;
 }
 /* 目录抽屉 */
 .reader-toc-mask {

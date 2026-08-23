@@ -4,7 +4,7 @@
  * 契约：docs/reader-v2/01-contract-backend-core.md + 02-contract-backend-dict.md。
  * 所有写操作失败抛 Error（detail 透出），调用方负责 toast。
  */
-import { api } from "../utils/apiClient.js";
+import { api, resolveServerUrl } from "../utils/apiClient.js";
 import type {
   BookAnnotations,
   BookSearchResponse,
@@ -237,7 +237,9 @@ export function queryDict(word: string, dictId?: string): Promise<DictQueryResul
  */
 export function rewriteDictHtml(html: string, dictId: string): string {
   let out = html.replace(/<script[\s\S]*?<\/script\s*>/gi, "");
-  const resource = (path: string) => `/api/dict/resource/${dictId}/${path}`;
+  // iOS 壳：srcdoc iframe 的 base 是 MiniHTTPServer origin，/api/… 相对路径会解析错
+  // （资源 404）→ 统一 resolveServerUrl 转桌面后端绝对 URL（桌面同源原样返回，行为零变化）
+  const resource = (path: string) => resolveServerUrl(`/api/dict/resource/${dictId}/${path}`);
   out = out.replace(
     /(\b(?:src|href)\s*=\s*["'])(?!https?:|data:|#|javascript:|mailto:|sound:|entry:|\/\/)([^"']+)(["'])/gi,
     (_m, pre, path, post) => `${pre}${resource(path)}${post}`,

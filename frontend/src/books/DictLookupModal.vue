@@ -157,12 +157,20 @@ ${themeCss}
 try {
   document.addEventListener('click', function (e) {
     var a = e.target && e.target.closest
-      ? e.target.closest('a[href^="/api/dict/resource/"], a[href^="entry://"]')
+      ? e.target.closest('a[href*="/api/dict/resource/"], a[href^="entry://"]')
       : null;
     if (!a) return;
     e.preventDefault();
     var href = a.getAttribute('href') || '';
     if (/[.](mp3|m4a|wav|ogg|aac)([?#]|$)/i.test(href)) {
+      // iOS 壳：postMessage 原生 AVPlayer 播放（iOS 26 WKWebView 里 HTMLAudioElement
+      // 会弹系统媒体播放器 UI；原生直接出声无界面）。浏览器回退 HTMLAudioElement。
+      try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.qqplayerIos) {
+          window.webkit.messageHandlers.qqplayerIos.postMessage({ cmd: "playAudio", url: href });
+          return;
+        }
+      } catch (e) {}
       var audio = new Audio(href);
       var p = audio.play();
       if (p && p.catch) p.catch(function () {});

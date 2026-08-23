@@ -33,7 +33,7 @@
         <span class="bs-cover">
           <img
             v-if="book.coverUrl && !failedCovers.has(book.id)"
-            :src="book.coverUrl"
+            :src="resolveServerUrl(book.coverUrl)"
             :alt="book.title"
             loading="lazy"
             @error="onCoverError(book)"
@@ -114,6 +114,7 @@ import { useI18n } from "vue-i18n";
 import { BookMarked, BookOpen, Trash2, Upload, Loader2 } from "@lucide/vue";
 import type { BookView } from "./types";
 import { fetchBooks, importBook, deleteBook } from "./api";
+import { resolveServerUrl } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import DictManagerModal from "./DictManagerModal.vue";
 
