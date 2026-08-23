@@ -179,6 +179,15 @@
     <!-- search anything 全屏搜索层本体（桌面/移动共用；v-if 由 isSearchOpen 单例控制） -->
     <SearchAnything @pick="onSearchPick" />
 
+    <!-- 壳内配对确认弹窗（桌面壳轮询到新配对请求时自动弹出；iOS 壳是发起方，不启用） -->
+    <PairingConfirmModal
+      :open="pairVisible"
+      :request="pairRequest"
+      :busy="pairBusy"
+      @approve="approvePairing"
+      @reject="rejectPairing"
+    />
+
     <!-- 拖拽导入遮罩（全局；pointer-events none 不拦截交互，z-index 低于 toast 300） -->
     <Transition name="drag-overlay">
       <div v-if="dragVisible || dragUploading" class="drag-overlay">
@@ -218,6 +227,7 @@ import ControlBar from "./components/ControlBar.vue";
 import LyricSpecModal from "./components/LyricSpecModal.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import SearchAnything from "./components/SearchAnything.vue";
+import PairingConfirmModal from "./components/PairingConfirmModal.vue";
 import BooksView from "./books/BooksView.vue";
 import VideosView from "./videos/VideosView.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
@@ -233,6 +243,7 @@ import {
   resolveServerUrl,
 } from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
+import { usePairingConfirm } from "./composables/usePairingConfirm.js";
 import { initSync } from "./utils/sync.js";
 import {
   coverSizePx,
@@ -266,6 +277,16 @@ import {
 } from "./composables/usePlayer.js";
 
 const { t } = useI18n();
+
+// 壳内配对确认：桌面壳（非 iOS）轮询待确认配对请求，有新请求自动弹确认框。
+// 轮询在组件卸载时自动清理（usePairingConfirm 内部 onBeforeUnmount）
+const {
+  visible: pairVisible,
+  current: pairRequest,
+  busy: pairBusy,
+  approve: approvePairing,
+  reject: rejectPairing,
+} = usePairingConfirm();
 
 // 统一壳桥（Tauri 2 Windows / WebKit macOS Swift / 浏览器直连静默降级）
 const bridge = useShellBridge();

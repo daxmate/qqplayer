@@ -45,4 +45,19 @@ export default {
       collapsePlaylist: "收起播放列表",
     },
   },
+  // 壳内配对确认（usePairingConfirm.js / PairingConfirmModal.vue）：桌面壳轮询到新配对请求时弹确认框
+  pairing: {
+    confirmTitle: "配对确认",
+    confirmText: "「{name}」请求与此设备配对",
+    deviceName: "设备名称",
+    deviceType: "设备类型",
+    requestTime: "请求时间",
+    approve: "批准配对",
+    reject: "拒绝",
+    processing: "处理中…",
+    approved: "配对成功",
+    rejected: "已拒绝该设备的配对请求",
+    actionFailed: "操作失败，请重试",
+    deviceUnknown: "未知设备",
+  },
 };
