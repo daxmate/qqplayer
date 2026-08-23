@@ -20,6 +20,12 @@ targets:
       - path: Resources/www
         type: folder
         buildPhase: resources
+      # App 图标（Assets.xcassets/AppIcon.appiconset，脚本由 desktop/macOS/assets/icon.icns 生成）
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Resources/Info.plist
       properties:
