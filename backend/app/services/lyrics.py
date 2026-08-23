@@ -49,8 +49,21 @@ def parse_srt(text: str):
     return result
 
 
+# 信息行（元信息）保守过滤：关键词开头 + 冒号/空白分隔 + 后面还有内容；
+# 如"作词：姚谦""作曲 李宗盛"；"词不达意""曲终人散"等正常歌词不被误杀。
+_META_LINE_RE = re.compile(
+    r"^(?:作词|作曲|编曲|制作人?|原唱|出品|企划|监制|录音|混音|母带|发行|策划|词|曲|唱)"
+    r"(?:\s*[:：]\s*|\s+)\S"
+)
+
+
 def parse_lrc(text: str):
-    """解析 lrc -> 句子列表（无段落，type 统一为 line）"""
+    """解析 lrc -> 句子列表（无段落，type 统一为 line）
+
+    与前端 frontend/src/utils/parseLrc.js parseLrcText 同构（含过滤规则）：
+    解析后过滤空行/信息行（作词作曲等元信息，保守规则宁可漏杀不可误杀）
+    与超短行（duration < 0.3s 且文本 <= 2 字，残留碎片/空行）。
+    """
     result = []
     pattern = re.compile(r"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]")
     items = []
@@ -65,8 +78,13 @@ def parse_lrc(text: str):
             t = int(m.group(1)) * 60 + int(m.group(2)) + ms / 1000
             items.append((t, lyric_text))
     items.sort(key=lambda x: x[0])
+    # 过滤 1/2：空行 + 信息行（关键词后必须有冒号或空白做分隔，避免误杀"词不达意"这类正常歌词）
+    items = [(t, txt) for t, txt in items if txt.strip() and not _META_LINE_RE.match(txt)]
     for i, (t, txt) in enumerate(items):
         e = items[i + 1][0] if i + 1 < len(items) else t + 5
+        # 过滤 3：超短行（duration < 0.3s 且文本 <= 2 字，如 0.13s 的残留碎片/标点残行）
+        if e - t < 0.3 and len(txt.strip()) <= 2:
+            continue
         result.append({"type": "line", "s": t, "e": e, "text": [txt]})
     return result
 

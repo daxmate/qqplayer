@@ -6,6 +6,12 @@
 
 const LRC_TIME_RE = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
+// 信息行（元信息）保守过滤：关键词开头 + 冒号/空白分隔 + 后面还有内容；
+// 如"作词：姚谦""作曲 李宗盛"；"词不达意""曲终人散"等正常歌词不被误杀。
+// 与后端 lyrics.py _META_LINE_RE 同构。
+const LRC_META_RE =
+  /^(?:作词|作曲|编曲|制作人?|原唱|出品|企划|监制|录音|混音|母带|发行|策划|词|曲|唱)(?:\s*[:：]\s*|\s+)\S/;
+
 /** 解析 LRC 文本 → [{type:'line', s, e, text:[txt]}]（与后端 parse_lrc 同构） */
 export function parseLrcText(text) {
   const items = [];
@@ -25,10 +31,17 @@ export function parseLrcText(text) {
     }
   }
   items.sort((a, b) => a.t - b.t);
+  // 过滤 1/2：空行 + 信息行（与后端 parse_lrc 同构的保守规则，宁可漏杀不可误杀正常歌词）
+  const kept = items.filter((it) => {
+    const txt = it.text.trim();
+    return txt && !LRC_META_RE.test(txt);
+  });
   const out = [];
-  for (let i = 0; i < items.length; i++) {
-    const e = i + 1 < items.length ? items[i + 1].t : items[i].t + 5;
-    out.push({ type: "line", s: items[i].t, e, text: [items[i].text] });
+  for (let i = 0; i < kept.length; i++) {
+    const e = i + 1 < kept.length ? kept[i + 1].t : kept[i].t + 5;
+    // 过滤 3：超短行（duration < 0.3s 且文本 <= 2 字，如 0.13s 的残留碎片/标点残行）
+    if (e - kept[i].t < 0.3 && kept[i].text.trim().length <= 2) continue;
+    out.push({ type: "line", s: kept[i].t, e, text: [kept[i].text] });
   }
   return out;
 }

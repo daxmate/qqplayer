@@ -655,6 +655,8 @@ function hashBg(name) {
   pointer-events: none;
 }
 .ml-item {
+  position: relative; /* 创建 stacking context：不透明底始终盖住下方 .ml-actions 操作区（未滑动时操作区默认隐藏） */
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 12px;
