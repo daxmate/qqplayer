@@ -67,6 +67,12 @@ export const syncState = reactive({
   progress: { received: 0, total: 0 }, // 聚合下载进度；total 为 0 = 未知（不可算百分比）
 });
 
+/** 逐项下载状态（同步管理页下载面板数据源）：
+ *  { [path]: {name, status:'queued'|'downloading'|'done'|'failed', received, total,
+ *             error, url, sha256, size} }
+ *  done/failed 条目保留（供重试 / 清除）；url/sha256/size 留存供 retryFailed 重建消息。 */
+export const syncDownloads = reactive({});
+
 /** 同步状态快照引用（设置页 UI 响应式读取；同 syncState） */
 export function getSyncState() {
   return syncState;
@@ -294,12 +300,38 @@ function handleAssetProgress(payload) {
   if (typeof payload.received === "number") cur.received = payload.received;
   if (typeof payload.total === "number" && payload.total > 0) cur.total = payload.total;
   activeDownloads.set(path, cur);
+  // 同步管理面板：条目状态流转（queued → downloading）；done/failed 后不再回退
+  const entry = syncDownloads[path];
+  if (entry) {
+    if (typeof payload.received === "number") entry.received = payload.received;
+    if (typeof payload.total === "number" && payload.total > 0) entry.total = payload.total;
+    if (entry.status !== "done" && entry.status !== "failed") entry.status = "downloading";
+  }
   refreshSyncState();
 }
 
 function handleAssetDone(payload) {
-  if (payload && payload.path) activeDownloads.delete(payload.path);
+  if (payload && payload.path) {
+    activeDownloads.delete(payload.path);
+    const entry = syncDownloads[payload.path];
+    if (entry) {
+      entry.status = payload.ok ? "done" : "failed";
+      entry.error = payload.error || "";
+      if (payload.ok && entry.total > 0) entry.received = entry.total;
+    }
+  }
   refreshSyncState();
+}
+
+// ---------- 资产占用回执（fetchAssetsSize） ----------
+let assetsSizeWaiters = new Set(); // Set<resolve>；原生回执/超时二者先到先结算
+
+function handleAssetsSize(payload) {
+  const total = payload && typeof payload.total === "number" ? payload.total : null;
+  for (const resolve of [...assetsSizeWaiters]) {
+    assetsSizeWaiters.delete(resolve);
+    resolve(total);
+  }
 }
 
 function refreshSyncState() {
@@ -334,6 +366,7 @@ function ensureSubscribed() {
   unsubs.push(onNativeEvent("syncAssetDone", handleAssetDone));
   unsubs.push(onNativeEvent("assetStatus", handleAssetStatus));
   unsubs.push(onNativeEvent("appState", handleAppState));
+  unsubs.push(onNativeEvent("assetsSize", handleAssetsSize));
 }
 
 /**
@@ -373,6 +406,138 @@ function handleAssetStatus(payload) {
   resolve(payload);
 }
 
+// ---------- 批量资产下载（同步管理页 · 阶段3） ----------
+
+/** 歌曲列表 → 下载项数组（批量复用 assetForSong；path 缺失的流媒体条目自动跳过） */
+export async function buildSongItems(songs) {
+  if (!Array.isArray(songs)) return [];
+  const items = await Promise.all(songs.map((s) => assetForSong(s)));
+  return items.filter(Boolean);
+}
+
+/** 图书列表 → 下载项数组（批量复用 assetForBook；缺 id 条目自动跳过） */
+export async function buildBookItems(books) {
+  if (!Array.isArray(books)) return [];
+  const items = await Promise.all(books.map((b) => assetForBook(b)));
+  return items.filter(Boolean);
+}
+
+/** 下载项展示名：path 去类型前缀（audio/<hash>.m4a → <hash>.m4a） */
+function displayNameOf(path) {
+  return String(path || "").replace(/^(audio|books|dicts)\/+/, "");
+}
+
+/**
+ * 批量下载：items=[{url,path,sha256,size}] → 一次 syncDownload 消息
+ * （原生串行队列 + 断点续传已有；条目先登记到 syncDownloads 供面板追踪）。
+ * 返回是否已发出（非原生环境 / 空列表 → false，静默 no-op）。
+ */
+export function syncAssets(items) {
+  if (!Array.isArray(items) || !items.length) return false;
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  ensureSubscribed();
+  const valid = [];
+  for (const item of items) {
+    if (!item || !item.path || !item.url) continue;
+    valid.push(item);
+    syncDownloads[item.path] = {
+      name: displayNameOf(item.path),
+      status: "queued",
+      received: 0,
+      total: item.size || 0,
+      error: "",
+      url: item.url,
+      sha256: item.sha256 || "",
+      size: item.size || 0,
+    };
+  }
+  if (!valid.length) return false;
+  nativePost({
+    cmd: "syncDownload",
+    items: valid.map(({ url, path, sha256, size }) => ({
+      url,
+      path,
+      sha256: sha256 || "",
+      size: size || 0,
+    })),
+  });
+  return true;
+}
+
+/** 清除已完成（done/failed）的下载状态条目（不影响原生已下载文件） */
+export function clearFinished() {
+  for (const path of Object.keys(syncDownloads)) {
+    const st = syncDownloads[path].status;
+    if (st === "done" || st === "failed") delete syncDownloads[path];
+  }
+}
+
+/** 重新下载失败项（条目内保留 url/sha256/size，直接重建消息；非失败态 no-op） */
+export function retryFailed(path) {
+  const entry = syncDownloads[path];
+  if (!entry || entry.status !== "failed") return false;
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  ensureSubscribed();
+  entry.status = "queued";
+  entry.received = 0;
+  entry.error = "";
+  nativePost({
+    cmd: "syncDownload",
+    items: [{ url: entry.url, path, sha256: entry.sha256 || "", size: entry.size || 0 }],
+  });
+  return true;
+}
+
+/** 清理原生侧资产文件（scope: 'all'|'audio'|'books'|'dicts'；原生命令由 iOS 侧实现） */
+export function clearAssets(scope) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  nativePost({ cmd: "deleteAssets", scope: scope || "all" });
+  return true;
+}
+
+/** 资产占用查询超时（ms）：原生无回执不挂起调用方 */
+export const ASSETS_SIZE_TIMEOUT_MS = 8000;
+
+/**
+ * 查询原生侧资产占用：发 assetsSize 命令，原生回执 push('assetsSize', {total}) →
+ * resolve(bytes)；超时 / 非原生环境 → resolve(null)。
+ */
+export function fetchAssetsSize() {
+  if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
+  ensureSubscribed();
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      assetsSizeWaiters.delete(resolve);
+      resolve(null);
+    }, ASSETS_SIZE_TIMEOUT_MS);
+    assetsSizeWaiters.add(resolve);
+    nativePost({ cmd: "assetsSize" });
+  });
+}
+
+// ---------- 自动预取开关（localStorage 持久化；默认关） ----------
+const AUTO_PREFETCH_KEY = "qqplayer.autoPrefetch";
+
+/** 播放时自动预取是否开启（默认关；'qqplayer.autoPrefetch' === 'on'） */
+export function autoPrefetchEnabled() {
+  try {
+    return localStorage.getItem(AUTO_PREFETCH_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+/** 设置自动预取开关（持久化 localStorage；返回生效值） */
+export function setAutoPrefetch(on) {
+  try {
+    if (on) localStorage.setItem(AUTO_PREFETCH_KEY, "on");
+    else localStorage.removeItem(AUTO_PREFETCH_KEY);
+  } catch {
+    /* 忽略 */
+  }
+  return autoPrefetchEnabled();
+}
+
 // ---------- 测试复位 ----------
 export function _resetSyncForTests() {
   for (const unsub of unsubs) {
@@ -396,4 +561,6 @@ export function _resetSyncForTests() {
   syncState.lastError = "";
   syncState.pendingCount = 0;
   syncState.progress = { received: 0, total: 0 };
+  for (const k of Object.keys(syncDownloads)) delete syncDownloads[k];
+  assetsSizeWaiters.clear();
 }

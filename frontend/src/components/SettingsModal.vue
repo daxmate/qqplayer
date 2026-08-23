@@ -542,12 +542,13 @@
 
             <!-- ============ 同步（iOS 壳） ============ -->
             <section v-else-if="tab === 'sync'" class="settings-scroll">
-              <div class="group">
-                <div class="group-title">
-                  <RefreshCw :size="13" />
-                  {{ t("settings.sync") }}
-                </div>
-                <template v-if="isNative">
+              <template v-if="isNative">
+                <!-- 元数据同步 -->
+                <div class="group">
+                  <div class="group-title">
+                    <RefreshCw :size="13" />
+                    {{ t("settings.sync") }}
+                  </div>
                   <div class="setting-item">
                     <div class="setting-label">{{ t("settings.syncNow") }}</div>
                     <div class="setting-desc">{{ t("settings.syncNowDesc") }}</div>
@@ -564,18 +565,284 @@
                     <div class="setting-label">{{ t("settings.syncLastTime") }}</div>
                     <div class="setting-desc">{{ lastSyncText }}</div>
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.syncPending") }}</div>
-                    <div class="setting-desc">{{ syncState.pendingCount }}</div>
+                </div>
+
+                <!-- 🎵 音乐 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Music2 :size="13" />
+                    {{ t("settings.syncMusic") }}
                   </div>
-                  <div v-if="syncTotal > 0" class="setting-item">
-                    <div class="setting-label">{{ t("settings.syncProgress") }}</div>
-                    <div class="progress-bar">
-                      <div class="progress-fill" :style="{ width: syncPercent + '%' }" />
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncAllSongs") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncAllSongsDesc") }}</div>
+                    <div class="setting-control">
+                      <button class="btn" :disabled="syncBusy" @click="syncAllSongs">
+                        {{ t("settings.syncStart") }}
+                      </button>
                     </div>
                   </div>
-                </template>
-                <div v-else class="setting-item">
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncPlaylist") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncPlaylistDesc") }}</div>
+                    <div class="setting-control sync-row">
+                      <select v-model="syncPlaylistId" class="lib-input" :disabled="syncBusy">
+                        <option value="">{{ t("settings.syncPlaylistPlaceholder") }}</option>
+                        <option v-for="p in playlists" :key="p.id" :value="p.id">
+                          {{ p.name }}
+                        </option>
+                      </select>
+                      <button
+                        class="btn"
+                        :disabled="syncBusy || !syncPlaylistId"
+                        @click="syncSelectedPlaylist"
+                      >
+                        {{ t("settings.syncStart") }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncPickSongs") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncPickDesc") }}</div>
+                    <div class="setting-control">
+                      <button class="btn" :disabled="syncBusy" @click="openPicker('songs')">
+                        {{ t("settings.syncPickOpen") }}
+                      </button>
+                    </div>
+                    <div v-if="picker === 'songs'" class="sync-picker">
+                      <div class="sync-picker-toolbar">
+                        <input
+                          v-model="pickerSearch"
+                          class="lib-input"
+                          :placeholder="t('settings.syncSearch')"
+                          spellcheck="false"
+                        />
+                        <button class="mini-btn" @click="togglePickerAll">
+                          {{ t("settings.syncPickAll") }}
+                        </button>
+                        <button class="mini-btn" @click="picker = ''">
+                          {{ t("settings.syncPickCancel") }}
+                        </button>
+                      </div>
+                      <div class="sync-picker-list">
+                        <label v-for="s in filteredSongs" :key="s.path" class="sync-picker-item">
+                          <input v-model="pickerSelected" type="checkbox" :value="s.path" />
+                          <span class="sync-picker-name">{{ s.name }}</span>
+                          <span class="sync-picker-meta">{{ s.artist }}</span>
+                        </label>
+                        <div v-if="!filteredSongs.length" class="setting-desc">
+                          {{ t("settings.syncPickEmpty") }}
+                        </div>
+                      </div>
+                      <div class="sync-picker-footer">
+                        <span class="setting-desc">{{
+                          t("settings.syncPickCount", { n: pickerSelected.length })
+                        }}</span>
+                        <button
+                          class="btn primary"
+                          :disabled="!pickerSelected.length || syncBusy"
+                          @click="downloadPickedSongs"
+                        >
+                          {{ t("settings.syncPickConfirm") }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 📖 图书 -->
+                <div class="group">
+                  <div class="group-title">
+                    <BookOpen :size="13" />
+                    {{ t("settings.syncBooks") }}
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncAllBooks") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncAllBooksDesc") }}</div>
+                    <div class="setting-control">
+                      <button class="btn" :disabled="syncBusy" @click="syncAllBooks">
+                        {{ t("settings.syncStart") }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncPickBooks") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncPickDesc") }}</div>
+                    <div class="setting-control">
+                      <button class="btn" :disabled="syncBusy" @click="openPicker('books')">
+                        {{ t("settings.syncPickOpen") }}
+                      </button>
+                    </div>
+                    <div v-if="picker === 'books'" class="sync-picker">
+                      <div class="sync-picker-toolbar">
+                        <input
+                          v-model="pickerSearch"
+                          class="lib-input"
+                          :placeholder="t('settings.syncSearch')"
+                          spellcheck="false"
+                        />
+                        <button class="mini-btn" @click="togglePickerAll">
+                          {{ t("settings.syncPickAll") }}
+                        </button>
+                        <button class="mini-btn" @click="picker = ''">
+                          {{ t("settings.syncPickCancel") }}
+                        </button>
+                      </div>
+                      <div class="sync-picker-list">
+                        <label v-for="b in filteredBooks" :key="b.id" class="sync-picker-item">
+                          <input v-model="pickerSelected" type="checkbox" :value="b.id" />
+                          <span class="sync-picker-name">{{ b.title }}</span>
+                          <span class="sync-picker-meta">{{ b.author }}</span>
+                        </label>
+                        <div v-if="!filteredBooks.length" class="setting-desc">
+                          {{ t("settings.syncPickEmpty") }}
+                        </div>
+                      </div>
+                      <div class="sync-picker-footer">
+                        <span class="setting-desc">{{
+                          t("settings.syncPickCount", { n: pickerSelected.length })
+                        }}</span>
+                        <button
+                          class="btn primary"
+                          :disabled="!pickerSelected.length || syncBusy"
+                          @click="downloadPickedBooks"
+                        >
+                          {{ t("settings.syncPickConfirm") }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 🎧 有声书 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Headphones :size="13" />
+                    {{ t("settings.syncAudiobooks") }}
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncAudiobooksComing") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncAudiobooksComingDesc") }}</div>
+                  </div>
+                </div>
+
+                <!-- 下载状态面板 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Download :size="13" />
+                    {{ t("settings.syncDownloads") }}
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-desc sync-stats">
+                      <span>{{ t("settings.syncDlActive", { n: downloadStats.active }) }}</span>
+                      <span>·</span>
+                      <span>{{ t("settings.syncDlDone", { n: downloadStats.done }) }}</span>
+                      <span>·</span>
+                      <span>{{ t("settings.syncDlFailed", { n: downloadStats.failed }) }}</span>
+                    </div>
+                    <div class="setting-control">
+                      <button
+                        class="btn"
+                        :disabled="!downloadStats.finished"
+                        @click="clearFinished"
+                      >
+                        {{ t("settings.syncClearFinished") }}
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="downloadList.length" class="sync-dl-list">
+                    <div v-for="d in downloadList" :key="d.path" class="sync-dl-item">
+                      <div class="sync-dl-head">
+                        <span class="sync-dl-name" :title="d.path">{{ d.name }}</span>
+                        <span class="sync-dl-status" :class="'st-' + d.status">{{
+                          statusLabel(d.status)
+                        }}</span>
+                        <button
+                          v-if="d.status === 'failed'"
+                          class="mini-btn"
+                          @click="retryFailed(d.path)"
+                        >
+                          {{ t("settings.syncRetry") }}
+                        </button>
+                      </div>
+                      <div
+                        v-if="d.status === 'queued' || d.status === 'downloading'"
+                        class="progress-bar"
+                      >
+                        <div class="progress-fill" :style="{ width: dlPercent(d) + '%' }" />
+                      </div>
+                      <div v-else-if="d.status === 'failed' && d.error" class="setting-error">
+                        {{ d.error }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="setting-item">
+                    <div class="setting-desc">{{ t("settings.syncDlEmpty") }}</div>
+                  </div>
+                </div>
+
+                <!-- 存储管理 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Database :size="13" />
+                    {{ t("settings.syncStorage") }}
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncStorageUsed") }}</div>
+                    <div class="setting-desc">{{ storageText }}</div>
+                    <div class="setting-control">
+                      <button class="btn" @click="refreshStorageSize">
+                        {{ t("settings.syncStorageRefresh") }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncClearAll") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncClearAllDesc") }}</div>
+                    <div class="setting-control">
+                      <button class="btn danger" @click="toggleClearAll">
+                        {{
+                          clearAllArmed
+                            ? t("settings.syncClearAllConfirmGo")
+                            : t("settings.syncClearAllGo")
+                        }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="setting-item">
+                    <div class="setting-label">{{ t("settings.syncClearFinished") }}</div>
+                    <div class="setting-desc">{{ t("settings.syncClearFinishedDesc") }}</div>
+                    <div class="setting-control">
+                      <button
+                        class="btn"
+                        :disabled="!downloadStats.finished"
+                        @click="clearFinished"
+                      >
+                        {{ t("settings.syncClearFinishedGo") }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 自动预取 -->
+                <div class="group">
+                  <div class="group-title">
+                    <Zap :size="13" />
+                    {{ t("settings.syncPrefetch") }}
+                  </div>
+                  <div class="setting-item">
+                    <div class="toggle-row" @click="togglePrefetch">
+                      <div>
+                        <div class="setting-label">{{ t("settings.syncPrefetch") }}</div>
+                        <div class="setting-desc">{{ t("settings.syncPrefetchDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: autoPrefetchOn }"><i /></span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="group">
+                <div class="setting-item">
                   <div class="setting-label">{{ t("settings.syncMobileOnly") }}</div>
                   <div class="setting-desc">{{ t("settings.syncMobileOnlyDesc") }}</div>
                 </div>
@@ -1371,6 +1638,9 @@ import {
   RefreshCw,
   Download,
   Video,
+  BookOpen,
+  Headphones,
+  Zap,
 } from "@lucide/vue";
 import {
   state,
@@ -1408,7 +1678,20 @@ import {
 } from "../composables/usePlayer.js";
 import { showToast } from "../composables/useToast.js";
 import { apiGet, apiPost } from "../utils/apiClient.js";
-import { syncNow, syncState } from "../utils/sync.js";
+import {
+  syncNow,
+  syncState,
+  syncDownloads,
+  syncAssets,
+  buildSongItems,
+  buildBookItems,
+  clearFinished,
+  retryFailed,
+  clearAssets,
+  fetchAssetsSize,
+  autoPrefetchEnabled,
+  setAutoPrefetch,
+} from "../utils/sync.js";
 import { isMobile } from "../composables/useMobileViewport.js";
 import {
   COVER_MIN,
@@ -1754,6 +2037,10 @@ watch(
 );
 watch(tab, (v) => {
   if (v === "download") refreshQuarkState();
+  if (v === "sync") {
+    loadPlaylists();
+    refreshStorageSize();
+  }
 });
 
 // ============ 同步区块（iOS 壳；桌面浏览器显示“仅移动端可用”） ============
@@ -1761,15 +2048,240 @@ const lastSyncText = computed(() => {
   if (!syncState.lastSyncAt) return t("settings.syncLastTimeNever");
   return new Date(syncState.lastSyncAt).toLocaleString();
 });
-const syncTotal = computed(() => syncState.progress.total || 0);
-const syncPercent = computed(() => {
-  const { received, total } = syncState.progress;
-  if (!total) return 0;
-  return Math.min(100, Math.round((received / total) * 100));
-});
 async function doSync() {
   if (syncState.syncing) return;
   await syncNow();
+}
+
+// ---------- 同步管理（音乐/图书批量下载 + 下载状态面板 + 存储管理 + 自动预取） ----------
+const syncBusy = ref(false); // 批量下载动作进行中（按钮禁用，防重复提交）
+const playlists = ref([]); // /api/playlists 列表（歌单下拉）
+const syncPlaylistId = ref("");
+const allSongs = ref([]); // /api/songs 本地歌曲（手动选择面板数据）
+const allBooks = ref([]); // /api/books 列表（手动选择面板数据）
+const picker = ref(""); // '' | 'songs' | 'books'（内联多选面板）
+const pickerSearch = ref("");
+const pickerSelected = ref([]); // songs: path[]；books: id[]
+const storageBytes = ref(null); // fetchAssetsSize 结果（null = 未知）
+const autoPrefetchOn = ref(autoPrefetchEnabled());
+
+const downloadList = computed(() => Object.values(syncDownloads));
+const downloadStats = computed(() => {
+  let active = 0;
+  let done = 0;
+  let failed = 0;
+  for (const d of Object.values(syncDownloads)) {
+    if (d.status === "done") done++;
+    else if (d.status === "failed") failed++;
+    else active++;
+  }
+  return { active, done, failed, finished: done + failed };
+});
+
+const filteredSongs = computed(() => {
+  const q = pickerSearch.value.trim().toLowerCase();
+  if (!q) return allSongs.value;
+  return allSongs.value.filter((s) => (s.name || "").toLowerCase().includes(q));
+});
+const filteredBooks = computed(() => {
+  const q = pickerSearch.value.trim().toLowerCase();
+  if (!q) return allBooks.value;
+  return allBooks.value.filter((b) => (b.title || "").toLowerCase().includes(q));
+});
+
+const storageText = computed(() => {
+  if (storageBytes.value === null) return t("settings.syncStorageUnknown");
+  return formatBytes(storageBytes.value);
+});
+
+function formatBytes(bytes) {
+  if (!bytes || bytes < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+
+function statusLabel(status) {
+  const key = "settings.syncStatus" + status.charAt(0).toUpperCase() + status.slice(1);
+  const text = t(key);
+  return text === key ? status : text;
+}
+
+function dlPercent(d) {
+  if (!d.total) return 0;
+  return Math.min(100, Math.round((d.received / d.total) * 100));
+}
+
+function toastFetchFailed() {
+  showToast(t("settings.syncFetchFailed"), { type: "error" });
+}
+
+async function loadPlaylists() {
+  try {
+    const r = await apiGet("/api/playlists");
+    if (r.ok && r.data && Array.isArray(r.data.playlists)) playlists.value = r.data.playlists;
+  } catch {
+    /* 静默（下拉留空） */
+  }
+}
+
+async function refreshStorageSize() {
+  storageBytes.value = await fetchAssetsSize();
+}
+
+async function syncAllSongs() {
+  if (syncBusy.value) return;
+  syncBusy.value = true;
+  try {
+    const r = await apiGet("/api/songs");
+    const songs = (r.ok && Array.isArray(r.data) ? r.data : []).filter((s) => s && s.path);
+    if (!songs.length) {
+      toastFetchFailed();
+      return;
+    }
+    const items = await buildSongItems(songs);
+    syncAssets(items);
+  } catch {
+    toastFetchFailed();
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function syncSelectedPlaylist() {
+  const pid = syncPlaylistId.value;
+  if (!pid || syncBusy.value) return;
+  syncBusy.value = true;
+  try {
+    const [pr, sr] = await Promise.all([apiGet("/api/playlists"), apiGet("/api/songs")]);
+    const pl = ((pr.ok && pr.data && pr.data.playlists) || []).find((p) => p.id === pid);
+    if (!pl) {
+      toastFetchFailed();
+      return;
+    }
+    const paths = new Set(pl.songPaths || []);
+    const songs = (sr.ok && Array.isArray(sr.data) ? sr.data : []).filter(
+      (s) => s && s.path && paths.has(s.path),
+    );
+    if (!songs.length) {
+      toastFetchFailed();
+      return;
+    }
+    const items = await buildSongItems(songs);
+    syncAssets(items);
+  } catch {
+    toastFetchFailed();
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function syncAllBooks() {
+  if (syncBusy.value) return;
+  syncBusy.value = true;
+  try {
+    const r = await apiGet("/api/books");
+    const books = r.ok && Array.isArray(r.data) ? r.data : [];
+    if (!books.length) {
+      toastFetchFailed();
+      return;
+    }
+    const items = await buildBookItems(books);
+    syncAssets(items);
+  } catch {
+    toastFetchFailed();
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function openPicker(which) {
+  if (picker.value === which) {
+    picker.value = "";
+    return;
+  }
+  picker.value = which;
+  pickerSearch.value = "";
+  if (which === "songs" && !allSongs.value.length) {
+    try {
+      const r = await apiGet("/api/songs");
+      if (r.ok && Array.isArray(r.data)) allSongs.value = r.data.filter((s) => s && s.path);
+    } catch {
+      /* 面板留空 */
+    }
+  } else if (which === "books" && !allBooks.value.length) {
+    try {
+      const r = await apiGet("/api/books");
+      if (r.ok && Array.isArray(r.data)) allBooks.value = r.data;
+    } catch {
+      /* 面板留空 */
+    }
+  }
+}
+
+function togglePickerAll() {
+  const isSongs = picker.value === "songs";
+  const list = isSongs ? filteredSongs.value : filteredBooks.value;
+  const key = isSongs ? "path" : "id";
+  const ids = list.map((x) => x[key]);
+  if (!ids.length) return;
+  const hasAll = ids.every((x) => pickerSelected.value.includes(x));
+  if (hasAll) {
+    pickerSelected.value = pickerSelected.value.filter((x) => !ids.includes(x));
+  } else {
+    pickerSelected.value = [...new Set([...pickerSelected.value, ...ids])];
+  }
+}
+
+async function downloadPickedSongs() {
+  if (syncBusy.value) return;
+  const picked = allSongs.value.filter((s) => pickerSelected.value.includes(s.path));
+  if (!picked.length) return;
+  syncBusy.value = true;
+  try {
+    const items = await buildSongItems(picked);
+    syncAssets(items);
+    pickerSelected.value = [];
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+async function downloadPickedBooks() {
+  if (syncBusy.value) return;
+  const picked = allBooks.value.filter((b) => pickerSelected.value.includes(b.id));
+  if (!picked.length) return;
+  syncBusy.value = true;
+  try {
+    const items = await buildBookItems(picked);
+    syncAssets(items);
+    pickerSelected.value = [];
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+const clearAllArmed = ref(false); // 两段式确认（WKWebView 不支持 window.confirm，改用内联确认态）
+let clearAllArmTimer = null;
+function toggleClearAll() {
+  if (!clearAllArmed.value) {
+    clearAllArmed.value = true;
+    clearAllArmTimer = setTimeout(() => (clearAllArmed.value = false), 4000); // 4s 未确认自动复位
+    return;
+  }
+  clearAllArmed.value = false;
+  if (clearAllArmTimer) clearTimeout(clearAllArmTimer);
+  clearAssets("all");
+  storageBytes.value = null;
+}
+
+function togglePrefetch() {
+  autoPrefetchOn.value = setAutoPrefetch(!autoPrefetchOn.value);
 }
 
 async function save() {
@@ -2054,6 +2566,137 @@ onBeforeUnmount(() => {
   border-radius: 3px;
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   transition: width 0.2s ease;
+}
+
+/* 同步管理：歌单行 / 多选面板 / 下载状态 / 存储 */
+.sync-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.sync-row .lib-input {
+  flex: 1;
+  min-width: 0;
+}
+.sync-picker {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--bg2);
+}
+.sync-picker-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.sync-picker-toolbar .lib-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.sync-picker-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.sync-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sync-picker-item + .sync-picker-item {
+  border-top: 1px solid var(--border);
+}
+.sync-picker-item input {
+  accent-color: var(--accent);
+}
+.sync-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-picker-meta {
+  color: var(--text3);
+  font-size: 11px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.sync-stats {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.sync-dl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sync-dl-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg2);
+}
+.sync-dl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-dl-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-dl-status {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.sync-dl-status.st-queued {
+  color: var(--text2);
+  background: var(--border);
+}
+.sync-dl-status.st-downloading {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.sync-dl-status.st-done {
+  color: #2e9e5b;
+  background: color-mix(in srgb, #2e9e5b 15%, transparent);
+}
+.sync-dl-status.st-failed {
+  color: #ff6b6b;
+  background: color-mix(in srgb, #ff6b6b 15%, transparent);
+}
+.btn.danger {
+  color: #ff6b6b;
+  border-color: color-mix(in srgb, #ff6b6b 40%, var(--border));
+}
+.btn.danger:hover {
+  background: color-mix(in srgb, #ff6b6b 12%, transparent);
 }
 
 /* 行内小按钮（重置等） */

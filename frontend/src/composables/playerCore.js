@@ -26,7 +26,7 @@ import {
   nativeSendMetadata,
   nativePost,
 } from "./nativeAudioBridge.js";
-import { ensureAsset, assetForSong } from "../utils/sync.js";
+import { ensureAsset, assetForSong, autoPrefetchEnabled } from "../utils/sync.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -1642,12 +1642,15 @@ export async function selectSong(index, opts = {}) {
   );
 }
 
-// ============ iOS 同步：本地歌资产后台预取（阶段3 · E1） ============
+// ============ iOS 同步：本地歌资产后台预取（阶段3 · E1；开关默认关） ============
 // 选歌播放时对本地歌（path 非空）发起 ensureAsset：
 //   - 已下载（assetStatus exists=true）→ 回执 localURL，切本地播放（快、省流量）
 //   - 未下载 → 后台发起 syncDownload，远程 URL 照常播（不阻塞、下载完成不强行切换）
+// 开关：设置页「自动预取」toggle（sync.js autoPrefetchEnabled，localStorage 默认 off）——
+// 默认关闭时选歌不触发任何资产查询/下载（E2 起由同步管理页显式下载）。
 // 桌面浏览器 / macOS 壳（无 iOS 桥）→ ensureAsset 静默 no-op，行为零变化。
 async function maybePrefetchAsset(song) {
+  if (!autoPrefetchEnabled()) return; // 自动预取开关（默认关）
   try {
     if (!isNativePlayback() || !song || !song.path) return;
     const item = await assetForSong(song);
