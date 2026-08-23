@@ -126,6 +126,10 @@ def test_scan_library_metadata(song_library):
     assert zhizu["has_lyric"] is False
     assert zhizu["lyric"] is None
 
+    # size 字段：iOS 同步下载 size 完整性校验依据（与 manifest 同源）
+    assert yakimochi["size"] > 0
+    assert zhizu["size"] > 0
+
 
 def test_scan_empty_library(tmp_path):
     old = backend.LIBRARY

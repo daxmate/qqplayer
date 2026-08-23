@@ -233,6 +233,34 @@ describe("nextSong / prevSong", () => {
     expect(state.currentIndex).toBe(1);
   });
 
+  it("播放中切歌：继续自动播放（autoPlay 跟随播放状态）", async () => {
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    await selectSong(0, { autoPlay: true });
+    const a = FakeAudio.instances[0];
+    a.paused = false; // 播放中
+    await nextSong();
+    expect(state.currentIndex).toBe(1);
+    expect(a.paused).toBe(false); // 切歌后自动播放
+  });
+
+  it("暂停中切歌：保持暂停（不自动播放）", async () => {
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    await selectSong(0, { autoPlay: true });
+    const a = FakeAudio.instances[0];
+    a.paused = true; // 主动暂停
+    await nextSong();
+    expect(state.currentIndex).toBe(1);
+    expect(a.paused).toBe(true); // 保持暂停
+  });
+
   it("跟唱模式切歌：自动退出跟唱（回音乐模式）并自动播放（句末暂停不阻止）", async () => {
     state.songs = [
       { path: "/a.mp3", name: "A" },
