@@ -184,10 +184,10 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     expect(bridgeMock.post).toHaveBeenCalledWith({
       cmd: "hasAsset",
       path: item.path,
-      requestId: 1,
+      requestId: "1",
     });
     bridgeMock.emit("assetStatus", {
-      requestId: 1,
+      requestId: "1",
       path: item.path,
       exists: true,
       localURL: "file:///Documents/qqplayer-assets/audio/abc123.mp3",
@@ -200,7 +200,12 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
   it("exists=false：发 syncDownload（批量 items）并 resolve(null)", async () => {
     await setNativeEnv();
     const p = sync.ensureAsset(item);
-    bridgeMock.emit("assetStatus", { requestId: 1, path: item.path, exists: false, localURL: "" });
+    bridgeMock.emit("assetStatus", {
+      requestId: "1",
+      path: item.path,
+      exists: false,
+      localURL: "",
+    });
     await expect(p).resolves.toBeNull();
     await flush(); // 微任务批量 flush
     expect(bridgeMock.post).toHaveBeenCalledWith({
@@ -214,8 +219,18 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     const item2 = { ...item, path: "audio/def456.flac", url: "http://s/api/audio?path=2" };
     const p1 = sync.ensureAsset(item);
     const p2 = sync.ensureAsset(item2);
-    bridgeMock.emit("assetStatus", { requestId: 1, path: item.path, exists: false, localURL: "" });
-    bridgeMock.emit("assetStatus", { requestId: 2, path: item2.path, exists: false, localURL: "" });
+    bridgeMock.emit("assetStatus", {
+      requestId: "1",
+      path: item.path,
+      exists: false,
+      localURL: "",
+    });
+    bridgeMock.emit("assetStatus", {
+      requestId: "2",
+      path: item2.path,
+      exists: false,
+      localURL: "",
+    });
     await Promise.all([p1, p2]);
     await flush();
     const dl = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "syncDownload");
@@ -231,7 +246,12 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     vi.advanceTimersByTime(sync.ASSET_QUERY_TIMEOUT_MS + 10);
     await expect(p).resolves.toBeNull();
     // 超时后回执到达 → 忽略（无 syncDownload、无异常）
-    bridgeMock.emit("assetStatus", { requestId: 1, path: item.path, exists: false, localURL: "" });
+    bridgeMock.emit("assetStatus", {
+      requestId: "1",
+      path: item.path,
+      exists: false,
+      localURL: "",
+    });
     vi.advanceTimersByTime(0);
     expect(bridgeMock.post).toHaveBeenCalledTimes(1);
   });
