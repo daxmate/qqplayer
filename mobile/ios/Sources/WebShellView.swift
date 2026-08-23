@@ -139,24 +139,6 @@ struct WebShellView: UIViewRepresentable {
                     try { window.webkit.messageHandlers.qqplayerIos.postMessage(msg); } catch (e) {}
                   }
                 };
-                // 临时诊断：console.log → 原生 stdout（阶段4 选区工具栏排查，验证后清理）
-                (function() {
-                  if (window.__qqConsolePatched) return;
-                  window.__qqConsolePatched = true;
-                  var orig = window.console && window.console.log ? window.console.log.bind(window.console) : function() {};
-                  window.console.log = function() {
-                    try { orig.apply(null, arguments); } catch (e) {}
-                    try {
-                      var parts = [];
-                      for (var i = 0; i < arguments.length; i++) {
-                        var a = arguments[i];
-                        try { parts.push(typeof a === 'string' ? a : JSON.stringify(a)); }
-                        catch (e) { parts.push(String(a)); }
-                      }
-                      window.qqplayerIosBridge.postMessage({cmd: "log", text: parts.join(' ')});
-                    } catch (e) {}
-                  };
-                })();
               } catch (e) {}
             })();
             """
@@ -202,33 +184,6 @@ struct WebShellView: UIViewRepresentable {
             userContentController.addUserScript(
                 WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true)
             )
-            // 临时诊断：Web console → 原生 stdout（阶段4 选区工具栏排查；注入顺序在 bridge 定义之后）
-            userContentController.addUserScript(
-                WKUserScript(source: Self.consoleBridgeJS(), injectionTime: .atDocumentStart, forMainFrameOnly: true)
-            )
-        }
-
-        /// 临时诊断：劫持 console.log 转发到原生（postMessage {cmd:"log"} → 原生 print）
-        private static func consoleBridgeJS() -> String {
-            """
-            (function() {
-              if (window.__qqConsolePatched) return;
-              window.__qqConsolePatched = true;
-              var orig = window.console && window.console.log ? window.console.log.bind(window.console) : function() {};
-              window.console.log = function() {
-                try { orig.apply(null, arguments); } catch (e) {}
-                try {
-                  var parts = [];
-                  for (var i = 0; i < arguments.length; i++) {
-                    var a = arguments[i];
-                    try { parts.push(typeof a === 'string' ? a : JSON.stringify(a)); }
-                    catch (e) { parts.push(String(a)); }
-                  }
-                  window.qqplayerIosBridge.postMessage({cmd: "log", text: parts.join(' ')});
-                } catch (e) {}
-              };
-            })();
-            """
         }
 
         /// 兑底重注入：页面加载完成后 evaluateJavaScript 重设 server/token（双写 localStorage + bridge）。
@@ -346,11 +301,6 @@ struct WebShellView: UIViewRepresentable {
                         object: nil,
                         userInfo: ["serverId": self.server.serverId]
                     )
-                }
-            case "log":
-                // 临时诊断：Web console 转发（阶段4 选区工具栏排查，验证后清理）
-                if let text = body["text"] as? String {
-                    print("[WebLog] \(text)")
                 }
             case "playAudio":
                 // 词典发音等短音频：原生 AVPlayer 直接播放（不弹系统播放器 UI）

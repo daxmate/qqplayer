@@ -559,11 +559,6 @@ let selPollLastText = "";
 let selPollStableCount = 0;
 /** 需要连续几次轮询选区相同才弹工具条（400ms/次，2 次 ≈ 800ms） */
 const SEL_POLL_STABLE = 2;
-/** 临时诊断：选区轮询各阶段日志（阶段4 排查 iOS 工具栏不出现，验证后清理） */
-let selPollDiagLogged = false; // 错误路径（contents 空 / cfi 失败）只打一次
-let selPollSeenLogged = false; // 选区检测到只打一次
-let onSelDiagLogged = false; // onSelected 内部 return 路径只打一次
-
 function stopSelPolling() {
   if (selPollTimer !== null) {
     clearInterval(selPollTimer);
@@ -579,34 +574,9 @@ function startSelPolling() {
 function pollSelection() {
   const iframe = containerRef.value?.querySelector("iframe");
   const iw = iframe?.contentWindow;
-  let sel: Selection | null = null;
-  try {
-    sel = iw?.getSelection?.() ?? null;
-  } catch (e) {
-    if (!selPollDiagLogged) {
-      selPollDiagLogged = true;
-      console.log(
-        "[selPoll] getSelection threw:",
-        (e as Error)?.name,
-        (e as Error)?.message,
-        "iframe?",
-        !!iframe,
-      );
-    }
-    return;
-  }
-  if (!sel) {
-    if (!selPollDiagLogged) {
-      selPollDiagLogged = true;
-      console.log("[selPoll] no selection obj; iframe?", !!iframe, "contentWindow?", !!iw);
-    }
-    return;
-  }
+  const sel = iw?.getSelection?.();
+  if (!sel) return;
   const text = sel.toString().trim();
-  if (!selPollSeenLogged && !sel.isCollapsed && sel.rangeCount > 0 && text) {
-    selPollSeenLogged = true;
-    console.log("[selPoll] selection detected, text=", JSON.stringify(text.slice(0, 40)));
-  }
   postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳右键菜单：选区状态变化时上报（去重：文本/高亮态没变不重复发）
   if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
     // 无选区：重置稳定计数 + 收起工具栏（工具栏锁定期间保持，iOS 自动收起选区后不隐藏）
@@ -627,35 +597,14 @@ function pollSelection() {
   // 选区已稳定（鼠标释放）→ 同一选区已处理过则跳过
   if (currentSelection.value?.text === text) return;
   const contents = getCurrentContents();
-  if (!contents) {
-    if (!selPollDiagLogged) {
-      selPollDiagLogged = true;
-      console.log(
-        "[selPoll] selection ok but contents null, text=",
-        JSON.stringify(text.slice(0, 40)),
-      );
-    }
-    return;
-  }
+  if (!contents) return;
   try {
     const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
       sel.getRangeAt(0),
     );
-    if (cfi) {
-      if (!selPollDiagLogged) {
-        selPollDiagLogged = true;
-        console.log("[selPoll] cfi ok, calling onSelected");
-      }
-      onSelected(cfi, contents);
-    } else if (!selPollDiagLogged) {
-      selPollDiagLogged = true;
-      console.log("[selPoll] cfiFromRange empty, text=", JSON.stringify(text.slice(0, 40)));
-    }
-  } catch (e) {
-    if (!selPollDiagLogged) {
-      selPollDiagLogged = true;
-      console.log("[selPoll] cfiFromRange threw:", (e as Error)?.name, (e as Error)?.message);
-    }
+    if (cfi) onSelected(cfi, contents);
+  } catch {
+    /* 轮询 CFI 生成失败忽略 */
   }
 }
 
@@ -663,31 +612,13 @@ function pollSelection() {
 function onSelected(cfi: string, contents: unknown) {
   const c = contents as { window?: Window };
   const sel = c.window?.getSelection?.();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
-    if (!onSelDiagLogged) {
-      onSelDiagLogged = true;
-      console.log("[selPoll] onSelected: no valid selection");
-    }
-    return;
-  }
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
   const text = sel.toString().trim();
-  if (!text) {
-    if (!onSelDiagLogged) {
-      onSelDiagLogged = true;
-      console.log("[selPoll] onSelected: empty text");
-    }
-    return;
-  }
+  if (!text) return;
   const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
   const iframe = containerRef.value?.querySelector("iframe");
   const root = rootRef.value;
-  if (!iframe || !root) {
-    if (!onSelDiagLogged) {
-      onSelDiagLogged = true;
-      console.log("[selPoll] onSelected: no iframe/root", !!iframe, !!root);
-    }
-    return;
-  }
+  if (!iframe || !root) return;
   const iframeRect = iframe.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
   toolbar.x = iframeRect.left + rangeRect.left + rangeRect.width / 2 - rootRect.left;
@@ -1627,8 +1558,6 @@ function attachTapHandlers() {
   tapContents = contents;
   doc.addEventListener("mousedown", onTapMouseDown, true);
   doc.addEventListener("click", onTapClick, true);
-  doc.addEventListener("touchstart", onTouchStart, { passive: true });
-  doc.addEventListener("touchend", onTouchEnd, { passive: true });
 }
 
 function detachTapHandlers() {
@@ -1637,8 +1566,6 @@ function detachTapHandlers() {
   if (doc) {
     doc.removeEventListener("mousedown", onTapMouseDown, true);
     doc.removeEventListener("click", onTapClick, true);
-    doc.removeEventListener("touchstart", onTouchStart);
-    doc.removeEventListener("touchend", onTouchEnd);
   }
   tapContents = null;
 }
@@ -1648,62 +1575,8 @@ function onTapMouseDown(e: MouseEvent) {
   tapDownY = e.clientY;
 }
 
-// ============ 触摸滑动翻页（iOS/移动端） ============
-// 触摸手势：横向快速滑动翻页（左滑 next / 右滑 prev）；慢速/纵向留给拖选与滚动。
-// 注意 iframe 内容已注入 touch-action: pan-y（见 applyNoTouchCallout），水平手势归 JS。
-const SWIPE_THRESHOLD = 50; // px：最小横向滑动距离
-const SWIPE_DRAG_RATIO = 1.5; // |dx| > |dy| * 1.5 才视为横向滑动（纵向滚动/拖选不翻页）
-const SWIPE_MAX_MS = 600; // 超过该时长视为慢速拖动（可能拖选），不翻页
-/** 临时诊断：滑动手势首触发只打一次（阶段4 翻页排查，验证后清理） */
-let swipeDiagLogged = false;
-/** iOS 原生滑动翻页事件订阅（onMounted 注册，onBeforeUnmount 取消） */
+/** iOS 原生滑动翻页事件订阅（UISwipeGestureRecognizer → native swipe 事件；onMounted 注册，onBeforeUnmount 取消） */
 let unsubSwipe: (() => void) | null = null;
-let touchStartX = 0;
-let touchStartY = 0;
-let touchStartT = 0;
-
-function onTouchStart(e: TouchEvent) {
-  if (e.touches.length !== 1) return;
-  touchStartX = e.touches[0].clientX;
-  touchStartY = e.touches[0].clientY;
-  touchStartT = Date.now();
-  if (!swipeDiagLogged) {
-    swipeDiagLogged = true;
-    console.log("[swipe] touchstart at", touchStartX.toFixed(0), touchStartY.toFixed(0));
-  }
-}
-
-function onTouchEnd(e: TouchEvent) {
-  if (e.changedTouches.length !== 1) return;
-  const dx = e.changedTouches[0].clientX - touchStartX;
-  const dy = e.changedTouches[0].clientY - touchStartY;
-  const dt = Date.now() - touchStartT;
-  if (!swipeDiagLogged) {
-    swipeDiagLogged = true;
-    console.log(
-      "[swipe] touchend dx=",
-      dx.toFixed(0),
-      "dy=",
-      dy.toFixed(0),
-      "dt=",
-      dt,
-      "thresh=",
-      Math.abs(dx) >= SWIPE_THRESHOLD &&
-        Math.abs(dx) >= Math.abs(dy) * SWIPE_DRAG_RATIO &&
-        dt <= SWIPE_MAX_MS,
-    );
-  }
-  if (Math.abs(dx) < SWIPE_THRESHOLD) return;
-  if (Math.abs(dx) < Math.abs(dy) * SWIPE_DRAG_RATIO) return;
-  // 慢速横向拖动可能是文字拖选（iOS 拖选为长按后拖动）→ 不翻页
-  if (dt > SWIPE_MAX_MS) return;
-  // 工具栏开着时滑动翻页？收起工具栏（选区已自动收起，仅关工具栏）
-  if (toolbar.visible) hideToolbar();
-  if (hlMenu.visible) closeHighlightMenu();
-  e.preventDefault();
-  if (dx < 0) nextPage();
-  else prevPage();
-}
 
 /**
  * 命中检测：epub.js marks 渲染在父文档的 SVG overlay（marks-pane，pointer-events:none），
