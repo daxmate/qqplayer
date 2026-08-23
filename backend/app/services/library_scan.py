@@ -86,6 +86,7 @@ def _full_scan():
                 "cover": cover,
                 "has_lyric": lyric is not None,
                 "duration": get_duration(f),
+                "size": st.st_size,  # 字节；iOS 同步下载 size 校验依据（manifest 同源）
                 "mtime": mtime_ms,  # 毫秒时间戳；本地歌=birthtime/mtime，网络歌=添加时刻
             }
         )

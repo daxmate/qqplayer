@@ -232,6 +232,54 @@ describe("nextSong / prevSong", () => {
     await prevSong();
     expect(state.currentIndex).toBe(1);
   });
+
+  it("跟唱模式切歌：自动退出跟唱（回音乐模式）并自动播放（句末暂停不阻止）", async () => {
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    state.mode = "karaoke";
+    await selectSong(0, { autoPlay: true });
+    const a = FakeAudio.instances[0];
+    a.paused = true; // 跟唱句末自动暂停状态
+    await nextSong();
+    expect(state.currentIndex).toBe(1);
+    expect(state.mode).toBe("continuous"); // 自动退出跟唱
+    expect(a.paused).toBe(false); // 切歌后自动播放
+  });
+
+  it("跟唱模式 prev：同样自动退出跟唱并自动播放", async () => {
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 1;
+    state.mode = "karaoke";
+    await selectSong(1, { autoPlay: true });
+    const a = FakeAudio.instances[0];
+    a.paused = true;
+    await prevSong();
+    expect(state.currentIndex).toBe(0);
+    expect(state.mode).toBe("continuous");
+    expect(a.paused).toBe(false);
+  });
+
+  it("跟唱模式切歌：显式 autoPlay=false 仍尊重（不自动播放）", async () => {
+    state.songs = [
+      { path: "/a.mp3", name: "A" },
+      { path: "/b.mp3", name: "B" },
+    ];
+    state.currentIndex = 0;
+    state.mode = "karaoke";
+    await selectSong(0, { autoPlay: true });
+    const a = FakeAudio.instances[0];
+    a.paused = true;
+    await nextSong({ autoPlay: false });
+    expect(state.currentIndex).toBe(1);
+    expect(state.mode).toBe("continuous"); // 跟唱照样退出
+    expect(a.paused).toBe(true); // 显式不播
+  });
 });
 
 describe("连播播放模式：随机 / 单曲循环", () => {

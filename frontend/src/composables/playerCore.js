@@ -1712,21 +1712,29 @@ export function pause() {
 
 export function nextSong(opts = {}) {
   if (state.songs.length === 0) return;
+  // 跟唱模式切歌：自动退出跟唱（回音乐模式）；句末自动暂停不阻止播放
+  const wasKaraoke = state.mode === "karaoke";
+  if (wasKaraoke) state.mode = "continuous";
+  const merged = wasKaraoke ? { autoPlay: true, ...opts } : { autoPlay: !audio.paused, ...opts };
   if (state.playMode === "shuffle") {
-    nextShuffle(opts);
+    nextShuffle(merged);
     return;
   }
-  selectSong((state.currentIndex + 1) % state.songs.length, opts);
+  selectSong((state.currentIndex + 1) % state.songs.length, merged);
 }
 
 export function prevSong(opts = {}) {
   if (state.songs.length === 0) return;
+  // 跟唱模式切歌：自动退出跟唱（同 nextSong）
+  const wasKaraoke = state.mode === "karaoke";
+  if (wasKaraoke) state.mode = "continuous";
+  const merged = wasKaraoke ? { autoPlay: true, ...opts } : { autoPlay: !audio.paused, ...opts };
   if (state.playMode === "shuffle" && playHistory.length) {
     // 随机模式：按播放历史回退到上一首（不重复记录）
-    selectSong(playHistory.pop(), { record: false, ...opts });
+    selectSong(playHistory.pop(), { record: false, ...merged });
     return;
   }
-  selectSong((state.currentIndex - 1 + state.songs.length) % state.songs.length, opts);
+  selectSong((state.currentIndex - 1 + state.songs.length) % state.songs.length, merged);
 }
 
 export function seek(t) {
