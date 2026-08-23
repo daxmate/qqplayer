@@ -81,7 +81,14 @@ vi.mock("../books/annotations", () => ({
   VOCAB_EXPORT_URL: "/api/vocab/export",
 }));
 
+vi.mock("../utils/sync.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/sync.js")>();
+  return { ...actual, ensureAsset: vi.fn(actual.ensureAsset) };
+});
+
+import { ensureAsset } from "../utils/sync.js";
 import { saveBookProgress } from "../books/api";
+
 import { getReaderSettings, saveReaderSettings, READER_SETTINGS_DEFAULTS } from "../books/settings";
 import { uiSettings } from "../composables/useSettings.js";
 import Reader from "../books/Reader.vue";
@@ -745,5 +752,52 @@ describe("settings 模块（/api/settings 契约）", () => {
   it("PUT 失败 → 返回 false 不抛（调用方迁移逻辑靠它决定是否清 localStorage）", async () => {
     settingsFetchFail = true;
     await expect(saveReaderSettings({ fontSize: 110 })).resolves.toBe(false);
+  });
+});
+
+// ============ iOS 离线资产分支（阶段4）：本地命中走 /assets/ HTTP，未命中回退远程 ============
+describe("Reader iOS 离线资产", () => {
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).qqplayerNative;
+  });
+
+  it("iOS 本地资产命中：fetch 本地 HTTP /assets/，不请求远程 fileUrl", async () => {
+    (window as unknown as Record<string, unknown>).qqplayerNative = true;
+    (ensureAsset as ReturnType<typeof vi.fn>).mockResolvedValue(
+      "file:///var/mobile/Containers/Data/Application/UUID/Documents/qqplayer-assets/books/abc123.epub",
+    );
+    const wrapper = mount(Reader, { props: { book: makeBook() } });
+    await flushPromises();
+
+    const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.startsWith("http://127.0.0.1:17888/assets/books/abc123.epub"))).toBe(
+      true,
+    );
+    expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(false);
+    expect(mocks.ePub.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer);
+    wrapper.unmount();
+  });
+
+  it("iOS 本地未下载：回退远程 fileUrl（ensureAsset 返回 null，不阻塞）", async () => {
+    (window as unknown as Record<string, unknown>).qqplayerNative = true;
+    (ensureAsset as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const wrapper = mount(Reader, { props: { book: makeBook() } });
+    await flushPromises();
+
+    expect(ensureAsset).toHaveBeenCalled();
+    const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(true);
+    expect(mocks.ePub).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("桌面环境（无 qqplayerNative）：ensureAsset 不被调用，走远程零变化", async () => {
+    const wrapper = mount(Reader, { props: { book: makeBook() } });
+    await flushPromises();
+
+    expect(ensureAsset).not.toHaveBeenCalled();
+    const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(true);
+    wrapper.unmount();
   });
 });

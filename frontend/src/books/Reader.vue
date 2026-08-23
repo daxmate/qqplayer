@@ -273,6 +273,7 @@ import { showToast, toastError } from "../composables/useToast.js";
 import { uiSettings } from "../composables/useSettings.js";
 import { useShellBridge } from "../composables/useShellBridge.js";
 import { api } from "../utils/apiClient.js";
+import { assetForBook, ensureAsset, localAssetHTTPURL, syncEnabled } from "../utils/sync.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
 import HighlightMenu from "./HighlightMenu.vue";
@@ -1683,6 +1684,27 @@ function teardown() {
   bookRef.value = null;
 }
 
+/** 获取 EPUB 二进制：iOS 壳优先本地资产（已下载 → 本地 HTTP 读取，离线可用；
+ *  未下载 → 远程加载 + 后台触发下载，下次打开秒开）；桌面/浏览器走远程，零变化。 */
+async function loadBookBuffer() {
+  if (syncEnabled()) {
+    try {
+      const item = await assetForBook(props.book);
+      const localURL = item ? await ensureAsset(item) : null;
+      const httpURL = localAssetHTTPURL(localURL);
+      if (httpURL) {
+        const resp = await fetch(httpURL); // 本地 server 无鉴权，裸 fetch
+        if (resp.ok) return await resp.arrayBuffer();
+      }
+    } catch {
+      /* 本地读取失败回退远程 */
+    }
+  }
+  const resp = await api({ url: props.book.fileUrl, raw: true });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return await resp.response.arrayBuffer();
+}
+
 async function loadBook() {
   teardown();
   loading.value = true;
@@ -1704,9 +1726,7 @@ async function loadBook() {
     // 先取 ArrayBuffer 再喂 epub.js：绕开 URL 语义（非 .epub 后缀被当书库目录）
     // 与 request/XHR 兼容问题（参考 ~/codes/qq 成功案例：ePub(arrayBuffer) 直接解析）
     // raw 模式：二进制大文件不解析 JSON、不进缓存，调用方直接消费 Response
-    const resp = await api({ url: props.book.fileUrl, raw: true });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const buf = await resp.response.arrayBuffer();
+    const buf = await loadBookBuffer();
     const book = ePub(buf);
     bookRef.value = book;
     await book.ready;
