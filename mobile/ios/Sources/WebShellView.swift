@@ -20,10 +20,23 @@ struct WebShellView: UIViewRepresentable {
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController = controller.userContentController
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = NoMenuWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = controller
+        webView.uiDelegate = controller
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = false
+        // 触摸立即派发 JS（默认 delaysContentTouches=true 会吞掉 iframe 内 touchstart，
+        // 滑动翻页/触摸事件收不到；设 false 后手势判定不再延迟事件）
+        webView.scrollView.delaysContentTouches = false
+        webView.scrollView.canCancelContentTouches = false
+        // 左右滑动翻页（iOS 原生手势：iframe 内 touch 事件在 WKWebView 里不可靠，
+        // 原生 UISwipeGestureRecognizer 最稳；swipe 需要快速滑动，与慢速拖选/垂直滚动不冲突）
+        let swipeLeft = UISwipeGestureRecognizer(target: controller, action: #selector(Coordinator.onSwipeLeft))
+        swipeLeft.direction = .left
+        webView.addGestureRecognizer(swipeLeft)
+        let swipeRight = UISwipeGestureRecognizer(target: controller, action: #selector(Coordinator.onSwipeRight))
+        swipeRight.direction = .right
+        webView.addGestureRecognizer(swipeRight)
         controller.webView = webView
         controller.injectServer(controller.server) // 先注入（user script 在页面加载前就位）再加载
         controller.loadFrontend() // 首次加载（服务器切换时由 updateUIView 重新加载）
@@ -43,7 +56,7 @@ struct WebShellView: UIViewRepresentable {
         Coordinator(server: server)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let server: PairingRecord
         let playerBridge = AVPlayerBridge()
         let downloadManager = DownloadManager()
@@ -126,6 +139,24 @@ struct WebShellView: UIViewRepresentable {
                     try { window.webkit.messageHandlers.qqplayerIos.postMessage(msg); } catch (e) {}
                   }
                 };
+                // 临时诊断：console.log → 原生 stdout（阶段4 选区工具栏排查，验证后清理）
+                (function() {
+                  if (window.__qqConsolePatched) return;
+                  window.__qqConsolePatched = true;
+                  var orig = window.console && window.console.log ? window.console.log.bind(window.console) : function() {};
+                  window.console.log = function() {
+                    try { orig.apply(null, arguments); } catch (e) {}
+                    try {
+                      var parts = [];
+                      for (var i = 0; i < arguments.length; i++) {
+                        var a = arguments[i];
+                        try { parts.push(typeof a === 'string' ? a : JSON.stringify(a)); }
+                        catch (e) { parts.push(String(a)); }
+                      }
+                      window.qqplayerIosBridge.postMessage({cmd: "log", text: parts.join(' ')});
+                    } catch (e) {}
+                  };
+                })();
               } catch (e) {}
             })();
             """
@@ -171,6 +202,33 @@ struct WebShellView: UIViewRepresentable {
             userContentController.addUserScript(
                 WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true)
             )
+            // 临时诊断：Web console → 原生 stdout（阶段4 选区工具栏排查；注入顺序在 bridge 定义之后）
+            userContentController.addUserScript(
+                WKUserScript(source: Self.consoleBridgeJS(), injectionTime: .atDocumentStart, forMainFrameOnly: true)
+            )
+        }
+
+        /// 临时诊断：劫持 console.log 转发到原生（postMessage {cmd:"log"} → 原生 print）
+        private static func consoleBridgeJS() -> String {
+            """
+            (function() {
+              if (window.__qqConsolePatched) return;
+              window.__qqConsolePatched = true;
+              var orig = window.console && window.console.log ? window.console.log.bind(window.console) : function() {};
+              window.console.log = function() {
+                try { orig.apply(null, arguments); } catch (e) {}
+                try {
+                  var parts = [];
+                  for (var i = 0; i < arguments.length; i++) {
+                    var a = arguments[i];
+                    try { parts.push(typeof a === 'string' ? a : JSON.stringify(a)); }
+                    catch (e) { parts.push(String(a)); }
+                  }
+                  window.qqplayerIosBridge.postMessage({cmd: "log", text: parts.join(' ')});
+                } catch (e) {}
+              };
+            })();
+            """
         }
 
         /// 兑底重注入：页面加载完成后 evaluateJavaScript 重设 server/token（双写 localStorage + bridge）。
@@ -289,14 +347,39 @@ struct WebShellView: UIViewRepresentable {
                         userInfo: ["serverId": self.server.serverId]
                     )
                 }
+            case "log":
+                // 临时诊断：Web console 转发（阶段4 选区工具栏排查，验证后清理）
+                if let text = body["text"] as? String {
+                    print("[WebLog] \(text)")
+                }
+            case "playAudio":
+                // 词典发音等短音频：原生 AVPlayer 直接播放（不弹系统播放器 UI）
+                if let urlString = body["url"] as? String, let url = URL(string: urlString),
+                   url.scheme == "http" || url.scheme == "https" {
+                    playerBridge.playAudioFile(url)
+                }
             default:
                 playerBridge.handleCommand(cmd, payload: body)
             }
         }
 
+        // MARK: WKUIDelegate
+
+        /// 禁长按链接/图片的系统 context menu 预览（iOS 13+）：阅读器交互统一走 Web 工具栏
+        func webView(
+            _ webView: WKWebView,
+            contextMenuConfigurationFor element: WKContextMenuElementInfo,
+            completionHandler: @escaping (UIContextMenuConfiguration?) -> Void
+        ) {
+            completionHandler(nil)
+        }
+
         // MARK: WKNavigationDelegate
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // 移除 WebKit 内部菜单交互：iOS 16+ 选区编辑菜单由 UIEditMenuInteraction 驱动
+            // （WebKit bug 244149 无官方禁用 API；移除后选区拖拽手柄保留、不再弹系统菜单）
+            stripSystemMenuInteractions(from: webView)
             // 页面就绪：确保适配层已挂（模块脚本加载完成后）；重复调用幂等
             webView.evaluateJavaScript("typeof window.qqplayerOnNativeEvent === 'function'") { [weak self] result, _ in
                 guard let self, let ok = result as? Bool, ok else { return }
@@ -314,6 +397,30 @@ struct WebShellView: UIViewRepresentable {
             // 忽略 -999（页面重载/导航取消）
             if (error as NSError).code == NSURLErrorCancelled { return }
             print("[WebShell] didFail: \(error.localizedDescription)")
+        }
+
+        /// 递归移除 WKWebView 内部菜单交互（UIEditMenuInteraction / UIContextMenuInteraction）：
+        /// iOS 16+ 文本选区编辑菜单（含“拷贝高亮标记的链接”）由 UIEditMenuInteraction 呈现，
+        /// WebKit 未提供禁用 API（bug 244149）；移除后选区/拖拽手柄不受影响，仅系统菜单不再弹出。
+        private func stripSystemMenuInteractions(from view: UIView) {
+            for sub in view.subviews {
+                for interaction in sub.interactions {
+                    if interaction is UIEditMenuInteraction || interaction is UIContextMenuInteraction {
+                        sub.removeInteraction(interaction)
+                    }
+                }
+                stripSystemMenuInteractions(from: sub)
+            }
+        }
+
+        // MARK: 滑动翻页（原生手势 → Web swipe 事件 → Reader 翻页）
+
+        @objc func onSwipeLeft() {
+            pushToWeb(event: "swipe", payload: ["dir": "left"])
+        }
+
+        @objc func onSwipeRight() {
+            pushToWeb(event: "swipe", payload: ["dir": "right"])
         }
 
         // MARK: Native → Web 事件

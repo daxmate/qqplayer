@@ -149,6 +149,17 @@ final class AVPlayerBridge {
         }
     }
 
+    /// 词典发音等短音频（独立 AVPlayer 实例，不干扰主播放器状态/事件；无 UI 直接出声）。
+    /// iOS 26 WKWebView 里 HTMLAudioElement.play() 会弹系统媒体播放器界面，词典查词
+    /// 发音改走原生播放（2026-08-23 阶段4）。
+    private var audioFxPlayer: AVPlayer?
+    func playAudioFile(_ url: URL) {
+        audioFxPlayer?.pause()
+        let item = AVPlayerItem(url: url)
+        audioFxPlayer = AVPlayer(playerItem: item)
+        audioFxPlayer?.play()
+    }
+
     func playerTime() -> Double {
         let t = player.currentTime().seconds
         return t.isFinite ? t : 0
