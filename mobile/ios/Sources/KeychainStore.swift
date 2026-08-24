@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import UIKit
 
 /// Keychain 封装：本机设备 UUID + 多桌面配对记录（按 serverId 维度存 JSON）。
 /// - 设备 UUID：首次启动生成并持久化（kSecClassGenericPassword），配对时作为 device_id 上报
