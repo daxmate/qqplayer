@@ -6,7 +6,7 @@
 // mock 策略（对齐 sync.test.js）：apiClient vi.mock（apiGet + resolveServerUrl）；
 // nativeAudioBridge vi.mock（onNativeEvent 订阅 + nativePost 记录）；cacheDb 真实（内存实现）。
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // ---------- mock：nativeAudioBridge（事件订阅 + 发消息） ----------
 const bridgeMock = vi.hoisted(() => {
@@ -79,23 +79,33 @@ function flush() {
   return new Promise((r) => setTimeout(r, 0));
 }
 
+// 已回执过的 hasAsset requestId（跨调用去重：replyHasAsset 只回执"最新未回执"的查询，
+// 避免 cacheCover 连锁查询时取到旧 requestId 导致新查询永远等不到回执——CI flaky 根因）
+const repliedHasAssetIds = new Set();
+
+afterEach(() => {
+  repliedHasAssetIds.clear();
+});
+
 async function setNativeEnv({ bridge = true } = {}) {
   window.qqplayerNative = true;
   if (bridge) window.qqplayerIosBridge = { postMessage: vi.fn() };
 }
 
-/** 找到最近一次 hasAsset 的 post 调用并回执 assetStatus */
+/** 找到最近一次未回执的 hasAsset 并回执 assetStatus（已回执的 requestId 跳过） */
 async function replyHasAsset({ exists, localURL }) {
+  let msg;
   await vi.waitFor(
     () => {
-      expect(bridgeMock.post.mock.calls.some(([m]) => m && m.cmd === "hasAsset")).toBe(true);
+      const calls = bridgeMock.post.mock.calls.filter(
+        ([m]) => m && m.cmd === "hasAsset" && !repliedHasAssetIds.has(m.requestId),
+      );
+      expect(calls.length).toBeGreaterThan(0);
+      msg = calls[calls.length - 1][0];
     },
     { timeout: 5000, interval: 20 },
   );
-  // 取最后一个 hasAsset（同一 path 可能多次查询：resolveCover 查询 + cacheCover 下载前查询）
-  // mock.calls 每项是参数数组 [msg]，消息体在 [0]
-  const calls = bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "hasAsset");
-  const msg = calls[calls.length - 1][0];
+  repliedHasAssetIds.add(msg.requestId);
   bridgeMock.emit("assetStatus", {
     requestId: msg.requestId,
     path: msg.path,
