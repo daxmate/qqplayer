@@ -22,6 +22,43 @@ from app.services import mdns
 from app.services import settings as settings_service
 from app.services.library_scan import _lyric_cleanup_loop, init_library
 
+# uvicorn 默认日志格式不带时间戳，这里基于默认配置给 default/access formatter 加上
+# `%(asctime)s`（%Y-%m-%d %H:%M:%S），方便按 ~/Library/Logs/qqplayer/{out,err}.log 排查时序。
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "%(asctime)s %(levelprefix)s %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+            "use_colors": None,
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+        "access": {
+            "formatter": "access",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        "uvicorn.error": {"level": "INFO"},
+        "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+    },
+}
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -93,7 +130,9 @@ def main():
         print(f"   📁 监听歌曲库变动（去抖 {state.WATCH_DEBOUNCE_SECONDS}s，自动刷新列表）")
     else:
         print("   📁 自动刷新已关闭（设置里可开启）")
-    uvicorn.run(app, host="0.0.0.0", port=state.DEFAULT_PORT, log_level="info")
+    uvicorn.run(
+        app, host="0.0.0.0", port=state.DEFAULT_PORT, log_level="info", log_config=LOGGING_CONFIG
+    )
 
 
 if __name__ == "__main__":
