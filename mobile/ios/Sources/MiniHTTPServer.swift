@@ -125,7 +125,7 @@ final class MiniHTTPServer {
         let mime = mimeType(for: fileURL.pathExtension)
         let rangeHeader = lines.first { $0.lowercased().hasPrefix("range:") }
         if let rangeHeader, let r = parseRange(rangeHeader, total: data.count) {
-            let slice = data.subdata(in: r.start..<(r.end + 1))
+            let slice = data.subdata(in: r.start ..< (r.end + 1))
             send(conn, status: 206, contentType: mime, body: slice,
                  contentRange: "bytes \(r.start)-\(r.end)/\(data.count)")
         } else {

@@ -1574,9 +1574,13 @@ function dbgLog(ev, data) {
     if (isNativePlayback()) {
       try {
         nativeMetaSave("debuglog", JSON.stringify(dbgBuf.slice(-80)));
-      } catch {}
+      } catch {
+        /* 写日志失败静默 */
+      }
     }
-  } catch {}
+  } catch {
+    /* 日志不影响播放 */
+  }
 }
 
 // 当前 selectSong / maybePrefetchAsset 挂的 loadedmetadata 监听器引用
