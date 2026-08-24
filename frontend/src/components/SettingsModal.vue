@@ -1697,7 +1697,7 @@ import {
   syncState,
   syncDownloads,
   syncAssets,
-  buildSongItems,
+  buildSongSyncItems,
   buildBookItems,
   clearFinished,
   retryFailed,
@@ -2177,7 +2177,8 @@ async function syncAllSongs() {
       toastFetchFailed();
       return;
     }
-    const items = await buildSongItems(songs);
+    // 音频+封面下载项（封面随歌一起同步；items.length 含封面，面板计数自动覆盖）
+    const items = await buildSongSyncItems(songs);
     if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
   } catch {
     toastFetchFailed();
@@ -2205,7 +2206,7 @@ async function syncSelectedPlaylist() {
       toastFetchFailed();
       return;
     }
-    const items = await buildSongItems(songs);
+    const items = await buildSongSyncItems(songs);
     if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
   } catch {
     toastFetchFailed();
@@ -2277,7 +2278,7 @@ async function downloadPickedSongs() {
   if (!picked.length) return;
   syncBusy.value = true;
   try {
-    const items = await buildSongItems(picked);
+    const items = await buildSongSyncItems(picked);
     if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
     pickerSelected.value = [];
   } finally {

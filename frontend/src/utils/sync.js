@@ -511,6 +511,25 @@ export async function buildSongItems(songs) {
   return items.filter(Boolean);
 }
 
+/**
+ * 歌曲列表 → 音频+封面下载项数组（任务 G：封面随歌一起同步）。
+ * 每首歌生成两个下载项：音频（assetForSong）+ 封面（coverItemFor，封面本地
+ * 优先链路共用同一下载项格式）；path 缺失的流媒体条目整首跳过——它没有本地
+ * 封面/歌词语义。返回拍平 items（音频+封面交错）；空/全跳过 → []。
+ * 同步面板计数 items.length 自动含封面（面板文案为「N 个文件」，无需区分）。
+ */
+export async function buildSongSyncItems(songs) {
+  if (!Array.isArray(songs)) return [];
+  const lists = await Promise.all(
+    songs.map(async (s) => {
+      if (!s || !s.path) return []; // 流媒体/缺 path：整首跳过
+      const [audio, cover] = await Promise.all([assetForSong(s), coverItemFor(s.path)]);
+      return [audio, cover].filter(Boolean); // 防御：理论上两者均非空
+    }),
+  );
+  return lists.flat();
+}
+
 /** 图书列表 → 下载项数组（批量复用 assetForBook；缺 id 条目自动跳过） */
 export async function buildBookItems(books) {
   if (!Array.isArray(books)) return [];
@@ -518,9 +537,9 @@ export async function buildBookItems(books) {
   return items.filter(Boolean);
 }
 
-/** 下载项展示名：path 去类型前缀（audio/<hash>.m4a → <hash>.m4a） */
+/** 下载项展示名：path 去类型前缀（audio/<hash>.m4a → <hash>.m4a；covers/ 同里去前缀） */
 function displayNameOf(path) {
-  return String(path || "").replace(/^(audio|books|dicts)\/+/, "");
+  return String(path || "").replace(/^(audio|books|dicts|covers)\/+/, "");
 }
 
 /**
