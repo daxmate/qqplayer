@@ -55,6 +55,7 @@ export default {
       addToPlaylist: "加歌单",
       goArtist: "进歌手",
       goAlbum: "进专辑",
+      editTags: "编辑标签/刮削",
       deleteToTrash: "移到废纸篓",
     },
     // 多选批量（桌面）

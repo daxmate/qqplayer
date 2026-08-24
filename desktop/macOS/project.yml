@@ -1,0 +1,32 @@
+# QQPlayer macOS 壳（xcodegen 工程定义，用于 IDE/CI 编译验证）
+# 说明：正式构建走 build.sh（swiftc 直编，见脚本）；本工程仅供 xcodegen generate + xcodebuild
+# 编译验证用（.xcodeproj 不入库，由 xcodegen 生成，.gitignore 排除）。
+# 用法：xcodegen generate  &&  xcodebuild -project QQPlayer.xcodeproj -scheme QQPlayer -configuration Debug build
+name: QQPlayer
+options:
+  bundleIdPrefix: com.daxmate.qqplayer
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+targets:
+  QQPlayer:
+    type: application
+    platform: macOS
+    sources:
+      - main.swift
+      - dict_events.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.daxmate.qqplayer
+        PRODUCT_NAME: QQPlayer
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        # 编译验证专用：免签名 + 自动生成 Info.plist（不落仓库文件）
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGN_IDENTITY: ""
+        ENABLE_HARDENED_RUNTIME: "NO"
+    scheme:
+      gatherCoverageData: false
+      testTargets: []

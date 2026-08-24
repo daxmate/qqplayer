@@ -27,6 +27,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const TagEditorModal = (await import("../components/TagEditorModal.vue")).default;
 const { state, audio } = await import("../composables/usePlayer.js");
+const { resetTagEditorSettings } = await import("../composables/tagEditorSettings.js");
 
 const SONG = { path: "/music/安静.mp3", name: "安静", artist: "周杰伦", album: "范特西" };
 
@@ -50,6 +51,10 @@ const SCRAPE_RES = {
       artist: "周杰伦",
       album: "范特西",
       cover: "https://coverartarchive.org/abc.jpg",
+      year: 2001,
+      genre: "流行",
+      track: 3,
+      album_artist: "周杰伦",
       mbid: "mbid-1",
     },
   ],
@@ -66,7 +71,7 @@ const SAVE_RES = {
 
 // 注意：用 vi.stubGlobal（不用 vi.spyOn）——spyOn 的 mock 不会被 unstubAllGlobals 还原，
 // 同一文件内多次 mockFetch 会串测试（旧 mock 的 calls 污染后续断言）
-function mockFetch({ scrape, save, songs } = {}) {
+function mockFetch({ scrape, save, songs, settings } = {}) {
   const mock = vi.fn(async (url, opts) => {
     const u = String(url);
     if (u.includes("/api/tags/scrape") && opts?.method === "POST") {
@@ -74,6 +79,19 @@ function mockFetch({ scrape, save, songs } = {}) {
     }
     if (u.includes("/api/tags") && opts?.method === "POST") {
       return save ? save() : Promise.resolve({ ok: true, json: async () => SAVE_RES });
+    }
+    if (u.includes("/api/library/settings")) {
+      return typeof settings === "function"
+        ? settings()
+        : Promise.resolve({
+            ok: true,
+            json: async () =>
+              settings ?? {
+                settings: { scraping: { enabled_fields: [] } },
+                library: {},
+                playback: {},
+              },
+          });
     }
     if (u.includes("/api/songs")) {
       return Promise.resolve({
@@ -99,6 +117,7 @@ beforeEach(() => {
     currentSong: { ...SONG },
   });
   audio.src = ""; // 记录基线：验证保存改名不触碰 audio.src（播放不中断）
+  resetTagEditorSettings(); // enabled_fields 模块级缓存隔离
 });
 
 afterEach(() => {
@@ -243,7 +262,7 @@ describe("TagEditorModal 点选填充", () => {
 });
 
 describe("TagEditorModal 保存", () => {
-  it("保存请求体包含 path/title/artist/album/cover_url（点选候选 → cover_url=候选封面）", async () => {
+  it("保存请求体包含 path/title/artist/album/cover_url + 新字段（点选网易云候选 → 新字段为空 → null）", async () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
@@ -265,11 +284,15 @@ describe("TagEditorModal 保存", () => {
       artist: "周杰伦",
       album: "无与伦比 演唱会",
       cover_url: "https://p1.music.126.net/cover1.jpg",
+      year: null,
+      genre: null,
+      track: null,
+      album_artist: null,
     });
     w.unmount();
   });
 
-  it("手动改文本不动封面 → cover_url 传 null", async () => {
+  it("手动改文本不动封面 → cover_url 传 null，新字段空值也传 null", async () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
@@ -289,6 +312,10 @@ describe("TagEditorModal 保存", () => {
       artist: "周杰伦",
       album: "范特西",
       cover_url: null,
+      year: null,
+      genre: null,
+      track: null,
+      album_artist: null,
     });
     w.unmount();
   });
@@ -337,6 +364,250 @@ describe("TagEditorModal 保存", () => {
     expect(document.body.querySelector(".modal")).toBeTruthy();
     expect(state.currentSong.path).toBe(SONG.path);
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/songs"))).toBe(false);
+    w.unmount();
+  });
+});
+
+describe("TagEditorModal 扩展字段（year/genre/track/album_artist）", () => {
+  it("打开时表单渲染 7 个字段（新字段初始值来自歌曲元数据）", async () => {
+    mockFetch();
+    state.currentSong = {
+      ...SONG,
+      year: 1999,
+      genre: "流行",
+      track: 5,
+      album_artist: "周杰伦",
+    };
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    expect(root.querySelectorAll(".field-input").length).toBe(7);
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("1999");
+    expect(root.querySelector('[data-testid="field-genre"]').value).toBe("流行");
+    expect(root.querySelector('[data-testid="field-track"]').value).toBe("5");
+    expect(root.querySelector('[data-testid="field-albumartist"]').value).toBe("周杰伦");
+    w.unmount();
+  });
+
+  it("MusicBrainz 候选展示新字段（artist · album · year · genre），点选填充表单新字段", async () => {
+    mockFetch();
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    let root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="scrape-btn"]').click();
+    await tick();
+    root = document.body.querySelector(".modal");
+    // 候选副信息：网易云不带 year/genre 不显示；MusicBrainz 带 → · 2001 · 流行
+    const mbSub = root
+      .querySelectorAll('[data-testid="cand-musicbrainz"]')[0]
+      .querySelector(".cand-sub");
+    expect(mbSub.textContent).toContain("· 范特西");
+    expect(mbSub.textContent).toContain("· 2001");
+    expect(mbSub.textContent).toContain("· 流行");
+    const neSub = root
+      .querySelectorAll('[data-testid="cand-netease"]')[0]
+      .querySelector(".cand-sub");
+    expect(neSub.textContent).not.toContain("2001");
+    // 点选 MusicBrainz → 新字段填充（含 track/album_artist）
+    root.querySelector('[data-testid="cand-musicbrainz"]').click();
+    await nextTick();
+    root = document.body.querySelector(".modal");
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2001");
+    expect(root.querySelector('[data-testid="field-genre"]').value).toBe("流行");
+    expect(root.querySelector('[data-testid="field-track"]').value).toBe("3");
+    expect(root.querySelector('[data-testid="field-albumartist"]').value).toBe("周杰伦");
+    w.unmount();
+  });
+
+  it("点选网易云候选（无新字段）→ 新字段置空", async () => {
+    mockFetch();
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    let root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="scrape-btn"]').click();
+    await tick();
+    root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="cand-netease"]').click();
+    await nextTick();
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
+    expect(root.querySelector('[data-testid="field-genre"]').value).toBe("");
+    expect(root.querySelector('[data-testid="field-track"]').value).toBe("");
+    expect(root.querySelector('[data-testid="field-albumartist"]').value).toBe("");
+    w.unmount();
+  });
+
+  it("保存：year/track 数字转换、空值 null、genre/album_artist 空串 → null", async () => {
+    const fetchMock = mockFetch();
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="field-year"]').value = "1995";
+    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    root.querySelector('[data-testid="field-track"]').value = "3";
+    root.querySelector('[data-testid="field-track"]').dispatchEvent(new Event("input"));
+    root.querySelector('[data-testid="field-genre"]').value = "流行";
+    root.querySelector('[data-testid="field-genre"]').dispatchEvent(new Event("input"));
+    root.querySelector('[data-testid="field-albumartist"]').value = "  周杰伦  ";
+    root.querySelector('[data-testid="field-albumartist"]').dispatchEvent(new Event("input"));
+    await nextTick();
+    root.querySelector('[data-testid="save-btn"]').click();
+    await tick();
+    const saveCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
+    );
+    const body = JSON.parse(saveCall[1].body);
+    expect(body.year).toBe(1995); // 数字类型（非字符串）
+    expect(body.track).toBe(3);
+    expect(body.genre).toBe("流行");
+    expect(body.album_artist).toBe("周杰伦"); // trim
+    w.unmount();
+  });
+});
+
+describe("TagEditorModal 自动刮削（autoScrape prop）", () => {
+  it("open + autoScrape → 打开即自动触发一次刮削（无需点按钮）", async () => {
+    const fetchMock = mockFetch();
+    const w = mount(TagEditorModal, { props: { open: true, autoScrape: true } });
+    await nextTick();
+    await tick();
+    const root = document.body.querySelector(".modal");
+    const scrapeCalls = fetchMock.mock.calls.filter(([u]) =>
+      String(u).includes("/api/tags/scrape"),
+    );
+    expect(scrapeCalls).toHaveLength(1); // 只自动触发一次
+    expect(JSON.parse(scrapeCalls[0][1].body)).toEqual({ path: SONG.path });
+    // 候选已渲染（不阻塞表单操作，异步完成后展示）
+    expect(root.querySelectorAll('[data-testid="cand-netease"]').length).toBe(2);
+    expect(root.querySelectorAll('[data-testid="cand-musicbrainz"]').length).toBe(1);
+    w.unmount();
+  });
+
+  it("autoScrape=false（默认）→ 打开不自动刮削", async () => {
+    const fetchMock = mockFetch();
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    await tick();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/scrape"))).toBe(false);
+    w.unmount();
+  });
+
+  it("autoScrape 刮削失败 → 显示 scrapeError，不阻塞表单（弹窗仍可操作）", async () => {
+    mockFetch({
+      scrape: () => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }),
+    });
+    const w = mount(TagEditorModal, { props: { open: true, autoScrape: true } });
+    await tick();
+    const root = document.body.querySelector(".modal");
+    expect(root.querySelector(".scrape-error")).toBeTruthy();
+    expect(root.querySelector('[data-testid="save-btn"]').disabled).toBe(false);
+    w.unmount();
+  });
+
+  it("指定目标歌曲（song prop）→ 表单/刮削/保存都以该歌曲为准，不影响当前播放", async () => {
+    const fetchMock = mockFetch();
+    const target = { ...SONG, path: "/music/别首.mp3", name: "别首" };
+    state.currentSong = { ...SONG }; // 当前播放仍是安静
+    const w = mount(TagEditorModal, {
+      props: { open: true, autoScrape: true, song: target },
+    });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    // 表单显示目标歌曲
+    const inputs = root.querySelectorAll(".field-input");
+    expect(inputs[0].value).toBe("别首");
+    expect(root.querySelector(".head-sub").textContent).toContain("别首");
+    // 自动刮削用目标 path
+    const scrapeCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/scrape"));
+    expect(JSON.parse(scrapeCall[1].body)).toEqual({ path: "/music/别首.mp3" });
+    // 保存用目标 path；改名更新只发生在编辑目标 === 当前播放时（这里不是 → 不动 currentSong）
+    root.querySelector('[data-testid="save-btn"]').click();
+    await tick();
+    const saveCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
+    );
+    expect(JSON.parse(saveCall[1].body).path).toBe("/music/别首.mp3");
+    expect(state.currentSong.path).toBe(SONG.path); // 当前播放未被改写
+    w.unmount();
+  });
+});
+
+describe("TagEditorModal enabled_fields 提交过滤", () => {
+  it("设置 scraping.enabled_fields 存在且非空 → 只提交勾选字段，其余置 null", async () => {
+    const fetchMock = mockFetch({
+      settings: {
+        settings: {
+          scraping: { enabled_fields: ["title", "artist", "year", "genre"] },
+          library: {},
+          playback: {},
+        },
+      },
+    });
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    await tick(); // 等 GET /api/library/settings 落缓存（enabled_fields 提交过滤依赖）
+    const root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="field-year"]').value = "1995";
+    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    await nextTick();
+    root.querySelector('[data-testid="save-btn"]').click();
+    await tick();
+    const saveCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
+    );
+    const body = JSON.parse(saveCall[1].body);
+    expect(body).toEqual({
+      path: SONG.path,
+      title: "安静", // 勾选 → 提交
+      artist: "周杰伦",
+      year: 1995,
+      genre: null, // 勾选了 genre 但表单为空 → null（不写）
+      album: null, // 未勾选 → null（不写）
+      cover_url: null,
+      track: null,
+      album_artist: null,
+    });
+    w.unmount();
+  });
+
+  it("enabled_fields 为空数组 → 提交全部字段（不限制）", async () => {
+    const fetchMock = mockFetch(); // 默认 settings.enabled_fields = []
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="field-year"]').value = "1995";
+    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    await nextTick();
+    root.querySelector('[data-testid="save-btn"]').click();
+    await tick();
+    const saveCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
+    );
+    const body = JSON.parse(saveCall[1].body);
+    expect(body.year).toBe(1995);
+    expect(body.album).toBe("范特西");
+    expect(body.cover_url).toBe(null);
+    w.unmount();
+  });
+
+  it("设置接口失败（后端未合并）→ 提交全部字段（容错）", async () => {
+    const fetchMock = mockFetch({
+      settings: () => Promise.resolve({ ok: false, status: 404, json: async () => ({}) }),
+    });
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="field-year"]').value = "1995";
+    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    await nextTick();
+    root.querySelector('[data-testid="save-btn"]').click();
+    await tick();
+    const saveCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
+    );
+    const body = JSON.parse(saveCall[1].body);
+    expect(body.year).toBe(1995);
+    expect(body.album).toBe("范特西"); // 未限制 → 全部提交
+    expect(body.track).toBe(null);
     w.unmount();
   });
 });

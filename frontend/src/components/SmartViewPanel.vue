@@ -68,8 +68,17 @@
       @add-playlist="ctxAddPlaylist"
       @go-artist="ctxGoArtist"
       @go-album="ctxGoAlbum"
+      @edit-tags="ctxEditTags"
       @delete="ctxDelete"
       @close="ctxOpen = false"
+    />
+
+    <!-- 编辑标签/刮削弹窗（右键目标歌曲；autoScrape 打开自动刮削） -->
+    <TagEditorModal
+      :open="tagEditorOpen"
+      :song="tagEditorSong"
+      auto-scrape
+      @close="tagEditorOpen = false"
     />
 
     <!-- 加歌浮层（与 Playlist 同款：歌单勾选/切换） -->
@@ -158,6 +167,7 @@ import {
   fmtSmartSub,
 } from "../composables/useSmartViews.js";
 import ContextMenu from "./ContextMenu.vue";
+import TagEditorModal from "./TagEditorModal.vue";
 
 const { t } = useI18n();
 
@@ -316,6 +326,23 @@ function ctxDelete() {
   }
   ctxClose();
   openDeleteDialog([p]);
+}
+
+// 编辑标签/刮削：打开 TagEditorModal（autoScrape 自动触发刮削），编辑对象 = 被右键的歌曲
+// （不切换当前播放；弹窗内保存/刮削都以该歌曲的 path 为准）
+const tagEditorOpen = ref(false);
+const tagEditorSong = ref(null);
+
+function openTagEditor(song) {
+  if (!song?.path) return;
+  tagEditorSong.value = song;
+  tagEditorOpen.value = true;
+}
+
+function ctxEditTags() {
+  const s = ctxSong.value;
+  ctxClose();
+  openTagEditor(s);
 }
 
 // ============ 加歌浮层（与 Playlist 同款：歌单列表 + 勾选/切换） ============
@@ -486,6 +513,12 @@ function onCtxGoAlbum(e) {
   if (s?.album) goBrowse("album", s.album);
 }
 
+// 编辑标签/刮削（壳菜单）：与浏览器右键菜单同一链路 → 打开 TagEditorModal(autoScrape)
+function onCtxEditTags(e) {
+  const s = ctxSongFromEvent(e);
+  if (s) openTagEditor(s);
+}
+
 const CTX_EVENTS = [
   ["qqplayer:ctx-play", onCtxPlay],
   ["qqplayer:ctx-playnext", onCtxPlayNext],
@@ -494,6 +527,7 @@ const CTX_EVENTS = [
   ["qqplayer:ctx-deletesong", onCtxDeleteSong],
   ["qqplayer:ctx-goartist", onCtxGoArtist],
   ["qqplayer:ctx-goalbum", onCtxGoAlbum],
+  ["qqplayer:ctx-edittags", onCtxEditTags],
 ];
 
 function bindCtxEvents() {

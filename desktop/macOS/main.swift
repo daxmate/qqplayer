@@ -190,7 +190,7 @@ final class MainWebView: WKWebView {
     }
 
     // ---- 歌曲列表 / 侧边栏歌单右键菜单（前端 ctxState 驱动） ----
-    // 歌曲行：播放 / 下一首播放 / 收藏(取消收藏) / 添加到歌单… / ─ / 移到废纸篓* / 进歌手* / 进专辑*
+    // 歌曲行：播放 / 下一首播放 / 收藏(取消收藏) / 添加到歌单… / ─ / 编辑标签/刮削* / 移到废纸篓* / 进歌手* / 进专辑*
     // 歌单项：播放 / 重命名 / 删除（* 按 canGoArtist / canGoAlbum / hasPath 条件显示，同 ContextMenu.vue）
     private func insertCtxMenuItems(into menu: NSMenu) {
         // 无上下文（空白区右键）或上下文过期 → 不注入，保留系统菜单
@@ -208,6 +208,7 @@ final class MainWebView: WKWebView {
             menu.insertItem(ctxItem(zh ? "添加到歌单…" : "Add to Playlist…", #selector(ctxAddPlaylistAction(_:))), at: idx); idx += 1
             menu.insertItem(.separator(), at: idx); idx += 1
             if MainWebView.ctxHasPath {
+                menu.insertItem(ctxItem(zh ? "编辑标签/刮削" : "Edit Tags", #selector(ctxEditTagsAction(_:))), at: idx); idx += 1
                 menu.insertItem(ctxItem(zh ? "移到废纸篓" : "Move to Trash", #selector(ctxRemoveAction(_:))), at: idx); idx += 1
             }
             if MainWebView.ctxCanGoArtist {
@@ -249,6 +250,10 @@ final class MainWebView: WKWebView {
 
     @objc private func ctxRemoveAction(_ sender: Any?) {
         callJS("window.__qqCtxMenu?.remove()")
+    }
+
+    @objc private func ctxEditTagsAction(_ sender: Any?) {
+        callJS("window.__qqCtxMenu?.editTags()")
     }
 
     @objc private func ctxGoArtistAction(_ sender: Any?) {

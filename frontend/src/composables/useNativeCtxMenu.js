@@ -164,6 +164,11 @@ function installCtxMenuApi() {
     goAlbum: () => {
       if (ctxTarget?.kind === "song") dispatch("qqplayer:ctx-goalbum", { path: ctxTarget.path });
     },
+    // 编辑标签/刮削：打开 TagEditorModal（Playlist/SmartViewPanel 监听，autoScrape 自动刮削）
+    // 网络歌（path=null）不命中歌曲行 → 无 ctxTarget，静默
+    editTags: () => {
+      if (ctxTarget?.kind === "song") dispatch("qqplayer:ctx-edittags", { path: ctxTarget.path });
+    },
     // 歌单：重命名（行内输入）/ 删除（撤销 toast）
     rename: () => {
       if (ctxTarget?.kind === "playlist")

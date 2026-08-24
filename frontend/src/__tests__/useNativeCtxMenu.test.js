@@ -411,6 +411,35 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
     expect(items).toHaveLength(1);
     expect(items[0].text()).toContain("A歌");
   });
+
+  it("编辑标签/刮削 → 派发 qqplayer:ctx-edittags（带右键歌曲 path）→ Playlist 打开 TagEditorModal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const u = String(url);
+        if (u.includes("/api/tags/scrape")) {
+          return { ok: true, json: async () => ({ query: "", netease: [], musicbrainz: [] }) };
+        }
+        if (u.includes("/api/library/settings")) {
+          return { ok: true, json: async () => ({ settings: {} }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    const wrapper = mountPlaylist();
+    const events = [];
+    window.addEventListener("qqplayer:ctx-edittags", (e) => events.push(e.detail));
+    await rclick(wrapper.findAll(".pl-item")[1]); // 右键 B
+    window.__qqCtxMenu.editTags();
+    await nextTick();
+    // 事件派发带被右键歌曲 path
+    expect(events).toEqual([{ path: "/b.mp3" }]);
+    // Playlist 监听到 → 打开 TagEditorModal（autoScrape 自动刮削 B）
+    const modal = document.body.querySelector(".modal.tag-modal");
+    expect(modal).toBeTruthy();
+    expect(modal.querySelectorAll(".field-input")[0].value).toBe("B歌");
+    window.removeEventListener("qqplayer:ctx-edittags", () => {});
+  });
 });
 
 describe("壳菜单动作（侧边栏歌单）", () => {

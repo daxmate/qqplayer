@@ -100,7 +100,7 @@ function toastText() {
 }
 
 describe("Playlist 右键菜单", () => {
-  it("右键歌曲行 → 显示菜单（播放/下一首/收藏/加歌单/进歌手/进专辑/移到废纸篓）", async () => {
+  it("右键歌曲行 → 显示菜单（播放/下一首/收藏/加歌单/进歌手/进专辑/编辑标签/移到废纸篓）", async () => {
     const wrapper = mountSongs();
     await rclick(wrapper, 0);
     expect(menuEl()).toBeTruthy();
@@ -110,6 +110,7 @@ describe("Playlist 右键菜单", () => {
     expect(menuText()).toContain("加歌单");
     expect(menuText()).toContain("进歌手");
     expect(menuText()).toContain("进专辑");
+    expect(menuText()).toContain("编辑标签/刮削");
     expect(menuText()).toContain("移到废纸篓");
   });
 
@@ -121,12 +122,64 @@ describe("Playlist 右键菜单", () => {
     expect(menuText()).toContain("移到废纸篓");
   });
 
-  it("网络歌（path=null）→ 不显示移到废纸篓", async () => {
+  it("网络歌（path=null）→ 不显示移到废纸篓，也不显示编辑标签/刮削", async () => {
     const wrapper = mountSongs([
       { id: "s", name: "网歌", artist: "x", album: "y", type: "stream", streamId: "1", path: null },
     ]);
     await rclick(wrapper, 0);
     expect(menuText()).not.toContain("移到废纸篓");
+    expect(menuText()).not.toContain("编辑标签/刮削");
+  });
+
+  it("菜单项：编辑标签/刮削 → 打开 TagEditorModal（autoScrape 自动刮削被右键的歌曲，不切换播放）", async () => {
+    const fetchMock = vi.fn(async (url, opts) => {
+      const u = String(url);
+      if (u.includes("/api/tags/scrape") && opts?.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            query: "B歌",
+            netease: [
+              { id: "1", title: "B歌", artist: "高橋優", album: "開往明天的旅行", cover: null },
+            ],
+            musicbrainz: [],
+          }),
+        };
+      }
+      if (u.includes("/api/tags") && opts?.method === "POST") {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (u.includes("/api/library/settings")) {
+        return { ok: true, json: async () => ({ settings: {} }) };
+      }
+      if (u.includes("/api/songs")) return { ok: true, json: async () => SONG };
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mountSongs();
+    await wrapper.findAll(".pl-item")[0].trigger("click"); // 播 A
+    await nextTick();
+    expect(state.currentSong.name).toBe("A歌");
+    await rclick(wrapper, 1); // 右键 B歌
+    await menuItem("编辑标签/刮削").click();
+    await nextTick();
+    await flushPromises(); // autoScrape 的 fetch 链路
+    // 弹窗打开，编辑目标 = 被右键的 B歌（不是当前播放的 A歌）
+    const modal = document.body.querySelector(".modal.tag-modal");
+    expect(modal).toBeTruthy();
+    const inputs = modal.querySelectorAll(".field-input");
+    expect(inputs[0].value).toBe("B歌");
+    expect(inputs[1].value).toBe("高橋優");
+    // autoScrape：打开即 POST /api/tags/scrape，body 带 B歌 path
+    const scrapeCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).includes("/api/tags/scrape") && o?.method === "POST",
+    );
+    expect(scrapeCall).toBeTruthy();
+    expect(JSON.parse(scrapeCall[1].body)).toEqual({ path: "/b.mp3" });
+    // 候选已渲染
+    expect(modal.querySelectorAll('[data-testid="cand-netease"]').length).toBe(1);
+    // 播放未被打断（当前仍是 A）
+    expect(state.currentSong.name).toBe("A歌");
   });
 
   it("菜单项：播放 → 选中并播放该歌", async () => {

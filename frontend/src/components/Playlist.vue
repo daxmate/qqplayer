@@ -358,8 +358,17 @@
       @add-playlist="ctxAddPlaylist"
       @go-artist="ctxGoArtist"
       @go-album="ctxGoAlbum"
+      @edit-tags="ctxEditTags"
       @delete="ctxDelete"
       @close="ctxOpen = false"
+    />
+
+    <!-- 编辑标签/刮削弹窗（右键目标歌曲；autoScrape 打开自动刮削） -->
+    <TagEditorModal
+      :open="tagEditorOpen"
+      :song="tagEditorSong"
+      auto-scrape
+      @close="tagEditorOpen = false"
     />
 
     <!-- 移到废纸篓确认弹窗 -->
@@ -431,6 +440,7 @@ import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import ContextMenu from "./ContextMenu.vue";
+import TagEditorModal from "./TagEditorModal.vue";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -850,6 +860,23 @@ function ctxDelete() {
   openDeleteDialog([p]);
 }
 
+// 编辑标签/刮削：打开 TagEditorModal（autoScrape 自动触发刮削），编辑对象 = 被右键的歌曲
+// （不切换当前播放；弹窗内保存/刮削都以该歌曲的 path 为准）
+const tagEditorOpen = ref(false);
+const tagEditorSong = ref(null);
+
+function openTagEditor(song) {
+  if (!song?.path) return;
+  tagEditorSong.value = song;
+  tagEditorOpen.value = true;
+}
+
+function ctxEditTags() {
+  const s = ctxSong.value;
+  ctxClose();
+  openTagEditor(s);
+}
+
 // ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报上下文 → 壳注入 NSMenu → 点击调 __qqCtxMenu → 事件派发到这里） ============
 // 与浏览器右键菜单共用同一套实现（playFor/playNextFor/goArtistFor/goAlbumFor/openAddMenuAt/openDeleteDialog），
 // 壳内与浏览器行为完全一致；事件只在原生壳内由 __qqCtxMenu 派发，浏览器永不触发。
@@ -907,6 +934,12 @@ function onCtxGoAlbum(e) {
   if (s) goAlbumFor(s);
 }
 
+// 编辑标签/刮削（壳菜单）：与浏览器右键菜单同一链路 → 打开 TagEditorModal(autoScrape)
+function onCtxEditTags(e) {
+  const s = ctxSongFromEvent(e);
+  if (s) openTagEditor(s);
+}
+
 const CTX_EVENTS = [
   ["qqplayer:ctx-play", onCtxPlay],
   ["qqplayer:ctx-playnext", onCtxPlayNext],
@@ -915,6 +948,7 @@ const CTX_EVENTS = [
   ["qqplayer:ctx-deletesong", onCtxDeleteSong],
   ["qqplayer:ctx-goartist", onCtxGoArtist],
   ["qqplayer:ctx-goalbum", onCtxGoAlbum],
+  ["qqplayer:ctx-edittags", onCtxEditTags],
 ];
 
 function bindCtxEvents() {

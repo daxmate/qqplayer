@@ -15,6 +15,7 @@ dist/
 # 桌面歌词/迷你窗/三合一壳构建产物（swiftc 编译生成，build.sh 可重建）
 desktop/macOS/build/
 desktop/macOS/assets/icon.iconset/
+desktop/macOS/QQPlayer.xcodeproj/
 
 # iOS 壳（mobile/ios）：构建产物与生成工程不入库（build.sh 可重建）
 mobile/ios/build/

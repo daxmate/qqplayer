@@ -1,0 +1,25 @@
+// 歌曲信息编辑弹窗（英文包；其余 tags key 由 fallbackLocale zh-CN 兜底）
+export default {
+  tags: {
+    editTitle: "Edit Song Info",
+    coverAlt: "Cover preview",
+    fieldTitle: "Title",
+    fieldArtist: "Artist",
+    fieldAlbum: "Album",
+    fieldYear: "Year",
+    fieldGenre: "Genre",
+    fieldTrack: "Track",
+    fieldAlbumArtist: "Album Artist",
+    scrapeBtn: "Auto Scrape",
+    scraping: "Scraping…",
+    scrapeHint: "Fetch candidates from NetEase / MusicBrainz, click to fill",
+    scrapeQuery: "Query: {query}",
+    scrapeFailed: "Scrape failed, please retry",
+    groupNetease: "NetEase",
+    groupMusicBrainz: "MusicBrainz",
+    emptyResult: "No matches found",
+    emptyAll: "Title/Artist/Album cannot all be empty",
+    saveSuccess: "Song info saved",
+    saveFailed: "Save failed: {msg}",
+  },
+};

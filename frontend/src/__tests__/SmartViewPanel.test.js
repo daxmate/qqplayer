@@ -408,6 +408,7 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     expect(text).toContain("加歌单");
     expect(text).toContain("进歌手");
     expect(text).toContain("进专辑");
+    expect(text).toContain("编辑标签/刮削");
     expect(text).toContain("移到废纸篓");
   });
 
@@ -591,6 +592,77 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     expect(seen).toEqual([{ type: "artist", value: "中島美嘉" }]);
     expect(wrapper.emitted("close")).toBeTruthy();
     window.removeEventListener("qqplayer:open-browse", onBrowse);
+  });
+
+  it("菜单项：编辑标签/刮削 → 打开 TagEditorModal（autoScrape 自动刮削被右键的歌曲）", async () => {
+    const fetchMock = vi.fn(async (url, opts) => {
+      const u = String(url);
+      if (u.includes("/api/tags/scrape") && opts?.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            query: "雪の華",
+            netease: [
+              { id: "1", title: "雪の華", artist: "中島美嘉", album: "雪の華", cover: null },
+            ],
+            musicbrainz: [],
+          }),
+        };
+      }
+      if (u.includes("/api/tags") && opts?.method === "POST") {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (u.includes("/api/library/settings")) {
+        return { ok: true, json: async () => ({ settings: {} }) };
+      }
+      if (u.includes("/api/songs")) return { ok: true, json: async () => lib };
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mountPanel("recentAdded");
+    await flushPromises();
+    await rclick(wrapper, 0); // 右键 雪の華
+    menuItem(wrapper, "编辑标签/刮削").trigger("click");
+    await nextTick();
+    await flushPromises(); // autoScrape fetch 链路
+    // 弹窗打开（teleport stub 内联在 wrapper 内），编辑目标 = 被右键歌曲
+    const modal = wrapper.find(".modal.tag-modal");
+    expect(modal.exists()).toBe(true);
+    expect(modal.find(".field-input").element.value).toBe("雪の華");
+    expect(modal.find('[data-testid="field-albumartist"]').exists()).toBe(true); // 7 字段表单
+    // autoScrape：POST /api/tags/scrape 带被右键歌曲 path
+    const scrapeCall = fetchMock.mock.calls.find(
+      ([u, o]) => String(u).includes("/api/tags/scrape") && o?.method === "POST",
+    );
+    expect(scrapeCall).toBeTruthy();
+    expect(JSON.parse(scrapeCall[1].body)).toEqual({ path: "/lib/a.mp3" });
+    expect(wrapper.findAll('[data-testid="cand-netease"]').length).toBe(1);
+  });
+
+  it("壳菜单事件 qqplayer:ctx-edittags → 打开 TagEditorModal（目标歌曲 = 事件 path）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, opts) => {
+        const u = String(url);
+        if (u.includes("/api/tags/scrape") && opts?.method === "POST") {
+          return { ok: true, json: async () => ({ query: "", netease: [], musicbrainz: [] }) };
+        }
+        if (u.includes("/api/library/settings")) {
+          return { ok: true, json: async () => ({ settings: {} }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    const wrapper = mountPanel("recentAdded");
+    await flushPromises();
+    window.dispatchEvent(
+      new CustomEvent("qqplayer:ctx-edittags", { detail: { path: "/lib/b.mp3" } }),
+    );
+    await nextTick();
+    await flushPromises();
+    const modal = wrapper.find(".modal.tag-modal");
+    expect(modal.exists()).toBe(true);
+    expect(modal.find(".field-input").element.value).toBe("知足");
   });
 
   it("Esc 关闭右键菜单（不关闭面板）", async () => {

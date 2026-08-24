@@ -31,6 +31,10 @@
       </template>
       <template v-if="hasPath">
         <div class="ctx-sep"></div>
+        <button class="ctx-item" @click="emit('edit-tags')">
+          <Tags :size="14" />
+          {{ t("playlist.ctx.editTags") }}
+        </button>
         <button class="ctx-item danger" @click="emit('delete')">
           <Trash2 :size="14" />
           {{ t("playlist.ctx.deleteToTrash") }}
@@ -43,7 +47,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import { Play, SkipForward, Heart, ListPlus, Mic, Disc, Trash2 } from "@lucide/vue";
+import { Play, SkipForward, Heart, ListPlus, Mic, Disc, Tags, Trash2 } from "@lucide/vue";
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -62,6 +66,7 @@ const emit = defineEmits([
   "add-playlist",
   "go-artist",
   "go-album",
+  "edit-tags",
   "delete",
   "close",
 ]);

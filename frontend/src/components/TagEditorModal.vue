@@ -37,6 +37,49 @@
                 <span class="field-label">{{ t("tags.fieldAlbum") }}</span>
                 <input v-model="form.album" class="field-input" type="text" spellcheck="false" />
               </label>
+              <!-- 扩展字段：year/genre/track/album_artist（两列 grid，保持弹窗宽度合理） -->
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label">{{ t("tags.fieldYear") }}</span>
+                  <input
+                    v-model.number="form.year"
+                    class="field-input"
+                    type="number"
+                    data-testid="field-year"
+                    placeholder="1995"
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t("tags.fieldGenre") }}</span>
+                  <input
+                    v-model="form.genre"
+                    class="field-input"
+                    type="text"
+                    data-testid="field-genre"
+                    spellcheck="false"
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t("tags.fieldTrack") }}</span>
+                  <input
+                    v-model.number="form.track"
+                    class="field-input"
+                    type="number"
+                    data-testid="field-track"
+                    placeholder="3"
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">{{ t("tags.fieldAlbumArtist") }}</span>
+                  <input
+                    v-model="form.albumArtist"
+                    class="field-input"
+                    type="text"
+                    data-testid="field-albumartist"
+                    spellcheck="false"
+                  />
+                </label>
+              </div>
             </div>
           </div>
 
@@ -83,6 +126,8 @@
                     <span class="cand-name">{{ item.title }}</span>
                     <span class="cand-sub">
                       {{ item.artist }}<template v-if="item.album"> · {{ item.album }}</template
+                      ><template v-if="item.year"> · {{ item.year }}</template
+                      ><template v-if="item.genre"> · {{ item.genre }}</template
                       ><template v-if="item.duration"> · {{ item.duration }}</template>
                     </span>
                   </span>
@@ -118,7 +163,9 @@
                   <span class="cand-info">
                     <span class="cand-name">{{ item.title }}</span>
                     <span class="cand-sub">
-                      {{ item.artist }}<template v-if="item.album"> · {{ item.album }}</template>
+                      {{ item.artist }}<template v-if="item.album"> · {{ item.album }}</template
+                      ><template v-if="item.year"> · {{ item.year }}</template
+                      ><template v-if="item.genre"> · {{ item.genre }}</template>
                     </span>
                   </span>
                 </button>
@@ -167,16 +214,30 @@ import { useI18n } from "vue-i18n";
 import { Loader2, Music, Sparkles, Tags, X } from "@lucide/vue";
 import { state, loadSongs } from "../composables/usePlayer.js";
 import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
+import { loadEnabledFields, getEnabledFields } from "../composables/tagEditorSettings.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  // 指定编辑目标歌曲；null = 编辑当前播放歌曲（控制栏入口）。
+  // 右键菜单入口传被右键的歌曲（不切换播放），保存/刮削都以它为准。
+  song: { type: Object, default: null },
+  // 打开弹窗时自动触发一次刮削（右键菜单入口用）
+  autoScrape: { type: Boolean, default: false },
 });
 const emit = defineEmits(["close"]);
 
 const { t } = useI18n();
 
-// 表单（title/artist/album 允许空串，全空时前端拦截）
-const form = reactive({ title: "", artist: "", album: "" });
+// 表单（title/artist/album 允许空串，全空时前端拦截；year/track 数字输入允许空）
+const form = reactive({
+  title: "",
+  artist: "",
+  album: "",
+  year: "",
+  genre: "",
+  track: "",
+  albumArtist: "",
+});
 // cover_url：候选封面（null = 不写封面，沿用文件现有封面）
 const remoteCover = ref(null);
 const previewBroken = ref(false); // 预览图加载失败 → 占位
@@ -192,7 +253,7 @@ const toastErr = ref(false);
 
 let toastTimer = null;
 
-const song = computed(() => state.currentSong);
+const song = computed(() => props.song || state.currentSong);
 const songName = computed(() =>
   song.value ? song.value.name + (song.value.artist ? " · " + song.value.artist : "") : "",
 );
@@ -207,13 +268,17 @@ const previewUrl = computed(() => {
     : "";
 });
 
-// 每次打开：从当前歌曲同步表单 + 清空上次刮削结果
+// 每次打开：从目标歌曲同步表单 + 清空上次刮削结果 + 拉一次字段选择设置（模块级缓存）
 // （immediate：直接以 open=true 挂载（测试/特殊场景）也能同步）
 function syncForm() {
-  const s = state.currentSong;
+  const s = song.value;
   form.title = s?.name || "";
   form.artist = s?.artist || "";
   form.album = s?.album || "";
+  form.year = s?.year ?? "";
+  form.genre = s?.genre || "";
+  form.track = s?.track ?? "";
+  form.albumArtist = s?.album_artist || "";
   remoteCover.value = null;
   previewBroken.value = false;
   scraping.value = false;
@@ -224,17 +289,24 @@ function syncForm() {
   musicbrainz.value = [];
 }
 
+// 打开时：同步表单 → 拉 enabled_fields（fire-and-forget，不阻塞）→ autoScrape 自动刮削一次
+function onOpen() {
+  syncForm();
+  loadEnabledFields();
+  if (props.autoScrape && !scraping.value && !scraped.value) scrape();
+}
+
 watch(
   () => props.open,
   (o) => {
-    if (o) syncForm();
+    if (o) onOpen();
   },
   { immediate: true },
 );
 
-// 弹窗打开期间切歌（自动连播/手动切歌）：编辑对象变了 → 重新同步，避免误改上一首
+// 弹窗打开期间目标歌曲变化（自动连播/手动切歌/右键另一首）：编辑对象变了 → 重新同步，避免误改上一首
 watch(
-  () => state.currentSong?.path,
+  () => song.value?.path,
   () => {
     if (props.open) syncForm();
   },
@@ -264,16 +336,30 @@ async function scrape() {
 }
 
 // 点选候选：填充表单 + 记录封面（条目 cover 为 null 则不换封面）
+// 新字段 item 有值才填，null/undefined 置空（网易云候选缺省 → 自动清空）
 function pick(item) {
   if (!item) return;
   form.title = item.title || "";
   form.artist = item.artist || "";
   form.album = item.album || "";
+  form.year = item.year ?? "";
+  form.genre = item.genre ?? "";
+  form.track = item.track ?? "";
+  form.albumArtist = item.album_artist ?? "";
   remoteCover.value = item.cover || null;
   previewBroken.value = false;
 }
 
-// 保存：POST /api/tags；成功 → toast + loadSongs 刷新 + 改名时更新 currentSong.path（不中断播放）
+// 数字字段转换：空 → null（后端 null = 不写）
+function toIntOrNull(v) {
+  if (v === "" || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+// 保存：POST /api/tags；成功 → toast + loadSongs 刷新 + 改名时更新目标歌曲（不中断播放）
+// enabled_fields（设置 scraping.enabled_fields，模块级缓存）存在且非空时：只提交勾选字段，其余置 null 不写；
+// 设置未就绪/接口失败 → 提交全部字段（容错）。
 async function save() {
   if (!song.value || saving.value) return;
   const title = form.title.trim();
@@ -285,26 +371,43 @@ async function save() {
   }
   saving.value = true;
   const path = song.value.path;
+  const body = {
+    path,
+    title,
+    artist,
+    album,
+    cover_url: remoteCover.value,
+    year: toIntOrNull(form.year),
+    genre: form.genre.trim() || null,
+    track: toIntOrNull(form.track),
+    album_artist: form.albumArtist.trim() || null,
+  };
+  const enabled = getEnabledFields();
+  if (Array.isArray(enabled) && enabled.length) {
+    // 只提交勾选字段：未勾选置 null（后端 null = 不写，保留原值）
+    for (const key of Object.keys(body)) {
+      if (key !== "path" && !enabled.includes(key)) body[key] = null;
+    }
+  }
   try {
-    const res = await apiPost("/api/tags", {
-      path,
-      title,
-      artist,
-      album,
-      cover_url: remoteCover.value,
-    });
+    const res = await apiPost("/api/tags", body);
     if (!res.ok) {
       const data = res.data || {};
       throw new Error(data.error || data.detail || t("tags.saveFailed", { msg: "" }));
     }
     const data = res.data || {};
-    // 当前播放的这首歌被改名：更新 path/name/artist/album，audio.src 不动 → 播放不中断
+    // 当前播放的这首歌被改名：更新 path/name/artist/album 及新字段，audio.src 不动 → 播放不中断
+    // （仅当编辑目标就是当前播放歌曲时更新 currentSong；右键编辑别的歌不影响播放）
     const cur = state.currentSong;
-    if (cur && data.newPath && data.newPath !== path) {
+    if (cur && cur === song.value && data.newPath && data.newPath !== path) {
       cur.path = data.newPath;
       if (typeof data.name === "string") cur.name = data.name;
       if (typeof data.artist === "string") cur.artist = data.artist;
       if (typeof data.album === "string") cur.album = data.album;
+      if (data.year !== undefined) cur.year = data.year;
+      if (data.genre !== undefined) cur.genre = data.genre;
+      if (data.track !== undefined) cur.track = data.track;
+      if (data.album_artist !== undefined) cur.album_artist = data.album_artist;
     }
     await loadSongs({ force: true }); // 刷新列表（loadSongs 按 path 保持当前选中/播放）
     showToast(t("tags.saveSuccess"), false);
@@ -456,6 +559,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* 扩展字段两列 grid（year/genre/track/album_artist），弹窗宽度 640px 内每列约 220px */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 .field-label {
   font-size: 11.5px;
@@ -721,6 +830,9 @@ onBeforeUnmount(() => {
   }
   .form-area {
     width: 100%;
+  }
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
   }
   .scrape-row {
     flex-wrap: wrap;
