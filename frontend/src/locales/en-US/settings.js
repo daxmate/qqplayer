@@ -3,6 +3,7 @@ export default {
   settings: {
     category: {
       pairing: "Pairing",
+      scrape: "Scraping",
     },
     cookiesFromBrowser: "Cookie source browser",
     cookiesFromBrowserDesc:
@@ -18,6 +19,41 @@ export default {
     amllEffects: "AMLL Effects",
     amllPerfHint:
       "These three AMLL effects are performance-heavy; turning them off can significantly reduce CPU usage (especially in the browser).",
+    // Scraping
+    scrapeFields: "Scrape fields",
+    scrapeFieldsDesc: "Song fields to write when batch scraping (checked = write)",
+    scrapeField: {
+      title: "Title",
+      artist: "Artist",
+      album: "Album",
+      cover: "Cover",
+      year: "Year",
+      genre: "Genre",
+      track: "Track #",
+      album_artist: "Album artist",
+    },
+    renameTemplate: "Rename template",
+    renameTemplateDesc: "Rename files by template after batch scraping (empty = keep name)",
+    renameTokens: "Placeholders: {artist} {title} {album} {track} {year}",
+    renameSlashHint: "A / in the template creates subfolders",
+    renamePreview: "Preview",
+    sourceOrder: "Source priority",
+    sourceOrderDesc: "Multi-source scraping tries sources in this order",
+    sourceName: {
+      netease: "NetEase Cloud Music",
+      musicbrainz: "MusicBrainz",
+    },
+    sourceUp: "Move up",
+    sourceDown: "Move down",
+    batchScrape: "Batch scraping",
+    batchScrapeDesc:
+      "When enabled, shows the batch scrape button in multi-select and the one-click fill entry; hidden when off",
+    batchLibraryGo: "Fill Missing Library Fields Now",
+    batchArmed: "Confirm fill?",
+    plugin: "Plugins",
+    pluginScrapeSource: "Custom scrape sources (plugins) — coming soon",
+    pluginScrapeSourceDesc: "A future release will support plugging in custom scrape sources",
+
     // Sync (iOS shell)
     sync: "Sync",
     syncNow: "Sync Now",

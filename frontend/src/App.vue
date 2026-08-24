@@ -246,6 +246,7 @@ import { setupDragImport, dragVisible, dragUploading } from "./composables/useDr
 import { usePairingConfirm } from "./composables/usePairingConfirm.js";
 import { initSync, nativeMetaLoad } from "./utils/sync.js";
 import { isNativePlayback } from "./composables/nativeAudioBridge.js";
+import { loadScrapingSettings } from "./composables/useScrapingSettings.js";
 import {
   coverSizePx,
   startCoverDrag,
@@ -502,6 +503,7 @@ onMounted(() => {
   loadQueueOrder().then(() => {
     loadSongs().then(() => restoreLastPlayed());
   });
+  loadScrapingSettings(); // 刮削设置（scraping namespace · 后端 /api/library/settings；未合并时容错保持默认）
   loadFavorites();
   loadPlaylists();
   setupKeyboardShortcuts();

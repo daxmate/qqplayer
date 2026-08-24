@@ -63,6 +63,8 @@ export default {
       selected: "{n} 首已选",
       fav: "批量收藏",
       addToPlaylist: "批量加歌单",
+      scrape: "批量刮削",
+      scraping: "刮削中 {n} 首…",
       deleteToTrash: "批量移到废纸篓",
       clear: "清空选择",
     },

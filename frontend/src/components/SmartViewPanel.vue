@@ -5,7 +5,7 @@
         <button class="sv-back" :title="t('smart.back')" @click="close">
           <ArrowLeft :size="15" />
         </button>
-        <span class="sv-title">{{ t(meta.titleKey) }}</span>
+        <span class="sv-title">{{ title }}</span>
         <span class="sv-count">{{ t("smart.count", { n: rows.length }) }}</span>
       </div>
       <div ref="svListEl" class="sv-list">
@@ -161,6 +161,7 @@ import { showToast, toastError } from "../composables/useToast.js";
 import { resolveServerUrl } from "../utils/apiClient.js";
 import {
   SMART_VIEWS,
+  DECADE_BUCKETS,
   smartViewState,
   loadSmartView,
   playSmartRow,
@@ -180,6 +181,16 @@ const meta = computed(() => SMART_VIEWS[props.kind] || SMART_VIEWS.recentAdded);
 const rows = computed(() => smartViewState.rows);
 const loading = computed(() => smartViewState.loading);
 const error = computed(() => smartViewState.error);
+
+// 年代视图标题：按具体年代显示（如「90年代」「未知年代」）；其他视图用通用标题 key
+const decadeBucket = computed(() => DECADE_BUCKETS.find((b) => b.key === smartViewState.decade));
+const title = computed(() => {
+  if (props.kind === "decades" && decadeBucket.value) {
+    const b = decadeBucket.value;
+    return b.labelParams ? t(b.labelKey, b.labelParams) : t(b.labelKey);
+  }
+  return t(meta.value.titleKey);
+});
 
 function isCurrent(row) {
   return state.currentSong && row.song.path === state.currentSong.path;

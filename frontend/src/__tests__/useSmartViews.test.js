@@ -42,6 +42,10 @@ const {
   fmtTs,
   fmtDuration,
   SMART_VIEW_LIMIT,
+  DECADE_BUCKETS,
+  decadeOfYear,
+  mapDecade,
+  countByDecade,
 } = await import("../composables/useSmartViews.js");
 const { state } = await import("../composables/usePlayer.js");
 
@@ -281,6 +285,163 @@ describe("playSmartRow（点击行播放链路）", () => {
     expect(ok).toBe(true);
     expect(state.currentIndex).toBe(2);
     expect(state.currentSong.streamId).toBe("s2");
+  });
+});
+
+describe("decadeOfYear（年代边界：10 年一段 + 更早/未知）", () => {
+  it("边界 1959/1960：闭区间 [min, max]", () => {
+    expect(decadeOfYear(1959)).toBe("1950s");
+    expect(decadeOfYear(1960)).toBe("1960s");
+    expect(decadeOfYear(1940)).toBe("1950s"); // 更早归 1950s
+    expect(decadeOfYear(1900)).toBe("1950s");
+  });
+
+  it("各段边界与 2020s 含以后", () => {
+    expect(decadeOfYear(1969)).toBe("1960s");
+    expect(decadeOfYear(1970)).toBe("1970s");
+    expect(decadeOfYear(1989)).toBe("1980s");
+    expect(decadeOfYear(1990)).toBe("1990s");
+    expect(decadeOfYear(1999)).toBe("1990s");
+    expect(decadeOfYear(2000)).toBe("2000s");
+    expect(decadeOfYear(2009)).toBe("2000s");
+    expect(decadeOfYear(2010)).toBe("2010s");
+    expect(decadeOfYear(2019)).toBe("2010s");
+    expect(decadeOfYear(2020)).toBe("2020s");
+    expect(decadeOfYear(2030)).toBe("2020s");
+  });
+
+  it("year 缺失/非法 → unknown", () => {
+    expect(decadeOfYear(null)).toBe("unknown");
+    expect(decadeOfYear(undefined)).toBe("unknown");
+    expect(decadeOfYear("")).toBe("unknown");
+    expect(decadeOfYear("abc")).toBe("unknown");
+    expect(decadeOfYear(1990.5)).toBe("unknown");
+    expect(decadeOfYear(99)).toBe("unknown");
+    expect(decadeOfYear(10000)).toBe("unknown");
+    expect(decadeOfYear("1995")).toBe("1990s"); // 字符串数字可解析
+  });
+});
+
+describe("mapDecade（年代聚合：按 song.year 纯前端分组）", () => {
+  const decadeLib = [
+    { id: "a", path: "/lib/a.mp3", name: "A", year: 1991 },
+    { id: "b", path: "/lib/b.mp3", name: "B", year: 1985 },
+    { id: "c", path: "/lib/c.mp3", name: "C", year: 1999 },
+    { id: "d", path: "/lib/d.mp3", name: "D" }, // 无 year → unknown
+    { id: "e", path: "/lib/e.mp3", name: "E", year: null }, // unknown
+    { id: "f", path: "/lib/f.mp3", name: "F", year: "2024" },
+    { id: "g", path: "/lib/g.mp3", name: "G", year: 1959 },
+    { id: "h", path: "/lib/h.mp3", name: "H", year: 1960 },
+  ];
+
+  it("按 bucket 聚合，组内 year 降序（新在前）", () => {
+    const rows = mapDecade(decadeLib, "1990s");
+    expect(rows.map((r) => r.song.path)).toEqual(["/lib/c.mp3", "/lib/a.mp3"]);
+  });
+
+  it("1950s 含更早 / 2020s 含以后 / 边界 1959·1960 归位", () => {
+    expect(mapDecade(decadeLib, "1950s").map((r) => r.song.path)).toEqual(["/lib/g.mp3"]);
+    expect(mapDecade(decadeLib, "1960s").map((r) => r.song.path)).toEqual(["/lib/h.mp3"]);
+    expect(mapDecade(decadeLib, "2020s").map((r) => r.song.path)).toEqual(["/lib/f.mp3"]);
+  });
+
+  it("未知年代：year 缺失/非法全部进 unknown", () => {
+    const rows = mapDecade(decadeLib, "unknown");
+    expect(rows.map((r) => r.song.path)).toEqual(["/lib/d.mp3", "/lib/e.mp3"]);
+  });
+
+  it("非法 bucket key 回落 unknown；空库空数组；limit 截断", () => {
+    expect(mapDecade(decadeLib, "not-a-bucket").map((r) => r.song.path)).toEqual([
+      "/lib/d.mp3",
+      "/lib/e.mp3",
+    ]);
+    expect(mapDecade([], "1990s")).toEqual([]);
+    expect(mapDecade(decadeLib, "unknown", 1)).toHaveLength(1);
+  });
+
+  it("DECADE_BUCKETS 覆盖 9 组（更早/60s~20s/未知）", () => {
+    expect(DECADE_BUCKETS.map((b) => b.key)).toEqual([
+      "1950s",
+      "1960s",
+      "1970s",
+      "1980s",
+      "1990s",
+      "2000s",
+      "2010s",
+      "2020s",
+      "unknown",
+    ]);
+  });
+});
+
+describe("countByDecade（年代计数：未知年代徽标数据源）", () => {
+  it("统计各年代数量（含 unknown）", () => {
+    const counts = countByDecade([
+      { year: 1985 },
+      { year: 1990 },
+      { year: 1991 },
+      { year: null },
+      { year: "2020" },
+      { year: "bad" },
+    ]);
+    expect(counts["1980s"]).toBe(1);
+    expect(counts["1990s"]).toBe(2);
+    expect(counts["2020s"]).toBe(1);
+    expect(counts["unknown"]).toBe(2);
+    expect(counts["1950s"]).toBe(0);
+  });
+
+  it("空库全 0", () => {
+    const counts = countByDecade([]);
+    expect(Object.values(counts).every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe("loadSmartView decades（年代视图：纯前端聚合，不发请求）", () => {
+  it("进入年代视图：按 decade 聚合 rows，state.decade 落参", async () => {
+    state.songs = [
+      { id: "a", path: "/lib/a.mp3", name: "A", year: 1988 },
+      { id: "b", path: "/lib/b.mp3", name: "B", year: 1989 },
+      { id: "c", path: "/lib/c.mp3", name: "C", year: 1990 },
+    ];
+    await loadSmartView("decades", "1980s");
+    expect(smartViewState.active).toBe("decades");
+    expect(smartViewState.decade).toBe("1980s");
+    expect(smartViewState.rows.map((r) => r.song.path)).toEqual(["/lib/b.mp3", "/lib/a.mp3"]);
+    expect(smartViewState.error).toBe("");
+  });
+
+  it("未传 decade 参数：用已写入的 smartViewState.decade（侧栏 openSmartView 先落参）", async () => {
+    state.songs = [{ id: "a", path: "/lib/a.mp3", year: 1975 }];
+    smartViewState.decade = "1970s";
+    await loadSmartView("decades");
+    expect(smartViewState.decade).toBe("1970s");
+    expect(smartViewState.rows).toHaveLength(1);
+  });
+
+  it("年代视图打开时曲库变化 → 自动重算（复用 recentAdded 的 watch 机制）", async () => {
+    state.songs = [{ id: "a", path: "/lib/a.mp3", name: "A", year: 2001 }];
+    await loadSmartView("decades", "2000s");
+    expect(smartViewState.rows).toHaveLength(1);
+    state.songs = [
+      { id: "a", path: "/lib/a.mp3", name: "A", year: 2001 },
+      { id: "b", path: "/lib/b.mp3", name: "B", year: 2005 },
+    ];
+    await nextTick();
+    expect(smartViewState.rows).toHaveLength(2);
+    expect(smartViewState.rows[0].song.path).toBe("/lib/b.mp3"); // year 降序
+  });
+
+  it("非年代视图 decade 复位为 null；closeSmartView 复位 decade", async () => {
+    await loadSmartView("decades", "1990s");
+    expect(smartViewState.decade).toBe("1990s");
+    await loadSmartView("recentAdded");
+    expect(smartViewState.decade).toBe(null);
+    await loadSmartView("decades", "2010s");
+    closeSmartView();
+    expect(smartViewState.active).toBe(null);
+    expect(smartViewState.decade).toBe(null);
+    expect(smartViewState.rows).toEqual([]);
   });
 });
 

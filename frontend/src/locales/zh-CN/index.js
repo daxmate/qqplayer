@@ -21,6 +21,7 @@ import importMessages from "./import.js";
 import queue from "./queue.js";
 import books from "./books.js";
 import videos from "./videos.js";
+import scrape from "./scrape.js";
 
 export default {
   ...common,
@@ -43,4 +44,5 @@ export default {
   ...queue,
   ...books,
   ...videos,
+  ...scrape,
 };

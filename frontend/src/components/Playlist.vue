@@ -160,6 +160,23 @@
           <ListPlus :size="13" />
           {{ t("playlist.multi.addToPlaylist") }}
         </button>
+        <!-- 批量刮削（仅开启批量刮削后显示） -->
+        <button
+          v-if="scrapingSettings.batch_enabled"
+          class="pl-multi-btn"
+          :disabled="scrapeBatchState.loading"
+          :title="t('playlist.multi.scrape')"
+          data-testid="pl-multi-scrape"
+          @click="batchScrape"
+        >
+          <Loader2 v-if="scrapeBatchState.loading" :size="13" class="spin" />
+          <Sparkles v-else :size="13" />
+          {{
+            scrapeBatchState.loading
+              ? t("playlist.multi.scraping", { n: selectedPaths.length })
+              : t("playlist.multi.scrape")
+          }}
+        </button>
         <button
           class="pl-multi-btn danger"
           :title="t('playlist.multi.deleteToTrash')"
@@ -388,6 +405,9 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- 批量刮削结果面板（多选批量；与设置页一键整库共用同一面板） -->
+    <ScrapeResultModal />
   </div>
 </template>
 
@@ -412,6 +432,7 @@ import {
   LocateFixed,
   Download,
   Loader2,
+  Sparkles,
 } from "@lucide/vue";
 import {
   state,
@@ -435,6 +456,9 @@ import {
   uiSettings,
 } from "../composables/usePlayer.js";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
+import { scrapingSettings } from "../composables/useScrapingSettings.js";
+import { scrapeBatchState, runScrapeBatch } from "../composables/useScrapeBatch.js";
+import ScrapeResultModal from "./ScrapeResultModal.vue";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
 import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
@@ -724,6 +748,19 @@ function openAddMenuBatch(paths) {
 // 批量移到废纸篓（与单曲同一链路：确认弹窗 → DELETE → toast → loadSongs）
 function batchDelete() {
   openDeleteDialog(selectedPaths.value);
+}
+
+// ============ 批量刮削（多选 → POST /api/tags/scrape-batch） ============
+// 按钮仅当设置里开启 batch_enabled 后显示（关闭时入口隐藏）；批量写入会改文件名，
+// 完成后刷新曲库 + 清空多选；结果面板（ScrapeResultModal）展示 summary + 明细。
+async function batchScrape() {
+  if (!scrapingSettings.batch_enabled) return;
+  const paths = selectedPaths.value.filter((p) => p != null);
+  if (!paths.length) return;
+  await runScrapeBatch({ paths });
+  // 请求结束（成功/未启用/失败都收敛）：改没改名都刷一次保险，多选清空
+  await loadSongs({ force: true });
+  clearSelection();
 }
 
 // ============ 右键菜单（桌面） ============
@@ -1860,6 +1897,9 @@ function fmtDur(d) {
 .pl-spin {
   animation: pl-dl-spin 0.9s linear infinite;
 }
+.spin {
+  animation: pl-dl-spin 0.9s linear infinite;
+}
 @keyframes pl-dl-spin {
   from {
     transform: rotate(0deg);
@@ -1903,6 +1943,10 @@ function fmtDur(d) {
   font-size: 11.5px;
   font-weight: 600;
   transition: all 0.12s;
+}
+.pl-multi-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 @media (hover: hover) {
   .pl-multi-btn:hover {

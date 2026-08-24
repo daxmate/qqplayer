@@ -18,5 +18,7 @@ export default {
       added: "已加入歌单「{name}」",
       alreadyIn: "已在歌单「{name}」中",
     },
+    // 年代分类（侧边栏分组标题）
+    decades: "年代",
   },
 };

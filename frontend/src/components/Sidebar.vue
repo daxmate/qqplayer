@@ -32,6 +32,24 @@
         </div>
       </template>
 
+      <!-- 年代分类（Apple Music Decades 粒度，纯前端按 song.year 聚合） -->
+      <div class="sb-group">{{ t("sidebar.decades") }}</div>
+      <template v-for="b in decadeEntries" :key="b.key">
+        <div
+          class="sb-item"
+          :class="{
+            on: smartViewState.active === 'decades' && smartViewState.decade === b.key,
+          }"
+          :title="decadeLabel(b)"
+          :data-testid="'sb-decade-' + b.key"
+          @click="openSmartView('decades', b.key)"
+        >
+          <Calendar :size="15" />
+          <span class="sb-name">{{ decadeLabel(b) }}</span>
+          <span class="sb-count">{{ decadeCounts[b.key] ?? 0 }}</span>
+        </div>
+      </template>
+
       <!-- 歌单列表（拖拽目标：歌曲行拖进来加歌） -->
       <template v-for="p in state.playlists" :key="p.id">
         <div
@@ -114,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from "vue";
 import {
   Library,
   Music2,
@@ -125,6 +143,7 @@ import {
   Sparkles,
   History,
   TrendingUp,
+  Calendar,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -141,9 +160,11 @@ import {
 import { showToast, toastError } from "../composables/useToast.js";
 import {
   SMART_VIEWS,
+  DECADE_BUCKETS,
   smartViewState,
   loadSmartView,
   closeSmartView,
+  countByDecade,
 } from "../composables/useSmartViews.js";
 import SmartViewPanel from "./SmartViewPanel.vue";
 
@@ -156,6 +177,14 @@ const smartViewEntries = [
   { kind: "topPlayed", titleKey: SMART_VIEWS.topPlayed.titleKey, icon: TrendingUp },
 ];
 
+// 年代入口（Apple Music Decades：更早 / 60s~20s / 未知）
+const decadeEntries = DECADE_BUCKETS;
+const decadeCounts = computed(() => countByDecade(state.songs));
+
+function decadeLabel(b) {
+  return b.labelParams ? t(b.labelKey, b.labelParams) : t(b.labelKey);
+}
+
 function activate(pid) {
   if (smartViewState.active) closeSmartViewPanel(); // 切回常规视图时关闭智能视图
   state.activePlaylistId = pid;
@@ -163,13 +192,17 @@ function activate(pid) {
 }
 
 // ============ 智能视图 ============
-function openSmartView(kind) {
-  if (smartViewState.active === kind) {
-    closeSmartViewPanel(); // 再点同一项 = 关闭
+function openSmartView(kind, decade) {
+  // 再点同一项 = 关闭（年代视图：同 kind + 同 decade）
+  const same =
+    smartViewState.active === kind && (kind !== "decades" || smartViewState.decade === decade);
+  if (same) {
+    closeSmartViewPanel();
     return;
   }
   smartViewState.prevPlaylistOpen = state.playlistOpen; // 记住进入前的面板开关，退出时恢复
   state.playlistOpen = true; // 挂载 Playlist 作为智能视图定位锚点（面板覆盖其上）
+  if (kind === "decades") smartViewState.decade = decade;
   loadSmartView(kind);
 }
 

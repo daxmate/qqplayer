@@ -67,10 +67,10 @@ describe("SettingsModal 配对分类", () => {
     w.unmount();
   });
 
-  it("无 iOS 桥时导航包含完整分类（含配对，共 10 项）", async () => {
+  it("无 iOS 桥时导航包含完整分类（含配对，共 11 项）", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await flushPromises();
-    expect(navItems().length).toBe(10);
+    expect(navItems().length).toBe(11);
     w.unmount();
   });
 });

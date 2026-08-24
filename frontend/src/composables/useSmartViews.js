@@ -16,10 +16,27 @@ export const SMART_VIEWS = {
   recentAdded: { titleKey: "smart.recentAdded.title", emptyKey: "smart.recentAdded.empty" },
   recentPlayed: { titleKey: "smart.recentPlayed.title", emptyKey: "smart.recentPlayed.empty" },
   topPlayed: { titleKey: "smart.topPlayed.title", emptyKey: "smart.topPlayed.empty" },
+  // 年代视图：kind=decades + 参数 decade（DECADE_BUCKETS 的 key）；标题按具体年代显示（SmartViewPanel 内处理）
+  decades: { titleKey: "smart.decades.title", emptyKey: "smart.decades.empty" },
 };
 
+// 年代划分（Apple Music Decades 粒度：10 年一段 + 未知；纯前端按 song.year 聚合）
+// min/max 闭区间；1950s 含更早（min=null），2020s 含以后（max=null）
+export const DECADE_BUCKETS = [
+  { key: "1950s", min: null, max: 1959, labelKey: "smart.decadeEarly" },
+  { key: "1960s", min: 1960, max: 1969, labelKey: "smart.decadeLabel", labelParams: { n: 6 } },
+  { key: "1970s", min: 1970, max: 1979, labelKey: "smart.decadeLabel", labelParams: { n: 7 } },
+  { key: "1980s", min: 1980, max: 1989, labelKey: "smart.decadeLabel", labelParams: { n: 8 } },
+  { key: "1990s", min: 1990, max: 1999, labelKey: "smart.decadeLabel", labelParams: { n: 9 } },
+  { key: "2000s", min: 2000, max: 2009, labelKey: "smart.decade2000s" },
+  { key: "2010s", min: 2010, max: 2019, labelKey: "smart.decade2010s" },
+  { key: "2020s", min: 2020, max: null, labelKey: "smart.decade2020s" },
+  { key: "unknown", min: null, max: null, labelKey: "smart.decadeUnknown" },
+];
+
 export const smartViewState = reactive({
-  active: null, // 'recentAdded' | 'recentPlayed' | 'topPlayed' | null
+  active: null, // 'recentAdded' | 'recentPlayed' | 'topPlayed' | 'decades' | null
+  decade: null, // 年代视图参数（active==='decades' 时：DECADE_BUCKETS key）
   loading: false,
   error: "",
   rows: [], // [{ song, record?, stat? }]（song 为当前库歌曲对象）
@@ -62,13 +79,50 @@ export function mapRecentAdded(library, limit = SMART_VIEW_LIMIT) {
     .map((song) => ({ song }));
 }
 
+// 歌曲 year → 年代 bucket key（纯函数）：year 缺失/非 4 位整数/越界 → unknown
+// 边界：1959 → 1950s，1960 → 1960s（闭区间 [min, max]）
+export function decadeOfYear(year) {
+  const n = Number(year);
+  if (!Number.isInteger(n) || n < 1000 || n > 9999) return "unknown";
+  if (n <= 1959) return "1950s";
+  if (n <= 1969) return "1960s";
+  if (n <= 1979) return "1970s";
+  if (n <= 1989) return "1980s";
+  if (n <= 1999) return "1990s";
+  if (n <= 2009) return "2000s";
+  if (n <= 2019) return "2010s";
+  return "2020s";
+}
+
+// 年代视图行：按 year 聚合到指定 bucket，同年内按 year 降序（新在前），截断 limit
+// 非法 bucket key 回落 unknown（与 DECADE_BUCKETS 尾项一致）
+export function mapDecade(library, bucketKey, limit = SMART_VIEW_LIMIT) {
+  const key = (DECADE_BUCKETS.some((b) => b.key === bucketKey) && bucketKey) || "unknown";
+  return [...(library || [])]
+    .filter((s) => decadeOfYear(s && s.year) === key)
+    .sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0))
+    .slice(0, limit)
+    .map((song) => ({ song }));
+}
+
+// 曲库 → 各年代数量（侧边栏徽标 / 未知年代入口计数）
+export function countByDecade(library) {
+  const counts = {};
+  for (const b of DECADE_BUCKETS) counts[b.key] = 0;
+  for (const s of library || []) {
+    const k = decadeOfYear(s && s.year);
+    if (k in counts) counts[k] += 1;
+  }
+  return counts;
+}
+
 // 库数组 → path 索引 Map
 export function byPath(songs) {
   return new Map((songs || []).map((s) => [s.path, s]));
 }
 
 // ============ 视图加载（进入时拉取一次） ============
-export async function loadSmartView(kind) {
+export async function loadSmartView(kind, decade) {
   smartViewState.active = kind;
   smartViewState.loading = true;
   smartViewState.error = "";
@@ -76,13 +130,21 @@ export async function loadSmartView(kind) {
   try {
     const libById = byPath(state.songs);
     if (kind === "recentAdded") {
+      smartViewState.decade = null;
       smartViewState.rows = mapRecentAdded(state.songs);
+    } else if (kind === "decades") {
+      // 参数优先，未传则用侧栏 openSmartView 已写入的 smartViewState.decade
+      if (decade) smartViewState.decade = decade;
+      if (!smartViewState.decade) smartViewState.decade = "unknown";
+      smartViewState.rows = mapDecade(state.songs, smartViewState.decade);
     } else if (kind === "recentPlayed") {
+      smartViewState.decade = null;
       // 播放记录是统计类数据，保持实时拉取（不走缓存）
       const r = await apiGet("/api/playback");
       if (!r.ok) throw new Error(i18n.global.t("errors.loadPlayback"));
       smartViewState.rows = mapRecentPlayed(r.data && r.data.records, libById);
     } else if (kind === "topPlayed") {
+      smartViewState.decade = null;
       const r = await apiGet("/api/playback/stats");
       if (!r.ok) throw new Error(i18n.global.t("errors.loadPlaybackStats"));
       smartViewState.rows = mapTopPlayed(r.data && r.data.songs, libById);
@@ -96,18 +158,21 @@ export async function loadSmartView(kind) {
 
 export function closeSmartView() {
   smartViewState.active = null;
+  smartViewState.decade = null;
   smartViewState.loading = false;
   smartViewState.error = "";
   smartViewState.rows = [];
 }
 
-// 曲库变化（下载/导入/删除后 loadSongs 整体替换 state.songs）→ 正在看"最近添加"时自动重算，
-// 新添加的歌实时排到最上。recentPlayed/topPlayed 依赖后端统计，保持进入时拉取一次（避免轮询风暴）。
+// 曲库变化（下载/导入/删除后 loadSongs 整体替换 state.songs）→ 正在看"最近添加"/"年代"时自动重算，
+// 新添加的歌实时排到最上/新年代归位。recentPlayed/topPlayed 依赖后端统计，保持进入时拉取一次（避免轮询风暴）。
 watch(
   () => state.songs,
   () => {
     if (smartViewState.active === "recentAdded") {
       smartViewState.rows = mapRecentAdded(state.songs);
+    } else if (smartViewState.active === "decades") {
+      smartViewState.rows = mapDecade(state.songs, smartViewState.decade);
     }
   },
 );
