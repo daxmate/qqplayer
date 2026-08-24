@@ -3,7 +3,9 @@
 # 用法: ./build.sh [--install]  （兼容 install / --install 两种写法）
 #   --install: 构建后安装到 /Applications（自动清理旧的独立迷你窗/歌词壳，避免 scheme 冲突）
 set -euo pipefail
-cd "$(dirname "$0")"
+# 脚本目录绝对路径（cd 前解析，防止 cd 后 dirname $0 相对路径失效）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 INSTALL=0
 case "${1:-}" in
@@ -23,7 +25,7 @@ APP_NAME="QQPlayer"
 BUNDLE_ID="com.daxmate.qqplayer"
 BUILD_DIR="build"
 # 版本号唯一真源：仓库根 VERSION 文件（desktop/macOS/../../VERSION）
-VERSION="$(cat "$(dirname "$0")/../../VERSION")"
+VERSION="$(cat "$SCRIPT_DIR/../../VERSION")"
 
 echo "📦 编译 Swift 壳..."
 mkdir -p "$BUILD_DIR"
