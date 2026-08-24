@@ -205,6 +205,7 @@ def test_devices_list_no_token_hash():
         "device_type",
         "created_at",
         "last_seen_at",
+        "note",
     }
     assert "token_hash" not in d
 
@@ -400,3 +401,117 @@ def test_revoke_all_servers_legacy_endpoint():
     assert not pairing_service.verify_token(token2)
     # 幂等：重复撤销仍 200
     assert client.delete("/api/pairing/devices/iphone-01").status_code == 200
+
+
+# ============ 设备备注 note ============
+
+
+def test_list_devices_includes_note_default_empty():
+    """新配对条目 note 为空串；老数据无 note 字段 → 列表兜底空串"""
+    _pair_device()
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert devices[0]["note"] == ""
+    # 老数据兼容：手工去掉 note 字段后列表仍返回空串
+    data = state.pairing_store.load()
+    data["devices"][0].pop("note")
+    state.pairing_store.save(data)
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert devices[0]["note"] == ""
+
+
+def test_patch_note_updates_list():
+    """PATCH 更新 note → 返回条目带新值，列表反映"""
+    _pair_device()
+    server_id = pairing_service.get_server_id()
+    r = client.patch(
+        f"/api/pairing/devices/{server_id}/iphone-01",
+        json={"note": "客厅的 iPhone"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["device"]["note"] == "客厅的 iPhone"
+    assert body["device"]["device_id"] == "iphone-01"
+    listed = client.get("/api/pairing/devices").json()["devices"]
+    assert listed[0]["note"] == "客厅的 iPhone"
+
+
+def test_patch_note_unknown_device_404():
+    """不存在的 device_id 或 server_id → 404"""
+    _pair_device()
+    server_id = pairing_service.get_server_id()
+    assert (
+        client.patch(
+            f"/api/pairing/devices/{server_id}/no-such-device", json={"note": "x"}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            "/api/pairing/devices/no-such-server/iphone-01", json={"note": "x"}
+        ).status_code
+        == 404
+    )
+    # note 缺失/非字符串 → 400
+    assert client.patch(f"/api/pairing/devices/{server_id}/iphone-01", json={}).status_code == 400
+    assert (
+        client.patch(f"/api/pairing/devices/{server_id}/iphone-01", json={"note": 123}).status_code
+        == 400
+    )
+
+
+def test_patch_note_clean_empty_truncate_idempotent():
+    """note 清洗：strip、空串允许、超 50 字符截断（含多字节）、重复 PATCH 幂等"""
+    _pair_device()
+    server_id = pairing_service.get_server_id()
+    url = f"/api/pairing/devices/{server_id}/iphone-01"
+    # 纯空白 → 空串
+    r = client.patch(url, json={"note": "   "})
+    assert r.status_code == 200 and r.json()["device"]["note"] == ""
+    # 首尾空白 strip
+    r = client.patch(url, json={"note": "  主卧  iPad  "})
+    assert r.status_code == 200 and r.json()["device"]["note"] == "主卧  iPad"
+    # 超长截断（ASCII 与多字节均按 [:50] 截断）
+    r = client.patch(url, json={"note": "a" * 60})
+    assert r.status_code == 200 and r.json()["device"]["note"] == "a" * 50
+    r = client.patch(url, json={"note": "你" * 60})
+    assert r.status_code == 200 and r.json()["device"]["note"] == "你" * 50
+    # 幂等：重复 PATCH 同值 → 200 且值不变
+    r2 = client.patch(url, json={"note": "你" * 60})
+    assert r2.status_code == 200 and r2.json()["device"]["note"] == "你" * 50
+    assert client.get("/api/pairing/devices").json()["devices"][0]["note"] == "你" * 50
+
+
+def test_patch_note_persisted():
+    """note 落盘：PATCH 后重新 load 存储文件仍有新值"""
+    _pair_device()
+    server_id = pairing_service.get_server_id()
+    assert (
+        client.patch(
+            f"/api/pairing/devices/{server_id}/iphone-01",
+            json={"note": "公司工位"},
+        ).status_code
+        == 200
+    )
+    data = state.pairing_store.load()
+    assert data["devices"][0]["note"] == "公司工位"
+    # 再次 load（模拟重启后从文件读）仍有
+    assert state.pairing_store.load()["devices"][0]["note"] == "公司工位"
+
+
+def test_patch_note_scoped_by_server_id():
+    """note 按 (server_id, device_id) 定位：只改目标桌面的条目，另一台桌面不受影响"""
+    _pair_device()
+    server_a = pairing_service.get_server_id()
+    _switch_server_id("server-B")
+    _pair_device()
+    assert (
+        client.patch(
+            f"/api/pairing/devices/{server_a}/iphone-01", json={"note": "家里"}
+        ).status_code
+        == 200
+    )
+    data = state.pairing_store.load()
+    by_server = {d["server_id"]: d for d in data["devices"]}
+    assert by_server[server_a]["note"] == "家里"
+    assert by_server["server-B"]["note"] == ""

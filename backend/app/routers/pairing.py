@@ -6,6 +6,7 @@
 - POST   /api/pairing/request/:id/reject   拒绝
 - GET    /api/pairing/request/:id/status   查询状态（approved 时附 token，仅一次）
 - GET    /api/pairing/devices              已配对设备列表（含 server_id，区分"哪台桌面"）
+- PATCH  /api/pairing/devices/:server_id/:device_id  更新已配对设备的用户备注 note
 - DELETE /api/pairing/devices/:server_id/:device_id  撤销该设备在某台桌面的配对（新增）
 - DELETE /api/pairing/devices/:device_id   旧接口兼容：撤销该设备在所有桌面的配对
 
@@ -80,6 +81,18 @@ def api_pairing_status(request_id: str):
 def api_pairing_devices():
     """已配对设备列表（不含 token_hash）"""
     return {"devices": pairing_service.list_devices()}
+
+
+@router.patch("/api/pairing/devices/{server_id}/{device_id}")
+def api_pairing_update_note(server_id: str, device_id: str, body: dict):
+    """更新已配对设备的用户备注（桌面设置区区分多台重名设备）；note 清洗见 service"""
+    note = body.get("note")
+    if note is None or not isinstance(note, str):
+        raise HTTPException(400, "note 必填且须为字符串")
+    device = pairing_service.update_note(server_id, device_id, note)
+    if device is None:
+        raise HTTPException(404, "设备不存在或未配对")
+    return {"ok": True, "device": device}
 
 
 @router.delete("/api/pairing/devices/{server_id}/{device_id}")

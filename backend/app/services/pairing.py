@@ -191,6 +191,7 @@ def approve(request_id: str) -> dict:
                 "token_hash": token_hash,
                 "created_at": now,
                 "last_seen_at": now,
+                "note": "",
             }
         )
     else:
@@ -270,7 +271,7 @@ def status(request_id: str) -> dict:
 
 
 def list_devices() -> list[dict]:
-    """已配对设备列表（不含 token_hash）；每条含 server_id（iOS 端区分"哪台桌面"）"""
+    """已配对设备列表（不含 token_hash）；每条含 server_id（iOS 端区分"哪台桌面"）与 note（用户备注）"""
     devices = state.pairing_store.load().get("devices", [])
     return [
         {
@@ -280,9 +281,35 @@ def list_devices() -> list[dict]:
             "device_type": d.get("device_type", ""),
             "created_at": d.get("created_at", ""),
             "last_seen_at": d.get("last_seen_at", ""),
+            "note": d.get("note", ""),  # 老数据无 note → 空串兜底
         }
         for d in devices
     ]
+
+
+def update_note(server_id: str, device_id: str, note: str) -> dict | None:
+    """更新已配对设备的用户备注（区分多台重名设备）。
+
+    按 (server_id, device_id) 定位条目并更新 note 落盘，返回更新后的条目 dict（含 note）；
+    找不到匹配条目返回 None。note 清洗：strip 去首尾空白，超 50 字符截断（前端同限）。
+    """
+    clean = note.strip()[:50]
+    data = state.pairing_store.load()
+    devices = data.get("devices", [])
+    for d in devices:
+        if d.get("device_id") == device_id and _server_id_of(d) == server_id:
+            d["note"] = clean
+            state.pairing_store.save(data)
+            return {
+                "server_id": _server_id_of(d),
+                "device_id": d.get("device_id", ""),
+                "device_name": d.get("device_name", ""),
+                "device_type": d.get("device_type", ""),
+                "created_at": d.get("created_at", ""),
+                "last_seen_at": d.get("last_seen_at", ""),
+                "note": d.get("note", ""),
+            }
+    return None
 
 
 def revoke(device_id: str, server_id: str | None = None) -> dict:
