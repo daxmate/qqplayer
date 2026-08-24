@@ -102,7 +102,8 @@ describe("PairingSettings 已配对设备列表", () => {
     routeGet({ devices: [device({ note: "书房 iPad" })] });
     const w = await mountSettings();
     const text = w.text();
-    expect(text).toContain("iPhone 15");
+    // 展示名：有备注用备注（备注优先），设备名不重复渲染
+    expect(text).not.toContain("iPhone 15");
     expect(text).toContain("书房 iPad");
     // 配对时间：跨天 → MM-DD HH:mm（两天前的 14:32）
     const created = new Date();

@@ -12,13 +12,8 @@
           <component :is="deviceIcon(d.device_type)" :size="16" class="pairing-row-icon" />
           <div class="pairing-row-main">
             <div class="pairing-row-name">
-              {{
-                d.device_name && String(d.device_name).trim()
-                  ? d.device_name
-                  : t("pairing.deviceUnknown")
-              }}
+              {{ displayName(d) }}
             </div>
-            <div v-if="d.note" class="pairing-row-note">{{ d.note }}</div>
             <div class="pairing-row-meta">
               <span>{{ t("pairing.pairedAt", { time: fmtTime(d.created_at) }) }}</span>
               <span class="pairing-dot">·</span>
@@ -218,8 +213,14 @@ function closeConfirm() {
 }
 const confirmName = computed(() => {
   const d = confirmTarget.value;
-  return d && d.device_name ? d.device_name : t("pairing.deviceUnknown");
+  return d ? displayName(d) : t("pairing.deviceUnknown");
 });
+
+/// 展示名：有备注用备注（用户可区分同名设备），无备注用设备名
+function displayName(d) {
+  if (d && d.note && String(d.note).trim()) return String(d.note).trim();
+  return d && d.device_name ? d.device_name : t("pairing.deviceUnknown");
+}
 async function confirmDelete() {
   const d = confirmTarget.value;
   if (!d || busy.value) return;
