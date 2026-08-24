@@ -1,5 +1,6 @@
 // sync.js 单元测试：manifest 同步（version 对比 + 集合写入）/ ensureAsset（hasAsset→
-// 回执，autoPrefetch 门控下载）/ 下载进度聚合 / appState 生命周期 / 桌面浏览器 no-op
+// 回执，autoPrefetch 门控下载）/ nativeMetaSave|nativeMetaLoad（元数据文件兜底桥）/
+// 下载进度聚合 / appState 生命周期 / 桌面浏览器 no-op
 //
 // mock 策略（参考 apiClient.test.js / nativeAudioBridge.test.js 风格）：
 //   - apiClient：vi.mock 整模块（apiGet + resolveServerUrl）
@@ -332,6 +333,75 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
   });
 });
 
+describe("nativeMetaSave / nativeMetaLoad：元数据文件持久化兜底桥", () => {
+  beforeEach(async () => {
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    apiMock.apiGet.mockReset();
+    bridgeMock.post.mockClear();
+    bridgeMock.handlers.clear();
+    sync._resetSyncForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("nativeMetaSave：发 {cmd:metaSave, kind, json}（fire-and-forget）", async () => {
+    await setNativeEnv();
+    const json = JSON.stringify([{ path: "/Music/a.mp3" }]);
+    expect(sync.nativeMetaSave("songs", json)).toBe(true);
+    expect(bridgeMock.post).toHaveBeenCalledWith({ cmd: "metaSave", kind: "songs", json });
+  });
+
+  it("nativeMetaSave：空 json / 非原生环境 → 静默 no-op（不发消息）", async () => {
+    await setNativeEnv();
+    expect(sync.nativeMetaSave("songs", "")).toBe(false);
+    expect(bridgeMock.post).not.toHaveBeenCalled();
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    expect(sync.nativeMetaSave("songs", "[]")).toBe(false);
+    expect(bridgeMock.post).not.toHaveBeenCalled();
+  });
+
+  it("nativeMetaLoad：发 metaLoad → metaLoaded 回执 resolve(json)", async () => {
+    await setNativeEnv();
+    const json = JSON.stringify(["favorites", "songs"]);
+    const p = sync.nativeMetaLoad("favorites");
+    expect(bridgeMock.post).toHaveBeenCalledWith({
+      cmd: "metaLoad",
+      kind: "favorites",
+      requestId: "1",
+    });
+    bridgeMock.emit("metaLoaded", { requestId: "1", kind: "favorites", json });
+    await expect(p).resolves.toBe(json);
+  });
+
+  it("nativeMetaLoad：文件缺失（无 json 字段）→ resolve(null)", async () => {
+    await setNativeEnv();
+    const p = sync.nativeMetaLoad("playlists");
+    bridgeMock.emit("metaLoaded", { requestId: "1", kind: "playlists" });
+    await expect(p).resolves.toBeNull();
+  });
+
+  it("nativeMetaLoad：原生无回执 → 超时 resolve(null)，不挂起", async () => {
+    vi.useFakeTimers();
+    await setNativeEnv();
+    const p = sync.nativeMetaLoad("songs");
+    expect(bridgeMock.post).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(sync.META_LOAD_TIMEOUT_MS + 10);
+    await expect(p).resolves.toBeNull();
+    // 迟到回执：忽略（已结算，不抛错）
+    bridgeMock.emit("metaLoaded", { requestId: "1", kind: "songs", json: "[]" });
+    vi.advanceTimersByTime(0);
+  });
+
+  it("nativeMetaLoad：非原生环境（桌面/macOS 壳无桥）→ 立即 resolve(null)", async () => {
+    await expect(sync.nativeMetaLoad("songs")).resolves.toBeNull();
+    expect(bridgeMock.post).not.toHaveBeenCalled();
+  });
+});
+
 describe("assetForSong / assetForDict / assetForBook：沙盒路径内容寻址", () => {
   beforeEach(() => {
     sync._resetSyncForTests();
@@ -390,8 +460,14 @@ describe("initSync：事件订阅 + 下载进度聚合 + appState 触发同步",
     sync.initSync();
     await flush();
     expect(apiMock.apiGet).toHaveBeenCalledWith("/api/sync/manifest");
-    // 四类事件均已订阅
-    for (const name of ["syncAssetProgress", "syncAssetDone", "assetStatus", "appState"]) {
+    // 各类事件均已订阅（含 metaLoaded 元数据文件回执）
+    for (const name of [
+      "syncAssetProgress",
+      "syncAssetDone",
+      "assetStatus",
+      "appState",
+      "metaLoaded",
+    ]) {
       expect(bridgeMock.handlers.has(name)).toBe(true);
     }
   });

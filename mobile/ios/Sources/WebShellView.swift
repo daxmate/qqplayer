@@ -70,6 +70,8 @@ struct WebShellView: UIViewRepresentable {
         private var scenePhaseObserver: NSObjectProtocol?
         /// hasAsset 请求的 requestId 队列（path → [requestId]，逐个消费）
         private var pendingAssetStatus: [String: [String]] = [:]
+        /// metaLoad 请求的 requestId → kind（回执时回带；对齐 hasAsset 的 requestId 回执模式）
+        private var pendingMetaLoads: [String: String] = [:]
 
         let userContentController: WKUserContentController
 
@@ -290,6 +292,27 @@ struct WebShellView: UIViewRepresentable {
                    DownloadManager.isSafePath(path) {
                     pendingAssetStatus[path, default: []].append(requestId)
                     downloadManager.checkAsset(path: path)
+                }
+            case "metaSave":
+                // 元数据文件兜底写：{kind, json} → Documents/meta/{kind}.json 原子写
+                // （fire-and-forget；失败静默，前端不依赖回执）
+                if let kind = body["kind"] as? String,
+                   let json = body["json"] as? String {
+                    MetaStore.save(kind: kind, json: json)
+                }
+            case "metaLoad":
+                // 元数据文件兜底读：{kind, requestId} → 回推 metaLoaded {requestId, kind, json?}
+                // （文件缺失/损坏 → 无 json 字段；前端 8s 超时兜底）
+                if let kind = body["kind"] as? String,
+                   let requestId = body["requestId"] as? String {
+                    pendingMetaLoads[requestId] = kind
+                    let json = MetaStore.load(kind: kind)
+                    pendingMetaLoads.removeValue(forKey: requestId)
+                    var payload: [String: Any] = ["requestId": requestId, "kind": kind]
+                    if let json {
+                        payload["json"] = json
+                    }
+                    pushToWeb(event: "metaLoaded", payload: payload)
                 }
             case "cancelDownloads":
                 downloadManager.cancelAll()

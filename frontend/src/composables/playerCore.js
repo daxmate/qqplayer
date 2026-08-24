@@ -26,7 +26,7 @@ import {
   nativeSendMetadata,
   nativePost,
 } from "./nativeAudioBridge.js";
-import { ensureAsset, assetForSong } from "../utils/sync.js";
+import { ensureAsset, assetForSong, nativeMetaSave } from "../utils/sync.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -1200,6 +1200,15 @@ export async function loadSongs(opts = {}) {
     if (r.network) throw new Error(r.message); // 网络失败走 catch（state.error 提示）
     const songs = r.data;
     state.songs = songs;
+    // iOS 壳元数据文件兜底：IndexedDB 重启不可靠（免费签名覆盖安装被清），
+    // 成功拿到的曲库落 Documents/meta/songs.json（fire-and-forget；非壳/失败静默）
+    if (isNativePlayback()) {
+      try {
+        nativeMetaSave("songs", JSON.stringify(songs));
+      } catch {
+        /* 写文件失败静默：不影响加载 */
+      }
+    }
     // 拖拽排序持久化的队列顺序：刷新/启动时恢复（loadQueueOrder 需先于首次 loadSongs 完成，见 App.vue）
     applyQueueOrder();
     if (songs.length && state.currentIndex < 0) {

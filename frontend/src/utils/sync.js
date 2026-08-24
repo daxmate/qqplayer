@@ -5,9 +5,12 @@
 //     全量写入 IndexedDB（key: sync:songs / sync:playlists / sync:favorites /
 //     sync:books / sync:dicts，经 cacheDb.setCache，ttl=0 不自动过期）
 //   - ensureAsset()：本地资产查询（hasAsset → assetStatus 回执，Promise 化）→
-//     存在返回 localURL；不存在发 syncDownload 后台下载并 resolve(null)
+//     存在返回 localURL；不存在且「自动预取」开启（或调用方显式 download:true）
+//     才发 syncDownload 后台下载并 resolve(null)——默认关 = 只查不下载
+//   - nativeMetaSave / nativeMetaLoad：元数据文件持久化兜底桥（Documents/meta/
+//     {kind}.json；iOS 壳 IndexedDB 重启不可靠，播放列表/收藏落文件双写）
 //   - initSync()：经 nativeAudioBridge.onNativeEvent 订阅（syncAssetProgress /
-//     syncAssetDone / assetStatus / appState），并执行首次 syncNow()。
+//     syncAssetDone / assetStatus / appState / metaLoaded），并执行首次 syncNow()。
 //     注意：window.qqplayerOnNativeEvent 全局入口由 nativeAudioBridge 独占安装，
 //     本模块只订阅不分发，避免双处理。
 //
@@ -16,10 +19,13 @@
 //     {cmd:"syncDownload", items:[{url,path,sha256,size}]}  批量下载请求
 //     {cmd:"hasAsset", path, requestId}                     本地资产查询
 //     {cmd:"cancelDownloads"}                               取消全部下载
+//     {cmd:"metaSave", kind, json}                          元数据写文件（fire-and-forget）
+//     {cmd:"metaLoad", kind, requestId}                     元数据读文件（回执 metaLoaded）
 //   Native→Web：window.qqplayerOnNativeEvent(name, payload)
 //     {name:"syncAssetProgress", path, received, total}     total 未知为 0
 //     {name:"syncAssetDone", path, ok, sha256, localURL, error?}
 //     {name:"assetStatus", requestId, path, exists, localURL}
+//     {name:"metaLoaded", requestId, kind, json?}           元数据文件读取回执
 //     {name:"appState", state:"active"|"inactive"|"background"}
 //
 // 环境：桌面浏览器（window.qqplayerNative 未定义）→ 全部静默 no-op，桌面行为零变化；
@@ -379,6 +385,7 @@ function ensureSubscribed() {
   unsubs.push(onNativeEvent("assetStatus", handleAssetStatus));
   unsubs.push(onNativeEvent("appState", handleAppState));
   unsubs.push(onNativeEvent("assetsSize", handleAssetsSize));
+  unsubs.push(onNativeEvent("metaLoaded", handleMetaLoaded));
 }
 
 /**
@@ -414,6 +421,14 @@ export function stopSync() {
 function handleAssetStatus(payload) {
   if (!payload || payload.requestId == null) return;
   const resolve = pendingQueries.get(payload.requestId);
+  if (!resolve) return; // 已超时/已消费的回执：忽略
+  resolve(payload);
+}
+
+// ---------- 内部：metaLoaded 回执分发（nativeMetaLoad 挂起的读取） ----------
+function handleMetaLoaded(payload) {
+  if (!payload || payload.requestId == null) return;
+  const resolve = pendingMetaLoads.get(payload.requestId);
   if (!resolve) return; // 已超时/已消费的回执：忽略
   resolve(payload);
 }
@@ -527,6 +542,52 @@ export function fetchAssetsSize() {
   });
 }
 
+// ---------- 元数据文件持久化兜底（iOS 壳 IndexedDB 重启不可靠 → Documents/meta 文件双写） ----------
+// 对齐 pairing「Keychain+文件双写」先例：歌曲/收藏/歌单元数据在原生侧落 JSON 文件，
+// 启动时读回填；网络成功覆盖、失败保留文件数据（IndexedDB 丢了也能离线看列表）。
+let metaSeq = 0;
+const pendingMetaLoads = new Map(); // requestId → resolve(json|null)
+
+/** metaLoad 回执等待超时（ms）：原生无回执时不挂起启动流程 */
+export const META_LOAD_TIMEOUT_MS = 8000;
+
+/**
+ * 元数据写文件（fire-and-forget）：{cmd:"metaSave", kind, json} → 原生原子写
+ * Documents/meta/{kind}.json。非 iOS 壳 / 参数非法 → 静默 no-op。
+ * @param {"songs"|"favorites"|"playlists"} kind 文件种类
+ * @param {string} json 序列化后的元数据 JSON 字符串
+ */
+export function nativeMetaSave(kind, json) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  if (typeof kind !== "string" || !kind || typeof json !== "string" || !json) return false;
+  nativePost({ cmd: "metaSave", kind, json });
+  return true;
+}
+
+/**
+ * 元数据读文件（Promise 化）：{cmd:"metaLoad", kind, requestId} → 原生回推
+ * metaLoaded {requestId, kind, json?} → resolve(json)；文件缺失/损坏/超时 → resolve(null)。
+ */
+export function nativeMetaLoad(kind) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
+  ensureSubscribed(); // 需要 metaLoaded 事件订阅
+  const requestId = String(++metaSeq);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (pendingMetaLoads.has(requestId)) {
+        pendingMetaLoads.delete(requestId);
+        resolve(null);
+      }
+    }, META_LOAD_TIMEOUT_MS);
+    pendingMetaLoads.set(requestId, (payload) => {
+      clearTimeout(timer);
+      pendingMetaLoads.delete(requestId);
+      resolve(payload && typeof payload.json === "string" ? payload.json : null);
+    });
+    nativePost({ cmd: "metaLoad", kind, requestId });
+  });
+}
+
 // ---------- 自动预取开关（localStorage 持久化；默认关） ----------
 const AUTO_PREFETCH_KEY = "qqplayer.autoPrefetch";
 
@@ -564,6 +625,8 @@ export function _resetSyncForTests() {
   subscribed = false;
   requestSeq = 0;
   pendingQueries.clear();
+  metaSeq = 0;
+  pendingMetaLoads.clear();
   activeDownloads.clear();
   downloadBatch.length = 0;
   downloadBatchTimer = null;

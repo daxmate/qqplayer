@@ -244,7 +244,8 @@ import {
 } from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import { usePairingConfirm } from "./composables/usePairingConfirm.js";
-import { initSync } from "./utils/sync.js";
+import { initSync, nativeMetaLoad } from "./utils/sync.js";
+import { isNativePlayback } from "./composables/nativeAudioBridge.js";
 import {
   coverSizePx,
   startCoverDrag,
@@ -441,6 +442,48 @@ async function runStartupSelfTest() {
   }
 }
 
+/**
+ * iOS 壳启动兜底：IndexedDB 重启不可靠（免费签名覆盖安装被清）→ 从原生文件
+ * Documents/meta/{kind}.json 回填歌曲/收藏/歌单。方案 A：与正常加载并行发起，
+ * 合并规则 = 回填完成时对应 state 仍为空才赋值——网络成功会覆盖（loadSongs 等
+ * 完成后写文件），失败/离线则保留文件数据，保证断网重启后列表有数据。
+ * 桌面浏览器 / macOS 壳（无 iOS 桥）→ 内部静默 no-op。
+ */
+async function backfillMetaFromFile() {
+  if (!isNativePlayback()) return;
+  const [songsJson, favoritesJson, playlistsJson] = await Promise.all([
+    nativeMetaLoad("songs"),
+    nativeMetaLoad("favorites"),
+    nativeMetaLoad("playlists"),
+  ]);
+  if (songsJson) {
+    try {
+      const songs = JSON.parse(songsJson);
+      if (Array.isArray(songs) && songs.length && !state.songs.length) {
+        state.songs = songs;
+      }
+    } catch {
+      /* 文件数据损坏：忽略，走正常加载 */
+    }
+  }
+  if (favoritesJson) {
+    try {
+      const favs = JSON.parse(favoritesJson);
+      if (Array.isArray(favs) && !state.favorites.length) state.favorites = favs;
+    } catch {
+      /* 忽略 */
+    }
+  }
+  if (playlistsJson) {
+    try {
+      const pls = JSON.parse(playlistsJson);
+      if (Array.isArray(pls) && !state.playlists.length) state.playlists = pls;
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
 onMounted(() => {
   // 数据层在线状态/配对失效监听：离线降级与 401 特判的轻提示（见 apiClient）
   offlineUnsub = onOfflineChange((off) => {
@@ -453,6 +496,8 @@ onMounted(() => {
   flushPendingOps();
   // 启动自检：与正常启动加载并发，GET /api/settings 只读无副作用
   runStartupSelfTest();
+  // iOS 壳元数据文件兜底回填（与正常加载并行；空 state 才赋值，网络成功覆盖）
+  backfillMetaFromFile();
   // 队列顺序持久化：先拉取再加载歌曲（loadSongs 恢复顺序依赖该缓存）
   loadQueueOrder().then(() => {
     loadSongs().then(() => restoreLastPlayed());
