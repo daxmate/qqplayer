@@ -12,6 +12,7 @@ TXT 记录：v=版本号（仓库根 VERSION 文件，唯一真源；缺失时�
 """
 
 import asyncio
+import contextlib
 import logging
 import socket
 
@@ -125,10 +126,41 @@ def _build_info():
     )
 
 
+# IP 变化检测间隔（秒）：DHCP 重新分配后旧 IP 不可达，iOS 解析到旧地址会一直"解析中"
+_REFRESH_INTERVAL = 30
+
+
+async def _refresh_loop(zc, holder: dict) -> None:
+    """后台刷新：本机局域网 IP 变化时重新注册 mDNS 广播。
+
+    zeroconf 的 ServiceInfo 注册后地址固定，不会随本机 IP 变化自动更新；
+    若 DHCP 换 IP（如 .124 -> .230），旧广播指向不可达地址，手机浏览得到服务名
+    但连接失败（2026-08-24 真机"解析中"根因）。每 30s 对比一次，变了就
+    注销旧记录并用新地址重新注册；holder["info"] 同步更新，保证 stop() 注销的是最新记录。
+    """
+    while True:
+        await asyncio.sleep(_REFRESH_INTERVAL)
+        current = _local_ipv4()
+        info = holder["info"]
+        advertised = socket.inet_ntoa(info.addresses[0]) if info.addresses else ""
+        if current and current != advertised:
+            logger.info("mDNS 本机 IP 变化 %s -> %s，重新广播", advertised, current)
+            try:
+                await asyncio.wait_for(zc.async_unregister_service(info), timeout=5)
+            except Exception:  # noqa: BLE001
+                logger.warning("mDNS 注销旧地址广播失败", exc_info=True)
+            try:
+                new_info = _build_info()
+                await asyncio.wait_for(zc.async_register_service(new_info), timeout=5)
+                holder["info"] = new_info
+            except Exception:  # noqa: BLE001
+                logger.warning("mDNS 重新广播失败（下轮再试）", exc_info=True)
+
+
 async def start():
     """启动 mDNS 广播（AsyncZeroconf；zeroconf 未安装/注册失败时降级静默）。
 
-    返回 handle（含 zc/info），供 stop() 注销；失败返回 None。
+    返回 handle（含 zc/info/refresh_task），供 stop() 注销；失败返回 None。
     """
     try:
         from zeroconf.asyncio import AsyncZeroconf
@@ -143,14 +175,21 @@ async def start():
         logger.warning("mDNS 广播注册失败", exc_info=True)
         await zc.async_close()
         return None
-    return {"zc": zc, "info": info}
+    holder = {"info": info}
+    refresh_task = asyncio.create_task(_refresh_loop(zc, holder))
+    return {"zc": zc, "info": info, "holder": holder, "refresh_task": refresh_task}
 
 
 async def stop(handle) -> None:
     """退出时注销 mDNS 服务（handle 为空/异常时静默）"""
     if not handle:
         return
-    zc, info = handle["zc"], handle["info"]
+    task = handle.get("refresh_task")
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    zc, info = handle["zc"], handle.get("holder", {}).get("info") or handle["info"]
     try:
         await asyncio.wait_for(zc.async_unregister_service(info), timeout=5)
     except Exception:  # noqa: BLE001
