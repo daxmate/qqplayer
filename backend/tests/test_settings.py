@@ -184,6 +184,110 @@ def test_books_last_read_id_valid_preserved():
     client.put("/api/settings", json={"books": {"lastReadId": ""}})
 
 
+# ============ scraping namespace（标签刮削设置）============
+def test_scraping_namespace_defaults():
+    """scraping 默认值：enabled_fields 白名单 / rename_template / source_order / batch_enabled=False"""
+    s = client.get("/api/settings").json()["settings"]["scraping"]
+    assert s == {
+        "enabled_fields": [
+            "title",
+            "artist",
+            "album",
+            "cover",
+            "year",
+            "genre",
+            "track",
+            "album_artist",
+        ],
+        "rename_template": "{artist} - {title}",
+        "source_order": ["netease", "musicbrainz"],
+        "batch_enabled": False,
+    }
+
+
+def test_scraping_enabled_fields_whitelist_dedupe_order():
+    """enabled_fields：白名单外字段丢弃，去重保序；全非法回落默认"""
+    s = client.put(
+        "/api/settings",
+        json={"scraping": {"enabled_fields": ["cover", "year", "hack", "year", "title", "year"]}},
+    ).json()["settings"]["scraping"]
+    assert s["enabled_fields"] == ["cover", "year", "title"]  # 去重保序 + 白名单过滤
+    # 全非法 / 非法类型 → 回落默认
+    for bad in (["hack", "nope"], 123, None, "title"):
+        s = client.put("/api/settings", json={"scraping": {"enabled_fields": bad}}).json()[
+            "settings"
+        ]["scraping"]
+        assert s["enabled_fields"] == [
+            "title",
+            "artist",
+            "album",
+            "cover",
+            "year",
+            "genre",
+            "track",
+            "album_artist",
+        ], f"enabled_fields={bad!r} 应回落默认"
+
+
+def test_scraping_rename_template_validated():
+    """rename_template：非空字符串合法保留；空串/非字符串回落默认"""
+    tpl = "{track} - {artist} - {title}"
+    s = client.put("/api/settings", json={"scraping": {"rename_template": tpl}}).json()["settings"][
+        "scraping"
+    ]
+    assert s["rename_template"] == tpl
+    for bad in ("", "   ", 123, None, ["{title}"]):
+        s = client.put("/api/settings", json={"scraping": {"rename_template": bad}}).json()[
+            "settings"
+        ]["scraping"]
+        assert s["rename_template"] == "{artist} - {title}", f"rename_template={bad!r} 应回落默认"
+
+
+def test_scraping_source_order_validated():
+    """source_order：只含 netease/musicbrainz 且不重复保序；非法回落默认"""
+    s = client.put(
+        "/api/settings", json={"scraping": {"source_order": ["musicbrainz", "netease", "netease"]}}
+    ).json()["settings"]["scraping"]
+    assert s["source_order"] == ["musicbrainz", "netease"]  # 去重保序
+    for bad in (["hack"], [], 123, None, "netease"):
+        s = client.put("/api/settings", json={"scraping": {"source_order": bad}}).json()[
+            "settings"
+        ]["scraping"]
+        assert s["source_order"] == ["netease", "musicbrainz"], f"source_order={bad!r} 应回落默认"
+
+
+def test_scraping_batch_enabled_bool():
+    """batch_enabled：bool 保留；非 bool 回落默认 False"""
+    s = client.put("/api/settings", json={"scraping": {"batch_enabled": True}}).json()["settings"][
+        "scraping"
+    ]
+    assert s["batch_enabled"] is True
+    for bad in ("yes", 1, None, [True]):
+        s = client.put("/api/settings", json={"scraping": {"batch_enabled": bad}}).json()[
+            "settings"
+        ]["scraping"]
+        assert s["batch_enabled"] is False, f"batch_enabled={bad!r} 应回落默认"
+    # 恢复默认（避免影响其他用例）
+    client.put("/api/settings", json={"scraping": {"batch_enabled": False}})
+
+
+def test_scraping_persisted_across_restart():
+    """scraping 设置落盘持久化（模拟重启后仍读到）"""
+    client.put(
+        "/api/settings",
+        json={"scraping": {"rename_template": "{year} - {title}", "batch_enabled": True}},
+    )
+    state._settings = None
+    s = client.get("/api/settings").json()["settings"]["scraping"]
+    assert s["rename_template"] == "{year} - {title}"
+    assert s["batch_enabled"] is True
+    # 清理
+    client.put(
+        "/api/settings",
+        json={"scraping": {"rename_template": "{artist} - {title}", "batch_enabled": False}},
+    )
+
+
 # ============ video.bilibiliCookie（B站 Cookie）============
 def test_video_bilibili_cookie_default():
     """video.bilibiliCookie 默认空串（未设置），随 GET /api/settings 返回"""

@@ -68,8 +68,8 @@ def _full_scan():
             if len(imgs) == 1:
                 cover = imgs[0].name
         # id 用相对歌曲库的路径（歌曲库可能在 backend 目录之外，不能 relative_to(ROOT)）
-        # 提取 ID3 元数据（歌手/标题/专辑），没有就用文件名
-        artist, title, album = tags.extract_tags(f)
+        # 提取 ID3 元数据（歌手/标题/专辑/年份/流派/音轨/专辑歌手），没有就用文件名
+        artist, title, album, year, genre, track, album_artist = tags.extract_tags(f)
         # 最近添加排序用：添加时间（macOS birthtime；跨平台 fallback 文件 mtime），毫秒整数
         st = f.stat()
         mtime_ms = int((getattr(st, "st_birthtime", None) or st.st_mtime) * 1000)
@@ -80,6 +80,10 @@ def _full_scan():
                 "name": title or f.stem,
                 "artist": artist or (f.parent.name if f.parent != state.LIBRARY else ""),
                 "album": album or "",
+                "year": year,  # int|null（刮削补全判定依据）
+                "genre": genre or "",  # str（刮削补全判定依据）
+                "track": track,  # int|null
+                "album_artist": album_artist or "",  # str
                 "folder": str(f.parent),
                 "ext": f.suffix.lower().lstrip("."),
                 "lyric": lyric,

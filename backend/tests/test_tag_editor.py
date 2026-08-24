@@ -15,11 +15,22 @@ sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
 import tag_editor  # noqa: E402
 from app import state  # noqa: E402
-from tag_editor import UnsupportedFormatError, save_tags  # noqa: E402
+from tag_editor import UnsupportedFormatError, save_tags, target_filename  # noqa: E402
 
 client = TestClient(backend.app)
 
 FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"x" * 200
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings(tmp_path, monkeypatch):
+    """设置存储隔离：settings.json 写临时目录（/api/tags 保存时读 rename_template），每测试后重置缓存"""
+    monkeypatch.setattr(state, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(state, "UI_SETTINGS_FILE", tmp_path / "ui_settings.json")
+    monkeypatch.setattr(state, "DESKTOP_LYRIC_FILE", tmp_path / "desktop_lyric.json")
+    state._settings = None
+    yield
+    state._settings = None
 
 
 # ============ 假音频文件生成（真实磁盘文件，mutagen 可读写）============
@@ -117,7 +128,7 @@ def test_save_tags_mp3_text_and_cover(tmp_path, monkeypatch):
     assert result["renamed"] is True
     assert result["name"] == "安静"
     assert not f.exists() and new.exists()
-    artist, title, album = backend.extract_tags(new)
+    artist, title, album, *_ = backend.extract_tags(new)
     assert (artist, title, album) == ("周杰伦", "安静", "范特西")
     from mutagen.id3 import ID3
 
@@ -135,7 +146,7 @@ def test_save_tags_m4a_text_and_cover(tmp_path, monkeypatch):
     new = tmp_path / "周杰伦 - 安静.m4a"
     assert result["renamed"] is True
     assert new.exists()
-    artist, title, album = backend.extract_tags(new)
+    artist, title, album, *_ = backend.extract_tags(new)
     assert (artist, title, album) == ("周杰伦", "安静", "范特西")
     from mutagen.mp4 import MP4, MP4Cover
 
@@ -154,7 +165,7 @@ def test_save_tags_flac_text_and_cover(tmp_path, monkeypatch):
     new = tmp_path / "周杰伦 - 安静.flac"
     assert result["renamed"] is True
     assert new.exists()
-    artist, title, album = backend.extract_tags(new)
+    artist, title, album, *_ = backend.extract_tags(new)
     assert (artist, title, album) == ("周杰伦", "安静", "范特西")
     from mutagen.flac import FLAC
 
@@ -173,7 +184,7 @@ def test_save_tags_ogg_text_only_cover_skipped(tmp_path, monkeypatch):
     new = tmp_path / "周杰伦 - 安静.ogg"
     assert result["renamed"] is True
     assert new.exists()
-    artist, title, album = backend.extract_tags(new)
+    artist, title, album, *_ = backend.extract_tags(new)
     assert (artist, title, album) == ("周杰伦", "安静", "范特西")
 
 
@@ -201,7 +212,7 @@ def test_atomic_write_failure_preserves_original(tmp_path, monkeypatch):
         save_tags(f, title="新名", artist="新歌手")
     # 原文件保持完好：内容与标签都没变
     assert f.exists()
-    assert backend.extract_tags(f) == ("旧歌手", "旧名", None)
+    assert backend.extract_tags(f) == ("旧歌手", "旧名", None, None, "", None, "")
     # 临时文件已清理
     assert list(tmp_path.glob(".*.tagtmp-*")) == []
 
@@ -231,7 +242,7 @@ def test_no_rename_when_target_same_as_current(tmp_path):
     result = save_tags(f, title="安静", artist="周杰伦")
     assert result["renamed"] is False
     assert result["path"] == str(f) and result["newPath"] == str(f)
-    assert backend.extract_tags(f) == ("周杰伦", "安静", None)
+    assert backend.extract_tags(f) == ("周杰伦", "安静", None, None, "", None, "")
 
 
 def test_album_only_no_rename_name_falls_back_to_stem(tmp_path):
@@ -241,7 +252,7 @@ def test_album_only_no_rename_name_falls_back_to_stem(tmp_path):
     assert result["renamed"] is False
     assert result["path"] == str(f)
     assert result["name"] == "song"
-    assert backend.extract_tags(f) == (None, None, "范特西")
+    assert backend.extract_tags(f) == (None, None, "范特西", None, "", None, "")
 
 
 def test_unsupported_format_raises(tmp_path):
@@ -382,7 +393,7 @@ def test_api_tags_write_failure_409(tmp_path, monkeypatch):
     r = client.post("/api/tags", json={"path": str(f), "title": "新名", "artist": "新歌手"})
     assert r.status_code == 409
     assert f.exists()  # 原文件回滚
-    assert backend.extract_tags(f) == ("旧歌手", "旧名", None)
+    assert backend.extract_tags(f) == ("旧歌手", "旧名", None, None, "", None, "")
     assert list(tmp_path.glob(".*.tagtmp-*")) == []
 
 
@@ -402,7 +413,7 @@ def test_api_tags_cover_download_failure_ignored(tmp_path, monkeypatch):
     )
     assert r.status_code == 200
     new = tmp_path / "周杰伦 - 安静.mp3"
-    assert backend.extract_tags(new) == ("周杰伦", "安静", None)
+    assert backend.extract_tags(new) == ("周杰伦", "安静", None, None, "", None, "")
     from mutagen.id3 import ID3
 
     assert ID3(str(new)).getall("APIC") == []  # 封面确实没写
@@ -446,3 +457,239 @@ def test_api_tags_scrape_query_fallback_to_stem(tmp_path, monkeypatch):
 def test_api_tags_scrape_missing_file_404(tmp_path):
     r = client.post("/api/tags/scrape", json={"path": str(tmp_path / "nope.mp3")})
     assert r.status_code == 404
+
+
+# ============ 新字段 year/genre/track/album_artist（四格式写入）============
+def test_save_tags_mp3_new_fields(tmp_path):
+    """MP3 写 year(TYER)/genre(TCON)/track(TRCK)/album_artist(TPE2) 并读回"""
+    f = tmp_path / "song.mp3"
+    make_mp3(f)
+    r = save_tags(
+        f,
+        title="安静",
+        artist="周杰伦",
+        year=2001,
+        genre="流行/华语",
+        track=3,
+        album_artist="合集歌手",
+    )
+    artist, title, _album, year, genre, track, album_artist = backend.extract_tags(Path(r["path"]))
+    assert (artist, title) == ("周杰伦", "安静")
+    assert (year, genre, track, album_artist) == (2001, "流行/华语", 3, "合集歌手")
+    from mutagen.id3 import ID3
+
+    tags = ID3(str(Path(r["path"])))
+    # mutagen 写 TYER 时自动转存 TDRC（v2.3/v2.4 兼容由 mutagen 处理）
+    assert str(tags["TDRC"].text[0]) == "2001"
+    assert str(tags["TCON"].text[0]) == "流行/华语"
+    assert str(tags["TRCK"].text[0]) == "3"
+    assert str(tags["TPE2"].text[0]) == "合集歌手"
+
+
+def test_save_tags_m4a_new_fields(tmp_path):
+    """M4A 写 ©day/©gen/trkn/aART 并读回"""
+    f = tmp_path / "song.m4a"
+    make_m4a(f)
+    r = save_tags(
+        f, title="安静", artist="周杰伦", year=2001, genre="流行", track=3, album_artist="合集歌手"
+    )
+    _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(Path(r["path"]))
+    assert (year, genre, track, album_artist) == (2001, "流行", 3, "合集歌手")
+    from mutagen.mp4 import MP4
+
+    audio = MP4(str(Path(r["path"])))
+    assert audio["\xa9day"] == ["2001"]
+    assert audio["\xa9gen"] == ["流行"]
+    assert audio["trkn"] == [(3, 0)]
+    assert audio["aART"] == ["合集歌手"]
+
+
+def test_save_tags_flac_new_fields(tmp_path):
+    """FLAC 写 date/genre/tracknumber/albumartist 并读回"""
+    f = tmp_path / "song.flac"
+    make_flac(f)
+    r = save_tags(
+        f, title="安静", artist="周杰伦", year=2001, genre="流行", track=3, album_artist="合集歌手"
+    )
+    _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(Path(r["path"]))
+    assert (year, genre, track, album_artist) == (2001, "流行", 3, "合集歌手")
+    from mutagen.flac import FLAC
+
+    audio = FLAC(str(Path(r["path"])))
+    assert audio["date"] == ["2001"]
+    assert audio["genre"] == ["流行"]
+    assert audio["tracknumber"] == ["3"]
+    assert audio["albumartist"] == ["合集歌手"]
+
+
+def test_save_tags_ogg_new_fields(tmp_path):
+    """OGG 写 date/genre/tracknumber/albumartist 并读回"""
+    f = tmp_path / "song.ogg"
+    make_ogg(f)
+    r = save_tags(
+        f, title="安静", artist="周杰伦", year=2001, genre="流行", track=3, album_artist="合集歌手"
+    )
+    _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(Path(r["path"]))
+    assert (year, genre, track, album_artist) == (2001, "流行", 3, "合集歌手")
+
+
+def test_save_tags_new_fields_empty_untouched(tmp_path):
+    """不传新字段 → 不写（year None/genre ""/track None/album_artist ""）"""
+    f = tmp_path / "song.mp3"
+    make_mp3(f, title="旧名", artist="旧歌手")
+    r = save_tags(f, title="新名", artist="新歌手")
+    _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(Path(r["path"]))
+    assert (year, genre, track, album_artist) == (None, "", None, "")
+
+
+# ============ 重命名模板渲染 ============
+def test_target_filename_default_template_regression():
+    """默认模板 {artist} - {title} 行为与历史完全一致（回归）"""
+    assert target_filename("周杰伦", "安静", ".mp3") == "周杰伦 - 安静.mp3"
+    assert target_filename("", "安静", ".mp3") == "安静.mp3"
+    assert target_filename("周杰伦", "", ".mp3") == "周杰伦.mp3"
+    assert target_filename("", "", ".mp3") is None
+    # 非法文件名字符清洗沿用（AC/DC → ACDC）
+    assert target_filename("AC/DC", "Highway", ".mp3") == "ACDC - Highway.mp3"
+    # 显式传默认模板字符串 → 同样走默认分支，结果一致
+    assert (
+        target_filename("周杰伦", "安静", ".mp3", template="{artist} - {title}")
+        == "周杰伦 - 安静.mp3"
+    )
+
+
+def test_target_filename_custom_template_fields():
+    """自定义模板占位符 {track}/{year}/{album} 渲染；空值渲染空串并清理残留分隔符"""
+    t = "{track}. {artist} - {title} ({year})"
+    assert (
+        target_filename("周杰伦", "安静", ".mp3", album="范特西", track=3, year=2001, template=t)
+        == "3. 周杰伦 - 安静 (2001).mp3"
+    )
+    # 空占位符 → 空串；前导分隔符被清理
+    assert target_filename("周杰伦", "安静", ".mp3", template="{track} - {title}") == "安静.mp3"
+    # 所有占位符都空 → None（不改名）
+    assert target_filename("", "", ".mp3", template="{artist} - {title} - {year}") is None
+    # album 占位符 + 子目录
+    assert (
+        target_filename("周杰伦", "安静", ".mp3", album="范特西", template="{album}/{title}")
+        == "范特西/安静.mp3"
+    )
+
+
+def test_target_filename_template_sanitize():
+    """模板路径清洗：非法字符去除（保留 / 子目录）；/ . .. 路径段过滤防穿越"""
+    assert (
+        target_filename("周杰伦", '安/静:歌"曲?<x>|y*', ".mp3", template="{artist} - {title}")
+        == "周杰伦 - 安静歌曲xy.mp3"
+    )
+    assert target_filename("..", "x", ".mp3", template="{artist}/{title}") == "x.mp3"
+    assert target_filename("a", "b", ".mp3", template="../{title}") == "b.mp3"
+
+
+def test_save_tags_template_subdirectory(tmp_path):
+    """模板含 / → 在文件所在目录下建子目录移动；引用迁移回调收到新旧路径"""
+    f = tmp_path / "song.mp3"
+    make_mp3(f)
+    migrated = []
+    r = save_tags(
+        f,
+        title="安静",
+        artist="周杰伦",
+        album="范特西",
+        rename_template="{artist}/{album} - {title}",
+        migrate=lambda old, new: migrated.append((old, new)),
+    )
+    new = tmp_path / "周杰伦" / "范特西 - 安静.mp3"
+    assert r["renamed"] is True
+    assert r["path"] == str(new)
+    assert new.exists() and not f.exists()
+    # 子目录移动引用迁移同样生效（新旧路径完整）
+    assert migrated == [(str(f), str(new))]
+    assert backend.extract_tags(new)[:2] == ("周杰伦", "安静")
+
+
+def test_save_tags_template_subdirectory_dedupe(tmp_path):
+    """子目录内重名 → 加 (2) 序号（去重基于新目录），绝不覆盖"""
+    f = tmp_path / "song.mp3"
+    make_mp3(f)
+    sub = tmp_path / "周杰伦"
+    sub.mkdir()
+    (sub / "范特西 - 安静.mp3").write_bytes(b"occupied")
+    r = save_tags(
+        f,
+        title="安静",
+        artist="周杰伦",
+        album="范特西",
+        rename_template="{artist}/{album} - {title}",
+    )
+    assert r["path"] == str(sub / "范特西 - 安静 (2).mp3")
+    assert (sub / "范特西 - 安静.mp3").read_bytes() == b"occupied"  # 绝不覆盖
+
+
+# ============ extract_tags 新字段解析（各格式 key 差异）============
+def test_extract_tags_id3_new_fields(tmp_path):
+    """ID3：TDRC（日期串取年份）/TCON/TRCK("3/12" 取 3)/TPE2"""
+    from mutagen.id3 import ID3, TCON, TDRC, TPE2, TRCK
+
+    f = tmp_path / "song.mp3"
+    make_mp3(f)
+    tags = ID3(str(f))
+    tags.add(TDRC(encoding=3, text="2001-06-15"))
+    tags.add(TCON(encoding=3, text="流行"))
+    tags.add(TRCK(encoding=3, text="3/12"))
+    tags.add(TPE2(encoding=3, text="合集"))
+    tags.save(f)
+    artist, title, _al, year, genre, track, album_artist = backend.extract_tags(f)
+    assert (artist, title) == (None, None)
+    assert (year, genre, track, album_artist) == (2001, "流行", 3, "合集")
+
+
+def test_extract_tags_mp4_new_fields(tmp_path):
+    """MP4：©day(前 4 位)/©gen(list 取第一个)/trkn/ aART"""
+    from mutagen.mp4 import MP4
+
+    f = tmp_path / "song.m4a"
+    make_m4a(f)
+    audio = MP4(str(f))
+    audio["\xa9day"] = ["2001-06-15"]
+    audio["\xa9gen"] = ["流行", "华语"]
+    audio["trkn"] = [(3, 12)]
+    audio["aART"] = ["合集"]
+    audio.save(f)
+    _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(f)
+    assert (year, genre, track, album_artist) == (2001, "流行", 3, "合集")
+
+
+def test_extract_tags_vorbis_new_fields(tmp_path):
+    """FLAC/OGG：DATE 优先 / YEAR 兜底；GENRE/TRACKNUMBER/ALBUMARTIST"""
+    for ext, maker in ((".flac", make_flac), (".ogg", make_ogg)):
+        f = tmp_path / f"song{ext}"
+        maker(f)
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+
+        audio = FLAC(str(f)) if ext == ".flac" else OggVorbis(str(f))
+        audio["date"] = ["2001-06-15"]
+        audio["genre"] = ["流行"]
+        audio["tracknumber"] = ["3"]
+        audio["albumartist"] = ["合集"]
+        audio.save()
+        _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(f)
+        assert (year, genre, track, album_artist) == (2001, "流行", 3, "合集"), ext
+        # YEAR 兜底（无 DATE）
+        audio["date"] = []
+        audio["year"] = ["1999"]
+        audio.save()
+        _a, _t, _al, year, *_ = backend.extract_tags(f)
+        assert year == 1999, ext
+
+
+def test_extract_tags_missing_new_fields_defaults(tmp_path):
+    """无新字段 → year None / genre "" / track None / album_artist ""；损坏文件也不抛异常"""
+    f = tmp_path / "song.mp3"
+    make_mp3(f)
+    _a, _t, _al, year, genre, track, album_artist = backend.extract_tags(f)
+    assert (year, genre, track, album_artist) == (None, "", None, "")
+    bad = tmp_path / "bad.mp3"
+    bad.write_bytes(b"\x00\x01\x02 not audio")
+    assert backend.extract_tags(bad) == (None, None, None, None, "", None, "")

@@ -73,7 +73,22 @@ MB_RECORDING = {
     "id": "mb-rec-1",
     "title": "安静",
     "artist-credit": [{"name": "周杰伦"}],
-    "releases": [{"id": "mb-rel-1", "title": "范特西"}],
+    "releases": [
+        {
+            "id": "mb-rel-1",
+            "title": "范特西",
+            "date": "2001-09-14",
+            "artist-credit": [{"name": "周杰伦"}],
+            "media": [{"track": [{"number": "3", "recording": {"id": "mb-rec-1"}}]}],
+        }
+    ],
+    "tags": [
+        {"count": 5, "name": "pop"},
+        {"count": 9, "name": "mandopop"},
+        {"count": 2, "name": "chinese"},
+        {"count": 1, "name": "ballad"},
+    ],
+    "first-release-date": "2001-09-14",
 }
 
 CAA_URL = tag_scraper.COVERARTARCHIVE_FRONT.format(mbid="mb-rel-1")
@@ -248,7 +263,7 @@ def test_mb_query_escapes_quotes_in_title():
 
 
 def test_scrape_musicbrainz_shape_ua_and_sleep():
-    """MusicBrainz 候选 5 字段 + 自定义 UA + 调用前 sleep 1s"""
+    """MusicBrainz 候选 9 字段（含 year/genre/track/album_artist）+ 自定义 UA + 调用前 sleep 1s"""
     scraper, client, sleeps = make_scraper(
         gets=[
             FakeResponse({"recordings": [MB_RECORDING]}),
@@ -259,16 +274,173 @@ def test_scrape_musicbrainz_shape_ua_and_sleep():
     result = scraper.scrape("安静", "周杰伦")
     assert len(result["musicbrainz"]) == 1
     cand = result["musicbrainz"][0]
-    assert set(cand) == {"title", "artist", "album", "cover", "mbid"}
+    assert set(cand) == {
+        "title",
+        "artist",
+        "album",
+        "cover",
+        "mbid",
+        "year",
+        "genre",
+        "track",
+        "album_artist",
+    }
     assert cand["mbid"] == "mb-rec-1"
     assert cand["artist"] == "周杰伦"
     assert cand["album"] == "范特西"
     assert cand["cover"] == CAA_URL
+    # 新字段：year 取 release date 年份；genre 按 count 降序前 3 join；track 从 media 找；album_artist 取 release credit
+    assert cand["year"] == 2001
+    assert cand["genre"] == "mandopop/pop/chinese"
+    assert cand["track"] == 3
+    assert cand["album_artist"] == "周杰伦"
     # 自定义 User-Agent（否则 MusicBrainz 403）+ 每次调用前 sleep 1s
     mb_call = client.calls[0]
     assert mb_call[0] == tag_scraper.MUSICBRAINZ_API
     assert mb_call[1]["headers"]["User-Agent"] == tag_scraper.MUSICBRAINZ_UA
     assert sleeps == [1]
+
+
+# ============ MB 候选新字段（year/genre/track/album_artist）============
+def test_mb_year_release_date_priority():
+    """year：release.date 优先，first-release-date 兜底"""
+    rec = {
+        **MB_RECORDING,
+        "first-release-date": "1999-03-01",
+        "releases": [{**MB_RECORDING["releases"][0], "date": "2001-09-14"}],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["year"] == 2001
+
+
+def test_mb_year_fallback_first_release_date():
+    """year：release 无 date → first-release-date 年份"""
+    rec = {
+        **MB_RECORDING,
+        "first-release-date": "2001-09-14",
+        "releases": [{**MB_RECORDING["releases"][0], "date": None}],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["year"] == 2001
+
+
+def test_mb_year_missing_null():
+    """year：release 与 first-release-date 都没有 → None，不抛异常"""
+    rec = {
+        **MB_RECORDING,
+        "first-release-date": None,
+        "releases": [{**MB_RECORDING["releases"][0], "date": None}],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["year"] is None
+
+
+def test_mb_genre_sorted_top3_join():
+    """genre：tags 按 count 降序取前 3 个 name 用 / 连接（输入乱序）"""
+    rec = {
+        **MB_RECORDING,
+        "tags": [
+            {"count": 1, "name": "ballad"},
+            {"count": 9, "name": "mandopop"},
+            {"count": 5, "name": "pop"},
+            {"count": 2, "name": "chinese"},
+        ],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["genre"] == "mandopop/pop/chinese"
+
+
+def test_mb_genre_empty_string():
+    """genre：无 tags / tags 无 name → 空串"""
+    for tags in (None, [], [{"count": 3}]):
+        rec = {**MB_RECORDING, "tags": tags}
+        scraper, client, _ = make_scraper(
+            gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+            netease_items=[],
+        )
+        assert scraper._scrape_musicbrainz("安静", "")[0]["genre"] == ""
+
+
+def test_mb_track_number_from_media():
+    """track：releases[0].media 里按 recording id 找 track.number"""
+    rec = {
+        **MB_RECORDING,
+        "releases": [
+            {
+                **MB_RECORDING["releases"][0],
+                "media": [
+                    {"track": [{"number": "1", "recording": {"id": "other-rec"}}]},
+                    {"track": [{"number": "12", "recording": {"id": "mb-rec-1"}}]},
+                ],
+            }
+        ],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["track"] == 12
+
+
+def test_mb_track_missing_null():
+    """track：media 里找不到本 recording → None，不抛异常"""
+    rec = {
+        **MB_RECORDING,
+        "releases": [
+            {
+                **MB_RECORDING["releases"][0],
+                "media": [{"track": [{"number": "1", "recording": {"id": "other-rec"}}]}],
+            }
+        ],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["track"] is None
+
+
+def test_mb_album_artist_from_release_credit():
+    """album_artist：release artist-credit joinphrase（同 _join_artist_credit）"""
+    rec = {
+        **MB_RECORDING,
+        "releases": [
+            {
+                **MB_RECORDING["releases"][0],
+                "artist-credit": [{"name": "Various", "joinphrase": " Artists"}],
+            }
+        ],
+    }
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]}), FakeResponse(status_code=302)],
+        netease_items=[],
+    )
+    assert scraper._scrape_musicbrainz("安静", "")[0]["album_artist"] == "Various Artists"
+
+
+def test_mb_no_release_new_fields_defaults():
+    """无 release 时：album/cover 为 None，year/track 为 None，genre/album_artist 空串，不抛异常"""
+    rec = {**MB_RECORDING, "releases": [], "tags": None, "first-release-date": None}
+    scraper, client, _ = make_scraper(
+        gets=[FakeResponse({"recordings": [rec]})],
+        netease_items=[],
+    )
+    cand = scraper._scrape_musicbrainz("安静", "")[0]
+    assert cand["album"] is None and cand["cover"] is None
+    assert cand["year"] is None and cand["track"] is None
+    assert cand["genre"] == "" and cand["album_artist"] == ""
 
 
 # ============ 封面 fallback 链 ============

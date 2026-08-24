@@ -1,4 +1,4 @@
-"""设置服务：统一设置（单一 settings.json · 9 namespace）读写/迁移 + 字段校验。
+"""设置服务：统一设置（单一 settings.json · 10 namespace）读写/迁移 + 字段校验。
 
 路径/内存缓存全部走 app.state（state.SETTINGS_FILE 等，延迟解析）——
 测试 patch app.state.XXX 后这里读到的就是临时路径。
@@ -19,6 +19,7 @@ _SETTINGS_NAMESPACES = (
     "books",
     "dict",
     "video",
+    "scraping",
 )
 
 
@@ -108,6 +109,39 @@ def _norm_last_played(v):
         if isinstance(t, (int, float)) and not isinstance(t, bool):
             return {"path": v["path"], "time": t}
     return None
+
+
+def _norm_enabled_fields(v, default):
+    """scraping.enabled_fields：必须来自白名单集合，去重保序；空结果回落默认"""
+    whitelist = state.SCRAPING_SETTINGS_DEFAULTS["enabled_fields"]
+    if isinstance(v, list):
+        out = []
+        for f in v:
+            if f in whitelist and f not in out:
+                out.append(f)
+        if out:
+            return out
+    return default
+
+
+def _norm_source_order(v, default):
+    """scraping.source_order：只含 netease/musicbrainz 且不重复，保序；空结果回落默认"""
+    allowed = {"netease", "musicbrainz"}
+    if isinstance(v, list):
+        out = []
+        for src in v:
+            if src in allowed and src not in out:
+                out.append(src)
+        if out:
+            return out
+    return default
+
+
+def _norm_rename_template(v, default):
+    """scraping.rename_template：非空字符串（可含占位符/子目录 /）"""
+    if isinstance(v, str) and v.strip():
+        return v
+    return default
 
 
 # 每 namespace 字段规范: {字段: (默认值, 校验器)}；不在白名单的字段一律忽略
@@ -303,6 +337,25 @@ _SETTINGS_SPEC = {
                 v, d, allowed={"vivaldi", "chrome", "safari", "edge", "firefox", "brave"}
             ),
         ),
+    },
+    "scraping": {
+        # 刮削可写字段白名单（前端展示用；批量/手动写入按各自规则过滤）
+        "enabled_fields": (
+            state.SCRAPING_SETTINGS_DEFAULTS["enabled_fields"],
+            lambda v, d: _norm_enabled_fields(v, d),
+        ),
+        # 重命名模板：占位符 {artist}/{title}/{album}/{track}/{year}，可含 / 子目录
+        "rename_template": (
+            state.SCRAPING_SETTINGS_DEFAULTS["rename_template"],
+            lambda v, d: _norm_rename_template(v, d),
+        ),
+        # 候选源合并顺序（批量刮削按此顺序取首候选）
+        "source_order": (
+            state.SCRAPING_SETTINGS_DEFAULTS["source_order"],
+            lambda v, d: _norm_source_order(v, d),
+        ),
+        # 批量刮削总开关（关闭时 POST /api/tags/scrape-batch 返回 enabled:false）
+        "batch_enabled": (state.SCRAPING_SETTINGS_DEFAULTS["batch_enabled"], _norm_bool),
     },
 }
 

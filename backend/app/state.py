@@ -246,6 +246,22 @@ DICT_SETTINGS_DEFAULTS = {
     "dictionaries": [],  # 词典配置数组（id/name/path/kind/role/enabled/addedAt）
     "activeDictId": "",  # 当前激活释义词典 id（空 = 未激活）
 }
+# scraping：标签刮削设置（重命名模板 / 候选源顺序 / 批量刮削开关；enabled_fields 前端展示用白名单）
+SCRAPING_SETTINGS_DEFAULTS = {
+    "enabled_fields": [
+        "title",
+        "artist",
+        "album",
+        "cover",
+        "year",
+        "genre",
+        "track",
+        "album_artist",
+    ],
+    "rename_template": "{artist} - {title}",
+    "source_order": ["netease", "musicbrainz"],
+    "batch_enabled": False,
+}
 
 # ============ 曲库导入 ============
 # 单文件导入大小上限（超出报 error 不写盘）

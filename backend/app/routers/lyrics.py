@@ -75,7 +75,7 @@ def api_lyric(path: str, prefer: str = "local"):
 
     def online_lyric():
         """返回 (format, lines, source) 或 None"""
-        artist, title, _album = tags.extract_tags(f)
+        artist, title, _album, _y, _g, _t, _aa = tags.extract_tags(f)
         title = title or f.stem
         lrc_text, tlyric_text, source = fetch_online_lyric(title, artist or "")
         if lrc_text is None:
@@ -144,7 +144,7 @@ def api_lyric_manual_put(body: dict):
         )
     if not tlyric:
         # 自动补翻译：网易云行级匹配（仅本地歌且歌名/歌手元数据至少一项非空；失败静默）
-        artist, title, _album = tags.extract_tags(f)
+        artist, title, _album, _y, _g, _t, _aa = tags.extract_tags(f)
         title = (title or "").strip()
         artist = (artist or "").strip()
         if title or artist:

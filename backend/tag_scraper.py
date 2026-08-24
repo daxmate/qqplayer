@@ -7,6 +7,8 @@
   会导致整条查询 0 结果），改为结果排序加分（artist 归一化后相等/包含的排前面）
 - 封面 fallback 链：网易云 cover → iTunes Search API → Cover Art Archive → None，
   在 scrape 返回前补好，前端不感知 fallback
+- MusicBrainz 候选新增 year/genre/track/album_artist（尽力取值，失败 → None/空串，绝不抛异常）；
+  网易云候选字段保持不变（拿不到新字段，缺省即可，前端容错）
 - 任何外部源挂掉都不影响其他源：单源失败返回空数组，整体不抛异常
 
 测试通过注入 FakeClient / fake netease_search / sleep_fn 全 mock 网络。
@@ -44,6 +46,52 @@ def _mb_query_stages(query: str) -> list[str]:
     # 转义 Lucene 特殊字符：短语内容里只可能被引号/反斜杠破坏
     esc = q.replace("\\", "\\\\").replace('"', '\\"')
     return [f'recording:"{esc}"', f'recording:"{esc}"~', f"title:{esc}"]
+
+
+# ---- MusicBrainz 候选新字段（year/genre/track/album_artist）----
+
+
+def _release_year(release: dict | None, recording: dict) -> int | None:
+    """年份：release.date 优先，recording first-release-date 兜底；解析失败 → None"""
+    for source in (release.get("date") if release else None, recording.get("first-release-date")):
+        m = re.search(r"\d{4}", str(source or ""))
+        if m:
+            try:
+                return int(m.group(0))
+            except (ValueError, TypeError):
+                return None
+    return None
+
+
+def _recording_genre(recording: dict) -> str:
+    """流派：recording.tags 按 count 降序取前 3 个 name 用 / 连接；无 →"""
+    tags = [t for t in (recording.get("tags") or []) if isinstance(t, dict) and t.get("name")]
+    tags = sorted(tags, key=lambda t: int(t.get("count") or 0), reverse=True)
+    return "/".join(str(t["name"]) for t in tags[:3])
+
+
+def _recording_track_number(recording: dict) -> int | None:
+    """音轨序号（尽力）：releases[0] 的 media 里找本 recording 对应的 track.number；找不到 → None"""
+    try:
+        release = next((r for r in (recording.get("releases") or []) if isinstance(r, dict)), None)
+        if not release:
+            return None
+        rec_id = recording.get("id")
+        for medium in release.get("media") or []:
+            if not isinstance(medium, dict):
+                continue
+            for tr in medium.get("track") or []:
+                if not isinstance(tr, dict):
+                    continue
+                tr_rec = tr.get("recording")
+                tr_rec_id = tr_rec.get("id") if isinstance(tr_rec, dict) else tr_rec
+                if tr_rec_id and tr_rec_id == rec_id:
+                    m = re.match(r"\s*(\d+)", str(tr.get("number") or ""))
+                    if m:
+                        return int(m.group(1))
+        return None
+    except Exception:
+        return None
 
 
 class TagScraper:
@@ -151,6 +199,15 @@ class TagScraper:
                     "album": release.get("title") if release else None,
                     "cover": cover,
                     "mbid": rec["id"],
+                    # 新字段：全部尽力取值，失败 → None/空串，绝不抛异常
+                    "year": _release_year(release, rec),
+                    "genre": _recording_genre(rec),
+                    "track": _recording_track_number(rec),
+                    "album_artist": (
+                        self._join_artist_credit(release.get("artist-credit") or [])
+                        if release
+                        else ""
+                    ),
                 }
             )
         return results

@@ -833,6 +833,7 @@ def test_api_settings_get_all_namespaces():
         "books",
         "dict",
         "video",
+        "scraping",
     }
     # library 5 字段（含任务：歌曲库路径 path，空 = 未设定）
     assert set(s["library"]) == {
@@ -1090,6 +1091,7 @@ def test_migrate_legacy_settings_idempotent():
         "books",
         "dict",
         "video",
+        "scraping",
     }
     state._settings = None
     backend.migrate_legacy_settings()  # 再跑一次
