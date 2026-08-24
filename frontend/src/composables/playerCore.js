@@ -1564,8 +1564,29 @@ function isFiniteNumber(v) {
 }
 
 // ============ 选歌 ============
+// 调试记录：播放决策链路（2026-08-25 定位“从固定秒数开始播”问题用；
+// 写 Documents/meta/debuglog.json，模拟器沙盒可直接读）
+const dbgBuf = [];
+function dbgLog(ev, data) {
+  try {
+    dbgBuf.push({ ts: Date.now(), ev, ...(data || {}) });
+    if (dbgBuf.length > 300) dbgBuf.splice(0, dbgBuf.length - 300);
+    if (isNativePlayback()) {
+      try {
+        nativeMetaSave("debuglog", JSON.stringify(dbgBuf.slice(-80)));
+      } catch {}
+    }
+  } catch {}
+}
+
+// 当前 selectSong / maybePrefetchAsset 挂的 loadedmetadata 监听器引用
+// （切歌时清理，防旧歌的 resumeAt 劫持新歌——2026-08-25 固定秒数开始播放根因）
+let loadedMetaHandler = null;
+let prefetchMetaHandler = null;
+
 export async function selectSong(index, opts = {}) {
   if (index < 0 || index >= state.songs.length) return;
+  dbgLog("selectSong", { idx: index, resumeAt: opts.resumeAt ?? null, autoPlay: !!opts.autoPlay });
   const seq = ++fadeSeq;
   // 切歌淡入淡出：正在播放且开启淡出 → 先淡出旧歌再换源
   const fade = opts.fade === false ? 0 : playbackSettings.fadeSec;
@@ -1616,6 +1637,7 @@ export async function selectSong(index, opts = {}) {
     src = "/api/audio?path=" + encodeURIComponent(state.currentSong.path);
   }
   audio.src = streamProxyUrl(src);
+  dbgLog("selectSong.src", { src: audio.src });
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
   // iOS 同步：本地歌资产本地优先（不阻塞远程播放；已下载时回执后切本地播放）
   maybePrefetchAsset(state.currentSong, { resumeAt: opts.resumeAt });
@@ -1637,18 +1659,22 @@ export async function selectSong(index, opts = {}) {
   await loadLyric(index);
   // 预取时长；恢复上次播放时在这里 seek 到断点
   // （电台流 duration=Infinity → 保持 0，进度条走空态不崩）
-  audio.addEventListener(
-    "loadedmetadata",
-    () => {
-      state.duration = isFiniteNumber(audio.duration) ? audio.duration : 0;
-      if (opts.resumeAt != null && audio.duration) {
-        const t = Math.min(opts.resumeAt, Math.max(0, audio.duration - 0.5));
-        audio.currentTime = t;
-        state.currentTime = t;
-      }
-    },
-    { once: true },
-  );
+  // 监听器清理（2026-08-25 根因）：restoreLastPlayed 的 resumeAt 监听器若不清理，
+  // 会在之后每一首新歌的 loadedmetadata 上触发 → 新歌被 seek 到旧断点（固定秒数开始/尾部跳过）。
+  if (loadedMetaHandler && typeof audio.removeEventListener === "function") {
+    audio.removeEventListener("loadedmetadata", loadedMetaHandler);
+  }
+  loadedMetaHandler = () => {
+    state.duration = isFiniteNumber(audio.duration) ? audio.duration : 0;
+    dbgLog("loadedmetadata", { dur: state.duration, resumeAt: opts.resumeAt ?? null });
+    if (opts.resumeAt != null && audio.duration) {
+      const t = Math.min(opts.resumeAt, Math.max(0, audio.duration - 0.5));
+      dbgLog("loadedmetadata.seek", { t });
+      audio.currentTime = t;
+      state.currentTime = t;
+    }
+  };
+  audio.addEventListener("loadedmetadata", loadedMetaHandler, { once: true });
 }
 
 // ============ iOS 同步：本地歌播放资产本地优先（阶段3 · E1 修复） ============
@@ -1677,23 +1703,32 @@ export async function maybePrefetchAsset(song, opts = {}) {
     // 断点兜底：换源后镜像清零（t=0 = 新歌还没开始播）时，调用方带的恢复位置
     // （restoreLastPlayed 断点续播）生效——切本地后从断点继续而不是从 0 开始
     const resumeAt = t > 0 ? t : (opts.resumeAt ?? 0) > 0 ? opts.resumeAt : 0;
+    dbgLog("prefetch.rcv", { t, optsResumeAt: opts.resumeAt ?? null, resumeAt, src: audio.src });
     audio.removeAttribute("src");
     audio.src = localURL; // 本地文件秒开（原生 load → AVPlayer 本地播放）
+    dbgLog("prefetch.local", { localURL });
     audio.volume = state.muted ? 0 : state.volume;
     if (wasPlaying) audio.play().catch(() => {});
     // 保留进度：loadedmetadata 后再 seek（原生 load 未就绪时 seek 可能被丢弃）
+    // 监听器清理 + 同歌校验：切歌后旧 onMeta 不得在新歌的 loadedmetadata 上触发
+    // （否则旧断点劫持新歌，2026-08-25 固定秒数开始播放根因之一）
+    if (prefetchMetaHandler && typeof audio.removeEventListener === "function") {
+      audio.removeEventListener("loadedmetadata", prefetchMetaHandler);
+    }
     if (resumeAt > 0) {
-      const onMeta = (e) => {
-        audio.removeEventListener("loadedmetadata", onMeta);
+      prefetchMetaHandler = (e) => {
+        audio.removeEventListener("loadedmetadata", prefetchMetaHandler);
+        if (state.currentSong !== song) return; // 已切歌：旧回执不 seek
         const dur = (e && e.duration) || audio.duration || 0;
         // clamp 防越界：目标超过 duration-0.5 会播到尾部立即 ended（"直接跳过"）
         const target = dur > 0 ? Math.min(resumeAt, Math.max(0, dur - 0.5)) : resumeAt;
+        dbgLog("prefetch.seek", { resumeAt, dur, target });
         if (target > 0) {
           audio.currentTime = target;
           state.currentTime = target;
         }
       };
-      audio.addEventListener("loadedmetadata", onMeta, { once: true });
+      audio.addEventListener("loadedmetadata", prefetchMetaHandler, { once: true });
     }
   } catch {
     /* 预取失败静默：远程播放不受影响 */
@@ -1761,6 +1796,7 @@ export function prevSong(opts = {}) {
 
 export function seek(t) {
   if (!audio.src) return;
+  dbgLog("seek", { t });
   audio.currentTime = t;
   state.currentTime = t;
   // 跳转后重定位跟唱锚点，避免旧锚点立刻触发暂停/漏停
@@ -1978,6 +2014,11 @@ export async function restoreLastPlayed() {
   // 等待统一层初始加载完成（GET 成功或失败），确保数据源为后端值而非本地缓存
   if (settingsLoadPromise) await settingsLoadPromise;
   const saved = { path: lastPlayedState.path, position: lastPlayedState.position };
+  dbgLog("restore", {
+    path: saved.path,
+    pos: saved.position,
+    resumeLast: playbackSettings.resumeLast,
+  });
   if (!saved.path) return;
   const idx = state.songs.findIndex((s) => s.path === saved.path);
   if (idx < 0) return;
