@@ -217,10 +217,13 @@ export const ASSET_QUERY_TIMEOUT_MS = 8000;
 /**
  * 查询本地资产并（必要时）发起后台下载。
  * @param {{path:string, url:string, sha256?:string, size?:number}} item 沙盒相对路径 + 桌面绝对 URL
- * @returns {Promise<string|null>} 已存在 → resolve(localURL)；不存在/已发起下载 → resolve(null)
+ * @param {{download?:boolean}} [opts] 显式 download:true → 未下载时无条件发起下载
+ *   （阅读器等既有「打开即后台下载」链路用）；默认行为 = autoPrefetchEnabled() 决定：
+ *   开启才下载，关闭只查不下载（播放本地优先：已下载切本地、未下载保持远程）
+ * @returns {Promise<string|null>} 已存在 → resolve(localURL)；不存在 → resolve(null)
  *   （不阻塞、不等待下载完成；调用方保持远程播放即可）
  */
-export function ensureAsset({ path, url, sha256, size } = {}) {
+export function ensureAsset({ path, url, sha256, size } = {}, opts = {}) {
   if (!syncEnabled() || !iosBridgeAvailable() || !path || !url) {
     return Promise.resolve(null);
   }
@@ -240,8 +243,12 @@ export function ensureAsset({ path, url, sha256, size } = {}) {
       if (payload && payload.exists && payload.localURL) {
         resolve(payload.localURL);
       } else {
-        // 本地没有：批量发起下载（同 tick 内多条请求合并成一次 syncDownload）
-        queueDownload({ url, path, sha256: sha256 || "", size: size || 0 });
+        // 本地没有：仅显式 download:true 或「自动预取」开关开启时才批量发起下载
+        // （同 tick 内多条请求合并成一次 syncDownload）；默认关 = 只查不下载，
+        // 调用方（播放器）保持远程播放，下载由同步管理页显式触发。
+        if (opts.download === true || autoPrefetchEnabled()) {
+          queueDownload({ url, path, sha256: sha256 || "", size: size || 0 });
+        }
         resolve(null);
       }
     });

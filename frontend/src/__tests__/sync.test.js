@@ -1,5 +1,5 @@
 // sync.js 单元测试：manifest 同步（version 对比 + 集合写入）/ ensureAsset（hasAsset→
-// download 流程）/ 下载进度聚合 / appState 生命周期 / 桌面浏览器 no-op
+// 回执，autoPrefetch 门控下载）/ 下载进度聚合 / appState 生命周期 / 桌面浏览器 no-op
 //
 // mock 策略（参考 apiClient.test.js / nativeAudioBridge.test.js 风格）：
 //   - apiClient：vi.mock 整模块（apiGet + resolveServerUrl）
@@ -73,6 +73,25 @@ const manifestV2 = {
     { path: "/Music/b.flac", name: "B", artist: "Y", size: 200 },
   ],
 };
+
+// jsdom（vitest 4）无 localStorage → 手写 stub（同 syncAssets.test.js 风格；
+// autoPrefetch 开关 / 桥环境判定依赖）
+const lsStore = {};
+const localStorageStub = {
+  getItem: (k) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k, v) => {
+    lsStore[k] = String(v);
+  },
+  removeItem: (k) => {
+    delete lsStore[k];
+  },
+  clear: () => {
+    for (const k of Object.keys(lsStore)) delete lsStore[k];
+  },
+};
+function clearLs() {
+  for (const k of Object.keys(lsStore)) delete lsStore[k];
+}
 
 /** 等待微任务 + 宏任务队列排空（syncNow/批量下载 flush 全异步链） */
 function flush() {
@@ -172,6 +191,8 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     bridgeMock.post.mockClear();
     bridgeMock.handlers.clear();
     sync._resetSyncForTests();
+    vi.stubGlobal("localStorage", localStorageStub);
+    clearLs(); // autoPrefetch 复位默认关
   });
 
   afterEach(() => {
@@ -197,8 +218,25 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     expect(bridgeMock.post).toHaveBeenCalledTimes(1);
   });
 
-  it("exists=false：发 syncDownload（批量 items）并 resolve(null)", async () => {
+  it("exists=false + autoPrefetch 关（默认）：resolve(null)，不发 syncDownload（只查不下载）", async () => {
     await setNativeEnv();
+    sync.setAutoPrefetch(false); // 默认关；显式复位防用例间残留
+    const p = sync.ensureAsset(item);
+    bridgeMock.emit("assetStatus", {
+      requestId: "1",
+      path: item.path,
+      exists: false,
+      localURL: "",
+    });
+    await expect(p).resolves.toBeNull();
+    await flush();
+    // 只发过 hasAsset，没有 syncDownload（播放本地优先：未下载保持远程）
+    expect(bridgeMock.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("exists=false + autoPrefetch 开：resolve(null) 且发 syncDownload（批量 items）", async () => {
+    await setNativeEnv();
+    sync.setAutoPrefetch(true);
     const p = sync.ensureAsset(item);
     bridgeMock.emit("assetStatus", {
       requestId: "1",
@@ -214,8 +252,27 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     });
   });
 
-  it("同一 tick 多条请求合并为一次 syncDownload（批量）", async () => {
+  it("exists=false + autoPrefetch 关 + 显式 download:true：仍发 syncDownload（阅读器链路）", async () => {
     await setNativeEnv();
+    sync.setAutoPrefetch(false);
+    const p = sync.ensureAsset(item, { download: true });
+    bridgeMock.emit("assetStatus", {
+      requestId: "1",
+      path: item.path,
+      exists: false,
+      localURL: "",
+    });
+    await expect(p).resolves.toBeNull();
+    await flush();
+    expect(bridgeMock.post).toHaveBeenCalledWith({
+      cmd: "syncDownload",
+      items: [{ url: item.url, path: item.path, sha256: "abc123", size: 1024 }],
+    });
+  });
+
+  it("同一 tick 多条请求合并为一次 syncDownload（批量；autoPrefetch 开）", async () => {
+    await setNativeEnv();
+    sync.setAutoPrefetch(true);
     const item2 = { ...item, path: "audio/def456.flac", url: "http://s/api/audio?path=2" };
     const p1 = sync.ensureAsset(item);
     const p2 = sync.ensureAsset(item2);

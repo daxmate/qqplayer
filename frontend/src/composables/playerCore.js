@@ -26,7 +26,7 @@ import {
   nativeSendMetadata,
   nativePost,
 } from "./nativeAudioBridge.js";
-import { ensureAsset, assetForSong, autoPrefetchEnabled } from "../utils/sync.js";
+import { ensureAsset, assetForSong } from "../utils/sync.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -1608,7 +1608,7 @@ export async function selectSong(index, opts = {}) {
   }
   audio.src = streamProxyUrl(src);
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
-  // iOS 同步：本地歌资产后台预取（不阻塞远程播放；已下载时回执后切本地播放）
+  // iOS 同步：本地歌资产本地优先（不阻塞远程播放；已下载时回执后切本地播放）
   maybePrefetchAsset(state.currentSong);
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   audio.volume = state.muted ? 0 : state.volume;
@@ -1642,15 +1642,17 @@ export async function selectSong(index, opts = {}) {
   );
 }
 
-// ============ iOS 同步：本地歌资产后台预取（阶段3 · E1；开关默认关） ============
-// 选歌播放时对本地歌（path 非空）发起 ensureAsset：
-//   - 已下载（assetStatus exists=true）→ 回执 localURL，切本地播放（快、省流量）
-//   - 未下载 → 后台发起 syncDownload，远程 URL 照常播（不阻塞、下载完成不强行切换）
-// 开关：设置页「自动预取」toggle（sync.js autoPrefetchEnabled，localStorage 默认 off）——
-// 默认关闭时选歌不触发任何资产查询/下载（E2 起由同步管理页显式下载）。
-// 桌面浏览器 / macOS 壳（无 iOS 桥）→ ensureAsset 静默 no-op，行为零变化。
-async function maybePrefetchAsset(song) {
-  if (!autoPrefetchEnabled()) return; // 自动预取开关（默认关）
+// ============ iOS 同步：本地歌播放资产本地优先（阶段3 · E1 修复） ============
+// 选歌播放时对本地歌（path 非空）总是查本地资产（hasAsset → assetStatus 回执）：
+//   - 已下载（exists=true）→ 回执 localURL，切本地播放（快、省流量、断网可播）
+//   - 未下载 → 保持远程播放（不阻塞）；「是否自动下载」的判断在 ensureAsset 内部
+//     （autoPrefetchEnabled 开启才发 syncDownload，默认关 = 只查不下载；
+//     下载由同步管理页显式触发）。
+// 桌面浏览器 / macOS 壳（无 iOS 桥）→ 直接 return，行为零变化。
+/**
+ * 选歌播放前本地资产查询（内部函数；导出供单元测试直接驱动 assetStatus 回执）。
+ */
+export async function maybePrefetchAsset(song) {
   try {
     if (!isNativePlayback() || !song || !song.path) return;
     const item = await assetForSong(song);

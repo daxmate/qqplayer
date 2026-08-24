@@ -1786,12 +1786,14 @@ function teardown() {
 }
 
 /** 获取 EPUB 二进制：iOS 壳优先本地资产（已下载 → 本地 HTTP 读取，离线可用；
- *  未下载 → 远程加载 + 后台触发下载，下次打开秒开）；桌面/浏览器走远程，零变化。 */
+ *  未下载 → 远程加载 + 后台触发下载，下次打开秒开）；桌面/浏览器走远程，零变化。
+ *  ensureAsset 默认「只查不下载」（autoPrefetch 关），阅读器链路显式 download:true
+ *  保持既有「打开即后台下载」语义（播放链路的下载判断不受影响）。 */
 async function loadBookBuffer() {
   if (syncEnabled()) {
     try {
       const item = await assetForBook(props.book);
-      const localURL = item ? await ensureAsset(item) : null;
+      const localURL = item ? await ensureAsset(item, { download: true }) : null;
       const httpURL = localAssetHTTPURL(localURL);
       if (httpURL) {
         const resp = await fetch(httpURL); // 本地 server 无鉴权，裸 fetch
