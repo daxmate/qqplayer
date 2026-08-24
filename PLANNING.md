@@ -157,3 +157,37 @@ mobile/           # 移动形态（companion 定位，与桌面功能差异大�
 - 各功能主体代码进独立目录（如 `books/`、`videos/`），不互相引用
 - 接线层改动保持小而独立提交，频繁 pull/push
 - 冲突时以"后合的人负责解决接线"为原则
+
+## 桌面配对管理 Tab（2026-08-24 定案，拷问后）
+
+**需求**：桌面设置区加「配对」tab，管理已配对设备（删除/备注）+ 待确认请求兜底；iOS 壳补配对失效提示。
+
+**拷问结论**（用户拍板）：
+- Q1 删除后 iOS 壳要有「配对失效」提示（现状：401 静默清配对踢回发现页，无任何提示）→ 本次做
+- Q2 待确认请求列表 = 只读展示 + 删除（= reject），**不提供批准入口**（批准走弹窗，避免双入口）
+- Q3 本机信息卡（IP/server_id/mDNS 状态）**不做**——用户觉得展示不舒服
+- Q4 设备备注（note）要做——重名手机区分
+- Q5 「暂停配对」开关**不做**
+- Q6 手机端已下载文件清理**不做**（由 iOS 端自行决定）
+
+### 范围
+
+**前端（SettingsModal 新增「配对」tab，Smartphone 图标）**
+1. 已配对设备列表：device_name/type 图标/created_at/last_seen_at/note；操作：删除（确认弹窗）+ 编辑备注（行内/弹窗输入）
+2. 待确认请求（只读+删除）：device_name/type/created_at + 删除按钮（= POST /reject，幂等）；无批准按钮
+3. 空状态：「暂无配对设备」
+4. iOS 壳内（qqplayerIosBridge 存在）隐藏该 tab？——**否，保留显示**（iOS 用同一前端，配对管理原生 DiscoveryView 已有，但 tab 无操作入口也行？→ 定：**iOS 也显示**，数据源同桌面（本实例 devices），删除/备注对 iOS 发起方无意义但无害；暂不特判，减少分支）——等等，iOS 的 apiClient baseURL 是本机 127.0.0.1 MiniHTTPServer，/api/pairing/devices 会代理到桌面端，删除本实例配对 = 删自己？**定案：iOS 壳隐藏该 tab**（配对管理归原生 DiscoveryView；避免删自己）
+5. i18n zh-CN/en-US + 组件/逻辑测试
+
+**后端**
+- devices 条目加 note 字段（默认 ""）
+- GET /api/pairing/devices 返回 note
+- 新增 PATCH /api/pairing/devices/{server_id}/{device_id}，body {note} → 更新备注（幂等，404 当不存在时返回 404）
+- 测试：note 默认/更新/持久化/幂等；devices 列表含 note
+
+**iOS 壳**
+- WebShellView `unauthorized`：清配对前弹用户可见提示（alert「配对已失效，请重新配对」）→ 再回发现页
+- 测试：手动（真机/模拟器：桌面删配对 → 手机下次请求 401 → 弹提示回发现页）
+
+### 不做
+- 本机信息卡 / 暂停配对开关 / 一键全部撤销 / 手机端文件清理联动 / pending 批准入口
