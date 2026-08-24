@@ -515,3 +515,43 @@ def test_patch_note_scoped_by_server_id():
     by_server = {d["server_id"]: d for d in data["devices"]}
     assert by_server[server_a]["note"] == "家里"
     assert by_server["server-B"]["note"] == ""
+
+
+def test_approve_fallback_same_name_replaces_device():
+    """同实例同名同类型设备（device_id 不同）→ 替换旧记录而不是新增（2026-08-24 重装累积根因）"""
+    _pair_device(device_id="uuid-old", name="iPhone 15", dtype="ios")
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert len(devices) == 1
+
+    # 重装后 device_id 变化，但设备名相同 → 应替换（仍只有 1 条）
+    _pair_device(device_id="uuid-new", name="iPhone 15", dtype="ios")
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert len(devices) == 1
+    assert devices[0]["device_id"] == "uuid-new"  # 记录跟随最新 device_id
+
+
+def test_approve_fallback_preserves_note():
+    """fallback 替换（同名）时保留用户备注，不丢"""
+    _pair_device(device_id="uuid-old", name="iPhone 15", dtype="ios")
+    server_id = pairing_service.get_server_id()
+    client.patch(f"/api/pairing/devices/{server_id}/uuid-old", json={"note": "老婆的手机"})
+    _pair_device(device_id="uuid-new", name="iPhone 15", dtype="ios")
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert len(devices) == 1
+    assert devices[0]["note"] == "老婆的手机"
+
+
+def test_approve_same_name_different_type_keeps_both():
+    """同名但不同类型 → 不合并（iPad 与 iPhone 同名设备各自保留）"""
+    _pair_device(device_id="uuid-a", name="我的设备", dtype="ios")
+    _pair_device(device_id="uuid-b", name="我的设备", dtype="ipad")
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert len(devices) == 2
+
+
+def test_approve_different_name_same_type_keeps_both():
+    """不同名同类型 → 不合并"""
+    _pair_device(device_id="uuid-a", name="iPhone 15", dtype="ios")
+    _pair_device(device_id="uuid-b", name="iPhone 15 Pro", dtype="ios")
+    devices = client.get("/api/pairing/devices").json()["devices"]
+    assert len(devices) == 2

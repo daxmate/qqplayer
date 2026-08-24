@@ -182,6 +182,19 @@ def approve(request_id: str) -> dict:
         None,
     )
     if existing is None:
+        # 双保险：同实例下同名同类型设备视为同一台（覆盖卸载重装后 device_id 变化的场景，
+        # 如 identifierForVendor 也失效；2026-08-24 真机重复记录根因）。
+        existing = next(
+            (
+                d
+                for d in devices
+                if d.get("device_name") == req.get("device_name")
+                and d.get("device_type") == req.get("device_type")
+                and _server_id_of(d) == server_id
+            ),
+            None,
+        )
+    if existing is None:
         devices.append(
             {
                 "server_id": server_id,
@@ -197,6 +210,7 @@ def approve(request_id: str) -> dict:
     else:
         # 同实例重复配对（同一设备再次发起）：替换 token，旧 token 立即失效
         existing["server_id"] = server_id  # 老数据迁移：补上 server_id 字段
+        existing["device_id"] = device_id  # 同步最新 device_id（fallback 按名匹配时旧 id 已过期）
         existing["device_name"] = req.get("device_name", existing.get("device_name", ""))
         existing["device_type"] = req.get("device_type", existing.get("device_type", ""))
         existing["token_hash"] = token_hash
