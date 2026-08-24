@@ -324,16 +324,20 @@ function handleRemoteCommand(payload = {}) {
 }
 
 // ---------- 锁屏元数据（currentSong 变化 → 原生 Now Playing） ----------
-export function nativeSendMetadata(song) {
+// coverOverride（可选第二参数）：调用方已解析好的封面 URL（如本地缓存命中），优先于
+// song.coverUrl 与远程兜底；同步签名保持兼容（老调用只传 song）。
+export function nativeSendMetadata(song, coverOverride = "") {
   if (!song) {
     nativePost({ cmd: "setMetadata", title: "", artist: "", album: "", coverUrl: "" });
     return;
   }
-  let cover = "";
-  if (song.coverUrl) {
-    cover = song.coverUrl;
-  } else if (song.path) {
-    cover = resolveNativeUrl("/api/cover?path=" + encodeURIComponent(song.path));
+  let cover = coverOverride;
+  if (!cover) {
+    if (song.coverUrl) {
+      cover = song.coverUrl;
+    } else if (song.path) {
+      cover = resolveNativeUrl("/api/cover?path=" + encodeURIComponent(song.path));
+    }
   }
   nativePost({
     cmd: "setMetadata",

@@ -232,4 +232,22 @@ describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => 
     const msg = posts.find((p) => p.cmd === "setMetadata");
     expect(msg.coverUrl).toBe("https://img.example.com/c.jpg");
   });
+
+  it("nativeSendMetadata：coverOverride 优先——本地缓存 URL 不解析远程（CarPlay 封面修复）", () => {
+    const local = "http://127.0.0.1:17888/native-assets/audio/abc.m4a";
+    m.nativeSendMetadata({ name: "歌", path: "/m/a.mp3" }, local);
+    const msg = posts.find((p) => p.cmd === "setMetadata");
+    expect(msg.coverUrl).toBe(local); // 直接透传，不走 /api/cover 远程兜底
+  });
+
+  it("nativeSendMetadata：coverOverride 传空串时回退 song.coverUrl / 远程兜底（兼容老调用）", () => {
+    m.nativeSendMetadata({ name: "s", coverUrl: "https://img.example.com/c.jpg" }, "");
+    expect(posts.filter((p) => p.cmd === "setMetadata").at(-1).coverUrl).toBe(
+      "https://img.example.com/c.jpg",
+    );
+    m.nativeSendMetadata({ name: "s", path: "/m/b.mp3" }, "");
+    expect(posts.filter((p) => p.cmd === "setMetadata").at(-1).coverUrl).toBe(
+      "http://192.168.1.50:17627/api/cover?path=%2Fm%2Fb.mp3",
+    );
+  });
 });

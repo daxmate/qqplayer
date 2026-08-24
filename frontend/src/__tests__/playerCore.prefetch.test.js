@@ -132,7 +132,16 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     registerRemoteCommandHandler: vi.fn(),
-    nativeSendMetadata: vi.fn(),
+    // 模拟真实 nativeSendMetadata 行为：coverOverride 优先，空则 song.coverUrl / 远程兑底
+    // （与 nativeAudioBridge.js 同款逻辑；本环境无 server base → 远程兜底返回相对路径）
+    nativeSendMetadata: vi.fn((song, coverOverride = "") => {
+      let cover = coverOverride;
+      if (!cover && song) {
+        if (song.coverUrl) cover = song.coverUrl;
+        else if (song.path) cover = "/api/cover?path=" + encodeURIComponent(song.path);
+      }
+      return cover;
+    }),
     getProxy: () => proxy,
     /** 模拟原生侧回推事件 */
     emit(name, payload) {
@@ -157,6 +166,19 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
   nativePost: bridgeMock.post,
   onNativeEvent: bridgeMock.onNativeEvent,
 }));
+
+// sync.js 部分 mock：cachedCoverURL / cacheCover 换可控 vi.fn（封面本地优先测试需要
+// 注入本地/未缓存/乱序结果）；其余导出（ensureAsset/assetForSong/_resetSyncForTests/
+// setAutoPrefetch 等）走真实实现——maybePrefetchAsset 全链路（哈希/assetStatus 回执）
+// 保持真实跑，既有用例行为不变。
+vi.mock("../utils/sync.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    cachedCoverURL: vi.fn(),
+    cacheCover: vi.fn(),
+  };
+});
 
 // ---------- 被测模块（动态导入：须在 Audio stub 之后） ----------
 const playerMod = await import("../composables/playerCore.js");
@@ -409,5 +431,103 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   it("无 path 的流媒体条目：不触发资产查询", async () => {
     await maybePrefetchAsset({ type: "stream", streamId: "s1", name: "S" });
     expect(bridgeMock.post).not.toHaveBeenCalled();
+  });
+});
+
+describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封面修复）", () => {
+  beforeEach(() => {
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    bridgeMock.handlers.clear();
+    bridgeMock.isNativePlayback.mockReturnValue(true);
+    bridgeMock.nativeSendMetadata.mockClear();
+    sync.cachedCoverURL.mockReset();
+    sync.cacheCover.mockReset();
+    Object.assign(state, {
+      songs: [],
+      currentIndex: -1,
+      currentSong: null,
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      muted: false,
+      volume: 1,
+      favorites: [],
+      playlists: [],
+      loading: false,
+      error: "",
+    });
+    sync._resetSyncForTests();
+    // 原生壳环境（真实 sync.js 的 syncEnabled/iosBridgeAvailable 判定）
+    window.qqplayerNative = true;
+    window.qqplayerIosBridge = { postMessage: vi.fn() };
+    vi.stubGlobal("localStorage", localStorageStub);
+    clearLs();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("已缓存封面：coverUrl 用本地 URL，不再走远程", async () => {
+    const unsub = playerMod.setupMediaSession();
+    bridgeMock.nativeSendMetadata.mockClear(); // 清掉 immediate 触发（null）的一次
+    try {
+      const local = "http://127.0.0.1:17888/native-assets/audio/abc.m4a";
+      sync.cachedCoverURL.mockResolvedValue(local);
+      const song = { path: "/Music/a.mp3", name: "A", artist: "X", album: "Y" };
+      state.currentSong = song;
+      await flush();
+      expect(bridgeMock.nativeSendMetadata).toHaveBeenLastCalledWith(song, local);
+      expect(sync.cacheCover).not.toHaveBeenCalled(); // 已缓存：不触发后台下载
+    } finally {
+      unsub();
+    }
+  });
+
+  it("未缓存封面：cover 走远程兜底 URL，并触发后台缓存", async () => {
+    const unsub = playerMod.setupMediaSession();
+    bridgeMock.nativeSendMetadata.mockClear();
+    try {
+      sync.cachedCoverURL.mockResolvedValue(null);
+      const song = { path: "/Music/b.flac", name: "B" };
+      state.currentSong = song;
+      await flush();
+      // 传给 nativeSendMetadata 的空 cover → 真实实现会解析远程兜底 URL（mock 模拟同款）
+      expect(bridgeMock.nativeSendMetadata).toHaveBeenLastCalledWith(song, "");
+      expect(bridgeMock.nativeSendMetadata.mock.results.at(-1).value).toBe(
+        "/api/cover?path=%2FMusic%2Fb.flac",
+      );
+      expect(sync.cacheCover).toHaveBeenCalledWith("/Music/b.flac");
+    } finally {
+      unsub();
+    }
+  });
+
+  it("乱序：第一首慢查询迟到 → 旧结果被丢弃，只发第二首元数据", async () => {
+    const unsub = playerMod.setupMediaSession();
+    bridgeMock.nativeSendMetadata.mockClear();
+    try {
+      let resolveFirst;
+      sync.cachedCoverURL
+        .mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)))
+        .mockResolvedValue("http://127.0.0.1:17888/native-assets/audio/second.m4a");
+      const song1 = { path: "/Music/a.mp3", name: "A" };
+      const song2 = { path: "/Music/b.mp3", name: "B" };
+      state.currentSong = song1;
+      await flush(); // 第一首 watcher 触发并挂起在 deferred 查询上
+      state.currentSong = song2;
+      await flush(); // 第二首查询立即 resolve → 发送
+      expect(bridgeMock.nativeSendMetadata).toHaveBeenCalledTimes(1);
+      expect(bridgeMock.nativeSendMetadata).toHaveBeenLastCalledWith(
+        song2,
+        "http://127.0.0.1:17888/native-assets/audio/second.m4a",
+      );
+      resolveFirst("http://127.0.0.1:17888/native-assets/audio/first.m4a"); // 迟到结果
+      await flush();
+      expect(bridgeMock.nativeSendMetadata).toHaveBeenCalledTimes(1); // 未追加发送
+    } finally {
+      unsub();
+    }
   });
 });

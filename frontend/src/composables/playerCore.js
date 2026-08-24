@@ -26,7 +26,13 @@ import {
   nativeSendMetadata,
   nativePost,
 } from "./nativeAudioBridge.js";
-import { ensureAsset, assetForSong, nativeMetaSave } from "../utils/sync.js";
+import {
+  ensureAsset,
+  assetForSong,
+  nativeMetaSave,
+  cachedCoverURL,
+  cacheCover,
+} from "../utils/sync.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -929,7 +935,19 @@ export function setupMediaSession() {
     mediaSessionStop?.();
     mediaSessionStop = watch(
       () => state.currentSong,
-      (song) => nativeSendMetadata(song),
+      async (song) => {
+        // 封面本地优先（CarPlay 无线场景手机脱离 Mac 网络，远程 /api/cover 拉图会失败）：
+        // 已缓存封面 → 用本地 URL；未缓存 → 保持远程兑底 + 后台缓存（fire-and-forget）。
+        // 异步查询期间可能已切歌：旧查询结果不覆盖新歌（同歌校验）。
+        let cover = "";
+        if (song?.path) {
+          const local = await cachedCoverURL(song.path).catch(() => null);
+          if (state.currentSong !== song) return; // 已切歌：旧查询结果不覆盖新歌
+          cover = local || "";
+          if (!local) cacheCover(song.path); // 未缓存封面：后台缓存（非壳 no-op）
+        }
+        nativeSendMetadata(song, cover);
+      },
       { immediate: true },
     );
     return () => {
