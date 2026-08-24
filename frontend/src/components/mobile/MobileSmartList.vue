@@ -289,10 +289,11 @@ function markCoverError(path) {
   background: var(--card2);
 }
 .msv-item.active {
+  /* 不透明底（同 MobileList .ml-item.active）：盖住下方操作区，避免半透明透出删除按钮 */
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--accent) 20%, transparent),
-    color-mix(in srgb, var(--accent2) 10%, transparent)
+    color-mix(in srgb, var(--accent) 22%, var(--bg)),
+    color-mix(in srgb, var(--accent2) 14%, var(--bg2))
   );
 }
 .msv-cover {

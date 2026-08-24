@@ -674,10 +674,12 @@ function hashBg(name) {
   background: var(--card2);
 }
 .ml-item.active {
+  /* 不透明底（用 bg 打底混 accent）：active 行也盖住下方操作区，
+     否则半透明渐变会透出红色删除按钮（选中行“自动出现右滑按钮”假象） */
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--accent) 20%, transparent),
-    color-mix(in srgb, var(--accent2) 10%, transparent)
+    color-mix(in srgb, var(--accent) 22%, var(--bg)),
+    color-mix(in srgb, var(--accent2) 14%, var(--bg2))
   );
 }
 .ml-drag {
