@@ -13,6 +13,7 @@ import App from "./App.vue";
 import i18n from "./locales/i18n.js";
 import ToastContainer from "./components/ToastContainer.vue";
 import { initNativeCtxMenu } from "./composables/useNativeCtxMenu.js";
+import { installPullRevealStatusBar } from "./composables/usePullRevealStatusBar.js";
 import "./style.css";
 import "./mobile.css"; // 移动端（<1024px）布局与触摸适配（全部规则在断点内，桌面零影响）
 // amll 歌词组件基础样式（体积小，全局引入；组件本体走异步按需加载）
@@ -31,6 +32,9 @@ createApp(App).use(i18n).mount("#app");
 // Swift 壳右键菜单桥接（歌曲列表/侧边栏歌单）：壳内挂 mousedown 检测 + window.__qqCtxMenu；
 // 浏览器（无 window.qqplayerNative）内部直接返回，不挂任何监听，右键行为零影响。
 initNativeCtxMenu();
+
+// iOS 壳：顶部状态条下拉召唤（平时隐藏，页面顶部下拉才浮现）。仅 iOS 壳生效，其他环境 no-op。
+installPullRevealStatusBar();
 
 // 全局 toast 容器：挂到 body 级独立容器（不侵入 App 组件树）
 // ToastContainer 内部 Teleport 到 body，任意组件通过 useToast() 触发

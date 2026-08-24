@@ -325,6 +325,9 @@ struct WebShellView: UIViewRepresentable {
                         userInfo: ["serverId": self.server.serverId]
                     )
                 }
+            case "pullRevealStatusBar":
+                // 前端页面顶部下拉 → 召唤顶部状态条浮层（平时隐藏，3s 后自动收回）
+                NotificationCenter.default.post(name: .qqplayerPullRevealStatusBar, object: nil)
             case "playAudio":
                 // 词典发音等短音频：原生 AVPlayer 直接播放（不弹系统播放器 UI）
                 if let urlString = body["url"] as? String, let url = URL(string: urlString),
@@ -498,4 +501,5 @@ struct WebShellView: UIViewRepresentable {
 extension Notification.Name {
     static let qqplayerTokenInvalid = Notification.Name("qqplayerTokenInvalid")
     static let qqplayerScenePhase = Notification.Name("qqplayerScenePhase")
+    static let qqplayerPullRevealStatusBar = Notification.Name("qqplayerPullRevealStatusBar")
 }
