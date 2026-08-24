@@ -3,6 +3,7 @@ import { audio, state } from "./playerCore.js";
 import { lyricSettings } from "./useSettings.js";
 import { parseLrcText, mergeTranslationLines } from "../utils/parseLrc.js";
 import { apiGet, apiPost, apiPut, apiDelete, invalidate } from "../utils/apiClient.js";
+import { syncEnabled, nativeMetaSave, nativeMetaLoad, lyricKindKey } from "../utils/sync.js";
 import i18n from "../locales/i18n.js";
 
 // 非本地歌（stream 曲库网络条目 / 试听 / URL 播放）：没有可解析的本地歌词文件，
@@ -28,6 +29,45 @@ export async function loadOnlineLyricForSong(song) {
     return { lines, format: lines.length ? "lrc" : null, source: hit.source || "online" };
   } catch {
     return { lines: [], format: null, source: null };
+  }
+}
+
+// ============ 歌词文件兜底（阶段 F2：iOS 壳 IndexedDB 重启不可靠 → 歌词落文件） ============
+// 模式对齐 sync.js nativeMetaSave/Load（Documents/meta/{kind}.json 双写）：成功加载后把
+// 最后一次 {lines, format, source} 落文件（fire-and-forget）；网络失败且 IndexedDB 缓存 miss
+// 时读文件回填——离线/重启后歌词不丢。kind = lyricKindKey(path)（'lyric:' + 稳定哈希，
+// 纯十六进制无路径穿越风险；原生 MetaStore 亦有 kind 净化双保险）。
+// 非 iOS 壳（syncEnabled false）→ 不写不读，桌面行为零变化。
+
+/** 歌词落文件（fire-and-forget；失败静默，不影响加载链路） */
+async function saveLyricFile(song, data) {
+  if (!syncEnabled() || !song || !song.path) return;
+  try {
+    const kind = await lyricKindKey(song.path);
+    if (!kind) return;
+    nativeMetaSave(kind, JSON.stringify(data));
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 读歌词文件兜底；文件缺失/损坏/非 iOS 壳 → null */
+async function loadLyricFile(song) {
+  if (!syncEnabled() || !song || !song.path) return null;
+  try {
+    const kind = await lyricKindKey(song.path);
+    if (!kind) return null;
+    const json = await nativeMetaLoad(kind);
+    if (!json) return null;
+    const data = JSON.parse(json);
+    if (!data || !Array.isArray(data.lines)) return null;
+    return {
+      lines: data.lines,
+      format: typeof data.format === "string" ? data.format : null,
+      source: typeof data.source === "string" ? data.source : null,
+    };
+  } catch {
+    return null; // JSON 损坏等 → 按无兜底处理
   }
 }
 
@@ -64,10 +104,24 @@ export async function loadLyric(index = state.currentIndex) {
       state.lyric = data.lines || [];
       state.lyricFormat = data.format || null;
       state.lyricSource = data.source || null;
+      // 歌词文件兜底写（fire-and-forget）：最后一次成功结果，不区分 prefer 来源
+      saveLyricFile(song, {
+        lines: state.lyric,
+        format: state.lyricFormat,
+        source: state.lyricSource,
+      });
       return;
     }
   } catch {
-    /* 网络错误走空歌词 */
+    /* 网络错误走文件兜底 */
+  }
+  // 失败/离线兜底：网络错误且 IndexedDB 缓存 miss → 读歌词文件回填；文件也没有 → 空歌词
+  const cached = await loadLyricFile(song);
+  if (cached) {
+    state.lyric = cached.lines;
+    state.lyricFormat = cached.format;
+    state.lyricSource = cached.source;
+    return;
   }
   state.lyric = [];
   state.lyricFormat = null;

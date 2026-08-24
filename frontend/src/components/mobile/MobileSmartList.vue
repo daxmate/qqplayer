@@ -52,7 +52,7 @@
           >
             <div class="msv-cover">
               <img
-                v-if="coverOk(row.song.path)"
+                v-if="coverSrc(row.song.path) && coverOk(row.song.path)"
                 :src="coverSrc(row.song.path)"
                 :alt="row.song.name"
                 loading="lazy"
@@ -104,12 +104,13 @@ import {
   playSmartRow,
   fmtSmartSub,
 } from "../../composables/useSmartViews.js";
-import { resolveServerUrl } from "../../utils/apiClient.js";
+import { useCoverURL, COVER_CACHE_FIRST_N } from "../../composables/useCoverURL.js";
 
 const { t } = useI18n();
 
-// 封面 URL（iOS 壳 file:// 下相对路径需转服务器绝对 URL；桌面同源原样返回）
-const coverSrc = (path) => resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
+// 封面 URL 异步解析（阶段 F1）：iOS 壳本地优先（离线可显示），未命中远程 + 后台缓存；
+// 桌面/非壳远程直出（行为零变化）。coverSrc 未解析完成返回 ""，模板 v-if 配合隐藏 <img>。
+const { coverSrc, coverOk, markCoverError, resolveCover } = useCoverURL();
 
 const props = defineProps({
   kind: { type: String, required: true }, // recentAdded | recentPlayed | topPlayed
@@ -120,6 +121,25 @@ const meta = computed(() => SMART_VIEWS[props.kind] || SMART_VIEWS.recentAdded);
 const rows = computed(() => smartViewState.rows);
 const loading = computed(() => smartViewState.loading);
 const error = computed(() => smartViewState.error);
+
+// 封面异步填充：可见行查询 + 前 N 行后台缓存（节流取舍见 useCoverURL 注释）；
+// 播放中歌曲恒缓存（切歌即触发）
+watch(
+  rows,
+  (list) => {
+    list.forEach((row, i) => {
+      if (row.song?.path) resolveCover(row.song.path, { download: i < COVER_CACHE_FIRST_N });
+    });
+  },
+  { immediate: true },
+);
+watch(
+  () => state.currentSong?.path,
+  (p) => {
+    if (p) resolveCover(p, { download: true });
+  },
+  { immediate: true },
+);
 
 function isCurrent(row) {
   return state.currentSong && row.song.path === state.currentSong.path;
@@ -172,13 +192,7 @@ watch(
 );
 
 // ============ 封面错误缓存 ============
-const coverErrors = ref(new Set());
-function coverOk(path) {
-  return !coverErrors.value.has(path);
-}
-function markCoverError(path) {
-  coverErrors.value.add(path);
-}
+// coverOk/markCoverError 由 useCoverURL 提供（本组件与 MobileList 共用）
 </script>
 
 <style scoped>

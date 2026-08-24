@@ -151,8 +151,9 @@ function extOf(name) {
 
 /** 资产标识的稳定哈希：优先 SHA-256（crypto.subtle），不可用时回落确定性 FNV-1a 64 位。
  * 注意：WKWebView 个别场景 crypto.subtle.digest 的 Promise 可能永不 resolve（而非 reject），
- * 用 Promise.race 500ms 超时兜底，避免调用方（如批量下载 buildSongItems）永久挂起。 */
-async function assetHash(identity) {
+ * 用 Promise.race 500ms 超时兜底，避免调用方（如批量下载 buildSongItems）永久挂起。
+ * 导出供封面缓存（coverAssetKey）与歌词文件兜底（lyricKindKey）共用同一哈希函数。 */
+export async function stableHash(identity) {
   const input = String(identity || "");
   try {
     if (typeof crypto !== "undefined" && crypto.subtle && typeof TextEncoder !== "undefined") {
@@ -183,7 +184,7 @@ async function assetHash(identity) {
 export async function assetForSong(song) {
   if (!song || !song.path) return null;
   const url = resolveServerUrl("/api/audio?path=" + encodeURIComponent(song.path));
-  const hash = await assetHash(song.path);
+  const hash = await stableHash(song.path);
   return {
     url,
     path: "audio/" + hash + (extOf(song.path) || ".m4a"),
@@ -196,7 +197,7 @@ export async function assetForSong(song) {
 export async function assetForDict(dict) {
   if (!dict || !dict.path) return null;
   const url = resolveServerUrl("/api/sync/dicts/file?path=" + encodeURIComponent(dict.path));
-  const hash = await assetHash(dict.path);
+  const hash = await stableHash(dict.path);
   return {
     url,
     path: "dicts/" + hash + (extOf(dict.path) || ".mdx"),
@@ -209,8 +210,38 @@ export async function assetForDict(dict) {
 export async function assetForBook(book) {
   if (!book || !book.id) return null;
   const url = resolveServerUrl("/api/books/" + encodeURIComponent(book.id) + "/file");
-  const hash = await assetHash(book.id);
+  const hash = await stableHash(book.id);
   return { url, path: "books/" + hash + ".epub", sha256: "", size: book.size || 0 };
+}
+
+// ---------- 封面/歌词缓存 key（阶段 F1/F2：封面离线缓存 + 歌词文件兜底） ----------
+// 两者共用 stableHash：跨会话确定、同 path 同 key；哈希为纯十六进制，无路径穿越风险
+// （原生 MetaStore.fileURL 亦按 kind 净化，双保险）。
+
+/** 封面资产沙盒路径：covers/<path 哈希>.jpg（前端不知封面实际格式，统一按 JPEG 命名；
+ *  MiniHTTPServer 按扩展名回 Content-Type，WKWebView 图片解码器按魔数嗅探，PNG 内容也能显示） */
+export async function coverAssetKey(path) {
+  if (!path) return null;
+  const hash = await stableHash(path);
+  return "covers/" + hash + ".jpg";
+}
+
+/** 封面下载项 {url, path, sha256, size}（url 为桌面 cover 端点；sha256 空 → 原生跳过内容校验） */
+export async function coverItemFor(path) {
+  if (!path) return null;
+  return {
+    url: resolveServerUrl("/api/cover?path=" + encodeURIComponent(path)),
+    path: await coverAssetKey(path),
+    sha256: "",
+    size: 0,
+  };
+}
+
+/** 歌词文件兜底 kind：lyric:<path 哈希>（Documents/meta/lyric:<hash>.json） */
+export async function lyricKindKey(path) {
+  if (!path) return null;
+  const hash = await stableHash(path);
+  return "lyric:" + hash;
 }
 
 // ---------- 资产查询与下载（ensureAsset） ----------
@@ -223,9 +254,12 @@ export const ASSET_QUERY_TIMEOUT_MS = 8000;
 /**
  * 查询本地资产并（必要时）发起后台下载。
  * @param {{path:string, url:string, sha256?:string, size?:number}} item 沙盒相对路径 + 桌面绝对 URL
- * @param {{download?:boolean}} [opts] 显式 download:true → 未下载时无条件发起下载
- *   （阅读器等既有「打开即后台下载」链路用）；默认行为 = autoPrefetchEnabled() 决定：
- *   开启才下载，关闭只查不下载（播放本地优先：已下载切本地、未下载保持远程）
+ * @param {{download?:boolean, skipAutoDownload?:boolean}} [opts]
+ *   download:true → 未下载时无条件发起下载（阅读器等既有「打开即后台下载」链路用）
+ *   skipAutoDownload:true → 未下载也不下载（即使 autoPrefetch 开启；封面查询用——
+ *     查询路径只回「有没有」，下载决策交给调用方显式 cacheCover 节流）
+ *   默认行为 = autoPrefetchEnabled() 决定：开启才下载，关闭只查不下载
+ *   （播放本地优先：已下载切本地、未下载保持远程）
  * @returns {Promise<string|null>} 已存在 → resolve(localURL)；不存在 → resolve(null)
  *   （不阻塞、不等待下载完成；调用方保持远程播放即可）
  */
@@ -249,10 +283,10 @@ export function ensureAsset({ path, url, sha256, size } = {}, opts = {}) {
       if (payload && payload.exists && payload.localURL) {
         resolve(payload.localURL);
       } else {
-        // 本地没有：仅显式 download:true 或「自动预取」开关开启时才批量发起下载
-        // （同 tick 内多条请求合并成一次 syncDownload）；默认关 = 只查不下载，
+        // 本地没有：仅显式 download:true 或「自动预取」开关开启（skipAutoDownload 可强制只查）
+        // 时才批量发起下载（同 tick 内多条请求合并成一次 syncDownload）；默认关 = 只查不下载，
         // 调用方（播放器）保持远程播放，下载由同步管理页显式触发。
-        if (opts.download === true || autoPrefetchEnabled()) {
+        if (opts.download === true || (autoPrefetchEnabled() && !opts.skipAutoDownload)) {
           queueDownload({ url, path, sha256: sha256 || "", size: size || 0 });
         }
         resolve(null);
@@ -286,6 +320,41 @@ export function localAssetHTTPURL(localURL) {
   const m = String(localURL).match(/qqplayer-assets\/(.+)$/);
   if (!m) return null;
   return LOCAL_SERVER_ORIGIN + "/native-assets/" + m[1];
+}
+
+// ---------- 封面离线缓存（阶段 F1：iOS 壳封面本地优先） ----------
+// 模式对齐 maybePrefetchAsset：播放/列表展示时先查沙盒，命中切本地 URL；未命中保持远程
+// 并（由调用方按节流策略）后台缓存。桌面/非壳 → 全部 no-op，行为零变化。
+
+/**
+ * 查询封面本地缓存：iOS 壳内 hasAsset 查询 → 命中返回本地 HTTP URL；未命中返回 null。
+ * 只查不下载（skipAutoDownload：即使 autoPrefetch 开启也不在这里触发下载——
+ * 列表可见行全部查询时不能刷爆原生串行下载队列，下载由调用方 cacheCover 显式节流）。
+ * 非 iOS 壳 / path 非法 → resolve(null)（静默 no-op）。
+ */
+export async function cachedCoverURL(path) {
+  if (!path || !syncEnabled() || !iosBridgeAvailable()) return null; // 非 iOS 壳：静默 no-op
+  const item = await coverItemFor(path);
+  if (!item) return null;
+  const localURL = await ensureAsset(item, { skipAutoDownload: true });
+  if (!localURL) return null;
+  return localAssetHTTPURL(localURL);
+}
+
+/**
+ * 封面后台缓存（fire-and-forget）：未下载时无条件发 syncDownload（已存在则自动跳过下载）。
+ * 调用方负责节流（useCoverURL：播放中 + 列表前 N 行），避免几百首封面同时灌入下载队列。
+ * 失败静默（下载失败不影响远程封面展示）。非 iOS 壳 no-op。
+ */
+export function cacheCover(path) {
+  if (!path || !syncEnabled() || !iosBridgeAvailable()) return; // 非 iOS 壳：静默 no-op
+  coverItemFor(path)
+    .then((item) => {
+      if (item) ensureAsset(item, { download: true });
+    })
+    .catch(() => {
+      /* 静默 */
+    });
 }
 
 // ---------- syncDownload 批量发送（微任务合并） ----------

@@ -81,7 +81,7 @@
             </span>
             <div class="ml-row-cover">
               <img
-                v-if="coverOk(song.path)"
+                v-if="coverSrc(song.path) && coverOk(song.path)"
                 :src="coverSrc(song.path)"
                 :alt="song.name"
                 loading="lazy"
@@ -133,8 +133,8 @@
         <div v-for="g in filteredGroups" :key="g.key" class="ml-item ml-group" @click="onGroup(g)">
           <div class="ml-row-cover">
             <img
-              v-if="g.coverUrl && coverOk(g.coverKey)"
-              :src="g.coverUrl"
+              v-if="g.coverPath && coverSrc(g.coverPath) && coverOk(g.coverKey)"
+              :src="coverSrc(g.coverPath)"
               :alt="g.name"
               loading="lazy"
               @error="markCoverError(g.coverKey)"
@@ -214,7 +214,7 @@ import {
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
 import { deleteSongs } from "../../composables/useDeleteSong.js";
-import { resolveServerUrl } from "../../utils/apiClient.js";
+import { useCoverURL, COVER_CACHE_FIRST_N } from "../../composables/useCoverURL.js";
 
 const props = defineProps({
   kind: { type: String, required: true }, // songs | favorites | playlist | artist | album | playlists | artists | albums
@@ -226,8 +226,9 @@ const emit = defineEmits(["back", "play", "open"]);
 
 const { t } = useI18n();
 
-// 封面 URL（iOS 壳 file:// 下相对路径需转服务器绝对 URL；桌面同源原样返回）
-const coverSrc = (path) => resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
+// 封面 URL 异步解析（阶段 F1）：iOS 壳本地优先（离线可显示），未命中远程 + 后台缓存；
+// 桌面/非壳远程直出（行为零变化）。coverSrc 未解析完成返回 ""，模板 v-if 配合隐藏 <img>。
+const { coverSrc, coverOk, markCoverError, resolveCover } = useCoverURL();
 
 const query = ref("");
 
@@ -254,7 +255,7 @@ const groupEntries = {
     key: "l:" + g.album + ":" + g.artist,
     name: g.album,
     subtitle: t("mobile.list.albumSubtitle", { artist: g.artist, n: g.count }),
-    coverUrl: g.coverUrl,
+    coverPath: g.coverPath, // 代表歌曲 path（封面异步解析：本地优先，见 useCoverURL）
     coverKey: "l:" + g.album,
     entry: { name: "list", kind: "album", title: g.album, payload: { album: g.album } },
   }),
@@ -321,7 +322,7 @@ const groupRows = computed(() => {
           album,
           artists: new Set([artist]),
           count: 1,
-          coverUrl: coverSrc(s.path),
+          coverPath: s.path,
         });
       }
     }
@@ -379,6 +380,35 @@ const filteredGroups = computed(() => {
   if (!q) return groupRows.value;
   return groupRows.value.filter((g) => g.name.toLowerCase().includes(q));
 });
+
+// ============ 封面异步填充（阶段 F1） ============
+// 可见行（歌曲/分组）hasAsset 查询 + 前 N 行后台缓存；播放中歌曲恒缓存。
+// 节流取舍见 useCoverURL 注释（几百首全下载会刷爆原生串行队列；查询本身零网络）。
+watch(
+  filteredSongs,
+  (rows) => {
+    rows.forEach(({ song }, i) => {
+      if (song.path) resolveCover(song.path, { download: i < COVER_CACHE_FIRST_N });
+    });
+  },
+  { immediate: true },
+);
+watch(
+  filteredGroups,
+  (groups) => {
+    groups.forEach((g, i) => {
+      if (g.coverPath) resolveCover(g.coverPath, { download: i < COVER_CACHE_FIRST_N });
+    });
+  },
+  { immediate: true },
+);
+watch(
+  () => state.currentSong?.path,
+  (p) => {
+    if (p) resolveCover(p, { download: true });
+  },
+  { immediate: true },
+);
 
 // ============ 行点击 ============
 function onPlay(song) {
@@ -503,13 +533,7 @@ onMounted(() => nextTick(setupSortable));
 onBeforeUnmount(() => sortable?.destroy());
 
 // ============ 封面错误缓存 ============
-const coverErrors = ref(new Set());
-function coverOk(path) {
-  return !coverErrors.value.has(path);
-}
-function markCoverError(path) {
-  coverErrors.value.add(path);
-}
+// coverOk/markCoverError 由 useCoverURL 提供（本组件与 MobileSmartList 共用）
 
 // 歌手首字母色块（与 Playlist.vue 一致）
 function hashBg(name) {
