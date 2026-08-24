@@ -33,7 +33,11 @@ struct ConnectedView: View {
     var body: some View {
         VStack(spacing: 0) {
             statusBar
+            // 底部安全区（home indicator）交给前端 env(safe-area-inset-bottom) 处理：
+            // WebView 铺满全屏，否则安全区外露 SwiftUI 容器黑底（viewport-fit=cover 只影响
+            // 页面内布局，管不了 WebView frame）。前端各页已有 safe-area padding 兑底。
             WebShellView(server: server)
+                .ignoresSafeArea(edges: .bottom)
         }
         .sheet(isPresented: $showSwitch) {
             DiscoveryView()
