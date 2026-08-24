@@ -71,11 +71,17 @@ const SAVE_RES = {
 
 // 注意：用 vi.stubGlobal（不用 vi.spyOn）——spyOn 的 mock 不会被 unstubAllGlobals 还原，
 // 同一文件内多次 mockFetch 会串测试（旧 mock 的 calls 污染后续断言）
-function mockFetch({ scrape, save, songs, settings } = {}) {
+function mockFetch({ scrape, save, songs, settings, albumYear } = {}) {
   const mock = vi.fn(async (url, opts) => {
     const u = String(url);
     if (u.includes("/api/tags/scrape") && opts?.method === "POST") {
       return scrape ? scrape() : Promise.resolve({ ok: true, json: async () => SCRAPE_RES });
+    }
+    if (u.includes("/api/tags/album-year") && opts?.method === "POST") {
+      // 默认 {year: null}：不改变表单（存量测试点选网易云候选后 year 仍为空）
+      return albumYear
+        ? albumYear()
+        : Promise.resolve({ ok: true, json: async () => ({ year: null }) });
     }
     if (u.includes("/api/tags") && opts?.method === "POST") {
       return save ? save() : Promise.resolve({ ok: true, json: async () => SAVE_RES });
@@ -257,6 +263,98 @@ describe("TagEditorModal 点选填充", () => {
     expect(inputs[2].value).toBe("无与伦比 演唱会");
     const img = root.querySelector(".cover-preview img");
     expect(img.getAttribute("src")).toBe("https://p1.music.126.net/cover1.jpg");
+    w.unmount();
+  });
+});
+
+describe("TagEditorModal 网易云候选惰性补年份", () => {
+  const clickNetease = async (root) => {
+    root.querySelector('[data-testid="scrape-btn"]').click();
+    await tick();
+    root.querySelector('[data-testid="cand-netease"]').click();
+    await tick();
+    return document.body.querySelector(".modal");
+  };
+
+  it("点选网易云候选（有 id、表单 year 空）→ 触发 album-year → 成功后 form.year 填入", async () => {
+    const fetchMock = mockFetch({
+      albumYear: () => Promise.resolve({ ok: true, json: async () => ({ year: 2018 }) }),
+    });
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = await clickNetease(document.body.querySelector(".modal"));
+    // 请求体：{ song_id: 候选 id }（第一条网易云候选 id=123）
+    const ayCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/album-year"));
+    expect(ayCall).toBeTruthy();
+    expect(JSON.parse(ayCall[1].body)).toEqual({ song_id: "123" });
+    // 年份填入表单（String）
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2018");
+    w.unmount();
+  });
+
+  it("点选网易云候选但请求失败 → 不报错、year 保持空（静默失败）", async () => {
+    const fetchMock = mockFetch({
+      albumYear: () => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }),
+    });
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = await clickNetease(document.body.querySelector(".modal"));
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/album-year"))).toBe(
+      true,
+    );
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
+    // 无错误 toast（静默失败）
+    expect(document.body.querySelector('[data-testid="tag-toast"]')).toBeFalsy();
+    w.unmount();
+  });
+
+  it("album-year 返回 year:null（无数据）→ year 保持空、不报错", async () => {
+    mockFetch(); // 默认 album-year 返回 {year: null}
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = await clickNetease(document.body.querySelector(".modal"));
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
+    expect(document.body.querySelector('[data-testid="tag-toast"]')).toBeFalsy();
+    w.unmount();
+  });
+
+  it("点选 MusicBrainz 候选 → 不触发 album-year", async () => {
+    const fetchMock = mockFetch();
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    let root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="scrape-btn"]').click();
+    await tick();
+    root = document.body.querySelector(".modal");
+    root.querySelector('[data-testid="cand-musicbrainz"]').click();
+    await tick();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/album-year"))).toBe(
+      false,
+    );
+    // MusicBrainz 候选自带 year=2001 → 正常填充
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2001");
+    w.unmount();
+  });
+
+  it("网易云候选自身带 year（表单 year 非空）→ 不触发 album-year", async () => {
+    const fetchMock = mockFetch({
+      scrape: () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({
+            query: "安静 周杰伦",
+            netease: [{ id: "123", title: "安静", artist: "周杰伦", album: "范特西", year: 2001 }],
+            musicbrainz: [],
+          }),
+        }),
+    });
+    const w = mount(TagEditorModal, { props: { open: true } });
+    await nextTick();
+    const root = await clickNetease(document.body.querySelector(".modal"));
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/album-year"))).toBe(
+      false,
+    );
+    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2001");
     w.unmount();
   });
 });

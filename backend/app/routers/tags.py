@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import netease_provider
 import tag_editor
 import tag_scraper
 from app.services import settings as settings_service
@@ -155,6 +156,19 @@ def api_tags_scrape(body: dict):
     query = title or f.stem
     result = tag_scraper.scrape(query, artist or "")
     return {"query": query, **result}
+
+
+@router.post("/api/tags/album-year")
+def api_tags_album_year(body: dict):
+    """网易云歌曲 id → 专辑发行年份（前端惰性补全用）；失败返回 {"year": null} 不报错
+
+    请求: {"song_id": "123"}；响应: {"year": 2018} 或 {"year": null}
+    （provider 查询失败/无数据 → null；只有 song_id 缺失/非字符串才 400）
+    """
+    song_id = body.get("song_id") if isinstance(body, dict) else None
+    if not isinstance(song_id, str) or not song_id.strip():
+        raise HTTPException(400, "song_id 必填")
+    return {"year": netease_provider.get_album_year(song_id.strip())}
 
 
 @router.post("/api/tags")

@@ -116,7 +116,7 @@
                   :key="'ne' + i"
                   class="cand-item"
                   data-testid="cand-netease"
-                  @click="pick(item)"
+                  @click="pick(item, 'netease')"
                 >
                   <span class="cand-cover">
                     <img v-if="item.cover" :src="item.cover" alt="" loading="lazy" />
@@ -154,7 +154,7 @@
                   :key="'mb' + i"
                   class="cand-item"
                   data-testid="cand-musicbrainz"
-                  @click="pick(item)"
+                  @click="pick(item, 'musicbrainz')"
                 >
                   <span class="cand-cover">
                     <img v-if="item.cover" :src="item.cover" alt="" loading="lazy" />
@@ -337,7 +337,9 @@ async function scrape() {
 
 // 点选候选：填充表单 + 记录封面（条目 cover 为 null 则不换封面）
 // 新字段 item 有值才填，null/undefined 置空（网易云候选缺省 → 自动清空）
-function pick(item) {
+// 网易云候选：cloudsearch 不返回发行时间 → 表单 year 为空时有 id 则惰性调 album-year 补年份
+// （异步 + 静默失败：不 toast、不阻塞点选、无 loading 态）
+function pick(item, source) {
   if (!item) return;
   form.title = item.title || "";
   form.artist = item.artist || "";
@@ -348,6 +350,22 @@ function pick(item) {
   form.albumArtist = item.album_artist ?? "";
   remoteCover.value = item.cover || null;
   previewBroken.value = false;
+  if (source === "netease" && item.id && !form.year) {
+    fetchAlbumYear(item.id);
+  }
+}
+
+// 惰性补年份：POST /api/tags/album-year → {year: int|null}
+// 成功且 year 非空 → 填表单（String）；失败/无数据 → 静默忽略（catch 不报错）
+async function fetchAlbumYear(songId) {
+  try {
+    const res = await apiPost("/api/tags/album-year", { song_id: songId });
+    if (!res.ok) return;
+    const year = res.data && res.data.year;
+    if (year) form.year = String(year);
+  } catch {
+    /* 静默失败：不 toast、不阻塞点选 */
+  }
 }
 
 // 数字字段转换：空 → null（后端 null = 不写）

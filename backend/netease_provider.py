@@ -5,11 +5,13 @@
 - search(query, limit): 歌曲搜索（POST /eapi/cloudsearch/pc）
 - get_play_info(id, level): 获取播放直链（Meting 优先 → cenguigui 兜底）
 - get_lyric(id): 获取歌词（POST /eapi/song/lyric/v1）
+- get_album_year(id): 查歌曲详情拿专辑发行年份（POST /eapi/song/detail，惰性补全用）
 
 全部使用 httpx 同步 Client（模块级复用），失败策略与 TS 版一致：
 search 失败返回 []，get_play_info/get_lyric 失败抛异常。
 """
 
+import datetime
 import hashlib
 import json
 import re
@@ -269,6 +271,32 @@ class NeteaseProvider:
             "level": DEFAULT_LEVEL,
         }
 
+    # ---- get_album_year ----
+    def get_album_year(self, song_id: str) -> int | None:
+        """查歌曲详情拿专辑发行年份（毫秒时间戳 → 年，UTC）；失败/无数据返回 None
+
+        网易云 cloudsearch 不返回发行时间，歌曲详情接口的
+        songs[0].album.publishTime 有（毫秒）。任何异常/缺字段/非法值 → None（绝不抛）。
+        """
+        try:
+            payload = self._eapi_post(
+                f"{API_DOMAIN}/eapi/song/detail",
+                "/api/song/detail",
+                {"ids": json.dumps([song_id])},
+            )
+            songs = payload.get("songs")
+            if not isinstance(songs, list) or not songs:
+                return None
+            album = songs[0].get("album")
+            if not isinstance(album, dict):
+                return None
+            ts = album.get("publishTime")
+            if isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts <= 0:
+                return None
+            return datetime.datetime.fromtimestamp(ts / 1000, datetime.timezone.utc).year
+        except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError, OverflowError):
+            return None
+
     # ---- get_play_info ----
     def get_play_info(self, song_id, level: str | None = None) -> dict:
         """获取播放直链：Meting 优先，cenguigui 兜底；两者都失败抛异常
@@ -385,6 +413,10 @@ provider = NeteaseProvider()
 
 def search(query: str, limit: int = 20) -> list[dict]:
     return provider.search(query, limit)
+
+
+def get_album_year(song_id: str) -> int | None:
+    return provider.get_album_year(song_id)
 
 
 def get_play_info(song_id, level: str | None = None) -> dict:
