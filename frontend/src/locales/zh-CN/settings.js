@@ -18,6 +18,7 @@ export default {
       lyric: "歌词",
       ui: "界面",
       shortcuts: "快捷键",
+      pairing: "配对",
       about: "关于",
     },
 

@@ -1556,6 +1556,11 @@
               </div>
             </section>
 
+            <!-- ============ 配对（iOS 壳隐藏） ============ -->
+            <section v-else-if="tab === 'pairing'" class="settings-scroll">
+              <PairingSettings />
+            </section>
+
             <!-- ============ 关于 ============ -->
             <section v-else class="settings-scroll">
               <div class="group">
@@ -1652,6 +1657,7 @@ import {
   RefreshCw,
   Download,
   Video,
+  Smartphone,
   BookOpen,
   Headphones,
   Zap,
@@ -1720,6 +1726,8 @@ import {
   setSleepTimerMinutes,
 } from "../composables/useSleepTimer.js";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
+import PairingSettings from "./PairingSettings.vue";
+import { isPairingEnabled } from "../composables/usePairingConfirm.js";
 import pkg from "../../package.json";
 
 const props = defineProps({
@@ -1867,17 +1875,22 @@ function toggleSetting(key) {
   saveLib({ [key]: !librarySettings.value[key] });
 }
 
-const categories = [
-  { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
-  { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
-  { key: "video", labelKey: "settings.category.video", icon: Video },
-  { key: "download", labelKey: "settings.category.download", icon: Download },
-  { key: "sync", labelKey: "settings.category.sync", icon: RefreshCw },
-  { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
-  { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
-  { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
-  { key: "about", labelKey: "settings.category.about", icon: Info },
-];
+// 分类导航：iOS 壳（发起方）隐藏配对管理，由桌面壳管理配对
+const categories = computed(() => {
+  const list = [
+    { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
+    { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
+    { key: "video", labelKey: "settings.category.video", icon: Video },
+    { key: "download", labelKey: "settings.category.download", icon: Download },
+    { key: "sync", labelKey: "settings.category.sync", icon: RefreshCw },
+    { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
+    { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
+    { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
+    { key: "pairing", labelKey: "settings.category.pairing", icon: Smartphone },
+    { key: "about", labelKey: "settings.category.about", icon: Info },
+  ];
+  return isPairingEnabled() ? list : list.filter((c) => c.key !== "pairing");
+});
 
 const playModeOptions = [
   { value: "order", labelKey: "settings.playModeOrder" },
