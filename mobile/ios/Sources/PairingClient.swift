@@ -9,6 +9,7 @@ enum PairingClient {
     /// 发起配对；限流 429 时返回 .rateLimited
     static func request(baseURL: String, deviceId: String, deviceName: String) async -> Result<String, PairingError> {
         guard let url = URL(string: baseURL + "/api/pairing/request") else {
+            print("[PAIR] request: badURL baseURL=\(baseURL)")
             return .failure(.badURL)
         }
         var req = URLRequest(url: url)
@@ -24,6 +25,7 @@ enum PairingClient {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            print("[PAIR] request → \(baseURL) status=\(status) body=\(String(data: data, encoding: .utf8) ?? "")")
             if status == 429 { return .failure(.rateLimited) }
             guard (200 ..< 300).contains(status) else { return .failure(.http(status)) }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -31,6 +33,7 @@ enum PairingClient {
             else { return .failure(.badResponse) }
             return .success(requestId)
         } catch {
+            print("[PAIR] request → \(baseURL) error: \(error)")
             return .failure(.network)
         }
     }

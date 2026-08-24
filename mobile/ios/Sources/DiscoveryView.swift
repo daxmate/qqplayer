@@ -176,9 +176,11 @@ struct DiscoveryView: View {
 
     private func startPairing(with server: DiscoveredServer) {
         guard let host = server.host else {
+            print("[PAIR] startPairing: host 未解析 service=\(server.serviceName) display=\(server.displayName)")
             errorMessage = "服务器地址尚未解析，请稍候重试"
             return
         }
+        print("[PAIR] startPairing: host=\(host) port=\(server.port) baseURL=\(server.baseURL)")
         errorMessage = nil
         let session = PairingSession(server: server, baseURL: server.baseURL)
         pairingSession = session

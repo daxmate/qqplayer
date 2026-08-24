@@ -110,14 +110,17 @@ final class DiscoveryService: ObservableObject {
         let conn = NWConnection(to: endpoint, using: .tcp)
         activeConnections[key] = conn
         var resolved = false
+        print("[PAIR] resolveHost: service=\(server.serviceName) 开始解析")
         conn.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
                 resolved = true
                 let (ip, port) = self?.extractEndpoint(from: conn.currentPath?.remoteEndpoint) ?? (nil, nil)
+                print("[PAIR] resolveHost ready: ip=\(ip ?? "nil") port=\(port.map(String.init) ?? "nil") service=\(server.serviceName)")
                 self?.applyHost(ip, port: port, serviceName: server.serviceName, key: key)
                 conn.cancel()
             case .failed, .cancelled:
+                print("[PAIR] resolveHost state: \(state) service=\(server.serviceName)")
                 self?.activeConnections[key] = nil
             default:
                 break
