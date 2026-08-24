@@ -225,19 +225,35 @@ final class AVPlayerBridge {
             MPMediaItemPropertyAlbumTitle: album,
             MPNowPlayingInfoPropertyPlaybackRate: player.rate,
         ]
+        // 先保留旧封面兑底：任何时刻 nowPlayingInfo 都带 artwork 键，
+        // 避免「先同步发布无封面信息、后异步补图」顶掉旧封面——锁屏会刷新，
+        // 但 CarPlay 车机大多不刷新异步补的图（2026-08-25 真机空白根因 A）。
+        if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] {
+            info[MPMediaItemPropertyArtwork] = existing
+        } else if let art = nowPlayingArtwork {
+            info[MPMediaItemPropertyArtwork] = art
+        }
         let duration = playerDuration()
         if duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playerTime()
         }
         if !cover.isEmpty {
-            loadArtwork(cover) { [weak self] artwork in
-                guard let self else { return }
-                if let artwork {
-                    self.nowPlayingArtwork = artwork
-                    var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
-                    updated[MPMediaItemPropertyArtwork] = artwork
-                    MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+            // data: URL 同步解码即时有封面（不走异步，无「先空后补」窗口）；
+            // 解码失败/http 封面 → 走异步 loadArtwork（回调逻辑保持现状）
+            let decoded = cover.hasPrefix("data:image/") ? decodeArtwork(cover) : nil
+            if let art = decoded {
+                nowPlayingArtwork = art
+                info[MPMediaItemPropertyArtwork] = art
+            } else {
+                loadArtwork(cover) { [weak self] artwork in
+                    guard let self else { return }
+                    if let artwork {
+                        self.nowPlayingArtwork = artwork
+                        var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
+                        updated[MPMediaItemPropertyArtwork] = artwork
+                        MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                    }
                 }
             }
         }
@@ -272,12 +288,7 @@ final class AVPlayerBridge {
     /// 401 兑底，2026-08-23）；相对路径按服务器 base 前缀补全（调用方已处理）
     private func loadArtwork(_ cover: String, completion: @escaping (MPMediaItemArtwork?) -> Void) {
         if cover.hasPrefix("data:image/") {
-            let base64 = cover.split(separator: ",").dropFirst().joined(separator: ",")
-            if let data = Data(base64Encoded: String(base64)), let img = UIImage(data: data) {
-                completion(MPMediaItemArtwork(boundsSize: img.size) { _ in img })
-            } else {
-                completion(nil)
-            }
+            completion(decodeArtwork(cover))
             return
         }
         guard let url = URL(string: cover), cover.hasPrefix("http") else {
@@ -299,6 +310,17 @@ final class AVPlayerBridge {
                 }
             }
         }.resume()
+    }
+
+    /// 同步解码 data:image/ 封面（base64）→ MPMediaItemArtwork；失败/非 data: 返回 nil。
+    /// 供 applyMetadata 同步路径与 loadArtwork 复用。
+    private func decodeArtwork(_ cover: String) -> MPMediaItemArtwork? {
+        guard cover.hasPrefix("data:image/") else { return nil }
+        let base64 = cover.split(separator: ",").dropFirst().joined(separator: ",")
+        if let data = Data(base64Encoded: String(base64)), let img = UIImage(data: data) {
+            return MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+        }
+        return nil
     }
 
     // MARK: - 远端命令（锁屏/耳机线控）→ 转发 Web
