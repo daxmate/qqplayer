@@ -137,6 +137,19 @@ describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => 
     ]);
   });
 
+  it("代理换 src（新歌 load）→ 进度/时长/ended 镜像清零（残留进度不污染新歌）", () => {
+    const p = m.createNativeAudioProxy();
+    // 上一首歌播到 230s / duration 240（原生 timeupdate 镜像）
+    window.qqplayerOnNativeEvent("timeupdate", { t: 230, duration: 240 });
+    expect(p.currentTime).toBe(230);
+    // 切新歌：换源镜像必须归零，否则 maybePrefetchAsset 切本地时捕获残留进度 →
+    // 新歌从接近尾部开始 / 越界被 clamp 到尾部立即 ended（2026-08-25 播放 bug 根因）
+    p.src = "/api/audio?path=%2Fnew.mp3";
+    expect(p.currentTime).toBe(0);
+    expect(p.duration).toBe(0);
+    expect(p.ended).toBe(false);
+  });
+
   it("代理 play/pause/seek/volume/rate → 对应命令", () => {
     const p = m.createNativeAudioProxy();
     p.play();

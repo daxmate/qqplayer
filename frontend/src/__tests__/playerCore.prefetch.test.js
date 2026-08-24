@@ -318,6 +318,86 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
     expect(proxy.src).toBe("http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3");
   });
 
+  it("已下载且新歌未播（currentTime=0）：切本地不从残留位置 seek（修复 2026-08-25 尾部播放）", async () => {
+    const proxy = bridgeMock.getProxy();
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    // 换源后镜像清零：新歌还没开始播，currentTime=0（修复前残留上一首进度会污染这里）
+    proxy._src = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
+    proxy.paused = true;
+    proxy.currentTime = 0;
+
+    const p = maybePrefetchAsset(state.currentSong);
+    await flush();
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const { path, requestId } = hasAssetCall[0];
+    bridgeMock.emit("assetStatus", {
+      requestId,
+      path,
+      exists: true,
+      localURL: "file:///Documents/qqplayer-assets/" + path,
+    });
+    await p;
+
+    expect(proxy.src.startsWith("file:///")).toBe(true); // 切本地
+    expect(proxy.playCalls).toBe(0); // 未在播不续播
+    // 无进度（t=0）：不挂 loadedmetadata seek——新歌从 0 播，绝不 seek 到残留位置
+    expect(proxy.listeners.loadedmetadata || []).toHaveLength(0);
+    expect(bridgeMock.post.mock.calls.some((c) => c[0].cmd === "seek")).toBe(false);
+  });
+
+  it("已下载 + resumeAt（restoreLastPlayed 断点续播）：切本地后 seek 到断点而不是从 0 开始", async () => {
+    const proxy = bridgeMock.getProxy();
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    proxy._src = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
+    proxy.paused = true;
+    proxy.currentTime = 0; // 还没开始播（换源清零）
+
+    const p = maybePrefetchAsset(state.currentSong, { resumeAt: 120 }); // 断点 120s
+    await flush();
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const { path, requestId } = hasAssetCall[0];
+    bridgeMock.emit("assetStatus", {
+      requestId,
+      path,
+      exists: true,
+      localURL: "file:///Documents/qqplayer-assets/" + path,
+    });
+    await p;
+
+    // 挂载了 loadedmetadata seek；duration 就绪后 seek 到断点
+    const metas = proxy.listeners.loadedmetadata || [];
+    expect(metas.length).toBe(1);
+    for (const fn of metas) fn({ duration: 180 });
+    expect(proxy.currentTime).toBe(120);
+    expect(state.currentTime).toBe(120);
+  });
+
+  it("resumeAt 超过 duration：clamp 到 duration-0.5（防 seek 越界立即 ended = 直接跳过）", async () => {
+    const proxy = bridgeMock.getProxy();
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    proxy._src = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
+    proxy.paused = true;
+    proxy.currentTime = 0;
+
+    const p = maybePrefetchAsset(state.currentSong, { resumeAt: 9999 }); // 远超时长
+    await flush();
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const { path, requestId } = hasAssetCall[0];
+    bridgeMock.emit("assetStatus", {
+      requestId,
+      path,
+      exists: true,
+      localURL: "file:///Documents/qqplayer-assets/" + path,
+    });
+    await p;
+
+    for (const fn of [...(proxy.listeners.loadedmetadata || [])]) fn({ duration: 180 });
+    expect(proxy.currentTime).toBe(179.5); // 180 - 0.5，不越界
+  });
+
   it("iOS 壳外（无桥）：直接 no-op，不发任何资产消息", async () => {
     bridgeMock.isNativePlayback.mockReturnValue(false);
     delete window.qqplayerNative;

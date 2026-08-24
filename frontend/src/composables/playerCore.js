@@ -1618,7 +1618,7 @@ export async function selectSong(index, opts = {}) {
   audio.src = streamProxyUrl(src);
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
   // iOS 同步：本地歌资产本地优先（不阻塞远程播放；已下载时回执后切本地播放）
-  maybePrefetchAsset(state.currentSong);
+  maybePrefetchAsset(state.currentSong, { resumeAt: opts.resumeAt });
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   audio.volume = state.muted ? 0 : state.volume;
   state.currentTime = 0;
@@ -1661,7 +1661,7 @@ export async function selectSong(index, opts = {}) {
 /**
  * 选歌播放前本地资产查询（内部函数；导出供单元测试直接驱动 assetStatus 回执）。
  */
-export async function maybePrefetchAsset(song) {
+export async function maybePrefetchAsset(song, opts = {}) {
   try {
     if (!isNativePlayback() || !song || !song.path) return;
     const item = await assetForSong(song);
@@ -1674,19 +1674,27 @@ export async function maybePrefetchAsset(song) {
     if (!curSrc || curSrc === localURL) return;
     const wasPlaying = !audio.paused;
     const t = audio.currentTime || 0;
+    // 断点兜底：换源后镜像清零（t=0 = 新歌还没开始播）时，调用方带的恢复位置
+    // （restoreLastPlayed 断点续播）生效——切本地后从断点继续而不是从 0 开始
+    const resumeAt = t > 0 ? t : (opts.resumeAt ?? 0) > 0 ? opts.resumeAt : 0;
     audio.removeAttribute("src");
     audio.src = localURL; // 本地文件秒开（原生 load → AVPlayer 本地播放）
     audio.volume = state.muted ? 0 : state.volume;
     if (wasPlaying) audio.play().catch(() => {});
     // 保留进度：loadedmetadata 后再 seek（原生 load 未就绪时 seek 可能被丢弃）
-    const onMeta = () => {
-      audio.removeEventListener("loadedmetadata", onMeta);
-      if (t > 0) {
-        audio.currentTime = t;
-        state.currentTime = t;
-      }
-    };
-    audio.addEventListener("loadedmetadata", onMeta, { once: true });
+    if (resumeAt > 0) {
+      const onMeta = (e) => {
+        audio.removeEventListener("loadedmetadata", onMeta);
+        const dur = (e && e.duration) || audio.duration || 0;
+        // clamp 防越界：目标超过 duration-0.5 会播到尾部立即 ended（"直接跳过"）
+        const target = dur > 0 ? Math.min(resumeAt, Math.max(0, dur - 0.5)) : resumeAt;
+        if (target > 0) {
+          audio.currentTime = target;
+          state.currentTime = target;
+        }
+      };
+      audio.addEventListener("loadedmetadata", onMeta, { once: true });
+    }
   } catch {
     /* 预取失败静默：远程播放不受影响 */
   }

@@ -170,6 +170,13 @@ export function createNativeAudioProxy() {
       set: (v) => {
         srcValue = v ? String(v) : "";
         if (srcValue) {
+          // 换源重置进度/时长镜像：模拟浏览器 <audio> 换 src 后 currentTime 归零。
+          // 否则原生新 item 首个 timeupdate 到达前，currentTime 残留上一首歌的进度——
+          // maybePrefetchAsset「切本地播放保留进度」会捕获错误位置，新歌从接近尾部
+          // 开始播（甚至越界被 clamp 到尾部立即 ended = 直接跳过），2026-08-25 根因。
+          nativeState.currentTime = 0;
+          nativeState.duration = 0;
+          nativeState.ended = false;
           nativePost({ cmd: "load", url: resolveNativeUrl(srcValue) });
         }
       },
