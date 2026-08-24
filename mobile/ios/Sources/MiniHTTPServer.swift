@@ -118,21 +118,69 @@ final class MiniHTTPServer {
             send(conn, status: 404, contentType: "text/plain", body: "Not Found")
             return
         }
-        send(conn, status: 200, contentType: mimeType(for: fileURL.pathExtension), body: data)
+        // Range 支持：AVPlayer 等 HTTP 流播放器硬性要求（探测时长 / seek 定位依赖
+        // 206 + Content-Range；不支持时 duration 读取异常、seek 行为错乱——
+        // 2026-08-25 已下载歌全部走本地 HTTP 流后“从接近尾部开始播/跳过”根因）。
+        // 无 Range 头或非法时降级 200 全量（带 Accept-Ranges 声明能力）。
+        let mime = mimeType(for: fileURL.pathExtension)
+        let rangeHeader = lines.first { $0.lowercased().hasPrefix("range:") }
+        if let rangeHeader, let r = parseRange(rangeHeader, total: data.count) {
+            let slice = data.subdata(in: r.start..<(r.end + 1))
+            send(conn, status: 206, contentType: mime, body: slice,
+                 contentRange: "bytes \(r.start)-\(r.end)/\(data.count)")
+        } else {
+            send(conn, status: 200, contentType: mime, body: data)
+        }
     }
 
-    private func send(_ conn: NWConnection, status: Int, contentType: String, body: Data) {
+    /// 解析 Range 请求头：bytes=start-end / bytes=start- / bytes=-suffix（最后 N 字节）。
+    /// 返回闭区间 [start, end]（含端点）；非 bytes 单位 / 非法 / 越界返回 nil（调用方降级 200 全量）。
+    private func parseRange(_ header: String, total: Int) -> (start: Int, end: Int)? {
+        guard total > 0 else { return nil }
+        let spec = header.split(separator: ":", maxSplits: 1).dropFirst().first?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        guard spec.lowercased().hasPrefix("bytes=") else { return nil }
+        let value = String(spec.dropFirst("bytes=".count)).trimmingCharacters(in: .whitespaces)
+        // 注意 omittingEmptySubsequences: false——"500-" 的尾部空段、"-100" 的头部空段都必须保留
+        let comps = value.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard comps.count == 2 else { return nil }
+        // bytes=-N：最后 N 字节（客户端不指定起点）
+        if comps[0].isEmpty, let suffix = Int(comps[1]), suffix > 0 {
+            let start = max(0, total - suffix)
+            return (start, total - 1)
+        }
+        // bytes=start- 或 bytes=start-end
+        guard let start = Int(comps[0]), start >= 0, start < total else { return nil }
+        var end = total - 1
+        if !comps[1].isEmpty, let e = Int(comps[1]) {
+            end = min(e, total - 1)
+        }
+        guard end >= start else { return nil }
+        return (start, end)
+    }
+
+    private func send(_ conn: NWConnection, status: Int, contentType: String, body: Data, contentRange: String? = nil) {
         let statusText: String
         switch status {
         case 200: statusText = "OK"
+        case 206: statusText = "Partial Content"
         case 404: statusText = "Not Found"
         case 405: statusText = "Method Not Allowed"
         default: statusText = "Error"
         }
-        let head = "HTTP/1.1 \(status) \(statusText)\r\n" +
+        var head = "HTTP/1.1 \(status) \(statusText)\r\n" +
             "Content-Type: \(contentType)\r\n" +
             "Content-Length: \(body.count)\r\n" +
+            "Accept-Ranges: bytes\r\n" +
             "Connection: close\r\n\r\n"
+        if let contentRange {
+            head = "HTTP/1.1 \(status) \(statusText)\r\n" +
+                "Content-Type: \(contentType)\r\n" +
+                "Content-Length: \(body.count)\r\n" +
+                "Content-Range: \(contentRange)\r\n" +
+                "Accept-Ranges: bytes\r\n" +
+                "Connection: close\r\n\r\n"
+        }
         var out = Data(head.utf8)
         out.append(body)
         conn.send(content: out, completion: .contentProcessed { _ in
