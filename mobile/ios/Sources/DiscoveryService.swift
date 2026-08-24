@@ -143,9 +143,12 @@ final class DiscoveryService: ObservableObject {
         let ip: String?
         switch host {
         case .ipv4(let addr):
-            ip = "\(addr)"
+            // IPv4Address 的字符串表示会带接口 scope 后缀（如 "192.168.31.118%en0"），
+            // 直接拼 URL 会非法（badURL）导致配对请求永远发不出去（2026-08-24 真机 mDNS 配对根因）；
+            // 截掉 % 之后的部分只留纯 IP。
+            ip = addr.debugDescription.split(separator: "%").first.map(String.init)
         case .ipv6(let addr):
-            ip = "[\(addr)]"
+            ip = "[\(addr.debugDescription.split(separator: "%").first ?? Substring(""))]"
         @unknown default:
             ip = nil
         }
