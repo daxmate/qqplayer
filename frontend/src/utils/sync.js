@@ -579,6 +579,70 @@ export function syncAssets(items) {
   return true;
 }
 
+/** 歌词同步：小并发上限（同时最多 5 首在途；126 首全并发会瞬时打爆后端） */
+export const LYRIC_SYNC_CONCURRENCY = 5;
+
+/** 歌词同步总超时兜底（ms）：60s 内尽力，超时静默返回已完部分（不阻塞同步面板） */
+export const LYRIC_SYNC_TOTAL_TIMEOUT_MS = 60000;
+
+/**
+ * 同步歌词落文件（任务 G）：逐首调 /api/lyric（prefer=local，构造与 useLyric.js
+ * 的 lyricUrl 同构——该函数未导出，这里本地复制等价逻辑，改端点时两处需同步），
+ * 成功且 lines 非空 → nativeMetaSave(lyricKindKey(path), {lines, format, source})。
+ * 取舍：
+ *   - 限流：固定小并发池（≤LYRIC_SYNC_CONCURRENCY 同时在途），避免批量歌词请求
+ *     同时打后端；并发上限与音频下载原生队列（≤3）互不干扰（互不阻塞）
+ *   - 总超时兜底：Promise.race 60s，超时返回已完部分（worker 仍在后台尽力跑完，
+ *     写文件不中断——同步面板不因歌词拖住/报错）
+ *   - 失败 / 无歌词（404 / 空 lines）→ 跳过：不写文件、不抛错、不计 ok
+ *   - 非 iOS 壳（无桥）→ 不请求不写（与 syncAssets 同门控），返回 {ok:0, total:0}
+ * @returns {Promise<{ok:number, total:number}>} ok=成功落文件数，total=尝试数（调用方可 toast）
+ */
+export async function syncLyricsForSongs(songs) {
+  const list = (Array.isArray(songs) ? songs : []).filter(
+    (s) => s && typeof s.path === "string" && s.path,
+  );
+  if (!list.length) return { ok: 0, total: 0 };
+  if (!syncEnabled() || !iosBridgeAvailable()) return { ok: 0, total: 0 };
+  let ok = 0;
+  let next = 0; // 共享游标：worker 逐首取任务（同步自增，无竞态）
+  const worker = async () => {
+    while (next < list.length) {
+      const song = list[next++];
+      try {
+        const r = await apiGet(
+          "/api/lyric?path=" + encodeURIComponent(song.path) + "&prefer=local",
+        );
+        const data = r && r.ok ? r.data || {} : null;
+        const lines = data && Array.isArray(data.lines) ? data.lines : [];
+        if (!lines.length) continue; // 无歌词：跳过（不写文件、不报错）
+        const kind = await lyricKindKey(song.path);
+        if (!kind) continue;
+        // 失败静默：nativeMetaSave 参数非法/非壳内会自降级，这里 try 兜底不抛
+        nativeMetaSave(
+          kind,
+          JSON.stringify({
+            lines,
+            format: typeof data.format === "string" ? data.format : null,
+            source: typeof data.source === "string" ? data.source : null,
+          }),
+        );
+        ok += 1;
+      } catch {
+        /* 单首失败静默：不影响其余歌词同步 */
+      }
+    }
+  };
+  const n = Math.min(LYRIC_SYNC_CONCURRENCY, list.length);
+  let timeoutId = null;
+  const timeout = new Promise((resolve) => {
+    timeoutId = setTimeout(resolve, LYRIC_SYNC_TOTAL_TIMEOUT_MS);
+  });
+  await Promise.race([Promise.all(Array.from({ length: n }, () => worker())), timeout]);
+  clearTimeout(timeoutId); // worker 先跑完：及时清掉兜底定时器（超时分支已触发，clear 无害）
+  return { ok, total: list.length };
+}
+
 /** 清除已完成（done/failed）的下载状态条目（不影响原生已下载文件） */
 export function clearFinished() {
   for (const path of Object.keys(syncDownloads)) {

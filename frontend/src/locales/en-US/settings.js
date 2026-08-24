@@ -34,6 +34,7 @@ export default {
     syncAllSongsDesc: "Download offline audio for all local songs (stream songs are skipped)",
     syncStart: "Sync",
     syncStarted: "Downloading {n} files…",
+    syncLyricsDone: "Synced lyrics for {n} songs",
     syncPlaylist: "Sync Playlist",
     syncPlaylistDesc: "Download offline audio for songs in a selected playlist",
     syncPlaylistPlaceholder: "Select playlist…",

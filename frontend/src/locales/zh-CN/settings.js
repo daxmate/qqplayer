@@ -161,6 +161,7 @@ export default {
     syncAllSongsDesc: "下载曲库全部本地歌曲的离线音频（流媒体歌曲自动跳过）",
     syncStart: "开始同步",
     syncStarted: "已开始下载 {n} 个文件",
+    syncLyricsDone: "已同步歌词 {n} 首",
     syncPlaylist: "同步歌单",
     syncPlaylistDesc: "下载指定歌单内歌曲的离线音频",
     syncPlaylistPlaceholder: "选择歌单…",

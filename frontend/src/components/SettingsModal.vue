@@ -1698,6 +1698,7 @@ import {
   syncDownloads,
   syncAssets,
   buildSongSyncItems,
+  syncLyricsForSongs,
   buildBookItems,
   clearFinished,
   retryFailed,
@@ -2180,6 +2181,11 @@ async function syncAllSongs() {
     // 音频+封面下载项（封面随歌一起同步；items.length 含封面，面板计数自动覆盖）
     const items = await buildSongSyncItems(songs);
     if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
+    // 歌词落文件（fire-and-forget）：与音频下载并行不阻塞；完成后 toast 一次
+    // （失败/无歌词静默跳过，不报错）
+    syncLyricsForSongs(songs).then((r) => {
+      if (r && r.ok > 0) showToast(t("settings.syncLyricsDone", { n: r.ok }));
+    });
   } catch {
     toastFetchFailed();
   } finally {
@@ -2208,6 +2214,9 @@ async function syncSelectedPlaylist() {
     }
     const items = await buildSongSyncItems(songs);
     if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
+    syncLyricsForSongs(songs).then((r) => {
+      if (r && r.ok > 0) showToast(t("settings.syncLyricsDone", { n: r.ok }));
+    });
   } catch {
     toastFetchFailed();
   } finally {
@@ -2280,6 +2289,9 @@ async function downloadPickedSongs() {
   try {
     const items = await buildSongSyncItems(picked);
     if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
+    syncLyricsForSongs(picked).then((r) => {
+      if (r && r.ok > 0) showToast(t("settings.syncLyricsDone", { n: r.ok }));
+    });
     pickerSelected.value = [];
   } finally {
     syncBusy.value = false;
