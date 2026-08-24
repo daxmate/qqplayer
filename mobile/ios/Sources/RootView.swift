@@ -45,21 +45,23 @@ struct ConnectedView: View {
     @State private var showSwitch = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            statusBar
-            // 底部安全区（home indicator）交给前端 env(safe-area-inset-bottom) 处理：
-            // WebView 铺满全屏，否则安全区外露 SwiftUI 容器黑底（viewport-fit=cover 只影响
-            // 页面内布局，管不了 WebView frame）。前端各页已有 safe-area padding 兑底。
-            WebShellView(server: server)
-                .ignoresSafeArea(edges: .bottom)
-        }
-        .sheet(isPresented: $showSwitch) {
-            DiscoveryView()
-        }
-        .onChange(of: pairingStore.currentServer?.serverId) { _ in
-            showSwitch = false // 切换/重新配对成功后收起选择页
-        }
-        .ignoresSafeArea(.keyboard)
+        // WebView 全屏铺满（顶部状态栏区 + 底部 home indicator 区都由前端背景覆盖）：
+        // 安全区外的区域露 SwiftUI 容器底色（黑/白）会跟页面背景不连续，参考图是背景铺满全屏。
+        // 顶部状态条用 safeAreaInset 浮在 WebView 上：既保留连接状态/切换入口，又把自身高度
+        // 自动并入 WebView 的 safe area——前端 env(safe-area-inset-top) 随之增大，标题等内容
+        // 自动下移避让，不会被状态条压住（viewport-fit=cover + 前端 safe-area padding 兜底）。
+        WebShellView(server: server)
+            .ignoresSafeArea()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                statusBar
+            }
+            .sheet(isPresented: $showSwitch) {
+                DiscoveryView()
+            }
+            .onChange(of: pairingStore.currentServer?.serverId) { _ in
+                showSwitch = false // 切换/重新配对成功后收起选择页
+            }
+            .ignoresSafeArea(.keyboard)
     }
 
     private var statusBar: some View {
