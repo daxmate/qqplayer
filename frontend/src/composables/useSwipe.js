@@ -102,7 +102,9 @@ export function useEdgeSwipe(elRef, { enabled = () => true, onTrigger = () => {}
 
 // ============ 列表左滑操作（swipe-reveal） ============
 export const REVEAL_WIDTH = 168; // 操作区宽度（px）
-const REVEAL_LOCK_DX = 12; // 横向判定阈值（px）
+const REVEAL_LOCK_DX = 20; // 横向判定阈值（px）：点击抖动容差（原 12 太小，真机点击误判左滑）
+const REVEAL_LOCK_VELOCITY = 0.35; // 锁定最小速度（px/ms）：慢速小位移视为点击不锁定
+const REVEAL_LOCK_FAR = 60; // 大位移慢速也算滑动（用户明显拖拽）
 const REVEAL_OPEN_RATIO = 0.5; // 位移超过操作区一半 → 展开
 const REVEAL_TAP_SLOP = 6; // 小于该位移视为点击（不抑制 tap）
 
@@ -170,6 +172,7 @@ export function useSwipeReveal(
       startX: t.clientX,
       startY: t.clientY,
       lastX: t.clientX,
+      startT: Date.now(),
       base: wasOpen ? actionWidth : 0,
       locked: false,
     });
@@ -183,8 +186,14 @@ export function useSwipeReveal(
     const dx = d.startX - t.clientX; // 左滑为正
     const dy = t.clientY - d.startY;
     if (!d.locked) {
-      if (Math.abs(dx) > REVEAL_LOCK_DX && Math.abs(dx) > Math.abs(dy)) d.locked = true;
-      else return; // 纵向意图：让位列表滚动
+      // 横向主导 + 位移够 +（快速滑动 或 大位移慢拖）才算左滑手势；
+      // 点击的慢速微小抖动（<20px 或 <0.35px/ms）不锁定 → 行不动、无闪现、点击正常
+      const dxAbs = Math.abs(dx);
+      const elapsed = Math.max(1, Date.now() - (d.startT ?? Date.now()));
+      const fast = dxAbs / elapsed >= REVEAL_LOCK_VELOCITY;
+      const far = dxAbs > REVEAL_LOCK_FAR;
+      if (dxAbs > REVEAL_LOCK_DX && dxAbs > Math.abs(dy) && (fast || far)) d.locked = true;
+      else return; // 纵向意图 / 点击抖动：让位列表滚动或保持原位
     }
     if (e.cancelable) e.preventDefault();
     d.lastX = t.clientX;

@@ -206,4 +206,21 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
     expect(plays).toBeTruthy();
     expect(plays[0][0].path).toBe("/lib/b.mp3");
   });
+
+  it("点击时的微小抖动位移（<20px 慢速）→ 不锁定不闪现，点击正常播放", async () => {
+    const wrapper = mountList();
+    const row1 = wrapper.findAll(".ml-item")[0].element;
+    // 模拟真机点击：按下后手指轻微横向抖动 15px（慢速，> 锁定速度阈值）
+    fireTouch(row1, "touchstart", [{ clientX: 200, clientY: 40 }]);
+    fireTouch(row1, "touchmove", [{ clientX: 185, clientY: 42 }]);
+    fireTouch(row1, "touchend", [], [{ clientX: 185, clientY: 42 }]);
+    await flushPromises();
+    // 行不应被锁定/位移（无闪现）
+    expect(wrapper.findAll(".ml-wrap")[0].classes()).not.toContain("open");
+    // 点击应正常触发播放
+    await wrapper.findAll(".ml-item")[0].trigger("click");
+    const plays = wrapper.emitted("play");
+    expect(plays).toBeTruthy();
+    expect(plays[0][0].path).toBe("/lib/a.mp3");
+  });
 });
