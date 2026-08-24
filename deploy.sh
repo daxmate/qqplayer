@@ -31,7 +31,20 @@ BACKUP=""
 if [ "$RESTART_ONLY" = "0" ]; then
   echo "── 拉取最新代码"
   # 显式禁用 rebase：仓库配了 pull.rebase=true 时 --ff-only 会走 rebase，要求工作区干净（deploy.sh 自身未提交也会挂）
-  git -c pull.rebase=false pull --ff-only
+  # 失败重试 3 次：并发 push / 网络抖动会导致瞬时失败（Cannot fast-forward to multiple branches）
+  pull_ok=0
+  for attempt in 1 2 3; do
+    if git -c pull.rebase=false pull --ff-only; then
+      pull_ok=1
+      break
+    fi
+    echo "⚠️ git pull 第 ${attempt} 次失败（网络/并发瞬时错误？），2s 后重试"
+    sleep 2
+  done
+  if [ "$pull_ok" != "1" ]; then
+    echo "❌ git pull 连续 3 次失败，中止部署"
+    exit 1
+  fi
 fi
 
 # 2. 后端依赖（venv 缺失自动创建，参照 plist 自愈模式）
