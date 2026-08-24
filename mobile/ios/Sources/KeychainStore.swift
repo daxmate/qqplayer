@@ -26,6 +26,10 @@ enum KeychainStore {
     // MARK: 设备 UUID
 
     /// 本机持久化设备 UUID（首次生成；Keychain 在重装/恢复后保留）
+    ///
+    /// 生成链：Keychain → 文件兜底 → identifierForVendor（重装后仍稳定，绑定设备而非安装）
+    /// → 随机 UUID（最后兑底）。2026-08-24：兑底从随机 UUID 改为 identifierForVendor，
+    /// 否则卸载重装后 device_id 变化，桌面端把同一台设备当成新设备反复累积配对记录。
     static func deviceId() -> String {
         if let existing = read(service: deviceService, account: "deviceId"), !existing.isEmpty {
             return existing
@@ -34,10 +38,19 @@ enum KeychainStore {
             _ = write(service: deviceService, account: "deviceId", value: backed)
             return backed
         }
-        let newId = UUID().uuidString.lowercased()
+        let newId = stableFallbackId()
         _ = write(service: deviceService, account: "deviceId", value: newId)
         saveBackup(deviceId: newId)
         return newId
+    }
+
+    /// 稳定兑底设备 ID：identifierForVendor 优先（同设备卸载重装后不变），不可用才随机。
+    private static func stableFallbackId() -> String {
+        if let vid = UIDevice.current.identifierForVendor?.uuidString.lowercased(),
+           !vid.isEmpty {
+            return vid
+        }
+        return UUID().uuidString.lowercased()
     }
 
     // MARK: 配对记录
