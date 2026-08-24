@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### ✨ 标签刮削全面增强（刮削设置 / 右键入口 / 批量刮削 / 年代歌单）
+
+- **设置面板新增「刮削」tab**：刮削字段选择（title/artist/album/cover/year/genre/track/album_artist 写入白名单，默认全选）、重命名规则模板（`{artist}` `{title}` `{album}` `{track}` `{year}` 占位符 + `/` 建子目录 + 实时预览）、源优先级排序（网易云 / MusicBrainz）、批量刮削开关（默认关闭）、自定义刮削源（插件）占位
+- **标签字段扩展（year/genre 必做 + track/album_artist 可选）**：读取（ID3/MP4/FLAC/OGG 四格式）→ 扫描进歌曲对象 → 编辑弹窗展示填写 → 原子写入文件全链路打通；MusicBrainz 刮削候选新增年份/流派/音轨号/专辑歌手
+- **右键菜单「编辑标签/刮削」**：浏览器与 macOS 壳两侧新增入口，点开即弹出标签编辑弹窗并自动刮削；编辑目标为被右键歌曲，不打断当前播放
+- **批量刮削（默认关闭）**：设置中开启后支持多选批量刮削（高置信度候选自动写入、低置信度跳过出报告）与一键补全曲库缺失年份/流派；结果面板展示成功/跳过/失败明细
+- **年代自动歌单**：侧边栏智能视图新增年代分组（50s 及更早 / 60s / 70s / 80s / 90s / 00s / 10s / 20s / 未知年代），按歌曲年份自动聚合、实时更新（Apple Music Decades 粒度）
+- 修复：`aart`（专辑歌手）标签此前被误读为歌手；desktop/macOS 补充缺失的 project.yml（xcodegen 工程定义）
+
 ### 🔧 SQLite 持久化升级（iOS companion 同步底座）
 
 - **引入 SQLite 存储层**（标准库 sqlite3，无新依赖）：`app/db.py` DAO，WAL 模式 + busy_timeout + 每操作短连接 + 全局写锁，FastAPI 多线程安全
