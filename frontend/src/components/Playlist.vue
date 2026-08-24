@@ -1,5 +1,5 @@
 <template>
-  <div class="playlist" :class="{ compact }">
+  <div class="playlist" :class="{ compact, 'sv-hidden': smartViewState.active }">
     <div class="pl-head">
       <Music :size="13" />
       {{ viewTitle }}
@@ -415,6 +415,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import Sortable from "sortablejs";
+import { smartViewState } from "../composables/useSmartViews.js";
 import {
   Music,
   Mic,
@@ -1338,6 +1339,11 @@ function fmtDur(d) {
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+/* 智能视图浮层打开时隐藏列表本体（visibility 保留占位，grid cell/panelStyle rect 不受影响）；
+   浮层背后直接透出封面模糊层，毛玻璃与全部歌曲/歌单列表完全同源 */
+.playlist.sv-hidden {
+  visibility: hidden;
 }
 .pl-head {
   padding: 12px 14px;

@@ -669,7 +669,8 @@ function coverUrl(path) {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: linear-gradient(160deg, var(--bg), var(--bg2)); /* 与 body 底色一致，覆盖原列 */
+  /* 背景不自绘：毛玻璃模式由 style.css html[data-blur] 规则统一管（与 .playlist 同源），
+     非毛玻璃模式由 html:not([data-blur]) .sv-panel 全局兜底（见 style.css） */
 }
 .sv-head {
   padding: 12px 14px;

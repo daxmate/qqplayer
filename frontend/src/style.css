@@ -172,10 +172,15 @@ html[data-blur="true"] .karaoke-panel {
 }
 html[data-blur="true"] .sidebar,
 html[data-blur="true"] .playlist,
-html[data-blur="true"] .activity-bar {
+html[data-blur="true"] .activity-bar,
+html[data-blur="true"] .sv-panel {
   background: color-mix(in srgb, var(--bg2) 64%, transparent);
   -webkit-backdrop-filter: blur(32px) saturate(1.3);
   backdrop-filter: blur(32px) saturate(1.3);
+}
+/* 非毛玻璃模式：sv-panel 浮层需遮住下面被覆盖的列表，用 body 同款渐变兑底（与 .playlist 透明露 body 等效） */
+html:not([data-blur="true"]) .sv-panel {
+  background: linear-gradient(160deg, var(--bg), var(--bg2));
 }
 
 /* ============ 紧凑模式（html[data-compact="true"]）============
