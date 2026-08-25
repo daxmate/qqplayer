@@ -47,6 +47,16 @@ def _norm_num(v, default, lo=None, hi=None, integer=False):
     return int(v) if integer else v
 
 
+def _norm_max_speed(v, default):
+    """下载限速（MB/s）：数字且在 0~100 内保留（允许小数），越界/非法回落默认。
+    与 _norm_num 的 clamp 不同：越界视为非法回落默认（-1 不是合理的“不限速”输入）。"""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return default
+    if v < 0 or v > 100:
+        return default
+    return v
+
+
 def _norm_exts(v, default):
     """audioExts：字符串扩展名列表（小写、带点）；过滤后非空才采纳，否则回落默认"""
     if isinstance(v, list) and v:
@@ -321,6 +331,8 @@ _SETTINGS_SPEC = {
         "engine": ("httpx", lambda v, d: _norm_str(v, d, allowed={"httpx", "aria2"})),
         "aria2Rpc": ("http://localhost:6800/jsonrpc", _norm_str),
         "aria2Secret": ("dax", _norm_str),
+        # 下载限速（MB/s；0 = 不限速）；负数/超 100/非数字回落默认 4
+        "maxSpeed": (4, _norm_max_speed),
     },
     "video": {
         # 本地视频目录（多目录字符串数组，空数组 = 未配置，/api/videos 返回空列表）

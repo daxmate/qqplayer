@@ -28,11 +28,19 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _stream_download(
-    url: str, dest: Path, timeout: float = DOWNLOAD_TIMEOUT, headers: dict | None = None
+    url: str,
+    dest: Path,
+    timeout: float = DOWNLOAD_TIMEOUT,
+    headers: dict | None = None,
+    max_speed_mbps: float = 0,
 ) -> None:
-    """流式下载 url 到 dest（同名覆盖）；失败抛异常（由路由转 404）"""
+    """流式下载 url 到 dest（同名覆盖）；失败抛异常（由路由转 404）。
+    max_speed_mbps > 0 时按时间窗节流（累计已写字节 / 限速 目标用时，未到则 sleep）：
+    降低下载写盘频率，缓解与 /api/audio 播放读盘争抢机械盘 I/O 导致的爆音。"""
     dl_headers = dict(headers or {})
     dl_headers.setdefault("User-Agent", DOWNLOAD_UA)
+    start = time.monotonic()
+    written = 0
     with httpx.stream(
         "GET",
         url,
@@ -44,6 +52,12 @@ def _stream_download(
         with open(dest, "wb") as f:
             for chunk in resp.iter_bytes():
                 f.write(chunk)
+                if max_speed_mbps > 0:
+                    written += len(chunk)
+                    target = written / (max_speed_mbps * 1024 * 1024)
+                    elapsed = time.monotonic() - start
+                    if elapsed < target:
+                        time.sleep(target - elapsed)
 
 
 def _unique_path(p: Path) -> Path:
@@ -87,11 +101,18 @@ def _download_with_engine(
     否则（未配置/连不上/超时）自动降级内置 httpx 流式下载。
     headers：直链签名绑定的请求头（夸克 Cookie/UA/Referer），下载必须一致。"""
     dl = settings.get("download") or {}
+    # 下载限速（MB/s）：防御性取数——None/非数字/非正数按 0（不限速）处理
+    raw_speed = dl.get("maxSpeed")
+    max_speed = 0
+    if isinstance(raw_speed, (int, float)) and not isinstance(raw_speed, bool) and raw_speed > 0:
+        max_speed = float(raw_speed)
     if (dl.get("engine") or "httpx") == "aria2":
         rpc = (dl.get("aria2Rpc") or "").strip() or "http://localhost:6800/jsonrpc"
         secret = (dl.get("aria2Secret") or "").strip()
         try:
             opts = {"dir": str(dest.parent), "out": dest.name}
+            if max_speed > 0:
+                opts["max-download-limit"] = f"{int(max_speed)}M"
             if headers:
                 opts["header"] = [f"{k}: {v}" for k, v in headers.items()]
             gid = _aria2_rpc_call(rpc, secret, "aria2.addUri", [[url], opts])
@@ -109,5 +130,7 @@ def _download_with_engine(
             raise RuntimeError("aria2 下载超时")
         except Exception:
             pass  # aria2 不可用 → 降级内置 httpx
-    _stream_download(url, dest, timeout=QUARK_DOWNLOAD_TIMEOUT, headers=headers)
+    _stream_download(
+        url, dest, timeout=QUARK_DOWNLOAD_TIMEOUT, headers=headers, max_speed_mbps=max_speed
+    )
     return dest
