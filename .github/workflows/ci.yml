@@ -73,19 +73,48 @@ jobs:
         run: pnpm build
 
   swift:
-    name: Swift (swiftlint + swiftformat)
-    # Swift 代码（desktop/macOS 壳 + mobile/ios 壳）lint/format 检查；
+    name: Swift (swiftlint + swiftformat + xcodebuild test)
+    # Swift 代码（desktop/macOS 壳 + mobile/ios 壳）lint/format 检查 + iOS 壳单元测试（QQPlayerTests）；
     # 与前端 job 平级，日常 push main / PR 都会跑（无 if 限制）。
     # 配置在仓库根 .swiftlint.yml / .swiftformat，swiftlint/swiftformat 自动发现。
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - name: Install tools
-        run: brew install swiftlint swiftformat
+        # xcodegen 不在 GitHub macOS runner 预装软件列表（已验证 runner-images Readme），需 brew 安装
+        run: brew install swiftlint swiftformat xcodegen
       - name: Lint (swiftlint)
         run: swiftlint lint
       - name: Format (swiftformat --lint)
         run: swiftformat --lint .
+      # ---- iOS 壳单元测试（QQPlayerTests，xcodegen 生成工程）----
+      # www 是 folder reference（project.yml sources → Resources/www），CI checkout 无 dist 产物
+      # （dist/ 与 mobile/ios/Resources/www 均 gitignore），占位目录保证 xcodegen 不因源路径缺失失败
+      - name: Prepare iOS www placeholder
+        run: |
+          mkdir -p mobile/ios/Resources/www
+          echo '<html></html>' > mobile/ios/Resources/www/index.html
+      - name: Generate Xcode project (xcodegen)
+        working-directory: mobile/ios
+        run: xcodegen generate
+      # destination 动态取第一个可用 iPhone 模拟器：macos-latest runner 的 Xcode/模拟器型号随系统镜像
+      # 更新而变（iPhone 16/17 系列都可能），写死型号会随镜像升级失配；动态选取在任何镜像上都成立。
+      # （本机已验证等价命令：iPhone 17 Pro 上 xcodebuild test 全绿）
+      - name: Test (xcodebuild test, iOS simulator)
+        working-directory: mobile/ios
+        run: |
+          DEVICE="$(xcrun simctl list devices available | grep -oE 'iPhone [^(]+' | head -1 | sed 's/ *$//')"
+          if [ -z "$DEVICE" ]; then
+            echo "❌ 无可用 iPhone 模拟器（xcrun simctl list devices available）"
+            exit 1
+          fi
+          echo "Using simulator: $DEVICE"
+          xcodebuild test \
+            -project QQPlayer.xcodeproj \
+            -scheme QQPlayer \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO
 
   backend-windows:
     name: Backend Windows ${{ matrix.arch }} (PyInstaller + smoke)

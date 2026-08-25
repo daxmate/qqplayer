@@ -69,3 +69,23 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: NO
     scheme:
       gatherCoverageData: false
+      # 单元测试（QQPlayerTests，xcodegen 生成 scheme 的 Test action；
+      # `xcodebuild test -scheme QQPlayer` 会跑测试）
+      testTargets:
+        - QQPlayerTests
+
+  # iOS 壳单元测试 target（XCTest，覆盖抽出的纯逻辑：内嵌封面提取 /
+  # 中断恢复状态机 / 封面策略决策；宿主 App = QQPlayer，@testable import 访问 internal 符号）
+  QQPlayerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: QQPlayer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.daxmate.qqplayer.ios.tests
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"

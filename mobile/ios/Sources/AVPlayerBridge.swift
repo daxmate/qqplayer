@@ -29,9 +29,9 @@ final class AVPlayerBridge {
     /// 唯一不依赖网络的封面来源；切歌时清空、新歌预读完成后填充（旧歌结果丢弃防乱序）。
     private var embeddedArtwork: MPMediaItemArtwork?
 
-    /// 音频中断（来电/其他 app 抢占/系统语音）恢复状态：began 时记录中断前是否在播放，
-    /// ended 后据此自动恢复（手动暂停后被打断不恢复）。
-    private var resumeAfterInterruption = false
+    /// 音频中断（来电/其他 app 抢占/系统语音）恢复状态机：began 时记录中断前是否在播放，
+    /// ended 后据此自动恢复（手动暂停后被打断不恢复）。纯逻辑在 InterruptionPolicy（可测）。
+    private var interruptionPolicy = InterruptionPolicy()
     private var interruptionObserver: NSObjectProtocol?
 
     /// 当前加载的 URL（setMetadata 时确认封面归属）
@@ -233,7 +233,7 @@ final class AVPlayerBridge {
             switch type {
             case .began:
                 // 中断前正在播放（排除缓冲等待）→ 结束后恢复
-                self.resumeAfterInterruption = (self.player.rate > 0
+                self.interruptionPolicy.began(wasPlaying: self.player.rate > 0
                     && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate)
                 // 系统已暂停 AVPlayer；同步 Web 暂停态（避免 UI 停留播放态）
                 if self.player.rate == 0
@@ -241,14 +241,13 @@ final class AVPlayerBridge {
                     self.push("paused", ["t": self.playerTime()])
                 }
             case .ended:
-                if self.resumeAfterInterruption {
+                if self.interruptionPolicy.ended() {
                     try? AVAudioSession.sharedInstance().setActive(true)
                     self.player.play()
                     self.updateNowPlayingPlaybackState()
                     // 恢复事件回传 Web（中断期间前端已收到 paused，需恢复播放态）
                     self.push("playing", ["t": self.playerTime()])
                 }
-                self.resumeAfterInterruption = false
             @unknown default:
                 break
             }
@@ -282,35 +281,23 @@ final class AVPlayerBridge {
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playerTime()
         }
         if !cover.isEmpty {
+            // 封面策略决策（纯逻辑，CoverDecision 可测）：
             // data: URL 同步解码即时有封面（不走异步，无「先空后补」窗口）；
-            // 解码失败/http 封面 → 先同步用内嵌封面兑底（CarPlay 即时刷新，不依赖网络/缓存），
+            // http 封面 → 先同步用内嵌封面兑底（CarPlay 即时刷新，不依赖网络/缓存），
             // 再异步 loadArtwork 拉远程/本地图，成功后覆盖（锁屏会刷新到更佳图）。
-            let decoded = cover.hasPrefix("data:image/") ? decodeArtwork(cover) : nil
-            if let art = decoded {
-                nowPlayingArtwork = art
-                info[MPMediaItemPropertyArtwork] = art
-            } else if let embedded = embeddedArtwork {
-                nowPlayingArtwork = embedded
-                info[MPMediaItemPropertyArtwork] = embedded
-                loadArtwork(cover) { [weak self] artwork in
-                    guard let self else { return }
-                    if let artwork {
-                        self.nowPlayingArtwork = artwork
-                        var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
-                        updated[MPMediaItemPropertyArtwork] = artwork
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-                    }
+            switch CoverDecision.decide(coverUrl: cover, hasEmbedded: embeddedArtwork != nil) {
+            case .syncDataURL:
+                if let art = decodeArtwork(cover) {
+                    nowPlayingArtwork = art
+                    info[MPMediaItemPropertyArtwork] = art
+                } else {
+                    // 解码失败（坏 base64）：与历史 if/else 链一致，兑底内嵌 → 异步
+                    applyEmbeddedFallback(cover: cover, info: &info)
                 }
-            } else {
-                loadArtwork(cover) { [weak self] artwork in
-                    guard let self else { return }
-                    if let artwork {
-                        self.nowPlayingArtwork = artwork
-                        var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
-                        updated[MPMediaItemPropertyArtwork] = artwork
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-                    }
-                }
+            case .embeddedThenAsync:
+                applyEmbeddedFallback(cover: cover, info: &info)
+            case .asyncOnly:
+                fetchArtworkAsync(cover: cover, fallbackInfo: info)
             }
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
@@ -379,29 +366,42 @@ final class AVPlayerBridge {
             let formats: [AVMetadataFormat] = [.id3Metadata, .iTunesMetadata, .quickTimeMetadata]
             for format in formats {
                 if let items = try? await asset.loadMetadata(for: format) {
-                    for m in items where m.commonKey == .commonKeyArtwork
-                        || m.identifier == AVMetadataIdentifier.id3MetadataAttachedPicture {
-                        if let data = m.dataValue {
-                            artworkData = data
-                            break
-                        }
-                    }
+                    artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
                 }
                 if artworkData != nil { break }
             }
             if artworkData == nil, let items = try? await asset.load(.commonMetadata) {
-                for m in items where m.commonKey == .commonKeyArtwork {
-                    if let data = m.dataValue {
-                        artworkData = data
-                        break
-                    }
-                }
+                artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
             }
             guard let data = artworkData, let img = UIImage(data: data) else { return }
             let art = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
             await MainActor.run {
                 guard self.player.currentItem === item else { return } // 已切歌：丢弃
                 self.embeddedArtwork = art
+            }
+        }
+    }
+
+    /// 内嵌兑底 + 异步覆盖（embeddedThenAsync 主路径 / sync 解码失败兑底共用）：
+    /// 先同步写入内嵌封面（CarPlay 即时刷新，不依赖网络/缓存），
+    /// 再异步拉远程/本地图，成功后覆盖（锁屏会刷新到更佳图）。
+    private func applyEmbeddedFallback(cover: String, info: inout [String: Any]) {
+        if let embedded = embeddedArtwork {
+            nowPlayingArtwork = embedded
+            info[MPMediaItemPropertyArtwork] = embedded
+        }
+        fetchArtworkAsync(cover: cover, fallbackInfo: info)
+    }
+
+    /// 异步拉取封面成功后覆盖 nowPlayingInfo（成功才覆盖；失败保留兑底图）
+    private func fetchArtworkAsync(cover: String, fallbackInfo: [String: Any]) {
+        loadArtwork(cover) { [weak self] artwork in
+            guard let self else { return }
+            if let artwork {
+                self.nowPlayingArtwork = artwork
+                var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? fallbackInfo
+                updated[MPMediaItemPropertyArtwork] = artwork
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
             }
         }
     }
