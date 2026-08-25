@@ -16,6 +16,30 @@ except ImportError:
 router = APIRouter()
 
 
+_IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
+
+def sniff_image_mime(data: bytes, fallback: str) -> str:
+    """按文件头魔数嗅探图片真实格式；无法识别时回退 fallback。
+
+    封面数据可能声明与实际不符（如 APIC 声明 image/jpeg 实际是 PNG）——
+    信声明会导致解码端按错误 Content-Type 解码失败。
+    """
+    head = data[:12]
+    if head.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    for magic, mime in _IMAGE_MAGIC:
+        if head.startswith(magic):
+            return mime
+    return fallback
+
+
 @router.get("/api/cover")
 def api_cover(path: str):
     """提取音频内嵌封面；无内嵌封面时返回文件夹 cover.jpg"""
@@ -38,7 +62,12 @@ def api_cover(path: str):
                     for key in tags:
                         if key.startswith("APIC"):
                             apic = tags[key]
-                            return Response(content=apic.data, media_type=apic.mime)
+                            return Response(
+                                content=apic.data,
+                                media_type=sniff_image_mime(
+                                    apic.data, apic.mime or "application/octet-stream"
+                                ),
+                            )
                 # MP4: covr
                 if isinstance(audio, MP4) and "covr" in audio:
                     cov = audio["covr"][0]

@@ -1,5 +1,6 @@
 """backend.py API 测试（测试数据用 tmp_path 现场生成假 mp3/srt，不依赖仓库内真实音频）"""
 
+import base64
 import json
 import sys
 from pathlib import Path
@@ -21,6 +22,12 @@ client = TestClient(backend.app)
 
 # 假 JPEG 封面字节（真实歌曲库数据太大，不入仓库；测试用临时文件模拟）
 FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"x" * 200
+
+# 1x1 最小合法 PNG（真实 PNG 魔数；用于构造“声明 JPEG 实际 PNG”的封面）
+FAKE_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
 
 SRT_TEXT = """# 主歌1
 
@@ -260,6 +267,24 @@ def test_api_cover_embedded(song_library):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("image/")
     assert len(r.content) > 100
+
+
+def test_api_cover_apic_mime_mismatch(tmp_path):
+    """APIC 声明 image/jpeg 但实际是 PNG：Content-Type 按魔数嗅探返回 image/png"""
+    make_mp3(tmp_path / "mismatch.mp3", title="关不上的窗", artist="周传雄", cover=FAKE_PNG)
+    r = client.get("/api/cover", params={"path": str(tmp_path / "mismatch.mp3")})
+    assert r.status_code == 200
+    assert r.content == FAKE_PNG
+    assert r.headers["content-type"].startswith("image/png")
+
+
+def test_api_cover_apic_jpeg_still_jpeg(tmp_path):
+    """正常 JPEG APIC：声明与实际一致，仍返回 image/jpeg（不破坏既有行为）"""
+    make_mp3(tmp_path / "ok.mp3", title="知足", artist="五月天", cover=FAKE_JPEG)
+    r = client.get("/api/cover", params={"path": str(tmp_path / "ok.mp3")})
+    assert r.status_code == 200
+    assert r.content == FAKE_JPEG
+    assert r.headers["content-type"].startswith("image/jpeg")
 
 
 def test_api_cover_missing_file():
