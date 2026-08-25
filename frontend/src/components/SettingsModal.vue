@@ -440,6 +440,20 @@
                   </div>
                 </div>
                 <div class="setting-item">
+                  <div class="setting-label">{{ t("settings.maxSpeed") }}</div>
+                  <div class="setting-desc">{{ t("settings.maxSpeedDesc") }}</div>
+                  <div class="setting-control">
+                    <input
+                      v-model.number="downloadSettings.maxSpeed"
+                      class="lib-input"
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      :placeholder="t('settings.maxSpeedPlaceholder')"
+                    />
+                  </div>
+                </div>
+                <div class="setting-item">
                   <div class="setting-label">{{ t("settings.defaultQuality") }}</div>
                   <div class="setting-desc">{{ t("settings.defaultQualityDesc") }}</div>
                   <div class="ext-grid">

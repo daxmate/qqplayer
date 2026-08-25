@@ -128,6 +128,11 @@ export default {
     syncPrefetch: "Auto Prefetch",
     syncPrefetchDesc: "Check and download the current song when it plays (off by default)",
     syncFetchFailed: "Failed to fetch data, please try again later",
+    // Download speed limit
+    maxSpeed: "Download speed limit",
+    maxSpeedDesc:
+      "Cap online download speed (MB/s) to reduce disk contention with playback reads (HDD stutter); 0 = unlimited",
+    maxSpeedPlaceholder: "0 = unlimited",
     // UI (mobile player)
     glassCover: "Glass cover background",
     glassCoverDesc: "Blur the current cover as the player background on mobile",

@@ -119,6 +119,7 @@ export const DOWNLOAD_SETTINGS_DEFAULTS = {
   engine: "httpx", // 歌曲海下载引擎：'httpx' 内置 | 'aria2' aria2
   aria2Rpc: "", // aria2 RPC 地址（engine=aria2 时生效）
   aria2Secret: "", // aria2 RPC 密钥（engine=aria2 时生效）
+  maxSpeed: 4, // 下载限速（MB/s；0 = 不限速）
 };
 
 // 歌曲海下载品质选项（labelKey 文案在 settings.js：settings.quarkQualityOptions.*）

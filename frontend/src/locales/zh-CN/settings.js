@@ -112,6 +112,9 @@ export default {
     downloadDir: "下载目录",
     downloadDirDesc: "在线歌曲下载后保存的位置；留空 = 下载到当前曲库",
     downloadDirPlaceholder: "留空 = 当前曲库",
+    maxSpeed: "下载限速",
+    maxSpeedDesc: "限制在线下载速度（MB/s），降低与播放读盘的磁盘争用（机械盘爆音）；0 = 不限速",
+    maxSpeedPlaceholder: "0 = 不限速",
     defaultQuality: "默认音质",
     defaultQualityDesc: "下载在线歌曲时使用的音质",
     downloadQuality: {
