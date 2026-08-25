@@ -249,6 +249,15 @@
           >
             <GripVertical :size="14" />
           </span>
+          <span v-if="uiSettings.showCover" class="pl-cover">
+            <img
+              v-if="coverSrc(song.path) && coverOk(song.path)"
+              :src="coverSrc(song.path)"
+              :alt="song.name"
+              loading="lazy"
+              @error="markCoverError(song.path)"
+            />
+          </span>
           <span class="pl-idx">{{ vi + 1 }}</span>
           <div class="pl-info">
             <div class="pl-name">
@@ -464,6 +473,7 @@ import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
 import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
+import { useCoverURL, COVER_CACHE_FIRST_N } from "../composables/useCoverURL.js";
 import ContextMenu from "./ContextMenu.vue";
 import TagEditorModal from "./TagEditorModal.vue";
 
@@ -472,6 +482,10 @@ defineProps({
 });
 
 const { t } = useI18n();
+
+// 封面 URL 异步解析（阶段 F1）：iOS 壳本地优先（离线可显示），未命中远程 + 后台缓存；
+// 桌面/非壳远程直出（行为零变化）。coverSrc 未解析完成返回 ""，模板 v-if 配合隐藏 <img>。
+const { coverSrc, coverOk, markCoverError, resolveCover } = useCoverURL();
 
 // ============ 视图：全部歌曲 / 歌单（独立视图）/ 分组浏览 ============
 const inPlaylistView = computed(() => !!state.activePlaylistId);
@@ -643,6 +657,26 @@ const visible = computed(() => {
   }
   return list;
 });
+
+// ============ 封面异步填充（阶段 F1） ============
+// 可见行 hasAsset 查询 + 前 N 行后台缓存；播放中歌曲恒缓存（节流取舍见 useCoverURL 注释）。
+// 行结构：visible 元素为 { song, i }（viewSongs 过滤/排序后视图），用 r.song.path 解析封面。
+watch(
+  visible,
+  (rows) => {
+    rows.forEach((r, i) => {
+      if (r.song?.path) resolveCover(r.song.path, { download: i < COVER_CACHE_FIRST_N });
+    });
+  },
+  { immediate: true },
+);
+watch(
+  () => state.currentSong?.path,
+  (p) => {
+    if (p) resolveCover(p, { download: true });
+  },
+  { immediate: true },
+);
 
 // ============ 列头点击排序（三态循环：升序 → 降序 → 默认顺序） ============
 // 不同列 → 切列并重置为升序；同列升 → 降；同列降 → 回到默认（曲库原始顺序）
@@ -1783,6 +1817,23 @@ function fmtDur(d) {
   text-align: right;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+.pl-cover {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.pl-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .pl-info {
   flex: 1;

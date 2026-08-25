@@ -369,6 +369,37 @@ describe("Playlist", () => {
     expect(wrapper.find(".gr-cover img").exists()).toBe(true);
   });
 
+  it("列表行封面：有 path 的歌显示封面 img，无 path 不渲染 img 但留占位", () => {
+    state.songs = [
+      { id: "a", name: "A", artist: "", path: "/music/a.mp3" },
+      { id: "b", name: "B", artist: "", path: null }, // 流媒体/网络歌
+    ];
+    const wrapper = mount(Playlist);
+    const items = wrapper.findAll(".pl-item");
+    // 有 path：封面 img 指向 /api/cover（桌面远程直出）
+    const covA = items[0].find(".pl-cover img");
+    expect(covA.exists()).toBe(true);
+    expect(covA.attributes("src")).toContain(
+      "/api/cover?path=" + encodeURIComponent("/music/a.mp3"),
+    );
+    // 无 path：img 不渲染，外层 span 仍占位（固定尺寸，行不跳动）
+    expect(items[1].find(".pl-cover img").exists()).toBe(false);
+    expect(items[1].find(".pl-cover").exists()).toBe(true);
+  });
+
+  it("列表行封面跟随「显示封面」设置：关闭后整个封面区不渲染，重开恢复", async () => {
+    state.songs = [{ id: "a", name: "A", artist: "", path: "/music/a.mp3" }];
+    const wrapper = mount(Playlist);
+    expect(wrapper.find(".pl-cover img").exists()).toBe(true);
+    uiSettings.showCover = false;
+    await nextTick();
+    expect(wrapper.find(".pl-cover").exists()).toBe(false);
+    expect(wrapper.find(".pl-name").exists()).toBe(true);
+    uiSettings.showCover = true;
+    await nextTick();
+    expect(wrapper.find(".pl-cover img").exists()).toBe(true);
+  });
+
   it("点击歌手卡 → 列表只显示该歌手 + 返回条标题", async () => {
     state.songs = SAMPLE;
     const wrapper = mount(Playlist);
