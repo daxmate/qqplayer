@@ -23,8 +23,10 @@ import {
   isNativePlayback,
   createNativeAudioProxy,
   registerRemoteCommandHandler,
+  registerNativeSongChangedHandler,
   nativeSendMetadata,
   resolveCoverURL,
+  resolveNativeUrl,
   nativePost,
 } from "./nativeAudioBridge.js";
 import {
@@ -1065,6 +1067,28 @@ if (isNativePlayback()) {
         break;
     }
   });
+  // 原生切歌跟随：锁屏/线控切歌由原生执行（后台 Web 挂起），songChanged 回传后对齐状态——
+  // 不重新 load（原生已切源），只同步当前歌/进度/歌词等状态
+  registerNativeSongChangedHandler((index) => {
+    const target = songChangedTargetIndex(state.playMode, index, shuffleQueue, state.songs.length);
+    if (target < 0) return;
+    if (state.playMode === "shuffle" && index >= 0 && index < shuffleQueue.length) {
+      // 原生快照位置 = 洗牌队列位置（nativeSyncQueue 按 shuffleQueue 顺序同步）→ 跟随
+      shufflePos = index;
+    }
+    state.currentIndex = target;
+    state.currentSong = state.songs[target];
+    state.isPlaying = true; // 原生切歌即播放
+    state.currentTime = 0;
+    state.duration = 0;
+    state.lyric = [];
+    state.lyricFormat = null;
+    state.lyricSource = null;
+    state.abLoop = null; // 切歌重置 AB 循环
+    resetAbLoopCount();
+    dbgLog("songChanged", { index, title: state.currentSong?.name });
+    loadLyric(target);
+  });
   // 桥就绪上报：壳收到 nativeReady 后才开始推播放事件（防事件早于适配层）
   nativePost({ cmd: "nativeReady" });
 }
@@ -1637,6 +1661,38 @@ function dbgLog(ev, data) {
   }
 }
 
+// songChanged 对齐索引（纯逻辑，vitest 可测）：普通模式 index 直接映射；
+// shuffle 模式经 shuffleQueue 映射（index 是播放顺序中的位置）；越界/空队列返回 -1
+// （songChanged 的 index 是原生 queue 快照位置，快照由 nativeSyncQueue 按同一顺序同步）
+export function songChangedTargetIndex(playMode, index, shuffleQueue, songsLen) {
+  if (!(index >= 0) || !(songsLen > 0)) return -1;
+  if (playMode === "shuffle") {
+    if (!(index >= 0 && index < shuffleQueue.length)) return -1;
+    const t = shuffleQueue[index];
+    return t >= 0 && t < songsLen ? t : -1;
+  }
+  return index < songsLen ? index : -1;
+}
+
+// 播放顺序快照 → 原生（setQueue）：锁屏/线控后台切歌用（Web 挂起时原生独立执行）。
+// 本地歌绝对 URL（resolveNativeUrl，AVPlayer 直接拉）；stream 歌 url 空（原生跳过，
+// MVP 限制：流媒体直链有时效，后台无法离线取）。顺序与前端一致：shuffle 用洗牌队列，
+// 普通模式用歌曲列表顺序。
+function nativeSyncQueue() {
+  const order = state.playMode === "shuffle" ? shuffleQueue : state.songs.map((_, i) => i);
+  const idx = state.playMode === "shuffle" ? shufflePos : state.currentIndex;
+  const songs = order.map((songIdx) => {
+    const s = state.songs[songIdx];
+    return {
+      url: isStreamSong(s) ? "" : resolveNativeUrl("/api/audio?path=" + encodeURIComponent(s.path)),
+      title: s.name || "",
+      artist: s.artist || "",
+      album: s.album || "",
+    };
+  });
+  nativePost({ cmd: "setQueue", songs, index: idx < 0 ? 0 : idx });
+}
+
 // 当前 selectSong / maybePrefetchAsset 挂的 loadedmetadata 监听器引用
 // （切歌时清理，防旧歌的 resumeAt 劫持新歌——2026-08-25 固定秒数开始播放根因）
 let loadedMetaHandler = null;
@@ -1696,6 +1752,8 @@ export async function selectSong(index, opts = {}) {
   }
   audio.src = streamProxyUrl(src);
   dbgLog("selectSong.src", { src: audio.src });
+  // iOS：播放顺序快照同步原生（锁屏/线控后台切歌用；Web 挂起时原生按此快照切歌）
+  if (isNativePlayback()) nativeSyncQueue();
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
   // iOS 同步：本地歌资产本地优先（不阻塞远程播放；已下载时回执后切本地播放）
   maybePrefetchAsset(state.currentSong, { resumeAt: opts.resumeAt });

@@ -294,6 +294,10 @@ export function installNativeEventSink() {
       case "remoteCommand":
         handleRemoteCommand(payload);
         break;
+      case "songChanged":
+        // 原生后台切歌（锁屏/线控）：index = 播放顺序快照（setQueue）中的新位置
+        handleSongChanged(payload);
+        break;
       default:
         // 通用事件（sync 资产进度/回执、appState 生命周期等）转给订阅者
         dispatchNativeEvent(event, payload);
@@ -321,6 +325,20 @@ function handleRemoteCommand(payload = {}) {
   else if (cmd === "next") remoteCommandHandler("next", t);
   else if (cmd === "prev") remoteCommandHandler("prev", t);
   else if (cmd === "seekto") remoteCommandHandler("seekto", t);
+}
+
+// ---------- 原生切歌事件（锁屏/线控后台切歌）→ playerCore 对齐状态 ----------
+// 壳 playQueueRelative 切歌成功后推 songChanged {index}（前端不重新 load，只对齐）。
+let nativeSongChangedHandler = null;
+
+export function registerNativeSongChangedHandler(fn) {
+  nativeSongChangedHandler = fn;
+}
+
+function handleSongChanged(payload = {}) {
+  if (!nativeSongChangedHandler) return;
+  const index = typeof payload.index === "number" ? payload.index : -1;
+  if (index >= 0) nativeSongChangedHandler(index);
 }
 
 // ---------- 封面 URL 解析（单一真源） ----------

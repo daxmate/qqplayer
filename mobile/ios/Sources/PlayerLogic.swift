@@ -16,6 +16,19 @@ struct InterruptionPolicy {
     }
 }
 
+/// 播放队列游标（纯逻辑，可测试）：锁屏/线控后台切歌（playQueueRelative）的
+/// 索引环绕移动。count<=0 返回 false（不动）；否则 index 环绕移动返回 true。
+struct QueueCursor {
+    private(set) var index: Int
+
+    /// 相对移动 delta 步；count 为队列长度。count<=0 时队列无效，index 不变返回 false。
+    mutating func advance(_ delta: Int, count: Int) -> Bool {
+        guard count > 0 else { return false }
+        index = (index + delta + count) % count
+        return true
+    }
+}
+
 /// 封面获取策略决策（纯逻辑，可测试）：applyMetadata 里「data: URL 同步解码 /
 /// 内嵌封面兑底 + 异步覆盖 / 纯异步」三分支的选择。
 enum CoverDecision {

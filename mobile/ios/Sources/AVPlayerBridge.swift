@@ -6,11 +6,17 @@ import UIKit
 /// - load/play/pause/seek/setVolume/setRate 由 Web 桥消息驱动
 /// - 事件回传（Web 侧 playerCore 适配层消费）：
 ///     loadedmetadata {duration} / playing {t} / paused {t} / ended / timeupdate {t, duration}
+///     songChanged {index}（原生后台切歌后推送，Web 对齐状态不重新 load）
 /// - 锁屏 Now Playing：元数据（标题/歌手/专辑/封面）+ 进度；MPRemoteCommandCenter
-///   （play/pause/toggle/next/prev/changePlaybackPosition + 耳机线控）→ 统一回传 Web 执行
-///   （Web 是队列/切歌逻辑的真源，原生只转发命令，避免双端状态分叉）。
+///   （play/pause/toggle/next/prev/changePlaybackPosition + 耳机线控）→ **原生直接执行**：
+///   后台锁屏时 WKWebView 的 JS 被 iOS 挂起，转发 Web 的命令要等回前台才执行（已实锤）——
+///   原生持有前端同步的播放顺序快照（setQueue），后台切歌/播放/暂停/seek 直接操作 AVPlayer。
+///   Web 仍是队列/切歌逻辑真源（app 内操作零变化），切歌后推 songChanged，前端跟随对齐。
 final class AVPlayerBridge {
     private let player = AVPlayer()
+    /// 播放顺序快照（前端 setQueue 同步；锁屏/线控后台切歌用，Web 挂起时不依赖 JS）
+    private var queue: [[String: Any]] = []
+    private var queueIndex = 0
     /// Bearer token（配对鉴权）：AVPlayer 拉流/短音频时附加 Authorization 头。
     /// 真机 401 根因（2026-08-23）：127.0.0.1 免鉴权模拟器正常，真机必须带 token。
     var authToken: String?
@@ -110,6 +116,18 @@ final class AVPlayerBridge {
         case "setPlaying":
             if let p = payload["playing"] as? Bool {
                 updateNowPlayingPlaybackState(playing: p)
+            }
+        case "setQueue":
+            // 播放顺序快照：前端 selectSong 后同步（songs 数组 + 当前 index）→
+            // 锁屏/线控后台切歌由原生直接执行（Web 挂起时不依赖 JS）
+            if let songs = payload["songs"] as? [[String: Any]], !songs.isEmpty {
+                queue = songs
+                let raw = (payload["index"] as? Int) ?? 0
+                queueIndex = min(max(0, raw), queue.count - 1) // 越界夹取
+            } else {
+                // 容错：songs 非数组/空数组 → 清空快照（next/prev 走 Web 兑底）
+                queue = []
+                queueIndex = 0
             }
         default:
             break // 未知命令静默忽略（桌面壳消息如 pickLibrary/lyric 等也走这里）
@@ -417,7 +435,25 @@ final class AVPlayerBridge {
         return nil
     }
 
-    // MARK: - 远端命令（锁屏/耳机线控）→ 转发 Web
+    // MARK: - 远端命令（锁屏/耳机线控）→ 原生直接执行
+
+    /// 锁屏/线控后台切歌：按 queue 快照相对移动（Web 挂起时原生独立执行）。
+    /// 复用 load（embeddedArtwork 预读/loadedmetadata 推送）+ applyMetadata（payload dict 直接可用）。
+    /// stream 歌 url 为空 → 跳过（MVP 限制：后台切歌只覆盖本地歌，流媒体直链有时效无法离线取）。
+    private func playQueueRelative(_ delta: Int) {
+        guard !queue.isEmpty else { return }
+        var cursor = QueueCursor(index: queueIndex)
+        guard cursor.advance(delta, count: queue.count) else { return }
+        queueIndex = cursor.index
+        let meta = queue[queueIndex]
+        guard let urlString = meta["url"] as? String, !urlString.isEmpty,
+              let url = URL(string: urlString) else { return } // stream 歌 url 为空：跳过（MVP 限制）
+        load(url: url)
+        player.play() // 锁屏切歌即播放（前端 songChanged 对齐为播放态）
+        applyMetadata(meta)
+        push("songChanged", ["index": queueIndex])
+        updateNowPlayingPlaybackState(playing: true)
+    }
 
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
@@ -429,28 +465,50 @@ final class AVPlayerBridge {
         center.changePlaybackPositionCommand.isEnabled = true
 
         center.playCommand.addTarget { [weak self] _ in
-            self?.onRemoteCommand?("play", nil)
+            guard let self else { return .success }
+            self.player.play()
+            self.updateNowPlayingPlaybackState()
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            self?.onRemoteCommand?("pause", nil)
+            guard let self else { return .success }
+            self.player.pause()
+            self.updateNowPlayingPlaybackState()
             return .success
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            self?.onRemoteCommand?("toggle", nil)
+            guard let self else { return .success }
+            if self.player.rate > 0 {
+                self.player.pause()
+            } else {
+                self.player.play()
+            }
+            self.updateNowPlayingPlaybackState()
             return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in
-            self?.onRemoteCommand?("next", nil)
+            guard let self else { return .success }
+            if self.queue.isEmpty {
+                // 兑底：未同步队列（旧客户端/未选歌）→ 转发 Web 执行（前端仍是队列真源）
+                self.onRemoteCommand?("next", nil)
+            } else {
+                self.playQueueRelative(+1)
+            }
             return .success
         }
         center.previousTrackCommand.addTarget { [weak self] _ in
-            self?.onRemoteCommand?("prev", nil)
+            guard let self else { return .success }
+            if self.queue.isEmpty {
+                self.onRemoteCommand?("prev", nil)
+            } else {
+                self.playQueueRelative(-1)
+            }
             return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             let t = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime ?? 0
-            self?.onRemoteCommand?("seekto", t)
+            // 复用现有 seek（pendingSeek 串行化：seek 完成前到达的 play 延迟执行）
+            self?.seek(to: CMTime(seconds: t, preferredTimescale: 600))
             return .success
         }
     }

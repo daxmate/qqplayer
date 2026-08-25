@@ -209,6 +209,17 @@ describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => 
     ]);
   });
 
+  it("songChanged：registerNativeSongChangedHandler 收到 index（原生后台切歌跟随）", () => {
+    const calls = [];
+    m.registerNativeSongChangedHandler((index) => calls.push(index));
+    window.qqplayerOnNativeEvent("songChanged", { index: 3 });
+    expect(calls).toEqual([3]);
+    // 非法 index（缺省/负数）不回调
+    window.qqplayerOnNativeEvent("songChanged", {});
+    window.qqplayerOnNativeEvent("songChanged", { index: -1 });
+    expect(calls).toEqual([3]);
+  });
+
   it("nativeSendMetadata：本地歌 → coverUrl 解析为服务器绝对 URL", () => {
     m.nativeSendMetadata({ name: "歌", artist: "艺人", album: "专", path: "/m/a.mp3" });
     const msg = posts.find((p) => p.cmd === "setMetadata");

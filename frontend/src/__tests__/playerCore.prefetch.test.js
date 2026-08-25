@@ -132,6 +132,8 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     registerRemoteCommandHandler: vi.fn(),
+    registerNativeSongChangedHandler: vi.fn(),
+    resolveNativeUrl: vi.fn((url) => url),
     // 模拟真实 nativeSendMetadata 行为：coverOverride 优先，空则 song.coverUrl / 远程兑底
     // （与 nativeAudioBridge.js 同款逻辑；本环境无 server base → 远程兜底返回相对路径）
     nativeSendMetadata: vi.fn((song, coverOverride = "") => {
@@ -169,6 +171,8 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
   isNativePlayback: bridgeMock.isNativePlayback,
   createNativeAudioProxy: bridgeMock.createNativeAudioProxy,
   registerRemoteCommandHandler: bridgeMock.registerRemoteCommandHandler,
+  registerNativeSongChangedHandler: bridgeMock.registerNativeSongChangedHandler,
+  resolveNativeUrl: bridgeMock.resolveNativeUrl,
   nativeSendMetadata: bridgeMock.nativeSendMetadata,
   resolveCoverURL: bridgeMock.resolveCoverURL,
   nativePost: bridgeMock.post,
