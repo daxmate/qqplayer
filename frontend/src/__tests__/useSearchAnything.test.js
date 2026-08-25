@@ -91,7 +91,8 @@ const { state } = await import("../composables/usePlayer.js");
 const settingsModule = await import("../settingsIndex.js");
 const { useSearchAnything } = await import("../composables/useSearchAnything.js");
 
-const { query, results, loading, isSearchOpen, clear } = useSearchAnything();
+const { query, results, loading, isSearchOpen, clear, onlineSource, setOnlineSource } =
+  useSearchAnything();
 
 let fetchMock;
 
@@ -468,6 +469,78 @@ describe("在线请求", () => {
     await flush();
     expect(results.value.filter((r) => r.kind === "online")).toHaveLength(0);
     expect(loading.value).toBe(false);
+  });
+});
+
+describe("在线结果匹配扩展到歌手/专辑（2026-08-25）", () => {
+  // 构造单条在线 item：title/artist/album 可分别命中不同 query
+  function mockOnlineItem(item) {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [{ id: "o1", cover: "", duration: "3:00", quality: "s", ...item }],
+      }),
+    });
+  }
+
+  function onlineTitles() {
+    return results.value.filter((r) => r.kind === "online").map((r) => r.title);
+  }
+
+  beforeEach(() => {
+    onlineSource.value = "netease";
+  });
+
+  it("搜歌手名：title 不含关键词也能命中（artist 字段匹配）", async () => {
+    mockOnlineItem({ title: "晴天", artist: "周杰伦", album: "叶惠美" });
+    query.value = "周杰伦";
+    await flush();
+    expect(onlineTitles()).toEqual(["晴天"]);
+  });
+
+  it("搜歌名：title 匹配，照常出现", async () => {
+    mockOnlineItem({ title: "晴天", artist: "周杰伦", album: "叶惠美" });
+    query.value = "晴天";
+    await flush();
+    expect(onlineTitles()).toEqual(["晴天"]);
+  });
+
+  it("搜专辑名：album 字段匹配，出现", async () => {
+    mockOnlineItem({ title: "晴天", artist: "周杰伦", album: "叶惠美" });
+    query.value = "叶惠美";
+    await flush();
+    expect(onlineTitles()).toEqual(["晴天"]);
+  });
+
+  it("无关词：三字段都不中，在线结果为空数组", async () => {
+    mockOnlineItem({ title: "晴天", artist: "周杰伦", album: "叶惠美" });
+    query.value = "xyzabc";
+    await flush();
+    expect(onlineTitles()).toEqual([]);
+  });
+
+  it("双源：gequhai 同样走三字段匹配，badge 为歌曲海", async () => {
+    mockOnlineItem({ title: "晴天", artist: "周杰伦", album: "叶惠美" });
+    setOnlineSource("gequhai");
+    query.value = "周杰伦";
+    await flush();
+    const online = results.value.filter((r) => r.kind === "online");
+    expect(online).toHaveLength(1);
+    expect(online[0].title).toBe("晴天");
+    expect(online[0].badge).toBe("歌曲海");
+    // 请求确实带 source=gequhai
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("source=gequhai"),
+      expect.anything(),
+    );
+  });
+
+  it("gequhai 无关词同样过滤为空", async () => {
+    mockOnlineItem({ title: "晴天", artist: "周杰伦", album: "叶惠美" });
+    setOnlineSource("gequhai");
+    query.value = "xyzabc";
+    await flush();
+    expect(onlineTitles()).toEqual([]);
   });
 });
 

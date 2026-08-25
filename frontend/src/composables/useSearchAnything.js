@@ -81,7 +81,12 @@ async function fetchOnline(q, seq) {
         title: item.title ?? "",
         subtitle: [item.artist, item.album].filter(Boolean).join(" · "),
         badge: src === "gequhai" ? "歌曲海" : "在线",
-        score: matchScore(q, item.title),
+        // 歌名/歌手/专辑三字段取最高（2026-08-25：搜歌手名、专辑名也能出网络歌曲）
+        score: Math.max(
+          matchScore(q, item.title || ""),
+          matchScore(q, item.artist || ""),
+          matchScore(q, item.album || ""),
+        ),
         payload: {
           id: item.id,
           title: item.title,
