@@ -88,6 +88,17 @@ if [ "$RESTART_ONLY" = "0" ]; then
   fi
 fi
 
+# 3.5 同步前端产物 → iOS 壳资源（符号链接，零拷贝：dist 更新后 www 自动最新；
+#     注意：已安装的 app 不受影响，需重新编译安装才生效；失败不阻断服务器部署）
+if [ "$RESTART_ONLY" = "0" ] && [ -d mobile/ios ]; then
+  echo "── 链接前端 → iOS 壳资源 (mobile/ios/Resources/www)"
+  if "$(dirname "$0")/scripts/link-ios-www.sh"; then
+    echo "    ✅ iOS 壳资源链接就绪（下次编译 iOS app 自动用最新前端）"
+  else
+    echo "    ⚠️ iOS 壳资源链接失败（不影响服务器部署；build.sh 编译时会重试）"
+  fi
+fi
+
 # 4. 确保 launchd 托管（plist 缺失时自动创建并加载）
 # 之前出现过 plist 丢失导致 pkill 后服务无人拉起的故障，这里做自愈：
 # 检测 ~/Library/LaunchAgents/com.daxmate.qqplayer.plist，不存在则创建，再确保已加载

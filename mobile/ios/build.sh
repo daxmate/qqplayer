@@ -13,11 +13,12 @@ if [ "$TARGET" = "--device" ]; then DEVICE=1; fi
 echo "=== 1/4 构建前端（vite build → $ROOT/dist） ==="
 (cd "$FRONTEND" && pnpm build)
 
-echo "=== 2/4 复制前端产物 → Resources/www ==="
-rm -rf Resources/www
-mkdir -p Resources/www
-cp -R "$ROOT/dist/." Resources/www/
-echo "    www: $(du -sh Resources/www | cut -f1) ($(find Resources/www -type f | wc -l | tr -d ' ') files)"
+echo "=== 2/4 链接前端产物 → Resources/www（符号链接，零拷贝） ==="
+if ! "$ROOT/scripts/link-ios-www.sh"; then
+  echo "❌ iOS 壳资源链接失败，中止构建"
+  exit 1
+fi
+ls -l Resources/www
 
 echo "=== 3/4 xcodegen generate ==="
 xcodegen generate
