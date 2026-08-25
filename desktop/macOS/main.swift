@@ -526,7 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             backing: .buffered,
             defer: false
         )
-        mainWindow.title = "QQPlayer 小千千"
+        mainWindow.title = (Bundle.main.object(forInfoDictionaryKey: "QQPlayerWindowTitle") as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "QQPlayer 小千千"
         mainWindow.setFrameAutosaveName("QQPlayerMainWindow")
         mainWindow.isReleasedWhenClosed = false
         mainWindow.center()

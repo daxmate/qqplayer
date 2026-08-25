@@ -13,11 +13,15 @@ case "$ARCH" in
   arm64|x86_64) : ;;
   *) echo "⚠️ 不支持的 ARCH: ${ARCH}（仅支持 arm64 / x86_64）" >&2; exit 1 ;;
 esac
+# 显示名（2026-08-25，独立版本如「QQPlayer 小雨版」用环境变量覆盖；DMG 文件名与卷名跟随）
+APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-QQPlayer}"
+# 透传给壳构建的命名参数（默认值 = 正式版现状，见 desktop/macOS/build.sh）
+export APP_DISPLAY_NAME BUNDLE_ID URL_SCHEME WINDOW_TITLE
 # 内置后端目录（仓库根相对路径），x86_64 打包时指向 packaging/dist-x64/qqplayer-backend
 BACKEND_DIR="${BACKEND_DIR:-packaging/dist/qqplayer-backend}"
 APP_SRC="desktop/macOS/build/QQPlayer.app"
 STAGE="packaging/dmg-staging"
-DMG="packaging/QQPlayer-${VERSION}-${ARCH}.dmg"
+DMG="packaging/${APP_DISPLAY_NAME}-${VERSION}-${ARCH}.dmg"
 
 if [ ! -x "$BACKEND_DIR/qqplayer-backend" ]; then
     echo "✗ 未找到内置后端 ${BACKEND_DIR}，先跑 ./packaging/build-backend.sh" >&2
@@ -37,7 +41,7 @@ cp packaging/README.txt "$STAGE/README.txt"
 
 echo "💿 3/3 压缩 dmg（UDZO）..."
 rm -f "$DMG"
-hdiutil create -volname "QQPlayer ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+hdiutil create -volname "${APP_DISPLAY_NAME} ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
 
 echo "✅ 完成: $DMG  （$(du -sh "$DMG" | cut -f1)）"

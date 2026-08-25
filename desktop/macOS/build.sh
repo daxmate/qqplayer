@@ -22,7 +22,15 @@ case "$ARCH" in
 esac
 
 APP_NAME="QQPlayer"
-BUNDLE_ID="com.daxmate.qqplayer"
+# 命名参数化（2026-08-25，给同事的独立版本用环境变量覆盖；默认值 = 正式版现状）：
+#   APP_DISPLAY_NAME  Dock/菜单栏显示名（默认 QQPlayer）
+#   BUNDLE_ID         bundle 标识（默认 com.daxmate.qqplayer；独立版本如 com.daxmate.qqplayer.xiaoyu）
+#   URL_SCHEME        URL scheme 前缀（默认 qqplayer；派生 scheme = ${URL_SCHEME}/mini/lyric）
+#   WINDOW_TITLE      主窗口标题（默认 QQPlayer 小千千；经 Info.plist QQPlayerWindowTitle 注入，main.swift 读取）
+APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-QQPlayer}"
+BUNDLE_ID="${BUNDLE_ID:-com.daxmate.qqplayer}"
+URL_SCHEME="${URL_SCHEME:-qqplayer}"
+WINDOW_TITLE="${WINDOW_TITLE:-QQPlayer 小千千}"
 BUILD_DIR="build"
 # 版本号唯一真源：仓库根 VERSION 文件（desktop/macOS/../../VERSION）
 VERSION="$(cat "$SCRIPT_DIR/../../VERSION")"
@@ -44,7 +52,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key><string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key><string>QQPlayer</string>
+    <key>CFBundleDisplayName</key><string>$APP_DISPLAY_NAME</string>
+    <key>QQPlayerWindowTitle</key><string>$WINDOW_TITLE</string>
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
     <key>CFBundleLocalizations</key>
     <array>
@@ -67,19 +76,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
-            <key>CFBundleURLName</key><string>com.daxmate.qqplayer</string>
+            <key>CFBundleURLName</key><string>$BUNDLE_ID</string>
             <key>CFBundleURLSchemes</key>
-            <array><string>qqplayer</string></array>
+            <array><string>$URL_SCHEME</string></array>
         </dict>
         <dict>
-            <key>CFBundleURLName</key><string>com.daxmate.qqplayer-mini</string>
+            <key>CFBundleURLName</key><string>${BUNDLE_ID}-mini</string>
             <key>CFBundleURLSchemes</key>
-            <array><string>qqplayermini</string></array>
+            <array><string>${URL_SCHEME}mini</string></array>
         </dict>
         <dict>
-            <key>CFBundleURLName</key><string>com.daxmate.qqplayer-lyric</string>
+            <key>CFBundleURLName</key><string>${BUNDLE_ID}-lyric</string>
             <key>CFBundleURLSchemes</key>
-            <array><string>qqplayerlyric</string></array>
+            <array><string>${URL_SCHEME}lyric</string></array>
         </dict>
     </array>
 </dict>
