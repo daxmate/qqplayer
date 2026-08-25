@@ -215,7 +215,7 @@ final class MiniHTTPServer {
         if head.starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
         if head.starts(with: [0x47, 0x49, 0x46, 0x38]) { return "image/gif" }
         if head.starts(with: [0x52, 0x49, 0x46, 0x46]),
-           Array(head[8..<12]) == [0x57, 0x45, 0x42, 0x50] {
+           Array(head[8 ..< 12]) == [0x57, 0x45, 0x42, 0x50] {
             return "image/webp"
         }
         if head.starts(with: [0x42, 0x4D]) { return "image/bmp" }
