@@ -28,13 +28,7 @@
     touch-action: manipulation;
   }
 
-  /* 全屏播放器封面：移动端尺寸（覆盖 Cover 组件 scoped 的 min(46vh, 340px)） */
-  .mobile-player .cover-wrap .cover-box {
-    width: min(52vw, 300px);
-    box-shadow: 0 8px 30px var(--shadow);
-  }
-
-  /* 控制条：移动端铺满底部 + 安全区 + 更大触摸滑块 */
+  /* 控制条：移动端铺满底部 + 安全区 + 更大触摸滑块（跟唱模式 ControlBar 仍走这里） */
   .mobile-player .controls {
     border-radius: 18px 18px 0 0;
     border-left: none;

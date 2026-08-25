@@ -9,6 +9,7 @@ import sidebar from "./sidebar.js";
 import playlist from "./playlist.js";
 import tags from "./tags.js";
 import scrape from "./scrape.js";
+import mobile from "./mobile.js";
 
 export default {
   ...books,
@@ -20,4 +21,5 @@ export default {
   ...playlist,
   ...tags,
   ...scrape,
+  ...mobile,
 };

@@ -25,7 +25,7 @@
 
     <!-- 全屏播放器：页面栈顶层（fixed 覆盖迷你条） -->
     <Transition name="mp-sheet">
-      <MobilePlayer v-if="top.name === 'player'" @back="pop" />
+      <MobilePlayer v-if="top.name === 'player'" @back="pop" @open-list="push" />
     </Transition>
 
     <!-- 底部常驻迷你播放条（播放器打开时隐藏） -->

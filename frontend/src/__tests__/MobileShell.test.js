@@ -64,6 +64,14 @@ async function openSongList(wrapper) {
   await cards.find((c) => c.text().includes("所有歌曲")).trigger("click");
 }
 
+// 播放器收起（顶栏收起按钮已删除 → 改为封面区下拉返回手势）
+async function pullDownToClose(wrapper) {
+  const area = wrapper.find(".mp-cover-area");
+  await area.trigger("touchstart", { touches: [{ clientX: 100, clientY: 60 }] });
+  await area.trigger("touchmove", { touches: [{ clientX: 100, clientY: 200 }] }); // dy=140 > 阈值
+  await area.trigger("touchend", { changedTouches: [{ clientX: 100, clientY: 200 }] });
+}
+
 describe("MobileShell 页面栈导航", () => {
   it("初始状态：首页 + 底部迷你播放条，无播放器", () => {
     const wrapper = mount(MobileShell);
@@ -98,10 +106,10 @@ describe("MobileShell 页面栈导航", () => {
     expect(wrapper.find(".mini-player").exists()).toBe(false); // 播放器打开时隐藏
   });
 
-  it("播放器收起 → 回到首页，迷你条重现", async () => {
+  it("播放器收起（下拉返回）→ 回到首页，迷你条重现", async () => {
     const wrapper = mount(MobileShell);
     await wrapper.find(".mini-player").trigger("click");
-    await wrapper.find('.mp-btn-round[title="收起播放器"]').trigger("click");
+    await pullDownToClose(wrapper);
     expect(wrapper.find(".mobile-player").exists()).toBe(false);
     expect(wrapper.find(".mh-page").exists()).toBe(true);
     expect(wrapper.find(".mini-player").exists()).toBe(true);
@@ -137,8 +145,8 @@ describe("MobileShell 页面栈导航", () => {
     const wrapper = mount(MobileShell);
     await wrapper.find(".mini-player").trigger("click");
     expect(wrapper.find(".mobile-player").exists()).toBe(true);
-    // 播放器状态无法再点迷你条（已隐藏），直接收起到首页：栈底唯一 home
-    await wrapper.find('.mp-btn-round[title="收起播放器"]').trigger("click");
+    // 播放器状态无法再点迷你条（已隐藏），直接下拉收起到首页：栈底唯一 home
+    await pullDownToClose(wrapper);
     expect(wrapper.find(".mh-page").exists()).toBe(true);
   });
 

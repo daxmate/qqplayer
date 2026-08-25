@@ -64,8 +64,15 @@ export default {
       deleteFailed: "部分歌曲删除失败（{n} 首）",
     },
     player: {
-      collapse: "收起播放器",
-      continuous: "音乐",
+      pullDownHint: "下拉返回",
+      addToPlaylist: "添加到歌单",
+      karaoke: "跟唱",
+      queue: "播放队列",
+      sleepTimer: "睡眠定时器",
+      sleepTimerOff: "关闭",
+      minutes: "{n} 分钟",
+      newPlaylistPlaceholder: "输入歌单名称",
+      create: "创建",
     },
   },
 };
