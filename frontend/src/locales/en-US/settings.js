@@ -128,5 +128,8 @@ export default {
     syncPrefetch: "Auto Prefetch",
     syncPrefetchDesc: "Check and download the current song when it plays (off by default)",
     syncFetchFailed: "Failed to fetch data, please try again later",
+    // UI (mobile player)
+    glassCover: "Glass cover background",
+    glassCoverDesc: "Blur the current cover as the player background on mobile",
   },
 };

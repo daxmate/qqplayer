@@ -356,6 +356,8 @@ export default {
     karaokeOnDesc: "每句播完自动暂停，方便逐句跟唱（关闭后连续播放）",
     coverBlur: "封面模糊背景",
     coverBlurDesc: "背景铺当前歌曲封面模糊图，面板呈毛玻璃效果",
+    glassCover: "毛玻璃封面",
+    glassCoverDesc: "移动端播放页背景铺当前歌曲封面模糊图",
     showCover: "显示封面",
     showCoverDesc: "关闭后隐藏封面（列表 / 播放器），主区歌词自动扩充铺满",
     coverSize: "封面区域大小",

@@ -51,6 +51,7 @@ export const UI_SETTINGS_DEFAULTS = {
   miniTheme: "theme", // 迷你窗外观：'theme' 跟随主窗口主题 | 'dark' 深色 | 'light' 浅色
   accent: "orange", // 强调色预设 key（见 ACCENT_OPTIONS）
   coverBlur: false, // 封面模糊背景（播放器背景铺当前歌曲封面模糊图）
+  glassCover: true, // 移动端播放页毛玻璃封面背景（默认开；仅移动端生效，桌面端不用）
   showCover: true, // 显示封面（关闭后所有封面显示位置隐藏封面图片，不占位——任务 E 起歌词区自动扩充）
   // 封面区域大小：0 = 自适应（min(46vh,340px,center高度-220-间距)，保底歌词 ≥220px）；140~420 = 手动固定值（拖拽分隔条/设置滑块写入）
   // 后端 settings 白名单未收录该字段（PUT 被丢弃、GET 不返回）→ 仅前端本地持久化（localStorage 写透缓存），跨设备不同步

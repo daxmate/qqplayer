@@ -1550,6 +1550,16 @@
                     <span class="switch" :class="{ on: uiSettings.coverBlur }"><i /></span>
                   </div>
                 </div>
+                <!-- 毛玻璃封面（仅移动端）：播放页背景铺当前歌曲封面模糊图 -->
+                <div v-if="isMobile" class="setting-item">
+                  <div class="toggle-row" @click="uiSettings.glassCover = !uiSettings.glassCover">
+                    <div>
+                      <div class="setting-label">{{ t("settings.glassCover") }}</div>
+                      <div class="setting-desc">{{ t("settings.glassCoverDesc") }}</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.glassCover }"><i /></span>
+                  </div>
+                </div>
                 <div class="setting-item">
                   <div class="toggle-row" @click="uiSettings.showCover = !uiSettings.showCover">
                     <div>

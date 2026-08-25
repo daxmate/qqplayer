@@ -35,6 +35,8 @@ function onTouchStart(e) {
 }
 
 function onTouchMove(e) {
+  // 移动端播放页打开时，顶部下拉由播放页自己的返回手势接管，不再召唤原生状态条
+  if (window.__qqpPlayerOpen) return;
   if (touchStartY == null || revealed || !scroller) return;
   // 滚动容器不在顶部（已滚出内容）→ 本次手势作废，不再触发
   if (scroller.scrollTop > 0) {
