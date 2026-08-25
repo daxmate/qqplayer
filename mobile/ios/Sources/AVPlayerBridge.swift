@@ -25,6 +25,14 @@ final class AVPlayerBridge {
     var onRemoteCommand: ((String, Double?) -> Void)?
 
     private var nowPlayingArtwork: MPMediaItemArtwork?
+    /// 当前 item 的内嵌封面（APIC 预读缓存）：无线 CarPlay 脱离 Mac 网络且封面无缓存时
+    /// 唯一不依赖网络的封面来源；切歌时清空、新歌预读完成后填充（旧歌结果丢弃防乱序）。
+    private var embeddedArtwork: MPMediaItemArtwork?
+
+    /// 音频中断（来电/其他 app 抢占/系统语音）恢复状态：began 时记录中断前是否在播放，
+    /// ended 后据此自动恢复（手动暂停后被打断不恢复）。
+    private var resumeAfterInterruption = false
+    private var interruptionObserver: NSObjectProtocol?
 
     /// 当前加载的 URL（setMetadata 时确认封面归属）
     private(set) var currentURL: URL?
@@ -136,7 +144,9 @@ final class AVPlayerBridge {
         currentURL = url
         let item = makeItem(url: url)
         statusObservation?.invalidate()
+        embeddedArtwork = nil // 上一首的内嵌封面作废，等新歌预读
         player.replaceCurrentItem(with: item)
+        loadEmbeddedArtwork(for: item) // 异步预读内嵌封面（applyMetadata 兑底用）
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             guard item.status == .readyToPlay else {
                 if item.status == .failed {
@@ -210,6 +220,39 @@ final class AVPlayerBridge {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .default, options: [])
         try? session.setActive(true)
+        // 音频中断（来电/其他 app 抢占/系统语音）→ 结束后自动恢复播放。
+        // 音乐播放器惯例：只要中断前在播就恢复（系统 Music 同行为）；手动暂停后被打断不恢复。
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self,
+                  let typeRaw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
+            switch type {
+            case .began:
+                // 中断前正在播放（排除缓冲等待）→ 结束后恢复
+                self.resumeAfterInterruption = (self.player.rate > 0
+                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate)
+                // 系统已暂停 AVPlayer；同步 Web 暂停态（避免 UI 停留播放态）
+                if self.player.rate == 0
+                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
+                    self.push("paused", ["t": self.playerTime()])
+                }
+            case .ended:
+                if self.resumeAfterInterruption {
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                    self.player.play()
+                    self.updateNowPlayingPlaybackState()
+                    // 恢复事件回传 Web（中断期间前端已收到 paused，需恢复播放态）
+                    self.push("playing", ["t": self.playerTime()])
+                }
+                self.resumeAfterInterruption = false
+            @unknown default:
+                break
+            }
+        }
     }
 
     // MARK: - 锁屏 Now Playing
@@ -240,11 +283,24 @@ final class AVPlayerBridge {
         }
         if !cover.isEmpty {
             // data: URL 同步解码即时有封面（不走异步，无「先空后补」窗口）；
-            // 解码失败/http 封面 → 走异步 loadArtwork（回调逻辑保持现状）
+            // 解码失败/http 封面 → 先同步用内嵌封面兑底（CarPlay 即时刷新，不依赖网络/缓存），
+            // 再异步 loadArtwork 拉远程/本地图，成功后覆盖（锁屏会刷新到更佳图）。
             let decoded = cover.hasPrefix("data:image/") ? decodeArtwork(cover) : nil
             if let art = decoded {
                 nowPlayingArtwork = art
                 info[MPMediaItemPropertyArtwork] = art
+            } else if let embedded = embeddedArtwork {
+                nowPlayingArtwork = embedded
+                info[MPMediaItemPropertyArtwork] = embedded
+                loadArtwork(cover) { [weak self] artwork in
+                    guard let self else { return }
+                    if let artwork {
+                        self.nowPlayingArtwork = artwork
+                        var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
+                        updated[MPMediaItemPropertyArtwork] = artwork
+                        MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                    }
+                }
             } else {
                 loadArtwork(cover) { [weak self] artwork in
                     guard let self else { return }
@@ -310,6 +366,44 @@ final class AVPlayerBridge {
                 }
             }
         }.resume()
+    }
+
+    /// 预读当前 item 的内嵌封面（APIC/artwork）：切歌后异步读音频文件元数据，
+    /// 供 applyMetadata 兑底（无线 CarPlay 脱离 Mac 网络 + 封面无缓存时唯一可靠来源）。
+    /// 读取是异步的：完成时若 item 已切换则丢弃结果（防旧歌封面覆盖新歌）。
+    private func loadEmbeddedArtwork(for item: AVPlayerItem) {
+        let asset = item.asset
+        Task {
+            var artworkData: Data?
+            // MP3 常见 id3 APIC；M4A 走 iTunes；其余容器 commonMetadata 兑底
+            let formats: [AVMetadataFormat] = [.id3Metadata, .iTunesMetadata, .quickTimeMetadata]
+            for format in formats {
+                if let items = try? await asset.loadMetadata(for: format) {
+                    for m in items where m.commonKey == .commonKeyArtwork
+                        || m.identifier == AVMetadataIdentifier.id3MetadataAttachedPicture {
+                        if let data = m.dataValue {
+                            artworkData = data
+                            break
+                        }
+                    }
+                }
+                if artworkData != nil { break }
+            }
+            if artworkData == nil, let items = try? await asset.load(.commonMetadata) {
+                for m in items where m.commonKey == .commonKeyArtwork {
+                    if let data = m.dataValue {
+                        artworkData = data
+                        break
+                    }
+                }
+            }
+            guard let data = artworkData, let img = UIImage(data: data) else { return }
+            let art = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+            await MainActor.run {
+                guard self.player.currentItem === item else { return } // 已切歌：丢弃
+                self.embeddedArtwork = art
+            }
+        }
     }
 
     /// 同步解码 data:image/ 封面（base64）→ MPMediaItemArtwork；失败/非 data: 返回 nil。
