@@ -16,13 +16,36 @@ struct DiscoveredServer: Identifiable, Equatable {
         if let n = txtName, !n.isEmpty { return n }
         return serviceName.replacingOccurrences(of: ".local", with: "")
     }
-    /// 服务器标识（Keychain serverId）：ip:port
-    var serverId: String {
-        host.map { "\($0):\(port)" } ?? "\(serviceName):\(port)"
+    /// 归一化服务名：去掉末尾 ".local"（mDNS 服务名可能带/不带后缀，统一后用于构造 URL 与 serverId）
+    var normalizedServiceName: String {
+        serviceName.hasSuffix(".local") ? String(serviceName.dropLast(6)) : serviceName
     }
-    /// 基础 URL
+    /// 服务名是否为 IP 地址（手动输入 IP 兜底场景）：IPv4 点分四段或 IPv6 含冒号
+    var isIPAddressName: Bool {
+        if normalizedServiceName.contains(":") { return true }
+        let parts = normalizedServiceName.split(separator: ".")
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { part in
+            guard let v = Int(part), v >= 0, v <= 255 else { return false }
+            return true
+        }
+    }
+    /// 服务器标识（Keychain serverId）：hostname:port（稳定，不随 IP 变化——主机换 IP 配对身份不丢；
+    /// 手动输入 IP 时归一化名即 IP，自然兼容）
+    var serverId: String {
+        "\(normalizedServiceName):\(port)"
+    }
+    /// 基础 URL（IP 形式，发现列表展示用）
     var baseURL: String {
         host.map { "http://\($0):\(port)" } ?? "http://\(serviceName):\(port)"
+    }
+    /// 稳定 URL（配对/存储用）：mDNS 发现的服务器用 hostname.local——主机 IP 变化由系统 mDNS
+    /// 自动解析新地址，配对记录永不失效；手动输入 IP 的场景（服务名即 IP）保持 IP URL。
+    var stableURL: String {
+        if isIPAddressName {
+            return baseURL
+        }
+        return "http://\(normalizedServiceName).local:\(port)"
     }
 }
 
@@ -159,6 +182,11 @@ final class DiscoveryService: ObservableObject {
         for idx in servers.indices where servers[idx].serviceName == serviceName {
             servers[idx].host = ip
             if let port { servers[idx].port = port }
+        }
+        // IP 解析成功 → 触发存量配对记录迁移：IP 形式 URL 且 IP 匹配的记录升级为 hostname.local
+        // （幂等：已迁移记录不匹配 IP 前缀；IP 变化后新 IP 与旧记录不匹配则留给用户一次重配对）
+        if let updated = servers.first(where: { $0.serviceName == serviceName }) {
+            PairingStore.shared.migrateToHostnameURL(ifMatching: updated)
         }
     }
 }

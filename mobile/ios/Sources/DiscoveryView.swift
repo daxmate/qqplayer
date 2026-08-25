@@ -180,7 +180,8 @@ struct DiscoveryView: View {
             return
         }
         errorMessage = nil
-        let session = PairingSession(server: server, baseURL: server.baseURL)
+        // 用 stableURL（hostname.local）配对：主机 IP 变化后配对记录不失效；手动输入 IP 时退化为 IP URL
+        let session = PairingSession(server: server, baseURL: server.stableURL)
         pairingSession = session
         Task {
             await runPairing(session)

@@ -83,6 +83,37 @@ final class PairingStore: ObservableObject {
         connect(server)
     }
 
+    /// 存量迁移：已配对记录是 IP 形式 URL（http://<ip>:…）且与 mDNS 解析出的 IP 一致时，
+    /// 升级为 hostname.local URL + 稳定 serverId——主机 IP 变化后配对记录不再失效。
+    /// 幂等：已迁移记录（hostname URL）不匹配 IP 前缀自动跳过；重复解析同一 IP 也不会重复迁移。
+    /// 触发：DiscoveryService.applyHost 每次成功解析后调用（IP 变化后新 IP 与旧记录不匹配的场景，
+    /// 留给用户在发现列表重新配对一次——新配对直接存 hostname URL，之后永久免疫）。
+    func migrateToHostnameURL(ifMatching discovered: DiscoveredServer) {
+        guard let host = discovered.host, !host.isEmpty else { return }
+        let stable = discovered.stableURL
+        // stableURL 与 baseURL 相同（手动 IP 输入场景）→ 无需迁移
+        guard stable.hasPrefix("http://"), stable != discovered.baseURL else { return }
+        for idx in servers.indices {
+            let record = servers[idx]
+            // 仅迁移 IP 形式 URL 且 IP 与当前解析一致
+            guard record.url.hasPrefix("http://\(host):") else { continue }
+            let migrated = PairingRecord(
+                serverId: discovered.serverId,
+                serverName: record.serverName,
+                url: stable,
+                token: record.token,
+                deviceName: record.deviceName,
+                lastConnectedAt: record.lastConnectedAt
+            )
+            _ = KeychainStore.deleteServer(record.serverId)
+            _ = KeychainStore.saveServer(migrated)
+            servers[idx] = migrated
+            if currentServer?.serverId == record.serverId {
+                currentServer = migrated
+            }
+        }
+    }
+
     /// token 失效（401）或用户主动断开：清 token 回到发现页
     func disconnect(_ serverId: String) {
         _ = KeychainStore.deleteServer(serverId)
