@@ -323,22 +323,25 @@ function handleRemoteCommand(payload = {}) {
   else if (cmd === "seekto") remoteCommandHandler("seekto", t);
 }
 
+// ---------- 封面 URL 解析（单一真源） ----------
+// song.coverUrl 优先（流媒体网络图）；否则本地歌 path → 服务器 /api/cover 绝对 URL
+//（token 附加同 resolveNativeUrl）；都没有返回 ""。
+export function resolveCoverURL(song) {
+  if (!song) return "";
+  if (song.coverUrl) return song.coverUrl;
+  if (song.path) return resolveNativeUrl("/api/cover?path=" + encodeURIComponent(song.path));
+  return "";
+}
+
 // ---------- 锁屏元数据（currentSong 变化 → 原生 Now Playing） ----------
-// coverOverride（可选第二参数）：调用方已解析好的封面 URL（如本地缓存命中），优先于
-// song.coverUrl 与远程兜底；同步签名保持兼容（老调用只传 song）。
+// coverOverride（可选第二参数）：调用方已解析好的封面（data: URL / 本地缓存 URL），优先于
+// resolveCoverURL 的 song.coverUrl 与远程兜底；同步签名保持兼容（老调用只传 song）。
 export function nativeSendMetadata(song, coverOverride = "") {
   if (!song) {
     nativePost({ cmd: "setMetadata", title: "", artist: "", album: "", coverUrl: "" });
     return;
   }
-  let cover = coverOverride;
-  if (!cover) {
-    if (song.coverUrl) {
-      cover = song.coverUrl;
-    } else if (song.path) {
-      cover = resolveNativeUrl("/api/cover?path=" + encodeURIComponent(song.path));
-    }
-  }
+  const cover = coverOverride || resolveCoverURL(song);
   nativePost({
     cmd: "setMetadata",
     title: song.name || "",
