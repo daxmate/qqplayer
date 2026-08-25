@@ -87,6 +87,10 @@ struct WebShellView: UIViewRepresentable {
                 self?.pushToWeb(event: name, payload: payload)
             }
             playerBridge.onRemoteCommand = { [weak self] cmd, t in
+                // 诊断日志：锁屏/线控命令到达原生（nativecmd.log 沙盒 + 后端 /api/debuglog 双通道；
+                // 后端上报不依赖 WebView——后台锁屏时 JS 可能挂起，原生通道是唯一可靠时间线）
+                WebShellView.appendNativeLog("remoteCmd \(cmd)" + (t.map { " t=\($0)" } ?? ""))
+                self?.reportNativeCmd(cmd, t)
                 var payload: [String: Any] = ["cmd": cmd]
                 if let t { payload["t"] = t }
                 self?.pushToWeb(event: "remoteCommand", payload: payload)
@@ -269,6 +273,11 @@ struct WebShellView: UIViewRepresentable {
             case "nativeReady":
                 webReady = true
                 flushPendingEvents()
+            case "nativeLog":
+                // 前端诊断日志转发（nativecmd.log 追加；排故用）
+                if let line = body["line"] as? String {
+                    WebShellView.appendNativeLog("web: \(line)")
+                }
             case "syncDownload":
                 // 批量下载资产：{url, path, sha256, size?}[]（path 为沙盒相对路径）
                 guard let items = body["items"] as? [[String: Any]] else { break }
@@ -347,6 +356,12 @@ struct WebShellView: UIViewRepresentable {
                 let total = downloadManager.assetsSize()
                 pushToWeb(event: "assetsSize", payload: ["total": total])
             default:
+                // 诊断日志：Web 命令到达原生（load/play/pause/seek/setMetadata…），
+                // 与 remoteCmd 对照：锁屏命令是否穿透 WebView 到达播放器（后台 JS 挂起时这里会缺失）
+                if cmd == "load" || cmd == "play" || cmd == "pause" || cmd == "seek" {
+                    WebShellView.appendNativeLog("webCmd \(cmd)")
+                    reportNativeCmd(cmd, nil)
+                }
                 playerBridge.handleCommand(cmd, payload: body)
             }
         }
@@ -445,9 +460,43 @@ struct WebShellView: UIViewRepresentable {
                 pendingEvents.append((event, payload))
             }
         }
+
+        /// 锁屏/线控命令上报桌面后端（/api/debuglog；不依赖 WebView，后台锁屏也能到达）。
+        /// fire-and-forget：失败静默（内网开发端点，不影响播放）。
+        private func reportNativeCmd(_ cmd: String, _ t: Double?) {
+            var base = server.url
+            if base.hasSuffix("/") { base.removeLast() }
+            guard let url = URL(string: base + "/api/debuglog") else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if !server.token.isEmpty {
+                req.setValue("Bearer \(server.token)", forHTTPHeaderField: "Authorization")
+            }
+            let line = "native remoteCmd \(cmd)" + (t.map { " t=\($0)" } ?? "")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["line": line])
+            URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        }
     }
 
     /// JSON 字面量编码（注入 evaluateJavaScript / 用户脚本安全）
+    /// 诊断日志（追加写 Documents/meta/nativecmd.log；模拟器沙盒直读，真机连 Mac 可读）。
+    /// 与前端 debuglog.json（dbgLog → nativeMetaSave）互补：nativecmd.log 记原生侧决策/桥消息。
+    static func appendNativeLog(_ line: String) {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("meta", isDirectory: true) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("nativecmd.log")
+        let ts = ISO8601DateFormatter().string(from: Date())
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(Data("\(ts) \(line)\n".utf8))
+            try? h.close()
+        } else {
+            try? Data("\(ts) \(line)\n".utf8).write(to: url)
+        }
+    }
+
     static func jsonLiteral(_ value: Any) -> String {
         // 字符串：手动 JSON 转义。NSJSONSerialization 对顶层 String 不支持（isValidJSONObject=false，
         // data(withJSONObject:) 还会抛 NSException——try? 拦不住），必须绕过。

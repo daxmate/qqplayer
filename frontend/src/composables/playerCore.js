@@ -1040,6 +1040,8 @@ export function setupMediaSession() {
 // 与桌面 MediaSession 同一套动作（队列/切歌逻辑复用）；桌面浏览器不注册（行为零变化）
 if (isNativePlayback()) {
   registerRemoteCommandHandler((cmd, t) => {
+    // 诊断日志：远端命令到达 Web（debuglog.json；与 nativecmd.log 对照定位断点）
+    dbgLog("remoteCmd", { cmd, t: t ?? null });
     switch (cmd) {
       case "play":
         play();
