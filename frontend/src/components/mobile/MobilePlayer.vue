@@ -626,7 +626,7 @@ function pickSleep(minutes) {
   opacity: 0.85;
 }
 .mp-cover-box {
-  width: min(40vw, 260px, 32vh);
+  width: min(calc(100vw - 32px), 46vh);
   aspect-ratio: 1;
   border-radius: 18px;
   overflow: hidden;
@@ -646,10 +646,10 @@ function pickSleep(minutes) {
   opacity: 0.75;
 }
 
-/* ---------- ② 小歌词区（固定高度 3~5 行，内部滚动） ---------- */
+/* ---------- ② 小歌词区（5 行起步，弹性吃剩余空间 → 控制区贴底） ---------- */
 .mp-lyric-area {
-  flex-shrink: 0;
-  height: 150px;
+  flex: 1;
+  min-height: 200px;
   margin-top: 12px;
   display: flex;
   flex-direction: column;
