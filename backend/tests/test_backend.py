@@ -908,7 +908,7 @@ def test_api_settings_get_all_namespaces():
         "lastPlayed": None,
         "mode": "continuous",
     }
-    # download 2 字段
+    # download 7 字段
     assert set(s["download"]) == {
         "downloadDir",
         "defaultQuality",
@@ -916,6 +916,7 @@ def test_api_settings_get_all_namespaces():
         "engine",
         "aria2Rpc",
         "aria2Secret",
+        "maxSpeed",
     }
     assert s["download"]["downloadDir"] == ""
     assert s["download"]["defaultQuality"] == "exhigh"
@@ -1549,6 +1550,7 @@ def test_settings_download_namespace():
         "engine": "httpx",
         "aria2Rpc": "http://localhost:6800/jsonrpc",
         "aria2Secret": "dax",
+        "maxSpeed": 4,
     }
     # 合法值保留
     s = backend.save_all_settings(
@@ -1577,6 +1579,15 @@ def test_settings_download_namespace():
     # 合法音质枚举保留
     s = backend.save_all_settings({"download": {"defaultQuality": "hires"}})["download"]
     assert s["defaultQuality"] == "hires"
+    # 下载限速：合法值保留（含小数/0），非法值回落默认 4
+    s = backend.save_all_settings({"download": {"maxSpeed": 2.5}})["download"]
+    assert s["maxSpeed"] == 2.5
+    s = backend.save_all_settings({"download": {"maxSpeed": 0}})["download"]
+    assert s["maxSpeed"] == 0
+    s = backend.save_all_settings({"download": {"maxSpeed": -1}})["download"]
+    assert s["maxSpeed"] == 4
+    s = backend.save_all_settings({"download": {"maxSpeed": "abc"}})["download"]
+    assert s["maxSpeed"] == 4
 
 
 def test_api_settings_put_download_namespace():

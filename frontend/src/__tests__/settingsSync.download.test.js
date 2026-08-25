@@ -108,6 +108,8 @@ describe("download namespace：默认值容错", () => {
     expect(m.downloadSettings.engine).toBe("httpx");
     expect(m.downloadSettings.aria2Rpc).toBe("");
     expect(m.downloadSettings.aria2Secret).toBe("");
+    // 下载限速默认 4 MB/s（0 = 不限速）
+    expect(m.downloadSettings.maxSpeed).toBe(4);
   });
 
   it("非法音质值兜底为 exhigh（约束在设置层校验）", async () => {
@@ -176,6 +178,18 @@ describe("download namespace：默认值容错", () => {
     expect(m.downloadSettings.aria2Secret).toBe("tok");
     expect(m.downloadSettings.defaultQuality).toBe("exhigh"); // 未返回字段保持默认
   });
+
+  it("后端返回 maxSpeed：字段级应用", async () => {
+    getResponder = {
+      "/api/settings": defaultSettings({ download: { maxSpeed: 2.5 } }),
+    };
+    stubFetch();
+    vi.resetModules();
+    const m = await import("../composables/usePlayer.js");
+    const sync = await import("../composables/settingsSync.js");
+    await sync.settingsLoadPromise;
+    expect(m.downloadSettings.maxSpeed).toBe(2.5);
+  });
 });
 
 describe("download namespace：PUT 与缓存", () => {
@@ -194,6 +208,7 @@ describe("download namespace：PUT 与缓存", () => {
     m.downloadSettings.engine = "aria2";
     m.downloadSettings.aria2Rpc = "http://127.0.0.1:6800/jsonrpc";
     m.downloadSettings.aria2Secret = "tok";
+    m.downloadSettings.maxSpeed = 2.5;
     await nextTick();
     await vi.advanceTimersByTimeAsync(350);
     expect(putBodies.length).toBe(1);
@@ -205,6 +220,7 @@ describe("download namespace：PUT 与缓存", () => {
       engine: "aria2",
       aria2Rpc: "http://127.0.0.1:6800/jsonrpc",
       aria2Secret: "tok",
+      maxSpeed: 2.5,
     });
     // 写透缓存
     expect(JSON.parse(lsStore[DOWNLOAD_SETTINGS_KEY])).toEqual({
@@ -214,6 +230,7 @@ describe("download namespace：PUT 与缓存", () => {
       engine: "aria2",
       aria2Rpc: "http://127.0.0.1:6800/jsonrpc",
       aria2Secret: "tok",
+      maxSpeed: 2.5,
     });
     vi.useRealTimers();
   });
