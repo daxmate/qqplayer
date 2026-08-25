@@ -22,6 +22,9 @@ final class MiniHTTPServer {
     /// 被占时 init 抛错返回 nil，界面显示启动失败提示）。
     static let fixedPort: UInt16 = 17888
 
+    /// 需要嗅探文件头真实格式的图片扩展名（封面缓存 .jpg 可能存 PNG 数据）。
+    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
+
     init?(root: URL, assetsRoot: URL? = nil) {
         self.root = root
         self.assetsRoot = assetsRoot
@@ -122,7 +125,15 @@ final class MiniHTTPServer {
         // 206 + Content-Range；不支持时 duration 读取异常、seek 行为错乱——
         // 2026-08-25 已下载歌全部走本地 HTTP 流后“从接近尾部开始播/跳过”根因）。
         // 无 Range 头或非法时降级 200 全量（带 Accept-Ranges 声明能力）。
-        let mime = mimeType(for: fileURL.pathExtension)
+        // 图片扩展名时先嗅探文件头魔数——封面缓存统一命名 .jpg 但内容可能是
+        // PNG（APIC 声明与实际数据不一致，按扩展名给 Content-Type 会解码失败）。
+        let ext = fileURL.pathExtension
+        let mime: String
+        if Self.imageExtensions.contains(ext.lowercased()) {
+            mime = sniffImageMime(fileURL) ?? mimeType(for: ext)
+        } else {
+            mime = mimeType(for: ext)
+        }
         let rangeHeader = lines.first { $0.lowercased().hasPrefix("range:") }
         if let rangeHeader, let r = parseRange(rangeHeader, total: data.count) {
             let slice = data.subdata(in: r.start ..< (r.end + 1))
@@ -190,6 +201,25 @@ final class MiniHTTPServer {
 
     private func send(_ conn: NWConnection, status: Int, contentType: String, body: String) {
         send(conn, status: status, contentType: contentType, body: Data(body.utf8))
+    }
+
+    /// 按文件头魔数嗅探图片真实格式；只读头部 16 字节不整文件载入，
+    /// 无法识别返回 nil（调用方回退扩展名判断）。
+    private func sniffImageMime(_ fileURL: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+        guard let headData = try? handle.read(upToCount: 16) else { return nil }
+        let head = [UInt8](headData)
+        guard head.count >= 12 else { return nil }
+        if head.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
+        if head.starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
+        if head.starts(with: [0x47, 0x49, 0x46, 0x38]) { return "image/gif" }
+        if head.starts(with: [0x52, 0x49, 0x46, 0x46]),
+           Array(head[8..<12]) == [0x57, 0x45, 0x42, 0x50] {
+            return "image/webp"
+        }
+        if head.starts(with: [0x42, 0x4D]) { return "image/bmp" }
+        return nil
     }
 
     private func mimeType(for ext: String) -> String {
