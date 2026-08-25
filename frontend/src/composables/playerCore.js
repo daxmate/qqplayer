@@ -24,6 +24,7 @@ import {
   createNativeAudioProxy,
   registerRemoteCommandHandler,
   nativeSendMetadata,
+  resolveCoverURL,
   nativePost,
 } from "./nativeAudioBridge.js";
 import {
@@ -33,6 +34,7 @@ import {
   cachedCoverURL,
   cacheCover,
 } from "../utils/sync.js";
+import { coverToDataURL } from "../utils/coverDataURL.js";
 
 // 全局唯一 audio 元素
 // 导出供 useLyric/useAbLoop/useEq 等模块直接操作播放原语
@@ -928,6 +930,43 @@ function syncMediaPosition() {
 // 每次调用注册独立 watch，卸载时一并停止
 let mediaSessionStop = null;
 
+/**
+ * 解析切歌时原生元数据用的封面（data: URL 优先，CarPlay 即时刷新）：
+ * - 本地封面缓存命中 → coverToDataURL 转 data:（失败兑底原始本地 URL）
+ * - 未命中 → cacheCover 后台缓存（fire-and-forget）+ 远程 URL → coverToDataURL 转 data:
+ *   （失败兑底远程 URL，原生异步路径锁屏仍正常）
+ * 任一步 await 后都用 isCurrent 校验：已切歌返回 null（调用方不覆盖新歌元数据）。
+ * @param {object} song
+ * @param {(song: object) => boolean|object|null} isCurrent 校验函数：返回 true/false 布尔谓词，
+ *   或返回当前歌对象（与 song 恒等比较，watch 里传 () => state.currentSong）
+ * @returns {Promise<string|null>} "" = 无封面；null = 已切歌（结果作废）
+ */
+export async function resolveCoverForMetadata(song, isCurrent) {
+  if (!song?.path) return "";
+  const local = await cachedCoverURL(song.path).catch(() => null);
+  if (!isSongStillCurrent(song, isCurrent)) return null; // 已切歌 → aborted
+  if (local) {
+    const cover = await coverToDataURL(local).catch(() => local); // 失败兑底原始本地 URL
+    if (!isSongStillCurrent(song, isCurrent)) return null;
+    return cover;
+  }
+  cacheCover(song.path); // fire-and-forget 保持现状
+  const remote = resolveCoverURL(song);
+  if (!remote) return "";
+  const cover = await coverToDataURL(remote).catch(() => remote); // 失败兑底远程 URL（原生异步路径，锁屏仍正常）
+  if (!isSongStillCurrent(song, isCurrent)) return null;
+  return cover;
+}
+
+// isCurrent 语义归一：布尔谓词（true=仍当前/false=已切）或当前歌对象（与 song 恒等比较——
+// Vue reactive 会把赋值对象包成代理，不能靠 !cur 判空，必须对 song 做恒等比较）。
+function isSongStillCurrent(song, isCurrent) {
+  const cur = isCurrent(song);
+  if (cur === true) return true;
+  if (cur === false || cur == null) return false;
+  return cur === song;
+}
+
 export function setupMediaSession() {
   // iOS 原生播放：无 navigator.mediaSession，锁屏元数据/远端命令走原生桥
   // （currentSong 变化 → setMetadata；锁屏/线控命令 → playerCore 同一套动作）
@@ -936,16 +975,11 @@ export function setupMediaSession() {
     mediaSessionStop = watch(
       () => state.currentSong,
       async (song) => {
-        // 封面本地优先（CarPlay 无线场景手机脱离 Mac 网络，远程 /api/cover 拉图会失败）：
-        // 已缓存封面 → 用本地 URL；未缓存 → 保持远程兑底 + 后台缓存（fire-and-forget）。
-        // 异步查询期间可能已切歌：旧查询结果不覆盖新歌（同歌校验）。
-        let cover = "";
-        if (song?.path) {
-          const local = await cachedCoverURL(song.path).catch(() => null);
-          if (state.currentSong !== song) return; // 已切歌：旧查询结果不覆盖新歌
-          cover = local || "";
-          if (!local) cacheCover(song.path); // 未缓存封面：后台缓存（非壳 no-op）
-        }
+        // 封面 data: URL 优先（CarPlay 无线场景手机脱离 Mac 网络，远程 /api/cover 拉图会失败；
+        // 且原生对 data: 走同步解码路径，CarPlay 即时刷新——异步补图车机不刷新）。
+        // 异步转换期间可能已切歌：旧结果不覆盖新歌（isCurrent 校验）。
+        const cover = await resolveCoverForMetadata(song, () => state.currentSong);
+        if (cover === null) return; // 已切歌，旧结果不覆盖新歌
         nativeSendMetadata(song, cover);
       },
       { immediate: true },

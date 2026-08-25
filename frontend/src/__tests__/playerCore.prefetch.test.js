@@ -142,6 +142,13 @@ const bridgeMock = vi.hoisted(() => {
       }
       return cover;
     }),
+    // 与 nativeAudioBridge.js resolveCoverURL 同款逻辑（playerCore 封面解析用）
+    resolveCoverURL: vi.fn((song) => {
+      if (!song) return "";
+      if (song.coverUrl) return song.coverUrl;
+      if (song.path) return "/api/cover?path=" + encodeURIComponent(song.path);
+      return "";
+    }),
     getProxy: () => proxy,
     /** 模拟原生侧回推事件 */
     emit(name, payload) {
@@ -163,6 +170,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
   createNativeAudioProxy: bridgeMock.createNativeAudioProxy,
   registerRemoteCommandHandler: bridgeMock.registerRemoteCommandHandler,
   nativeSendMetadata: bridgeMock.nativeSendMetadata,
+  resolveCoverURL: bridgeMock.resolveCoverURL,
   nativePost: bridgeMock.post,
   onNativeEvent: bridgeMock.onNativeEvent,
 }));
@@ -180,11 +188,18 @@ vi.mock("../utils/sync.js", async (importOriginal) => {
   };
 });
 
+// coverDataURL 换可控 vi.fn：默认 identity（原样返回 URL）——既有用例期望封面 URL 透传；
+// resolveCoverForMetadata 新用例里用 mockResolvedValue/mockRejectedValue 注入 data URL/失败。
+const coverToDataURLMock = vi.fn(async (url) => url);
+vi.mock("../utils/coverDataURL.js", () => ({
+  coverToDataURL: coverToDataURLMock,
+}));
+
 // ---------- 被测模块（动态导入：须在 Audio stub 之后） ----------
 const playerMod = await import("../composables/playerCore.js");
 const sync = await import("../utils/sync.js");
 
-const { state, maybePrefetchAsset } = playerMod;
+const { state, maybePrefetchAsset, resolveCoverForMetadata } = playerMod;
 
 /** 等待异步链排空（assetForSong 哈希 / ensureAsset 回执结算 / 批量下载 flush）
  *  jsdom 下 crypto.subtle.digest 完成比 setTimeout(0) 慢，给 30ms 余量 */
@@ -441,6 +456,8 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     bridgeMock.handlers.clear();
     bridgeMock.isNativePlayback.mockReturnValue(true);
     bridgeMock.nativeSendMetadata.mockClear();
+    bridgeMock.resolveCoverURL.mockClear();
+    coverToDataURLMock.mockClear();
     sync.cachedCoverURL.mockReset();
     sync.cacheCover.mockReset();
     Object.assign(state, {
@@ -485,7 +502,7 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     }
   });
 
-  it("未缓存封面：cover 走远程兜底 URL，并触发后台缓存", async () => {
+  it("未缓存封面：cover 转 data URL（远程兑底后直传解析结果），并触发后台缓存", async () => {
     const unsub = playerMod.setupMediaSession();
     bridgeMock.nativeSendMetadata.mockClear();
     try {
@@ -493,11 +510,11 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
       const song = { path: "/Music/b.flac", name: "B" };
       state.currentSong = song;
       await flush();
-      // 传给 nativeSendMetadata 的空 cover → 真实实现会解析远程兜底 URL（mock 模拟同款）
-      expect(bridgeMock.nativeSendMetadata).toHaveBeenLastCalledWith(song, "");
-      expect(bridgeMock.nativeSendMetadata.mock.results.at(-1).value).toBe(
-        "/api/cover?path=%2FMusic%2Fb.flac",
-      );
+      // 新链路：coverToDataURL(远程 URL) identity → 直传解析后的远程 URL
+      //（原生收到的 coverUrl 与旧链路 resolveCoverURL 计算值相同，行为不变）
+      const remote = "/api/cover?path=%2FMusic%2Fb.flac";
+      expect(bridgeMock.nativeSendMetadata).toHaveBeenLastCalledWith(song, remote);
+      expect(bridgeMock.nativeSendMetadata.mock.results.at(-1).value).toBe(remote);
       expect(sync.cacheCover).toHaveBeenCalledWith("/Music/b.flac");
     } finally {
       unsub();
@@ -506,6 +523,7 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
 
   it("乱序：第一首慢查询迟到 → 旧结果被丢弃，只发第二首元数据", async () => {
     const unsub = playerMod.setupMediaSession();
+    await flush(); // immediate 触发（null）的异步壳先结算，再清计数
     bridgeMock.nativeSendMetadata.mockClear();
     try {
       let resolveFirst;
@@ -529,5 +547,131 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     } finally {
       unsub();
     }
+  });
+});
+
+describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）", () => {
+  beforeEach(() => {
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    bridgeMock.handlers.clear();
+    bridgeMock.isNativePlayback.mockReturnValue(true);
+    bridgeMock.resolveCoverURL.mockClear();
+    coverToDataURLMock.mockClear();
+    sync.cachedCoverURL.mockReset();
+    sync.cacheCover.mockReset();
+    Object.assign(state, {
+      songs: [],
+      currentIndex: -1,
+      currentSong: null,
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      muted: false,
+      volume: 1,
+      favorites: [],
+      playlists: [],
+      loading: false,
+      error: "",
+    });
+    sync._resetSyncForTests();
+    window.qqplayerNative = true;
+    window.qqplayerIosBridge = { postMessage: vi.fn() };
+    vi.stubGlobal("localStorage", localStorageStub);
+    clearLs();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("本地缓存命中：coverToDataURL(local) 转 data URL", async () => {
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    const local = "http://127.0.0.1:17888/native-assets/audio/a.m4a";
+    sync.cachedCoverURL.mockResolvedValue(local);
+    coverToDataURLMock.mockResolvedValue("data:image/jpeg;base64,local");
+
+    const cover = await resolveCoverForMetadata(song, () => true);
+
+    expect(cover).toBe("data:image/jpeg;base64,local");
+    expect(coverToDataURLMock).toHaveBeenCalledWith(local);
+    expect(sync.cacheCover).not.toHaveBeenCalled(); // 已缓存：不触发后台下载
+    expect(bridgeMock.resolveCoverURL).not.toHaveBeenCalled(); // 本地命中不走远程
+  });
+
+  it("本地缓存命中但转换失败：兑底原始本地 URL", async () => {
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    const local = "http://127.0.0.1:17888/native-assets/audio/a.m4a";
+    sync.cachedCoverURL.mockResolvedValue(local);
+    coverToDataURLMock.mockRejectedValue(new Error("fetch failed"));
+
+    const cover = await resolveCoverForMetadata(song, () => true);
+
+    expect(cover).toBe(local); // 失败不阻塞元数据推送
+  });
+
+  it("未缓存：cacheCover 触发 + 远程 URL 转 data URL", async () => {
+    const song = { path: "/Music/b.flac", name: "B" };
+    state.currentSong = song;
+    sync.cachedCoverURL.mockResolvedValue(null);
+    coverToDataURLMock.mockResolvedValue("data:image/jpeg;base64,remote");
+
+    const cover = await resolveCoverForMetadata(song, () => true);
+
+    expect(cover).toBe("data:image/jpeg;base64,remote");
+    expect(sync.cacheCover).toHaveBeenCalledWith("/Music/b.flac"); // fire-and-forget 保持
+    expect(bridgeMock.resolveCoverURL).toHaveBeenCalledWith(song);
+    expect(coverToDataURLMock).toHaveBeenCalledWith("/api/cover?path=%2FMusic%2Fb.flac");
+  });
+
+  it("未缓存 + 远程转换失败：兑底远程 URL（原生异步路径，锁屏仍正常）", async () => {
+    const song = { path: "/Music/b.flac", name: "B" };
+    state.currentSong = song;
+    sync.cachedCoverURL.mockResolvedValue(null);
+    coverToDataURLMock.mockRejectedValue(new Error("bad"));
+
+    const cover = await resolveCoverForMetadata(song, () => true);
+
+    expect(cover).toBe("/api/cover?path=%2FMusic%2Fb.flac");
+    expect(sync.cacheCover).toHaveBeenCalledWith("/Music/b.flac");
+  });
+
+  it("isCurrent 返回 false（第一次 await 后已切歌）→ 返回 null", async () => {
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    sync.cachedCoverURL.mockResolvedValue("http://127.0.0.1:17888/native-assets/audio/a.m4a");
+
+    const cover = await resolveCoverForMetadata(song, () => false);
+
+    expect(cover).toBeNull();
+    expect(coverToDataURLMock).not.toHaveBeenCalled();
+  });
+
+  it("第二次 await 后已切歌：返回 null（旧结果不覆盖新歌）", async () => {
+    const song = { path: "/Music/a.mp3", name: "A" };
+    state.currentSong = song;
+    const local = "http://127.0.0.1:17888/native-assets/audio/a.m4a";
+    sync.cachedCoverURL.mockResolvedValue(local);
+    let resolveConvert;
+    coverToDataURLMock.mockImplementationOnce(() => new Promise((r) => (resolveConvert = r)));
+
+    let current = song; // 模拟 state.currentSong 的当前歌引用（转换期间被切走）
+    const p = resolveCoverForMetadata(song, () => current);
+    await flush(); // cachedCoverURL 结算 → 挂起在 coverToDataURL
+    current = { path: "/Music/other.mp3", name: "Other" }; // 转换期间已切歌
+    resolveConvert("data:image/jpeg;base64,stale");
+
+    expect(await p).toBeNull();
+  });
+
+  it("无 path（流媒体/空歌）：直接返回空串，不查询缓存", async () => {
+    const cover = await resolveCoverForMetadata(
+      { type: "stream", coverUrl: "https://img.example.com/c.jpg" },
+      () => state.currentSong,
+    );
+    expect(cover).toBe("");
+    expect(sync.cachedCoverURL).not.toHaveBeenCalled();
   });
 });
