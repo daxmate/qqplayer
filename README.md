@@ -1,6 +1,6 @@
 # 🎵 QQPlayer 小千千
 
-本地音乐播放器 + 跟唱练习器。FastAPI + Vue 3 + Vite。
+本地音乐播放器 + 跟唱练习器 + 有声书阅读器。FastAPI + Vue 3 + Vite，桌面（macOS / Windows）+ 移动端（iOS 伴侣）多端覆盖。
 
 <p align="center">
   <img src="docs/screenshot.png" width="32%" alt="连播模式"/>
@@ -13,6 +13,7 @@
 ## 功能
 
 - **连播模式** = 普通播放器：播放列表、播放/暂停/上一首/下一首、专辑封面、歌词滚动高亮
+- **AB 循环复读**：快捷键 A / B 设起点 / 终点，区间循环复读（主播放器与视频模块通用），练听力 / 跟读利器
 - **均衡器 EQ**：10 段（31Hz~16kHz，±12dB）+ 7 预设（平直/流行/摇滚/爵士/古典/低音增强/人声）+ 自定义滑杆，设置 → 播放 → 均衡器，实时生效
 - **跟唱模式** = 逐句练习：点击句子跳转播放、每句显示原文/罗马音/中文、变速（0.75/1.0/1.25）、跟唱开关（每句播完自动停）
 - **视频模块**（独立 Tab，跟唱式交互）：本地视频库（文件夹扫描 / 文件列表 / Range 流播放 / 同名字幕）+ 在线视频源（yt-dlp 统一引擎：粘贴链接解析，B站 DASH 音视频双轨 ffmpeg 合成流，防盗链流代理透传 206/Range，可导入浏览器 Cookie）；字幕逐句渲染 / 点击跳转 / 当前句高亮，双字幕（原文 + 翻译），变速 / 单句循环 / AB 区间循环 / 跟读开关
@@ -23,14 +24,16 @@
 - **歌曲库自动刷新**：watchdog 监听文件夹变动自动重扫，列表实时更新（可关闭）
 - **系统媒体键（MediaSession）**：键盘媒体键 / 控制中心 / 锁屏控制播放、切歌
 - **播放统计**：完整播放历史 + 统计 API（喂每日三首推荐）
-- **在线搜索 + 下载**：顶栏搜索框在线搜网易云（本地/在线分组），下载直接落盘曲库（默认音质 320k，可设置下载目录/音质），watchdog 自动刷新
+- **在线搜索 + 下载**：顶栏搜索框在线搜网易云（本地/在线分组），下载直接落盘曲库（默认音质 320k，可设置下载目录/音质/下载限速），watchdog 自动刷新
 - **search anything 全屏搜索**：顶栏小放大镜（或 Cmd+K）唤起 Spotlight 式全屏搜索层——混合搜索本地歌曲 / 在线歌曲 / 歌手 / 专辑 / 设置项，按匹配度排序（简繁/声调互通）；设置项结果可直接行内开关/滑杆/选择/输入；空态展示全部设置目录；歌手/专辑直达分组浏览
-- **音乐标签编辑 + 刮削**：歌曲信息弹窗（Pencil 按钮）编辑歌名/歌手/专辑/封面；输入关键词自动刮削候选（网易云 + MusicBrainz，封面 fallback 链），点选即填；保存写 ID3v2 / MP4 / FLAC 标签（OGG/OPUS 只文本，原子写盘不损坏原文件）；自动统一改名 `{artist} - {title}.{ext}`（重名加序号不覆盖），收藏/歌单/播放统计路径自动迁移
+- **音乐标签编辑 + 刮削**：歌曲信息弹窗（Pencil 按钮 / 右键菜单「编辑标签/刮削」）编辑歌名/歌手/专辑/年份/流派/封面；输入关键词自动刮削候选（网易云 + MusicBrainz，封面 fallback 链），点选即填；保存写 ID3v2 / MP4 / FLAC 标签（OGG/OPUS 只文本，原子写盘不损坏原文件）；自动统一改名 `{artist} - {title}.{ext}`（重名加序号不覆盖），收藏/歌单/播放统计路径自动迁移；设置 → 刮削可配字段写入白名单、重命名规则模板（`{artist}`/`{title}`/`{album}`/`{track}`/`{year}` 占位符 + `/` 建子目录 + 实时预览）、刮削源优先级、批量刮削开关（默认关：多选批量自动写入高置信度候选 + 一键补全曲库缺失年份/流派）；侧边栏智能视图新增年代分组（50s~20s，Apple Music Decades 粒度）自动歌单
 - **手动指定歌词**：上传 `.lrc` / `.srt` / JSON、在线搜索挑选（网易云 + lrclib 多源候选）、粘贴文本，优先级最高
 - **图书阅读器**：EPUB 导入 / 书架（封面 + 进度记忆）/ 点击翻页；iBooks 式高亮菜单（五色 + 下划线 + 移除 / 搜索 / 拷贝）、点击高亮弹菜单；书内搜索（跳转定位临时高亮）；查词弹窗（本地 MDX 词典）、笔记 / 书签、生词本；阅读设置面板（iBooks 式字体列表 / 排版预设 / 粗体 / 还原、行距 / 边距 / 主题 / 自定义颜色），主题默认跟随 App，字体选择真正生效
 - **词典模块**：MDX/MDD 词典导入（本地路径或上传）、激活 / 启停管理；@@@LINK 词条跳转、词条内音频点击播放、COCA 词频标注；iCloud dataless 占位容错（清晰提示先在 Finder 下载）
 - **AI 歌词对齐**：歌词指定弹窗粘贴纯歌词 → 本地 Qwen3-ForcedAligner 生成时间戳（`backend/scripts/lyric-align`）→ 填入 LRC 编辑框确认保存
-- **桌面壳（QQPlayer.app）**：Swift 原生壳三合一（主窗口 + 迷你窗 + 桌面歌词）；阅读器内右键菜单直接查词 / 高亮 / 添加笔记，系统菜单跟随系统语言本地化（zh_CN / en）
+- **桌面壳（QQPlayer.app，macOS）**：Swift 原生壳三合一（主窗口 + 迷你窗 + 桌面歌词）；阅读器内右键菜单直接查词 / 高亮 / 添加笔记，系统菜单跟随系统语言本地化（zh_CN / en）；显示名 / Bundle ID / URL scheme / 窗口标题可命名参数化（独立版本如小雨版可用环境变量覆盖）
+- **iOS 伴侣壳（iPhone / iPad）**：mDNS 自动发现 + 配对（主机名稳定，主机换 IP 不失效）；同步收藏 / 歌单 / 播放统计 / 阅读进度 / 词典（增量操作，后台批量下载）；下载离线播放（断网可用，封面 / 歌词离线缓存）；锁屏 / 线控媒体控制由原生后台执行（锁屏 next / prev / play / pause / seek 立即生效，不依赖挂起的 WebView）；CarPlay 封面支持；跟唱 / 阅读 / 词典全功能
+- **Windows 壳（Tauri 2）**：桌面体验与 macOS 对齐，x64 / arm64 双架构，与 macOS 同版本线发布
 - **播放视觉化**：6 种频谱样式（条 / 圆环 / 波形 / 脉冲 / 镜像 / 粒子）+ 封面取色氛围背景 + 控制栏迷你频谱
 - **曲库管理增强**：歌曲移到废纸篓（右键 / ⌘·Ctrl 多选批量 / 移动端左滑，自动清理歌单与收藏引用）、列头点击排序、歌曲行拖拽进歌单、播放队列顺序拖拽持久化
 - **专业设置**：左侧分类导航（播放 / 音乐库 / 歌词 / 界面 / 快捷键 / 关于）——播放模式、启动恢复上次播放、记住音量、切歌淡入淡出、歌词延迟校准、歌词来源优先级、文件类型多选（7 种格式）、忽略隐藏文件、自动刷新开关、启动自动扫描、快捷键全量可录制（冲突检测）
@@ -46,7 +49,7 @@
 
 - **歌曲库**（默认，首次启动自动创建）：`~/Music/QQPlayer`。可在设置 → 音乐库切换任意本地文件夹，或运行时用命令行参数指定：`./backend/venv/bin/python backend/backend.py [歌曲库路径]`
 - **歌词缓存**：`~/.cache/qqplayer/lyric/`（在线获取的歌词自动缓存，30 天有效；手动指定歌词存 `manual/` 子目录，按歌曲路径隔离，不碰歌曲目录）
-- **应用数据**：`~/Library/Application Support/qqplayer/`（收藏 `favorites.json` / 歌单 `playlists.json` / 播放统计 `playback.json` / 统一设置 `settings.json`（6 分类）/ 桌面歌词 `desktop_lyric.json` / 播放队列顺序 `queue_order.json` / 网络曲库登记 `network_songs.json` / 电子书书架 `books/` + `books.json` / 阅读标注 `annotations.json` / 生词本 `vocab.json` / 上传词典 `dicts/`）
+- **应用数据**：`~/Library/Application Support/qqplayer/`（收藏 `favorites.json` / 歌单 `playlists.json` / 播放统计 `playback.json` / 统一设置 `settings.json`（6 分类）/ 桌面歌词 `desktop_lyric.json` / 播放队列顺序 `queue_order.json` / 网络曲库登记 `network_songs.json` / 电子书书架 `books/` + `books.json` / 阅读标注 `annotations.json` / 生词本 `vocab.json` / 上传词典 `dicts/` / 配对信息 `pairing.json` / SQLite 同步底座 `qqplayer.db`）
 - **测试数据**：不入仓库（歌曲文件太大，约 22MB）。`backend/tests/` 用 `tmp_path` 现场生成假 mp3/srt 跑测试，不依赖真实音频；等以后有外部贡献者再考虑如何提供样例数据
 
 ## 启动
@@ -101,6 +104,15 @@ cd frontend
 pnpm install
 pnpm dev        # 开发服务器（代理 /api 到 17627）
 pnpm build      # 构建到 ../dist（后端直接托管）
+
+# iOS 壳（mobile/ios/，SwiftUI + WKWebView）
+./mobile/ios/build.sh            # 模拟器包（前端构建 → xcodegen → xcodebuild）
+./mobile/ios/build.sh --device   # 真机包（需签名配置）
+
+# Windows 壳（desktop/Windows/，Tauri 2）
+cd desktop/Windows
+pnpm install
+pnpm tauri build
 ```
 
 ## 测试 / 质量
@@ -183,6 +195,8 @@ kimi ga mae ni tsuki atte ita hito no koto
 | `PUT /api/playlists/{id}/order` | 歌单整体重排 |
 | `POST /api/now-playing` / `GET /api/now-playing` | 当前播放状态上报（桌面歌词）/ 轮询 |
 | `GET/PUT /api/desktop-lyric/settings` | 桌面歌词设置 |
+| `POST /api/pairing/request`、`GET /api/pairing/pending`、`POST /api/pairing/request/{id}/approve\|reject`、`GET /api/pairing/request/{id}/status` | 设备配对（iOS 伴侣，免鉴权） |
+| `GET /api/sync/manifest`、`GET/POST /api/sync/ops`、`GET /api/sync/dicts/file` | iOS 同步（清单 / 增量操作游标 / 词典文件） |
 | `POST /api/tags/scrape` | 标签刮削候选（网易云 + MusicBrainz recording，封面 fallback 链） |
 | `POST /api/tags` | 写入歌曲标签 + 统一改名（mutagen，原子写盘） |
 | `GET/POST /api/books`、`POST /api/books/import`、`GET /api/books/{bid}/file|cover|progress`、`DELETE /api/books/{bid}` | 电子书书架（导入 / 列表 / 文件 / 封面 / 进度 / 删除） |
