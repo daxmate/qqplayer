@@ -96,52 +96,69 @@ final class AVPlayerBridge {
 
     // MARK: - Web 命令入口（从 WKScriptMessage 解析）
 
-    func handleCommand(_ cmd: String, payload: [String: Any]) {
-        switch cmd {
-        case "load":
+    /// Web 命令处理器类型：bridge 实例 + payload（静态表存闭包，不捕获 self）
+    typealias CommandHandler = (AVPlayerBridge, [String: Any]) -> Void
+
+    /// 命令分发映射表（Pass 3 架构层：switch → 显式映射表，行为零变化）。
+    /// cmd 字符串 → handler；不在表里的未知命令由 handleCommand 静默忽略
+    /// （桌面壳消息如 pickLibrary/lyric 等也走这里）。
+    static let commandHandlers: [String: CommandHandler] = [
+        "load": { bridge, payload in
             if let urlString = payload["url"] as? String, let url = URL(string: urlString) {
-                load(url: url)
+                bridge.load(url: url)
             }
-        case "play":
-            if pendingSeek != nil {
+        },
+        "play": { bridge, _ in
+            if bridge.pendingSeek != nil {
                 // seek 进行中：标记待播，seek 完成回调里再 play（跳句/断点恢复场景）
-                playAfterSeek = true
+                bridge.playAfterSeek = true
             } else {
-                player.play()
-                metadataManager.updateNowPlayingPlaybackState()
+                bridge.player.play()
+                bridge.metadataManager.updateNowPlayingPlaybackState()
             }
-        case "pause":
-            player.pause()
-            metadataManager.updateNowPlayingPlaybackState()
-        case "seek":
+        },
+        "pause": { bridge, _ in
+            bridge.player.pause()
+            bridge.metadataManager.updateNowPlayingPlaybackState()
+        },
+        "seek": { bridge, payload in
             if let t = payload["t"] as? Double {
-                seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
+                bridge.seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
             } else if let t = payload["t"] as? Int {
-                seek(to: CMTime(seconds: max(0, Double(t)), preferredTimescale: 600))
+                bridge.seek(to: CMTime(seconds: max(0, Double(t)), preferredTimescale: 600))
             }
-        case "setVolume":
+        },
+        "setVolume": { bridge, payload in
             if let v = payload["v"] as? Double {
-                player.volume = Float(min(1, max(0, v)))
+                bridge.player.volume = Float(min(1, max(0, v)))
             }
-        case "setRate":
+        },
+        "setRate": { bridge, payload in
             if let r = payload["r"] as? Double {
-                player.defaultRate = Float(r)
-                if player.rate > 0 { player.rate = Float(r) }
-                metadataManager.updateNowPlayingPlaybackState()
+                bridge.player.defaultRate = Float(r)
+                if bridge.player.rate > 0 { bridge.player.rate = Float(r) }
+                bridge.metadataManager.updateNowPlayingPlaybackState()
             }
-        case "setMetadata":
-            metadataManager.applyMetadata(payload)
-        case "setPlaying":
+        },
+        "setMetadata": { bridge, payload in
+            bridge.metadataManager.applyMetadata(payload)
+        },
+        "setPlaying": { bridge, payload in
             if let p = payload["playing"] as? Bool {
-                metadataManager.updateNowPlayingPlaybackState(playing: p)
+                bridge.metadataManager.updateNowPlayingPlaybackState(playing: p)
             }
-        case "setQueue":
+        },
+        "setQueue": { bridge, payload in
             // 播放顺序快照：前端 selectSong 后同步 → RemoteCommandManager 持有，
             // 锁屏/线控后台切歌由原生直接执行（Web 挂起时不依赖 JS）
-            remoteCommands.handleSetQueue(payload)
-        default:
-            break // 未知命令静默忽略（桌面壳消息如 pickLibrary/lyric 等也走这里）
-        }
+            bridge.remoteCommands.handleSetQueue(payload)
+        },
+    ]
+
+    func handleCommand(_ cmd: String, payload: [String: Any]) {
+        // 未知命令静默忽略（桌面壳消息如 pickLibrary/lyric 等也走这里）
+        guard let handler = Self.commandHandlers[cmd] else { return }
+        handler(self, payload)
     }
 
     // MARK: - 播放原语
