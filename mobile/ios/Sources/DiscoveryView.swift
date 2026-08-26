@@ -116,9 +116,6 @@ struct DiscoveryView: View {
         .onAppear {
             discovery.start()
         }
-        .onDisappear {
-            // 连接成功切走后停止发现（切换页再次 onAppear 会重启）
-        }
     }
 
     // MARK: - 行

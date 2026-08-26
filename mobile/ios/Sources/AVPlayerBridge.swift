@@ -40,9 +40,6 @@ final class AVPlayerBridge {
     private var interruptionPolicy = InterruptionPolicy()
     private var interruptionObserver: NSObjectProtocol?
 
-    /// 当前加载的 URL（setMetadata 时确认封面归属）
-    private(set) var currentURL: URL?
-
     /// seek 串行化状态（2026-08-23 跟唱跳句竞态修复）：
     /// Web 侧 currentTime setter 与 play() 是两个独立桥消息，AVPlayer.seek 异步完成前
     /// 若收到 play → 从旧位置开始播（"下一句没用"/乱跳）。
@@ -159,7 +156,6 @@ final class AVPlayerBridge {
     }
 
     private func load(url: URL) {
-        currentURL = url
         let item = makeItem(url: url)
         statusObservation?.invalidate()
         embeddedArtwork = nil // 上一首的内嵌封面作废，等新歌预读

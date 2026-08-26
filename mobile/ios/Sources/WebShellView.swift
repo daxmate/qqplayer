@@ -479,7 +479,6 @@ struct WebShellView: UIViewRepresentable {
         }
     }
 
-    /// JSON 字面量编码（注入 evaluateJavaScript / 用户脚本安全）
     /// 诊断日志（追加写 Documents/meta/nativecmd.log；模拟器沙盒直读，真机连 Mac 可读）。
     /// 与前端 debuglog.json（dbgLog → nativeMetaSave）互补：nativecmd.log 记原生侧决策/桥消息。
     static func appendNativeLog(_ line: String) {
@@ -497,6 +496,7 @@ struct WebShellView: UIViewRepresentable {
         }
     }
 
+    /// JSON 字面量编码（注入 evaluateJavaScript / 用户脚本安全）
     static func jsonLiteral(_ value: Any) -> String {
         // 字符串：手动 JSON 转义。NSJSONSerialization 对顶层 String 不支持（isValidJSONObject=false，
         // data(withJSONObject:) 还会抛 NSException——try? 拦不住），必须绕过。

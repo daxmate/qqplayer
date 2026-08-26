@@ -7,7 +7,6 @@ struct DiscoveredServer: Identifiable, Equatable {
     let serviceName: String   // mDNS 服务名（hostname）
     var host: String?         // 解析出的 IP（nil = 解析中/失败）
     var port: UInt16
-    var txtVersion: String?
     var txtName: String?
 
     var id: String { serviceName + (host ?? "") + String(port) }
@@ -100,9 +99,8 @@ final class DiscoveryService: ObservableObject {
         for result in results {
             guard case .service(let name, _, _, _) = result.endpoint else { continue }
             var s = DiscoveredServer(serviceName: name, host: nil, port: 17627)
-            // TXT 记录：NWBrowser 结果不带 TXT，通过短连解析时顺带读不了 TXT；
-            // 版本/名称做 best-effort：连接成功时从 HTTP /api/settings 拿不到——保持 nil，
-            // 名称用服务名即可（桌面端广播的服务名即 hostname）。
+            // TXT 记录：NWBrowser 结果不带 TXT，短连解析也读不到——名称保持 nil 用服务名即可
+            // （桌面端广播的服务名即 hostname）。
             list.append(s)
             resolveHost(for: s)
         }
