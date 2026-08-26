@@ -1,166 +1,168 @@
 <template>
-  <div v-if="state.specLyricOpen" class="modal-mask" @click.self="close">
-    <div class="modal">
-      <div class="modal-head">
-        <FileMusic :size="16" />
-        <span class="spec-title">{{ t("spec.title") }}</span>
-        <span class="head-sub">{{ songName }}</span>
-        <span class="src-badge" :class="{ manual: manualSpecified }">
-          {{ manualSpecified ? t("spec.manual") : t("spec.auto") }}
-        </span>
-        <button class="modal-close" :title="t('common.close')" @click="close">
-          <X :size="16" />
-        </button>
-      </div>
-
-      <div class="spec-body">
-        <!-- 当前状态 -->
-        <div v-if="manualSpecified" class="spec-status">
-          <span class="status-dot" />
-          <span class="status-text">
-            {{
-              t("spec.statusUsing", { source: manualSource, format: manualFormat.toUpperCase() })
-            }}
+  <Teleport to="body">
+    <div v-if="state.specLyricOpen" class="modal-mask" @click.self="close">
+      <div class="modal">
+        <div class="modal-head">
+          <FileMusic :size="16" />
+          <span class="spec-title">{{ t("spec.title") }}</span>
+          <span class="head-sub">{{ songName }}</span>
+          <span class="src-badge" :class="{ manual: manualSpecified }">
+            {{ manualSpecified ? t("spec.manual") : t("spec.auto") }}
           </span>
-          <button class="clear-link" @click="clearSpec">{{ t("spec.clear") }}</button>
-        </div>
-
-        <!-- tab 切换 -->
-        <div class="spec-tabs">
-          <button
-            v-for="tabItem in tabs"
-            :key="tabItem.value"
-            class="spec-tab"
-            :class="{ on: tab === tabItem.value }"
-            @click="tab = tabItem.value"
-          >
-            <component :is="tabItem.icon" :size="14" />
-            {{ tabItem.label }}
+          <button class="modal-close" :title="t('common.close')" @click="close">
+            <X :size="16" />
           </button>
         </div>
 
-        <!-- 上传文件 -->
-        <div v-if="tab === 'upload'" class="spec-pane">
-          <label class="drop-zone" :class="{ has: file }">
-            <input type="file" accept=".lrc,.srt,.json,.txt" @change="onFile" />
-            <FileUp :size="26" />
-            <div class="dz-main">{{ file ? file.name : t("spec.clickToSelect") }}</div>
-            <div class="dz-sub">
+        <div class="spec-body">
+          <!-- 当前状态 -->
+          <div v-if="manualSpecified" class="spec-status">
+            <span class="status-dot" />
+            <span class="status-text">
               {{
-                file
-                  ? t("spec.formatLabel", {
-                      format: detectedFormat
-                        ? detectedFormat.toUpperCase()
-                        : t("spec.unrecognized"),
-                    })
-                  : t("spec.supportedFormats")
+                t("spec.statusUsing", { source: manualSource, format: manualFormat.toUpperCase() })
               }}
-            </div>
-          </label>
-          <div v-if="file && !detectedFormat" class="spec-error">
-            {{ t("spec.unrecognizedDetail") }}
+            </span>
+            <button class="clear-link" @click="clearSpec">{{ t("spec.clear") }}</button>
           </div>
-          <pre v-if="file && detectedFormat" class="spec-preview">{{ preview }}</pre>
-        </div>
 
-        <!-- 在线搜索 -->
-        <div v-else-if="tab === 'search'" class="spec-pane">
-          <div class="search-row">
-            <input
-              v-model="searchTitle"
-              class="search-input"
-              :placeholder="t('spec.placeholderTitle')"
-              @keyup.enter="doSearch"
-            />
-            <input
-              v-model="searchArtist"
-              class="search-input"
-              :placeholder="t('spec.placeholderArtist')"
-              @keyup.enter="doSearch"
-            />
-            <button class="search-btn" :disabled="searching" @click="doSearch">
-              <Loader2 v-if="searching" :size="14" class="spin" />
-              {{ searching ? t("spec.searching") : t("common.search") }}
-            </button>
-          </div>
-          <div v-if="searchError" class="spec-error">{{ searchError }}</div>
-          <div v-if="results.length" class="result-list">
+          <!-- tab 切换 -->
+          <div class="spec-tabs">
             <button
-              v-for="(r, i) in results"
-              :key="i"
-              class="result-item"
-              :disabled="savingIdx === i"
-              @click="pickResult(r, i)"
+              v-for="tabItem in tabs"
+              :key="tabItem.value"
+              class="spec-tab"
+              :class="{ on: tab === tabItem.value }"
+              @click="tab = tabItem.value"
             >
-              <span class="src-tag" :class="r.source">
-                {{ r.source === "netease" ? t("spec.sourceNetease") : "lrclib" }}
-              </span>
-              <span class="ri-title">{{ r.title }}</span>
-              <span v-if="r.artist" class="ri-artist">{{ r.artist }}</span>
-              <span v-if="r.tlyric" class="ri-zh" :title="t('spec.hasZhTitle')">{{
-                t("control.zh")
-              }}</span>
-              <Loader2 v-if="savingIdx === i" :size="13" class="spin" />
+              <component :is="tabItem.icon" :size="14" />
+              {{ tabItem.label }}
             </button>
           </div>
-          <div v-else-if="searched && !searching" class="spec-empty">
-            {{ t("spec.searchEmpty") }}
+
+          <!-- 上传文件 -->
+          <div v-if="tab === 'upload'" class="spec-pane">
+            <label class="drop-zone" :class="{ has: file }">
+              <input type="file" accept=".lrc,.srt,.json,.txt" @change="onFile" />
+              <FileUp :size="26" />
+              <div class="dz-main">{{ file ? file.name : t("spec.clickToSelect") }}</div>
+              <div class="dz-sub">
+                {{
+                  file
+                    ? t("spec.formatLabel", {
+                        format: detectedFormat
+                          ? detectedFormat.toUpperCase()
+                          : t("spec.unrecognized"),
+                      })
+                    : t("spec.supportedFormats")
+                }}
+              </div>
+            </label>
+            <div v-if="file && !detectedFormat" class="spec-error">
+              {{ t("spec.unrecognizedDetail") }}
+            </div>
+            <pre v-if="file && detectedFormat" class="spec-preview">{{ preview }}</pre>
+          </div>
+
+          <!-- 在线搜索 -->
+          <div v-else-if="tab === 'search'" class="spec-pane">
+            <div class="search-row">
+              <input
+                v-model="searchTitle"
+                class="search-input"
+                :placeholder="t('spec.placeholderTitle')"
+                @keyup.enter="doSearch"
+              />
+              <input
+                v-model="searchArtist"
+                class="search-input"
+                :placeholder="t('spec.placeholderArtist')"
+                @keyup.enter="doSearch"
+              />
+              <button class="search-btn" :disabled="searching" @click="doSearch">
+                <Loader2 v-if="searching" :size="14" class="spin" />
+                {{ searching ? t("spec.searching") : t("common.search") }}
+              </button>
+            </div>
+            <div v-if="searchError" class="spec-error">{{ searchError }}</div>
+            <div v-if="results.length" class="result-list">
+              <button
+                v-for="(r, i) in results"
+                :key="i"
+                class="result-item"
+                :disabled="savingIdx === i"
+                @click="pickResult(r, i)"
+              >
+                <span class="src-tag" :class="r.source">
+                  {{ r.source === "netease" ? t("spec.sourceNetease") : "lrclib" }}
+                </span>
+                <span class="ri-title">{{ r.title }}</span>
+                <span v-if="r.artist" class="ri-artist">{{ r.artist }}</span>
+                <span v-if="r.tlyric" class="ri-zh" :title="t('spec.hasZhTitle')">{{
+                  t("control.zh")
+                }}</span>
+                <Loader2 v-if="savingIdx === i" :size="13" class="spin" />
+              </button>
+            </div>
+            <div v-else-if="searched && !searching" class="spec-empty">
+              {{ t("spec.searchEmpty") }}
+            </div>
+          </div>
+
+          <!-- 粘贴文本 -->
+          <div v-else class="spec-pane">
+            <textarea
+              v-model="pasteText"
+              class="paste-area"
+              :placeholder="t('spec.pastePlaceholder')"
+              spellcheck="false"
+            />
+            <div v-if="pasteText.trim()" class="paste-meta">
+              {{ t("spec.detectFormatLabel")
+              }}<b>{{ pasteFormat ? pasteFormat.toUpperCase() : t("spec.unrecognized") }}</b>
+              <span v-if="!pasteFormat" class="spec-error inline">{{
+                t("spec.pasteNeedTimeline")
+              }}</span>
+            </div>
           </div>
         </div>
 
-        <!-- 粘贴文本 -->
-        <div v-else class="spec-pane">
-          <textarea
-            v-model="pasteText"
-            class="paste-area"
-            :placeholder="t('spec.pastePlaceholder')"
-            spellcheck="false"
-          />
-          <div v-if="pasteText.trim()" class="paste-meta">
-            {{ t("spec.detectFormatLabel")
-            }}<b>{{ pasteFormat ? pasteFormat.toUpperCase() : t("spec.unrecognized") }}</b>
-            <span v-if="!pasteFormat" class="spec-error inline">{{
-              t("spec.pasteNeedTimeline")
-            }}</span>
+        <div class="modal-foot">
+          <div class="foot-hint">
+            <template v-if="alignSourceText.trim() && !pasteText.trim()">
+              {{ t("spec.alignUsesCurrent", { lines: currentLyricLineCount }) }}
+            </template>
+            <template v-else>{{ t("spec.footHint") }}</template>
           </div>
-        </div>
-      </div>
-
-      <div class="modal-foot">
-        <div class="foot-hint">
-          <template v-if="alignSourceText.trim() && !pasteText.trim()">
-            {{ t("spec.alignUsesCurrent", { lines: currentLyricLineCount }) }}
-          </template>
-          <template v-else>{{ t("spec.footHint") }}</template>
-        </div>
-        <div class="foot-actions">
-          <!-- AI 对齐（通用区）：自动用当前已加载歌词；无歌词时用粘贴文本 -->
-          <button
-            class="align-btn"
-            :disabled="aligning || !alignSourceText.trim()"
-            :title="t('spec.alignExperimentalHint')"
-            @click="doAlign"
-          >
-            <Loader2 v-if="aligning" :size="14" class="spin" />
-            <Sparkles v-else :size="14" />
-            {{ aligning ? t("spec.aligning") : t("spec.align") }}
-          </button>
-          <button v-if="manualSpecified" class="btn-danger" @click="clearSpec">
-            <Trash2 :size="13" />{{ t("spec.clear") }}
-          </button>
-          <button
-            v-if="tab !== 'search'"
-            class="btn-primary"
-            :disabled="!canSave || saving"
-            @click="save"
-          >
-            <Loader2 v-if="saving" :size="14" class="spin" />
-            {{ t("common.save") }}
-          </button>
+          <div class="foot-actions">
+            <!-- AI 对齐（通用区）：自动用当前已加载歌词；无歌词时用粘贴文本 -->
+            <button
+              class="align-btn"
+              :disabled="aligning || !alignSourceText.trim()"
+              :title="t('spec.alignExperimentalHint')"
+              @click="doAlign"
+            >
+              <Loader2 v-if="aligning" :size="14" class="spin" />
+              <Sparkles v-else :size="14" />
+              {{ aligning ? t("spec.aligning") : t("spec.align") }}
+            </button>
+            <button v-if="manualSpecified" class="btn-danger" @click="clearSpec">
+              <Trash2 :size="13" />{{ t("spec.clear") }}
+            </button>
+            <button
+              v-if="tab !== 'search'"
+              class="btn-primary"
+              :disabled="!canSave || saving"
+              @click="save"
+            >
+              <Loader2 v-if="saving" :size="14" class="spin" />
+              {{ t("common.save") }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>

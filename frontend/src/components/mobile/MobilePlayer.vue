@@ -617,7 +617,7 @@ function pickSleep(minutes) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: calc(10px + env(safe-area-inset-top)) 16px 8px;
+  padding: calc(10px + env(safe-area-inset-top)) 20px 8px;
   touch-action: manipulation;
 }
 .mp-pull-hint {
@@ -626,7 +626,7 @@ function pickSleep(minutes) {
   opacity: 0.85;
 }
 .mp-cover-box {
-  width: min(calc(100vw - 32px), 46vh);
+  width: min(calc(100vw - 40px), 46vh);
   aspect-ratio: 1;
   border-radius: 18px;
   overflow: hidden;
@@ -651,12 +651,18 @@ function pickSleep(minutes) {
   flex: 1;
   min-height: 200px;
   margin-top: 12px;
+  padding: 0 20px; /* 左右与上下区块统一 20px（2026-08-26） */
   display: flex;
   flex-direction: column;
 }
 .mp-lyric-area > * {
   flex: 1;
   min-height: 0;
+}
+/* 歌词卡片内部滚动区自带 22px 左右 padding，外层已给 20px → 内层归零避免双重缩进 */
+.mp-lyric-area :deep(.kp-scroll) {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* ---------- ③ 歌名/歌手行 + 操作钮 ---------- */
@@ -774,7 +780,7 @@ function pickSleep(minutes) {
   align-items: center;
   justify-content: space-around;
   gap: 4px;
-  padding: 6px 14px calc(10px + env(safe-area-inset-bottom));
+  padding: 6px 20px calc(10px + env(safe-area-inset-bottom));
 }
 .mp-cbtn {
   width: 44px;

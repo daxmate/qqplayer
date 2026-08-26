@@ -92,7 +92,11 @@ function waitFor(fn, timeout = 3000) {
 }
 
 async function openModal() {
-  const w = mount(LyricSpecModal, { attachTo: document.body });
+  // teleport stub：Teleport 到 body 后 wrapper 无根节点，stub 让内容原地渲染（测试断言不变）
+  const w = mount(LyricSpecModal, {
+    attachTo: document.body,
+    global: { stubs: { teleport: true } },
+  });
   state.specLyricOpen = true; // mount 后触发 watch（非 immediate）
   await nextTick();
   await tick(); // 等 fetchManualLyric 完成
