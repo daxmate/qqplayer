@@ -7,9 +7,11 @@ import MediaPlayer
 /// 交给 Bridge 执行（onLoad/onPlay/onPause/isPlaying/onApplyMetadata/onPushEvent/
 /// onUpdatePlaybackState/onSeek），无队列兑底命令（next/prev）走 onFallbackCommand 转发 Web。
 final class RemoteCommandManager {
-    /// 播放顺序快照（前端 setQueue 同步；锁屏/线控后台切歌用，Web 挂起时不依赖 JS）
-    private(set) var queue: [[String: Any]] = []
-    private(set) var queueIndex = 0
+    /// 播放顺序快照（前端 setQueue 同步；锁屏/线控后台切歌用，Web 挂起时不依赖 JS）。
+    /// Pass 3：队列快照 + 游标抽成纯模型 PlayerQueue（夹取/环绕/stream 跳过规则都在模型里）。
+    private(set) var queue = PlayerQueue()
+    /// 当前游标（PlayerQueue.index 透出；测试/外部读取用）
+    var queueIndex: Int { queue.index }
 
     // MARK: - Bridge 执行器（闭包回调；AVPlayer 在 Bridge 手里，组件只发指令）
 
@@ -36,16 +38,11 @@ final class RemoteCommandManager {
 
     /// 播放顺序快照：前端 selectSong 后同步（songs 数组 + 当前 index）→
     /// 锁屏/线控后台切歌由原生直接执行（Web 挂起时不依赖 JS）
+    /// Pass 3：快照/夹取/清空逻辑在 PlayerQueue.replace（行为零变化）
     func handleSetQueue(_ payload: [String: Any]) {
-        if let songs = payload["songs"] as? [[String: Any]], !songs.isEmpty {
-            queue = songs
-            let raw = (payload["index"] as? Int) ?? 0
-            queueIndex = min(max(0, raw), queue.count - 1) // 越界夹取
-        } else {
-            // 容错：songs 非数组/空数组 → 清空快照（next/prev 走 Web 兑底）
-            queue = []
-            queueIndex = 0
-        }
+        let songs = (payload["songs"] as? [[String: Any]]) ?? []
+        let raw = (payload["index"] as? Int) ?? 0
+        queue.replace(songs: songs, index: raw)
     }
 
     // MARK: - 原生队列切歌执行器
@@ -53,18 +50,16 @@ final class RemoteCommandManager {
     /// 锁屏/线控后台切歌：按 queue 快照相对移动（Web 挂起时原生独立执行）。
     /// 复用 Bridge.load（embeddedArtwork 预读/loadedmetadata 推送）+ applyMetadata（payload dict 直接可用）。
     /// stream 歌 url 为空 → 跳过（MVP 限制：后台切歌只覆盖本地歌，流媒体直链有时效无法离线取）。
+    /// Pass 3：游标移动/stream 跳过规则在 PlayerQueue（advance 先移游标，currentSongURL nil 则跳过），
+    /// 行为零变化——跳过时游标已前进，下次切歌从新位置开始（测试已固化）。
     func playQueueRelative(_ delta: Int) {
-        guard !queue.isEmpty else { return }
-        var cursor = QueueCursor(index: queueIndex)
-        guard cursor.advance(delta, count: queue.count) else { return }
-        queueIndex = cursor.index
-        let meta = queue[queueIndex]
-        guard let urlString = meta["url"] as? String, !urlString.isEmpty,
-              let url = URL(string: urlString) else { return } // stream 歌 url 为空：跳过（MVP 限制）
+        guard queue.advance(delta) else { return }
+        guard let url = queue.currentSongURL else { return } // stream 歌 url 为空：跳过（MVP 限制）
+        let meta = queue.currentSong ?? [:]
         onLoad?(url)
         onPlay?() // 锁屏切歌即播放（前端 songChanged 对齐为播放态）
         onApplyMetadata?(meta)
-        onPushEvent?("songChanged", ["index": queueIndex])
+        onPushEvent?("songChanged", ["index": queue.index])
         onUpdatePlaybackState?(true)
     }
 
