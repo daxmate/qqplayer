@@ -74,5 +74,45 @@ export default {
       newPlaylistPlaceholder: "输入歌单名称",
       create: "创建",
     },
+    // 负一屏同步中心（MobileSync）
+    syncCenter: {
+      title: "同步中心",
+      syncAll: "同步全部",
+      syncAllDesc:
+        "一键拉全：缺失的音乐（音频+封面）、图书、词典下载，歌词失效自动刷新，自动更新开启时可更新项一并应用",
+      syncAllDone: "同步完成，已开始下载 {n} 个文件",
+      // 词典区
+      dicts: "词典",
+      dictsDesc: "词典文件离线下载（阅读时本地优先）；逐项可下载 / 删除",
+      dictAll: "下载全部词典",
+      dictEmpty: "暂无词典",
+      dictDelete: "删除",
+      dictDeleted: "已删除词典文件",
+      dictsUpToDate: "词典已全部是最新",
+      // 存储细分
+      typeAudio: "音频",
+      typeCovers: "封面",
+      typeLyric: "歌词",
+      typeBooks: "图书",
+      typeDicts: "词典",
+      typeOther: "其他（元数据等）",
+      clearType: "清理",
+      cleared: "已清理 {n} 个文件",
+      clearedAll: "已清理全部离线资产",
+      nothingToClear: "没有可清理的文件",
+      // 清理未引用
+      orphans: "清理未引用",
+      orphansDesc: "本地存在但清单中已不存在的资产（旧版本/删除曲目残留）",
+      orphansFree: "可释放 {size}",
+      orphansEmpty: "没有未引用文件",
+      orphansGo: "清理",
+      orphansConfirmGo: "确认清理？",
+      orphansCleared: "已释放 {size}",
+      // 开关组
+      wifiOnly: "仅 Wi-Fi 下载",
+      wifiOnlyDesc: "蜂窝网络下挂起资产下载（默认开启）",
+      autoUpdate: "自动更新",
+      autoUpdateDesc: "同步后自动更新本地已下载但内容已变化的资产（默认关闭）",
+    },
   },
 };

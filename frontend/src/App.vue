@@ -2,7 +2,12 @@
   <div class="app">
     <div v-if="blurCoverUrl" class="bg-blur" :style="{ backgroundImage: `url(${blurCoverUrl})` }" />
     <!-- 移动端（<1024px）：页面栈式布局（媒体库首页 / 列表 / 全屏播放器 + 迷你播放条） -->
-    <MobileShell v-if="isMobile" @open-settings="isSettingsOpen = true" />
+    <MobileShell
+      v-if="isMobile"
+      ref="shellRef"
+      @open-settings="isSettingsOpen = true"
+      @open-sync="openSyncCenter"
+    />
     <!-- 桌面端（≥1024px）：三栏布局（完全不变） -->
     <template v-else>
       <!-- 顶栏 -->
@@ -279,6 +284,14 @@ import {
 } from "./composables/usePlayer.js";
 
 const { t } = useI18n();
+
+// 负一屏同步中心：SettingsModal 同步 tab「打开同步中心」→ 关设置弹窗 + MobileShell push sync
+// （桌面布局无 MobileShell → shellRef 为空，按钮在桌面不展示，此处兜底不动作）
+const shellRef = ref(null);
+function openSyncCenter() {
+  isSettingsOpen.value = false;
+  shellRef.value?.openSyncCenter();
+}
 
 // 壳内配对确认：桌面壳（非 iOS）轮询待确认配对请求，有新请求自动弹确认框。
 // 轮询在组件卸载时自动清理（usePairingConfirm 内部 onBeforeUnmount）

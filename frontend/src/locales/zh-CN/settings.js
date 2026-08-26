@@ -220,6 +220,10 @@ export default {
     syncPrefetch: "自动预取",
     syncPrefetchDesc: "播放歌曲时自动检查并下载该歌曲（默认关闭）",
     syncFetchFailed: "获取数据失败，请稍后重试",
+    // 负一屏同步中心入口（iOS 壳：SettingsModal 同步 tab → MobileSync）
+    openSyncCenter: "打开同步中心",
+    openSyncCenterDesc: "首页左缘右滑进入：离线资产下载、更新检测、存储管理、词典与 Wi-Fi 开关",
+    openSyncCenterGo: "打开",
 
     // ============ 刮削 ============
     scrapeFields: "刮削字段",

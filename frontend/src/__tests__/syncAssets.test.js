@@ -157,7 +157,7 @@ describe("syncAssets：批量下载消息 + downloads 状态登记", () => {
     expect(bridgeMock.post).not.toHaveBeenCalled();
   });
 
-  it("批量下载：一次 syncDownload，items 字段 {url,path,sha256,size} 透传", async () => {
+  it("批量下载：一次 syncDownload，items 字段 {url,path,sha256,size,wifiOnly} 透传", async () => {
     await setNativeEnv();
     const items = [
       { url: "http://s/a.m4a", path: "audio/aaa.m4a", sha256: "", size: 100 },
@@ -168,8 +168,8 @@ describe("syncAssets：批量下载消息 + downloads 状态登记", () => {
     expect(msg).toBeTruthy();
     expect(msg.cmd).toBe("syncDownload");
     expect(msg.items).toEqual([
-      { url: "http://s/a.m4a", path: "audio/aaa.m4a", sha256: "", size: 100 },
-      { url: "http://s/b.epub", path: "books/bbb.epub", sha256: "h2", size: 200 },
+      { url: "http://s/a.m4a", path: "audio/aaa.m4a", sha256: "", size: 100, wifiOnly: true },
+      { url: "http://s/b.epub", path: "books/bbb.epub", sha256: "h2", size: 200, wifiOnly: true },
     ]);
   });
 

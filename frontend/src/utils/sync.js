@@ -91,6 +91,36 @@ const COLLECTION_KEYS = ["songs", "playlists", "favorites", "books", "dicts"];
 let syncInFlight = false;
 
 /**
+ * 拉取桌面 manifest 并缓存元数据集合（syncNow / syncAll 共用）。
+ * @returns {Promise<{ok:boolean, changed?:boolean, version?:string, manifest?:object, message?:string}>}
+ */
+async function fetchAndCacheManifest() {
+  const r = await apiGet(MANIFEST_URL);
+  if (!r.ok) {
+    syncState.lastError = r.message || `HTTP ${r.status || 0}`;
+    return { ok: false, message: syncState.lastError, status: r.status };
+  }
+  const manifest = r.data || {};
+  const version = String(manifest.version || "");
+  const meta = await getCache("sync:meta");
+  const changed = !meta || meta.version !== version;
+  if (changed) {
+    const counts = {};
+    for (const key of COLLECTION_KEYS) {
+      const list = Array.isArray(manifest[key]) ? manifest[key] : [];
+      counts[key] = list.length;
+      await setCache("sync:" + key, list);
+    }
+    await setCache("sync:meta", {
+      version,
+      generatedAt: manifest.generated_at || "",
+      syncedAt: Date.now(),
+    });
+  }
+  return { ok: true, changed, version, manifest };
+}
+
+/**
  * 拉取桌面 manifest 并缓存元数据集合。
  * @returns {Promise<{ok:boolean, enabled?:boolean, changed?:boolean, version?:string,
  *   counts?:object, message?:string}>}
@@ -103,35 +133,22 @@ export async function syncNow() {
   syncInFlight = true;
   syncState.syncing = true;
   try {
-    const r = await apiGet(MANIFEST_URL);
-    if (!r.ok) {
-      syncState.lastError = r.message || `HTTP ${r.status || 0}`;
-      return { ok: false, message: syncState.lastError, status: r.status };
-    }
-    const manifest = r.data || {};
-    const version = String(manifest.version || "");
-    const meta = await getCache("sync:meta");
-    const changed = !meta || meta.version !== version;
-    if (changed) {
-      const counts = {};
-      for (const key of COLLECTION_KEYS) {
-        const list = Array.isArray(manifest[key]) ? manifest[key] : [];
-        counts[key] = list.length;
-        await setCache("sync:" + key, list);
-      }
-      await setCache("sync:meta", {
-        version,
-        generatedAt: manifest.generated_at || "",
-        syncedAt: Date.now(),
-      });
+    const mr = await fetchAndCacheManifest();
+    if (!mr.ok) {
+      return { ok: false, message: mr.message, status: mr.status };
     }
     syncState.lastSyncAt = Date.now();
     syncState.lastError = "";
     const counts = {};
     for (const key of COLLECTION_KEYS) {
-      counts[key] = Array.isArray(manifest[key]) ? manifest[key].length : 0;
+      counts[key] = Array.isArray(mr.manifest[key]) ? mr.manifest[key].length : 0;
     }
-    return { ok: true, changed, version, counts };
+    // 自动更新（默认关）：同步成功后异步拉 assetIndex → 对比 sha256 → 应用可更新项
+    // （fire-and-forget，不阻塞 syncNow 返回；失败静默，下次同步再试）
+    if (autoUpdateEnabled()) {
+      runAutoUpdate(mr.manifest.songs).catch(() => {});
+    }
+    return { ok: true, changed: mr.changed, version: mr.version, counts };
   } catch (e) {
     syncState.lastError = (e && e.message) || "同步失败";
     return { ok: false, message: syncState.lastError };
@@ -139,6 +156,13 @@ export async function syncNow() {
     syncInFlight = false;
     syncState.syncing = false;
   }
+}
+
+/** 自动更新：对比本地注册表 → 对 sha256 变化的资产应用更新（失败静默） */
+async function runAutoUpdate(songs) {
+  const local = await fetchAssetIndex();
+  const updates = await computeUpdateList(Array.isArray(songs) ? songs : [], local);
+  if (updates.length) await applyUpdates(updates);
 }
 
 // ---------- 资产标识 → 沙盒路径（内容寻址） ----------
@@ -179,8 +203,9 @@ export async function stableHash(identity) {
 }
 
 /** 歌曲 → 下载项 {url, path, sha256, size}（url 为桌面服务器绝对 URL）
- *  sha256 暂为 ""（后端 manifest 未提供内容哈希；原生侧空值跳过内容校验，
- *  文件名仍用资产标识哈希做内容寻址） */
+ *  sha256 = manifest 条目自带的内容哈希（T1 契约：manifest songs[].sha256）；
+ *  老清单/缺字段 → ""（原生侧空值跳过内容校验，文件名仍用资产标识哈希做内容寻址）。
+ *  下载项同时是「资产注册表路径」的权威来源：本地注册表按此 path 与 manifest 对照。 */
 export async function assetForSong(song) {
   if (!song || !song.path) return null;
   const url = resolveServerUrl("/api/audio?path=" + encodeURIComponent(song.path));
@@ -188,7 +213,7 @@ export async function assetForSong(song) {
   return {
     url,
     path: "audio/" + hash + (extOf(song.path) || ".m4a"),
-    sha256: "",
+    sha256: song.sha256 || "",
     size: song.size || 0,
   };
 }
@@ -201,7 +226,7 @@ export async function assetForDict(dict) {
   return {
     url,
     path: "dicts/" + hash + (extOf(dict.path) || ".mdx"),
-    sha256: "",
+    sha256: dict.sha256 || "",
     size: dict.size || 0,
   };
 }
@@ -211,7 +236,7 @@ export async function assetForBook(book) {
   if (!book || !book.id) return null;
   const url = resolveServerUrl("/api/books/" + encodeURIComponent(book.id) + "/file");
   const hash = await stableHash(book.id);
-  return { url, path: "books/" + hash + ".epub", sha256: "", size: book.size || 0 };
+  return { url, path: "books/" + hash + ".epub", sha256: book.sha256 || "", size: book.size || 0 };
 }
 
 // ---------- 封面/歌词缓存 key（阶段 F1/F2：封面离线缓存 + 歌词文件兜底） ----------
@@ -226,14 +251,15 @@ export async function coverAssetKey(path) {
   return "covers/" + hash + ".jpg";
 }
 
-/** 封面下载项 {url, path, sha256, size}（url 为桌面 cover 端点；sha256 空 → 原生跳过内容校验） */
-export async function coverItemFor(path) {
+/** 封面下载项 {url, path, sha256, size}（url 为桌面 cover 端点；sha256 空 → 原生跳过内容校验）
+ *  @param {number} [size] 可选：manifest 封面文件大小（cover_source=file 时原生 size 校验用） */
+export async function coverItemFor(path, size = 0) {
   if (!path) return null;
   return {
     url: resolveServerUrl("/api/cover?path=" + encodeURIComponent(path)),
     path: await coverAssetKey(path),
     sha256: "",
-    size: 0,
+    size: size || 0,
   };
 }
 
@@ -410,16 +436,8 @@ function handleAssetDone(payload) {
   refreshSyncState();
 }
 
-// ---------- 资产占用回执（fetchAssetsSize） ----------
-let assetsSizeWaiters = new Set(); // Set<resolve>；原生回执/超时二者先到先结算
-
-function handleAssetsSize(payload) {
-  const total = payload && typeof payload.total === "number" ? payload.total : null;
-  for (const resolve of [...assetsSizeWaiters]) {
-    assetsSizeWaiters.delete(resolve);
-    resolve(total);
-  }
-}
+// ---------- 资产占用回执（fetchAssetsSize / fetchAssetsSizeDetailed 共用 waiter） ----------
+let assetsSizeWaiters = new Set(); // Set<fn(payload|null)>；原生回执/超时先到先结算
 
 function refreshSyncState() {
   syncState.pendingCount = activeDownloads.size;
@@ -454,6 +472,8 @@ function ensureSubscribed() {
   unsubs.push(onNativeEvent("assetStatus", handleAssetStatus));
   unsubs.push(onNativeEvent("appState", handleAppState));
   unsubs.push(onNativeEvent("assetsSize", handleAssetsSize));
+  unsubs.push(onNativeEvent("assetIndex", handleAssetIndex));
+  unsubs.push(onNativeEvent("assetsDeleted", handleAssetsDeleted));
   unsubs.push(onNativeEvent("metaLoaded", handleMetaLoaded));
 }
 
@@ -574,6 +594,7 @@ export function syncAssets(items) {
       path,
       sha256: sha256 || "",
       size: size || 0,
+      wifiOnly: wifiOnlyEnabled(), // T3：仅 Wi-Fi 开关，原生侧蜂窝下挂起
     })),
   });
   return true;
@@ -677,21 +698,533 @@ export function clearAssets(scope) {
 /** 资产占用查询超时（ms）：原生无回执不挂起调用方 */
 export const ASSETS_SIZE_TIMEOUT_MS = 8000;
 
-/**
- * 查询原生侧资产占用：发 assetsSize 命令，原生回执 push('assetsSize', {total}) →
- * resolve(bytes)；超时 / 非原生环境 → resolve(null)。
- */
-export function fetchAssetsSize() {
+/** 资产占用回执分发：waiter 统一收完整 payload（{total, byType}），由各查询函数取用 */
+function handleAssetsSize(payload) {
+  const data = payload && typeof payload === "object" ? payload : null;
+  for (const resolve of [...assetsSizeWaiters]) {
+    assetsSizeWaiters.delete(resolve);
+    resolve(data);
+  }
+}
+
+/** 发起 assetsSize 查询（pending promise + 回执 + 超时）；非原生环境立即 resolve(null) */
+function requestAssetsSize() {
   if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
   ensureSubscribed();
   return new Promise((resolve) => {
-    setTimeout(() => {
-      assetsSizeWaiters.delete(resolve);
-      resolve(null);
+    const timer = setTimeout(() => {
+      assetsSizeWaiters.delete(settle);
+      settle(null);
     }, ASSETS_SIZE_TIMEOUT_MS);
-    assetsSizeWaiters.add(resolve);
+    const settle = (data) => {
+      clearTimeout(timer);
+      resolve(data);
+    };
+    assetsSizeWaiters.add(settle);
     nativePost({ cmd: "assetsSize" });
   });
+}
+
+/**
+ * 查询原生侧资产占用：回执 {total} → resolve(bytes)；超时 / 非原生环境 → resolve(null)。
+ * 兼容旧壳（只回 total 数字）。
+ */
+export async function fetchAssetsSize() {
+  const data = await requestAssetsSize();
+  return data && typeof data.total === "number" ? data.total : null;
+}
+
+/**
+ * 查询原生侧资产占用明细：resolve({total, byType:{audio,covers,lyric,books,dicts,meta,other}})
+ * （T3 契约：assetsSize 回执扩展）；超时 / 非原生环境 / 旧壳无 byType → resolve(null)。
+ */
+export async function fetchAssetsSizeDetailed() {
+  const data = await requestAssetsSize();
+  if (!data || typeof data.total !== "number") return null;
+  const byType = data.byType && typeof data.byType === "object" ? data.byType : null;
+  return byType ? { total: data.total, byType } : { total: data.total, byType: {} };
+}
+
+// ---------- 资产注册表（T3：assetIndex）与存储细分 ----------
+let assetIndexWaiters = new Set(); // Set<fn(assets|null)>：原生回执/超时先到先结算
+
+function handleAssetIndex(payload) {
+  const assets = payload && Array.isArray(payload.assets) ? payload.assets : [];
+  for (const cb of [...assetIndexWaiters]) {
+    assetIndexWaiters.delete(cb);
+    try {
+      cb(assets);
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
+/** 资产注册表查询超时（ms）：与 ASSET_QUERY_TIMEOUT_MS 同级，原生无回执不挂起调用方 */
+export const ASSET_INDEX_TIMEOUT_MS = 8000;
+
+/**
+ * 查询原生侧资产注册表：发 assetIndex 命令，原生回执 push('assetIndex',
+ * {assets: [{path, sha256, size}]}) → resolve(assets)。
+ * 失败/超时/非原生环境 → resolve([])（空注册表 = 老版本升级场景，按「全部最新」处理，
+ * 避免误报全量更新；缺失统计在空注册表下会全量补齐——一键拉全的语义）。
+ */
+export function fetchAssetIndex() {
+  if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve([]);
+  ensureSubscribed();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      assetIndexWaiters.delete(settle);
+      settle([]);
+    }, ASSET_INDEX_TIMEOUT_MS);
+    const settle = (assets) => {
+      clearTimeout(timer);
+      resolve(assets);
+    };
+    assetIndexWaiters.add(settle);
+    nativePost({ cmd: "assetIndex" });
+  });
+}
+
+// ---------- 更新 / 孤儿计算（T3：sha256 对比） ----------
+
+/**
+ * 可更新项计算：manifest songs（带 sha256）vs 本地资产注册表。
+ * 判定 = 本地注册有该资产 && 本地 sha256 ≠ manifest sha256 → {path, name, kind, song}。
+ * 首次升级策略：注册表不存在/为空（老版本升级，assets.json 未建）→ 全部视为最新，
+ * 不标记可更新（避免误报全量更新）；注册表存在后严格对比。
+ * @returns {Promise<Array<{path:string, name:string, kind:'audio', song:object}>>}
+ */
+export async function computeUpdateList(manifestSongs, localAssets) {
+  const local = Array.isArray(localAssets) ? localAssets : [];
+  if (!local.length) return []; // 首次升级/注册表为空：全部视为最新
+  const byPath = new Map();
+  for (const a of local) {
+    if (a && a.path) byPath.set(a.path, a);
+  }
+  const out = [];
+  for (const song of Array.isArray(manifestSongs) ? manifestSongs : []) {
+    if (!song || !song.path) continue;
+    // 音频更新：内容哈希变化（内嵌封面随音频一起更新）
+    if (song.sha256) {
+      const item = await assetForSong(song);
+      if (item) {
+        const localAsset = byPath.get(item.path);
+        if (localAsset && localAsset.sha256 !== song.sha256) {
+          out.push({ path: item.path, name: song.name || song.path, kind: "audio", song });
+        }
+      }
+    }
+    // 封面更新：文件封面（cover_source=file）的封面文件 size 变化 → 封面过期
+    // （本地注册表 cover 条目 size = 下载时实际大小；manifest.cover_size = 当前封面文件大小）
+    if (song.cover_source === "file" && song.cover_size > 0) {
+      const cover = await coverItemFor(song.path);
+      if (cover) {
+        const localCover = byPath.get(cover.path);
+        if (localCover && localCover.size !== song.cover_size) {
+          out.push({
+            path: cover.path,
+            name: song.name || song.path,
+            kind: "cover",
+            song,
+            coverStale: true,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 未引用资产计算：期望集 = 清单内全部音频/封面/图书/词典的沙盒路径
+ * （assetForSong / coverItemFor / assetForBook / assetForDict 的 path；歌词 meta key 不算）；
+ * 本地注册表中不在期望集内的 → 孤儿 [{path, size}] + 可释放总大小。
+ * @returns {Promise<{orphans:Array<{path:string, size:number}>, totalSize:number}>}
+ */
+export async function computeOrphanAssets(
+  manifestSongs,
+  manifestDicts,
+  manifestBooks,
+  localAssets,
+) {
+  const local = Array.isArray(localAssets) ? localAssets : [];
+  if (!local.length) return { orphans: [], totalSize: 0 };
+  const expected = new Set();
+  const addExpected = async (fn, arg) => {
+    const item = await fn(arg);
+    if (item && item.path) expected.add(item.path);
+  };
+  const songs = Array.isArray(manifestSongs) ? manifestSongs.filter((s) => s && s.path) : [];
+  for (const s of songs) {
+    await addExpected(assetForSong, s);
+    await addExpected(coverItemFor, s.path);
+  }
+  for (const b of Array.isArray(manifestBooks) ? manifestBooks : []) {
+    await addExpected(assetForBook, b);
+  }
+  for (const d of Array.isArray(manifestDicts) ? manifestDicts : []) {
+    await addExpected(assetForDict, d);
+  }
+  const orphans = [];
+  let totalSize = 0;
+  for (const a of local) {
+    if (!a || !a.path) continue;
+    if (a.path.startsWith("lyric:")) continue; // 歌词 meta key 不算未引用（阅读兜底数据）
+    if (!expected.has(a.path)) {
+      orphans.push({ path: a.path, size: a.size || 0 });
+      totalSize += a.size || 0;
+    }
+  }
+  return { orphans, totalSize };
+}
+
+/**
+ * 应用可更新项：对列表（computeUpdateList 产物）重新构建音频+封面下载项
+ * （assetForSong 用 manifest 真实 sha256）→ syncAssets → 原生侧自动删旧重下。
+ * @returns {Promise<boolean>} 是否发出了下载请求
+ */
+export async function applyUpdates(list) {
+  const updates = (Array.isArray(list) ? list : []).filter((u) => u && u.song && u.song.path);
+  if (!updates.length) return false;
+  // 封面过期项：先删本地旧封面——不删则原生 hasAsset 命中旧文件直接 done，不会重下
+  const staleCovers = updates.filter((u) => u.coverStale && u.path).map((u) => u.path);
+  if (staleCovers.length && syncEnabled() && iosBridgeAvailable()) {
+    nativePost({ cmd: "deleteAssets", paths: staleCovers });
+  }
+  const lists = await Promise.all(
+    updates.map(async (u) => {
+      // audio：manifest 真实 sha256 → 原生侧自动删旧重下（T2 期望哈希校验）
+      const audio = await assetForSong(u.song);
+      // cover：仅过期项重建（带 manifest cover_size 供原生 size 校验）；未过期不重下
+      const cover = u.coverStale ? await coverItemFor(u.song.path, u.song.cover_size) : null;
+      return [audio, cover].filter(Boolean);
+    }),
+  );
+  const items = lists.flat();
+  if (!items.length) return false;
+  return syncAssets(items);
+}
+
+// ---------- 歌词失效检测（T3：manifest lyric_mtime vs 本地记录） ----------
+// 记录：nativeMetaSave('syncMeta', {<song path>: lyric_mtime})；对比变了 → 清对应
+// lyric:<hash> 缓存（nativeMetaSave 空 json 有 no-op 守卫——空串会被拒发，故用 "{}"
+// 空对象哨兵覆盖；loadLyricFile 对无 lines 的 JSON 一律视为无缓存，等价于清空）。
+
+/** syncMeta 记录 key（Documents/meta/syncMeta.json：song path → 上次 lyric_mtime） */
+export const SYNC_META_KEY = "syncMeta";
+
+/** 读取本地 syncMeta 记录（文件缺失/损坏 → {}） */
+async function loadSyncMeta() {
+  const json = await nativeMetaLoad(SYNC_META_KEY);
+  if (!json) return {};
+  try {
+    const data = JSON.parse(json);
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 歌词失效检测：manifest 条目 lyric_mtime 与本地记录对比，
+ * 本地有记录且值不同 → 返回该歌曲（歌词文件缓存已过期）。
+ * @returns {Promise<Array<object>>} 失效歌曲的 manifest 条目列表
+ */
+export async function detectStaleLyrics(songs) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return [];
+  const list = (Array.isArray(songs) ? songs : []).filter(
+    (s) => s && typeof s.path === "string" && s.path && s.lyric_mtime != null,
+  );
+  if (!list.length) return [];
+  const record = await loadSyncMeta();
+  return list.filter((s) => {
+    const prev = record[s.path];
+    return prev != null && String(prev) !== String(s.lyric_mtime);
+  });
+}
+
+/** 清除单首歌的歌词文件缓存（覆盖为 {} 哨兵；loadLyric 空数据视为无缓存） */
+export async function invalidateLyricForSong(song) {
+  if (!syncEnabled() || !iosBridgeAvailable() || !song || !song.path) return false;
+  const kind = await lyricKindKey(song.path);
+  if (!kind) return false;
+  nativeMetaSave(kind, "{}");
+  return true;
+}
+
+/** 批量清除失效歌词缓存（fire-and-forget；失败静默） */
+export async function invalidateStaleLyrics(songs) {
+  for (const s of Array.isArray(songs) ? songs : []) {
+    try {
+      await invalidateLyricForSong(s);
+    } catch {
+      /* 单首失败静默 */
+    }
+  }
+}
+
+/** 记录当前歌词 mtime 到 syncMeta（与既有记录合并，只覆盖本次清单条目） */
+export async function recordLyricMtimes(songs) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  const list = (Array.isArray(songs) ? songs : []).filter(
+    (s) => s && typeof s.path === "string" && s.path && s.lyric_mtime != null,
+  );
+  if (!list.length) return false;
+  const record = await loadSyncMeta();
+  for (const s of list) record[s.path] = s.lyric_mtime;
+  nativeMetaSave(SYNC_META_KEY, JSON.stringify(record));
+  return true;
+}
+
+// ---------- 主按钮：syncAll（一键拉全 + 更新 + 歌词失效） ----------
+
+/**
+ * 同步总览（负一屏徽标/孤儿区/存储区数据源，不发起下载）：
+ * 并行拉 manifest + assetIndex → 缺失统计 / 可更新列表 / 孤儿资产。
+ * @returns {Promise<{ok:boolean, message?:string, missing?:{audio,covers,books,dicts},
+ *   updateCount?:number, orphans?:Array, orphanSize?:number, songs?:Array, dicts?:Array,
+ *   manifest?:object}>}
+ */
+export async function computeSyncOverview() {
+  if (!syncEnabled()) return { ok: false, enabled: false };
+  const [mr, assets] = await Promise.all([fetchAndCacheManifest(), fetchAssetIndex()]);
+  if (!mr.ok) return { ok: false, message: mr.message };
+  const manifest = mr.manifest || {};
+  const songs = (Array.isArray(manifest.songs) ? manifest.songs : []).filter((s) => s && s.path);
+  const books = Array.isArray(manifest.books) ? manifest.books : [];
+  const dicts = Array.isArray(manifest.dicts) ? manifest.dicts : [];
+  const local = Array.isArray(assets) ? assets : [];
+  const localSet = new Set(local.map((a) => a.path).filter(Boolean));
+  const [songItems, bookItems, dictItems] = await Promise.all([
+    buildSongSyncItems(songs),
+    buildBookItems(books),
+    Promise.all(dicts.map((d) => assetForDict(d))).then((l) => l.filter(Boolean)),
+  ]);
+  const missing = [...songItems, ...bookItems, ...dictItems].filter(
+    (it) => it && it.path && !localSet.has(it.path),
+  );
+  const missingStats = { audio: 0, covers: 0, books: 0, dicts: 0 };
+  for (const it of missing) {
+    if (it.path.startsWith("audio/")) missingStats.audio++;
+    else if (it.path.startsWith("covers/")) missingStats.covers++;
+    else if (it.path.startsWith("books/")) missingStats.books++;
+    else if (it.path.startsWith("dicts/")) missingStats.dicts++;
+  }
+  const updates = await computeUpdateList(songs, local);
+  const orphan = await computeOrphanAssets(songs, dicts, books, local);
+  return {
+    ok: true,
+    missing: missingStats,
+    updateCount: updates.length,
+    orphans: orphan.orphans,
+    orphanSize: orphan.totalSize,
+    assets: local,
+    songs,
+    dicts,
+    manifest,
+  };
+}
+
+/**
+ * 一键同步全部（负一屏主按钮）：并行拉 manifest + assetIndex →
+ * 缺失的下载（音频/封面/图书/词典）→ 可更新的应用（自动更新开关开时）→
+ * 歌词失效检测（清缓存 + 重新拉取 + 记录）→ 逐类进度汇总。
+ * @returns {Promise<{ok:boolean, enabled?:boolean, message?:string,
+ *   sent?:boolean, missing?:{audio,covers,books,dicts}, updateCount?:number, manifest?:object}>}
+ */
+export async function syncAll() {
+  if (!syncEnabled()) return { enabled: false, ok: false };
+  if (syncInFlight) return { ok: false, message: "sync in progress" };
+  syncInFlight = true;
+  syncState.syncing = true;
+  try {
+    const [mr, assets] = await Promise.all([fetchAndCacheManifest(), fetchAssetIndex()]);
+    if (!mr.ok) {
+      return { ok: false, message: mr.message, status: mr.status };
+    }
+    const manifest = mr.manifest || {};
+    const songs = (Array.isArray(manifest.songs) ? manifest.songs : []).filter((s) => s && s.path);
+    const books = Array.isArray(manifest.books) ? manifest.books : [];
+    const dicts = Array.isArray(manifest.dicts) ? manifest.dicts : [];
+    const local = Array.isArray(assets) ? assets : [];
+    const localSet = new Set(local.map((a) => a.path).filter(Boolean));
+
+    // 缺失项：音频+封面 / 图书 / 词典（本地注册表没有即缺失；空注册表 = 全量补齐）
+    const [songItems, bookItems, dictItems] = await Promise.all([
+      buildSongSyncItems(songs),
+      buildBookItems(books),
+      Promise.all(dicts.map((d) => assetForDict(d))).then((l) => l.filter(Boolean)),
+    ]);
+    const missing = [...songItems, ...bookItems, ...dictItems].filter(
+      (it) => it && it.path && !localSet.has(it.path),
+    );
+    const missingStats = { audio: 0, covers: 0, books: 0, dicts: 0 };
+    for (const it of missing) {
+      if (it.path.startsWith("audio/")) missingStats.audio++;
+      else if (it.path.startsWith("covers/")) missingStats.covers++;
+      else if (it.path.startsWith("books/")) missingStats.books++;
+      else if (it.path.startsWith("dicts/")) missingStats.dicts++;
+    }
+    const sent = syncAssets(missing);
+
+    // 可更新（自动更新开才应用；关闭时仅统计，供徽标展示）
+    const updates = await computeUpdateList(songs, local);
+    if (autoUpdateEnabled() && updates.length) await applyUpdates(updates);
+
+    // 歌词失效：变了 → 清缓存 + 重新拉取落文件 + 记录新 mtime（fire-and-forget）
+    const stale = await detectStaleLyrics(songs);
+    if (stale.length) {
+      await invalidateStaleLyrics(stale);
+      syncLyricsForSongs(stale).then(() => recordLyricMtimes(stale));
+    }
+    // 主按钮「一键拉全」含歌词：有新下载时顺带全部歌词落文件（fire-and-forget）
+    if (missing.length) {
+      syncLyricsForSongs(songs).then(() => recordLyricMtimes(songs));
+    }
+    recordLyricMtimes(songs); // 记录本次清单全部 mtime（后续对比基线）
+
+    syncState.lastSyncAt = Date.now();
+    syncState.lastError = "";
+    return {
+      ok: true,
+      sent,
+      missing: missingStats,
+      updateCount: updates.length,
+      manifest,
+    };
+  } catch (e) {
+    syncState.lastError = (e && e.message) || "同步失败";
+    return { ok: false, message: syncState.lastError };
+  } finally {
+    syncInFlight = false;
+    syncState.syncing = false;
+  }
+}
+
+// ---------- 精确删除（deleteAssets {paths}，T3 契约） ----------
+
+/** 类型前缀（assetIndex path 过滤；lyric 为 meta 文件 kind 前缀） */
+export const ASSET_TYPE_PREFIX = {
+  audio: "audio/",
+  covers: "covers/",
+  lyric: "lyric:",
+  books: "books/",
+  dicts: "dicts/",
+};
+
+/**
+ * 按类型清理：assetIndex 按前缀过滤出 paths → deleteAssets {paths}（精确删除）。
+ * 注册表未覆盖该类型（空列表）→ 回退旧 scope 删除（audio/books/dicts）。
+ * @returns {number} 匹配并提交删除的路径数（0 = 无可清理，UI 提示）
+ */
+export function clearAssetsByType(type, assets) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return 0;
+  const prefix = ASSET_TYPE_PREFIX[type];
+  const paths = (Array.isArray(assets) ? assets : [])
+    .map((a) => a.path)
+    .filter((p) => p && prefix && p.startsWith(prefix));
+  if (paths.length) {
+    nativePost({ cmd: "deleteAssets", paths });
+    return paths.length;
+  }
+  if (type === "audio" || type === "books" || type === "dicts") {
+    clearAssets(type); // 回退 scope 删除（旧壳无注册表也可用）
+  }
+  return 0;
+}
+
+/** 清理未引用资产（computeOrphanAssets 产物）→ deleteAssets {paths}；返回是否发出 */
+export function deleteOrphanAssets(orphans) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  const paths = (Array.isArray(orphans) ? orphans : []).map((o) => o.path).filter(Boolean);
+  if (!paths.length) return false;
+  nativePost({ cmd: "deleteAssets", paths });
+  return true;
+}
+
+// ---------- assetsDeleted 完成事件（删除后 UI 刷新用） ----------
+let deletionWaiters = new Set(); // Set<fn(paths)>：原生完成回推后结算
+
+function handleAssetsDeleted(payload) {
+  const paths = payload && Array.isArray(payload.paths) ? payload.paths : [];
+  for (const cb of [...deletionWaiters]) {
+    deletionWaiters.delete(cb);
+    try {
+      cb(paths);
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
+/**
+ * 等待一次资产删除完成回推（deleteAssets 后调用方刷新存储/孤儿统计）。
+ * 旧壳不回推 → 超时 resolve([])（调用方照常刷新，不阻塞）。
+ */
+export function waitAssetsDeleted(timeout = ASSET_INDEX_TIMEOUT_MS) {
+  if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve([]);
+  ensureSubscribed(); // 需要 assetsDeleted 事件订阅
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      deletionWaiters.delete(settle);
+      settle([]);
+    }, timeout);
+    const settle = (paths) => {
+      clearTimeout(timer);
+      resolve(paths);
+    };
+    deletionWaiters.add(settle);
+  });
+}
+
+// ---------- 仅 Wi-Fi / 自动更新开关（localStorage 持久化） ----------
+const WIFI_ONLY_KEY = "qqplayer.syncWifiOnly";
+const AUTO_UPDATE_KEY = "qqplayer.syncAutoUpdate";
+
+/** 仅 Wi-Fi 下载是否开启（默认开；'off' 才视为关） */
+export function wifiOnlyEnabled() {
+  try {
+    return localStorage.getItem(WIFI_ONLY_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 设置仅 Wi-Fi 开关：持久化 localStorage + 通知原生（setWifiOnly fire-and-forget）；
+ * syncAssets 的下载项会携带当前值（wifiOnly: Bool，原生侧蜂窝下挂起）。
+ */
+export function setWifiOnly(on) {
+  try {
+    localStorage.setItem(WIFI_ONLY_KEY, on ? "on" : "off");
+  } catch {
+    /* 忽略 */
+  }
+  if (syncEnabled() && iosBridgeAvailable()) {
+    nativePost({ cmd: "setWifiOnly", on: !!on });
+  }
+  return wifiOnlyEnabled();
+}
+
+/** 自动更新是否开启（默认关；'on' 才视为开） */
+export function autoUpdateEnabled() {
+  try {
+    return localStorage.getItem(AUTO_UPDATE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+/** 设置自动更新开关（localStorage 持久化；返回生效值） */
+export function setAutoUpdate(on) {
+  try {
+    if (on) localStorage.setItem(AUTO_UPDATE_KEY, "on");
+    else localStorage.removeItem(AUTO_UPDATE_KEY);
+  } catch {
+    /* 忽略 */
+  }
+  return autoUpdateEnabled();
 }
 
 // ---------- 元数据文件持久化兜底（iOS 壳 IndexedDB 重启不可靠 → Documents/meta 文件双写） ----------
@@ -790,4 +1323,6 @@ export function _resetSyncForTests() {
   syncState.progress = { received: 0, total: 0 };
   for (const k of Object.keys(syncDownloads)) delete syncDownloads[k];
   assetsSizeWaiters.clear();
+  assetIndexWaiters.clear();
+  deletionWaiters.clear();
 }
