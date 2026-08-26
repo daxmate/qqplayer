@@ -1731,6 +1731,26 @@ export async function selectSong(index, opts = {}) {
   state.currentSong = state.songs[index];
   state.isPlaying = false;
   audio.pause();
+  // 监听器先换新（必须在 src 赋值之前）：旧 resumeAt 监听器不得劫持新歌的 loadedmetadata。
+  // 2026-08-26 复发根因：清理+挂载原在 await loadLyric 之后，而 audio.src 赋值在前——
+  // 原生加载完成即 emit loadedmetadata，歌词加载慢时（网络请求）竞态窗口内旧监听器
+  // （带旧断点 resumeAt）仍活着 → 新歌被 seek 到旧断点（固定秒数开始/尾部跳过）。
+  // 另：nativeAudioBridge 自定义事件系统曾忽略 {once:true}（2026-08-26 已修），
+  // 监听器挂上即需显式清理，清理时机必须早于任何 src 赋值。
+  if (loadedMetaHandler && typeof audio.removeEventListener === "function") {
+    audio.removeEventListener("loadedmetadata", loadedMetaHandler);
+  }
+  loadedMetaHandler = () => {
+    state.duration = isFiniteNumber(audio.duration) ? audio.duration : 0;
+    dbgLog("loadedmetadata", { dur: state.duration, resumeAt: opts.resumeAt ?? null });
+    if (opts.resumeAt != null && audio.duration) {
+      const t = Math.min(opts.resumeAt, Math.max(0, audio.duration - 0.5));
+      dbgLog("loadedmetadata.seek", { t });
+      audio.currentTime = t;
+      state.currentTime = t;
+    }
+  };
+  audio.addEventListener("loadedmetadata", loadedMetaHandler, { once: true });
   // 曲库网络条目（stream 歌）：实时取直链（失败重试一次，仍失败 toast）；本地歌走 /api/audio
   let src;
   if (isStreamSong(state.currentSong)) {
@@ -1775,22 +1795,8 @@ export async function selectSong(index, opts = {}) {
   await loadLyric(index);
   // 预取时长；恢复上次播放时在这里 seek 到断点
   // （电台流 duration=Infinity → 保持 0，进度条走空态不崩）
-  // 监听器清理（2026-08-25 根因）：restoreLastPlayed 的 resumeAt 监听器若不清理，
-  // 会在之后每一首新歌的 loadedmetadata 上触发 → 新歌被 seek 到旧断点（固定秒数开始/尾部跳过）。
-  if (loadedMetaHandler && typeof audio.removeEventListener === "function") {
-    audio.removeEventListener("loadedmetadata", loadedMetaHandler);
-  }
-  loadedMetaHandler = () => {
-    state.duration = isFiniteNumber(audio.duration) ? audio.duration : 0;
-    dbgLog("loadedmetadata", { dur: state.duration, resumeAt: opts.resumeAt ?? null });
-    if (opts.resumeAt != null && audio.duration) {
-      const t = Math.min(opts.resumeAt, Math.max(0, audio.duration - 0.5));
-      dbgLog("loadedmetadata.seek", { t });
-      audio.currentTime = t;
-      state.currentTime = t;
-    }
-  };
-  audio.addEventListener("loadedmetadata", loadedMetaHandler, { once: true });
+  // 监听器清理+挂载已提前到 src 赋值前（见 selectSong 上部注释，2026-08-26）：
+  // 旧 resumeAt 监听器不得劫持新歌，且清理必须早于原生 loadedmetadata 到达。
 }
 
 // ============ iOS 同步：本地歌播放资产本地优先（阶段3 · E1 修复） ============

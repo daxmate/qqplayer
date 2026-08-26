@@ -190,6 +190,33 @@ describe("nativeAudioBridge iOS 原生环境（有 qqplayerIosBridge）", () => 
     expect(events).toEqual(["loadedmetadata", "timeupdate", "play", "pause", "ended"]);
   });
 
+  it("addEventListener once:true：触发一次后自移除（不再响应后续事件）", () => {
+    const p = m.createNativeAudioProxy();
+    const fn = vi.fn();
+    p.addEventListener("loadedmetadata", fn, { once: true });
+    window.qqplayerOnNativeEvent("loadedmetadata", { duration: 100 });
+    window.qqplayerOnNativeEvent("loadedmetadata", { duration: 100 });
+    expect(fn).toHaveBeenCalledTimes(1); // once 语义：第二次不触发
+  });
+
+  it("addEventListener once:true + removeEventListener(原始 fn)：映射移除生效", () => {
+    const p = m.createNativeAudioProxy();
+    const fn = vi.fn();
+    p.addEventListener("loadedmetadata", fn, { once: true });
+    p.removeEventListener("loadedmetadata", fn); // 传原始引用（非包装引用）也能移除
+    window.qqplayerOnNativeEvent("loadedmetadata", { duration: 100 });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("addEventListener 不带 once：多次触发多次调用（常规监听不受影响）", () => {
+    const p = m.createNativeAudioProxy();
+    const fn = vi.fn();
+    p.addEventListener("loadedmetadata", fn);
+    window.qqplayerOnNativeEvent("loadedmetadata", { duration: 100 });
+    window.qqplayerOnNativeEvent("loadedmetadata", { duration: 100 });
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
   it("远端命令：registerRemoteCommandHandler 收到 play/pause/next/prev/seekto/toggle", () => {
     const calls = [];
     m.registerRemoteCommandHandler((cmd, t) => calls.push([cmd, t]));

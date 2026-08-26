@@ -79,14 +79,28 @@ function dispatchNativeEvent(name, payload) {
 
 // ---------- 事件派发（模拟 DOM EventTarget，playerCore bindAudioEvents 直接挂） ----------
 const listeners = new Map();
+// {once:true} 包装映射：原始 fn → 包装 fn。模拟 DOM 的 once 语义（触发即自移除），
+// 且 removeEventListener 传原始 fn 也能移除包装后的监听器（2026-08-26：此前 once 选项
+// 被直接丢弃，监听器挂上即永久存活——loadedmetadata 泄漏劫持新歌的帮凶之一）。
+const onceWrappers = new Map();
 
-function addListener(type, fn) {
+function addListener(type, fn, options) {
   if (!listeners.has(type)) listeners.set(type, new Set());
-  listeners.get(type).add(fn);
+  let entry = fn;
+  if (options && options.once) {
+    entry = (event) => {
+      removeListener(type, entry);
+      fn(event);
+    };
+    onceWrappers.set(fn, entry);
+  }
+  listeners.get(type).add(entry);
 }
 
 function removeListener(type, fn) {
-  listeners.get(type)?.delete(fn);
+  const actual = onceWrappers.get(fn) || fn;
+  onceWrappers.delete(fn);
+  listeners.get(type)?.delete(actual);
 }
 
 function emit(type, payload = {}) {
