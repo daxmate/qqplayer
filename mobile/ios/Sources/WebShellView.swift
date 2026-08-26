@@ -269,100 +269,18 @@ struct WebShellView: UIViewRepresentable {
                 return
             }
             guard let cmd = body["cmd"] as? String else { return }
+            // 桥消息按域分路由（各域 handler 见下方 extension；纯搬移，行为零变化）
             switch cmd {
-            case "nativeReady":
-                webReady = true
-                flushPendingEvents()
-            case "nativeLog":
-                // 前端诊断日志转发（nativecmd.log 追加；排故用）
-                if let line = body["line"] as? String {
-                    WebShellView.appendNativeLog("web: \(line)")
-                }
-            case "syncDownload":
-                // 批量下载资产：{url, path, sha256, size?}[]（path 为沙盒相对路径）
-                guard let items = body["items"] as? [[String: Any]] else { break }
-                var requests: [DownloadManager.Request] = []
-                for it in items {
-                    guard let urlString = it["url"] as? String,
-                          let url = URL(string: urlString),
-                          url.scheme == "http" || url.scheme == "https",
-                          let path = it["path"] as? String,
-                          let sha256 = it["sha256"] as? String,
-                          DownloadManager.isSafePath(path)
-                    else { continue }
-                    let size = (it["size"] as? NSNumber)?.int64Value
-                    requests.append(DownloadManager.Request(url: url, path: path, sha256: sha256, size: size))
-                }
-                downloadManager.enqueue(requests)
-            case "hasAsset":
-                // 查本地资产：回传 assetStatus {requestId, path, exists, localURL}
-                if let path = body["path"] as? String,
-                   let requestId = body["requestId"] as? String,
-                   DownloadManager.isSafePath(path) {
-                    pendingAssetStatus[path, default: []].append(requestId)
-                    downloadManager.checkAsset(path: path)
-                }
-            case "metaSave":
-                // 元数据文件兜底写：{kind, json} → Documents/meta/{kind}.json 原子写
-                // （fire-and-forget；失败静默，前端不依赖回执）
-                if let kind = body["kind"] as? String,
-                   let json = body["json"] as? String {
-                    MetaStore.save(kind: kind, json: json)
-                }
-            case "metaLoad":
-                // 元数据文件兜底读：{kind, requestId} → 回推 metaLoaded {requestId, kind, json?}
-                // （文件缺失/损坏 → 无 json 字段；前端 8s 超时兜底）
-                if let kind = body["kind"] as? String,
-                   let requestId = body["requestId"] as? String {
-                    pendingMetaLoads[requestId] = kind
-                    let json = MetaStore.load(kind: kind)
-                    pendingMetaLoads.removeValue(forKey: requestId)
-                    var payload: [String: Any] = ["requestId": requestId, "kind": kind]
-                    if let json {
-                        payload["json"] = json
-                    }
-                    pushToWeb(event: "metaLoaded", payload: payload)
-                }
-            case "cancelDownloads":
-                downloadManager.cancelAll()
+            case "nativeReady", "nativeLog", "pullRevealStatusBar":
+                handleUILifecycleCommand(cmd, body: body)
+            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize":
+                handleSyncCommand(cmd, body: body)
+            case "metaSave", "metaLoad":
+                handleMetaCommand(cmd, body: body)
             case "unauthorized":
-                // 401：token 失效 → 清 Keychain 配对 → 回发现页重新配对
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .qqplayerTokenInvalid,
-                        object: nil,
-                        userInfo: ["serverId": self.server.serverId]
-                    )
-                }
-            case "pullRevealStatusBar":
-                // 前端页面顶部下拉 → 召唤顶部状态条浮层（平时隐藏，3s 后自动收回）
-                NotificationCenter.default.post(name: .qqplayerPullRevealStatusBar, object: nil)
-            case "playAudio":
-                // 词典发音等短音频：原生 AVPlayer 直接播放（不弹系统播放器 UI）
-                if let urlString = body["url"] as? String, let url = URL(string: urlString),
-                   url.scheme == "http" || url.scheme == "https" {
-                    playerBridge.playAudioFile(url)
-                }
-            case "deleteAssets":
-                // 删除本地资产：{scope: "all"|"audio"|"books"|"dicts"}；
-                // 删除完成后回推 assetsDeleted（前端不依赖也保留，便于调试）
-                if let scope = body["scope"] as? String {
-                    downloadManager.deleteAssets(scope: scope) { [weak self] in
-                        self?.pushToWeb(event: "assetsDeleted", payload: ["scope": scope])
-                    }
-                }
-            case "assetsSize":
-                // 本地资产总占用 → 回推 assetsSize {total}（字节，Int64 → JS number）
-                let total = downloadManager.assetsSize()
-                pushToWeb(event: "assetsSize", payload: ["total": total])
+                handlePairingCommand(cmd)
             default:
-                // 诊断日志：Web 命令到达原生（load/play/pause/seek/setMetadata…），
-                // 与 remoteCmd 对照：锁屏命令是否穿透 WebView 到达播放器（后台 JS 挂起时这里会缺失）
-                if cmd == "load" || cmd == "play" || cmd == "pause" || cmd == "seek" {
-                    WebShellView.appendNativeLog("webCmd \(cmd)")
-                    reportNativeCmd(cmd, nil)
-                }
-                playerBridge.handleCommand(cmd, payload: body)
+                handlePlaybackCommand(cmd, body: body) // playAudio + 播放命令透传（含未知命令静默）
             }
         }
 
@@ -544,6 +462,150 @@ struct WebShellView: UIViewRepresentable {
             return "null"
         }
         return str
+    }
+}
+
+// MARK: - Coordinator 桥消息分域（Pass 2 结构拆分：userContentController 按域路由，纯搬移）
+
+// MARK: 桥消息分域 · 生命周期/UI（nativeReady / nativeLog / pullRevealStatusBar）
+
+extension WebShellView.Coordinator {
+    /// 生命周期/UI 域：nativeReady（适配层就绪）、nativeLog（前端诊断日志）、
+    /// pullRevealStatusBar（顶部状态条浮层）
+    private func handleUILifecycleCommand(_ cmd: String, body: [String: Any]) {
+        switch cmd {
+        case "nativeReady":
+            webReady = true
+            flushPendingEvents()
+        case "nativeLog":
+            // 前端诊断日志转发（nativecmd.log 追加；排故用）
+            if let line = body["line"] as? String {
+                WebShellView.appendNativeLog("web: \(line)")
+            }
+        default:
+            // pullRevealStatusBar：前端页面顶部下拉 → 召唤顶部状态条浮层（平时隐藏，3s 后自动收回）
+            NotificationCenter.default.post(name: .qqplayerPullRevealStatusBar, object: nil)
+        }
+    }
+}
+
+// MARK: 桥消息分域 · 同步/资产（syncDownload / hasAsset / cancelDownloads / deleteAssets / assetsSize）
+
+extension WebShellView.Coordinator {
+    /// 同步/资产域：批量下载、本地资产查询/删除/占用、取消下载
+    private func handleSyncCommand(_ cmd: String, body: [String: Any]) {
+        switch cmd {
+        case "syncDownload":
+            // 批量下载资产：{url, path, sha256, size?}[]（path 为沙盒相对路径）
+            guard let items = body["items"] as? [[String: Any]] else { break }
+            var requests: [DownloadManager.Request] = []
+            for it in items {
+                guard let urlString = it["url"] as? String,
+                      let url = URL(string: urlString),
+                      url.scheme == "http" || url.scheme == "https",
+                      let path = it["path"] as? String,
+                      let sha256 = it["sha256"] as? String,
+                      DownloadManager.isSafePath(path)
+                else { continue }
+                let size = (it["size"] as? NSNumber)?.int64Value
+                requests.append(DownloadManager.Request(url: url, path: path, sha256: sha256, size: size))
+            }
+            downloadManager.enqueue(requests)
+        case "hasAsset":
+            // 查本地资产：回传 assetStatus {requestId, path, exists, localURL}
+            if let path = body["path"] as? String,
+               let requestId = body["requestId"] as? String,
+               DownloadManager.isSafePath(path) {
+                pendingAssetStatus[path, default: []].append(requestId)
+                downloadManager.checkAsset(path: path)
+            }
+        case "cancelDownloads":
+            downloadManager.cancelAll()
+        case "deleteAssets":
+            // 删除本地资产：{scope: "all"|"audio"|"books"|"dicts"}；
+            // 删除完成后回推 assetsDeleted（前端不依赖也保留，便于调试）
+            if let scope = body["scope"] as? String {
+                downloadManager.deleteAssets(scope: scope) { [weak self] in
+                    self?.pushToWeb(event: "assetsDeleted", payload: ["scope": scope])
+                }
+            }
+        default:
+            // assetsSize：本地资产总占用 → 回推 assetsSize {total}（字节，Int64 → JS number）
+            let total = downloadManager.assetsSize()
+            pushToWeb(event: "assetsSize", payload: ["total": total])
+        }
+    }
+}
+
+// MARK: 桥消息分域 · 元数据（metaSave / metaLoad）
+
+extension WebShellView.Coordinator {
+    /// 元数据域：Documents/meta/{kind}.json 兜底写/读（前端 IndexedDB 失效兑底）
+    private func handleMetaCommand(_ cmd: String, body: [String: Any]) {
+        switch cmd {
+        case "metaSave":
+            // 元数据文件兜底写：{kind, json} → Documents/meta/{kind}.json 原子写
+            // （fire-and-forget；失败静默，前端不依赖回执）
+            if let kind = body["kind"] as? String,
+               let json = body["json"] as? String {
+                MetaStore.save(kind: kind, json: json)
+            }
+        default:
+            // metaLoad：元数据文件兜底读：{kind, requestId} → 回推 metaLoaded {requestId, kind, json?}
+            // （文件缺失/损坏 → 无 json 字段；前端 8s 超时兜底）
+            if let kind = body["kind"] as? String,
+               let requestId = body["requestId"] as? String {
+                pendingMetaLoads[requestId] = kind
+                let json = MetaStore.load(kind: kind)
+                pendingMetaLoads.removeValue(forKey: requestId)
+                var payload: [String: Any] = ["requestId": requestId, "kind": kind]
+                if let json {
+                    payload["json"] = json
+                }
+                pushToWeb(event: "metaLoaded", payload: payload)
+            }
+        }
+    }
+}
+
+// MARK: 桥消息分域 · 配对/鉴权（unauthorized）
+
+extension WebShellView.Coordinator {
+    /// 配对/鉴权域：401 → token 失效 → 清 Keychain 配对 → 回发现页重新配对
+    private func handlePairingCommand(_ cmd: String) {
+        guard cmd == "unauthorized" else { return }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .qqplayerTokenInvalid,
+                object: nil,
+                userInfo: ["serverId": self.server.serverId]
+            )
+        }
+    }
+}
+
+// MARK: 桥消息分域 · 播放（playAudio + 播放命令透传）
+
+extension WebShellView.Coordinator {
+    /// 播放域：playAudio（词典短音频原生播放）+ 其余播放命令透传 AVPlayerBridge
+    /// （load/play/pause/seek/setVolume/setRate/setMetadata/setPlaying/setQueue；
+    /// 未知命令静默忽略——桌面壳消息如 pickLibrary/lyric 等也走这里）
+    private func handlePlaybackCommand(_ cmd: String, body: [String: Any]) {
+        if cmd == "playAudio" {
+            // 词典发音等短音频：原生 AVPlayer 直接播放（不弹系统播放器 UI）
+            if let urlString = body["url"] as? String, let url = URL(string: urlString),
+               url.scheme == "http" || url.scheme == "https" {
+                playerBridge.playAudioFile(url)
+            }
+            return
+        }
+        // 诊断日志：Web 命令到达原生（load/play/pause/seek/setMetadata…），
+        // 与 remoteCmd 对照：锁屏命令是否穿透 WebView 到达播放器（后台 JS 挂起时这里会缺失）
+        if cmd == "load" || cmd == "play" || cmd == "pause" || cmd == "seek" {
+            WebShellView.appendNativeLog("webCmd \(cmd)")
+            reportNativeCmd(cmd, nil)
+        }
+        playerBridge.handleCommand(cmd, payload: body)
     }
 }
 
