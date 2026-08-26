@@ -273,7 +273,7 @@ struct WebShellView: UIViewRepresentable {
             switch cmd {
             case "nativeReady", "nativeLog", "pullRevealStatusBar":
                 handleUILifecycleCommand(cmd, body: body)
-            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize", "assetIndex", "setWifiOnly":
+            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize", "assetIndex", "setWifiOnly", "getDeviceId":
                 handleSyncCommand(cmd, body: body)
             case "metaSave", "metaLoad":
                 handleMetaCommand(cmd, body: body)
@@ -489,10 +489,10 @@ extension WebShellView.Coordinator {
     }
 }
 
-// MARK: 桥消息分域 · 同步/资产（syncDownload / hasAsset / cancelDownloads / deleteAssets / assetsSize / assetIndex / setWifiOnly）
+// MARK: 桥消息分域 · 同步/资产（syncDownload / hasAsset / cancelDownloads / deleteAssets / assetsSize / assetIndex / setWifiOnly / getDeviceId）
 
 extension WebShellView.Coordinator {
-    /// 同步/资产域：批量下载、本地资产查询/删除/占用、取消下载
+    /// 同步/资产域：批量下载、本地资产查询/删除/占用、设备标识、取消下载
     private func handleSyncCommand(_ cmd: String, body: [String: Any]) {
         switch cmd {
         case "syncDownload":
@@ -543,6 +543,11 @@ extension WebShellView.Coordinator {
             // 仅 Wi-Fi 下载开关（fire-and-forget，无回执）
             if let on = body["on"] as? Bool {
                 downloadManager.setWifiOnly(on)
+            }
+        case "getDeviceId":
+            // 设备标识：Keychain 持久 deviceId 回推（requestId 回带；对齐 hasAsset 回执模式）
+            if let requestId = body["requestId"] as? String {
+                pushToWeb(event: "deviceId", payload: ["requestId": requestId, "deviceId": KeychainStore.deviceId()])
             }
         default:
             // assetsSize：本地资产占用 → 回推 assetsSize {total, byType}（字节，Int64 → JS number）

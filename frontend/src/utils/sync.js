@@ -9,10 +9,15 @@
 //     才发 syncDownload 后台下载并 resolve(null)——默认关 = 只查不下载
 //   - nativeMetaSave / nativeMetaLoad：元数据文件持久化兜底桥（Documents/meta/
 //     {kind}.json；iOS 壳 IndexedDB 重启不可靠，播放列表/收藏落文件双写）
+//   - pollCommands()：指令轮询执行器（T2）——桌面写指令（pushDownload 推送下载 /
+//     remoteDelete 远程删除）→ iOS 轮询拉取执行 + 回执 ack；60s interval 随 appState
+//     启停；getDeviceId() 经原生桥取 Keychain 持久设备标识（超时回落 null）。
+//   - reportAssets()：资产清单上报（触发式）——assetIndex + assetsSize 回执 →
+//     POST /api/sync/device/assets（桌面端存储面板数据源）。
 //   - initSync()：经 nativeAudioBridge.onNativeEvent 订阅（syncAssetProgress /
-//     syncAssetDone / assetStatus / appState / metaLoaded），并执行首次 syncNow()。
-//     注意：window.qqplayerOnNativeEvent 全局入口由 nativeAudioBridge 独占安装，
-//     本模块只订阅不分发，避免双处理。
+//     syncAssetDone / assetStatus / appState / metaLoaded / deviceId），并执行首次
+//     syncNow()。注意：window.qqplayerOnNativeEvent 全局入口由 nativeAudioBridge
+//     独占安装，本模块只订阅不分发，避免双处理。
 //
 // 桥契约（与 iOS 壳 Swift 侧对齐）：
 //   Web→Native：window.qqplayerIosBridge.postMessage(msg)
@@ -21,11 +26,13 @@
 //     {cmd:"cancelDownloads"}                               取消全部下载
 //     {cmd:"metaSave", kind, json}                          元数据写文件（fire-and-forget）
 //     {cmd:"metaLoad", kind, requestId}                     元数据读文件（回执 metaLoaded）
+//     {cmd:"getDeviceId", requestId}                        设备标识查询（回执 deviceId）
 //   Native→Web：window.qqplayerOnNativeEvent(name, payload)
 //     {name:"syncAssetProgress", path, received, total}     total 未知为 0
 //     {name:"syncAssetDone", path, ok, sha256, localURL, error?}
 //     {name:"assetStatus", requestId, path, exists, localURL}
 //     {name:"metaLoaded", requestId, kind, json?}           元数据文件读取回执
+//     {name:"deviceId", requestId, deviceId}                getDeviceId 回执（Keychain）
 //     {name:"appState", state:"active"|"inactive"|"background"}
 //
 // 环境：桌面浏览器（window.qqplayerNative 未定义）→ 全部静默 no-op，桌面行为零变化；
@@ -37,7 +44,7 @@
 
 import { reactive } from "vue";
 import { onNativeEvent, nativePost } from "../composables/nativeAudioBridge.js";
-import { apiGet, resolveServerUrl } from "./apiClient.js";
+import { apiGet, apiPost, resolveServerUrl } from "./apiClient.js";
 import { getCache, setCache } from "./cacheDb.js";
 
 // ---------- 环境判定 ----------
@@ -148,6 +155,10 @@ export async function syncNow() {
     if (autoUpdateEnabled()) {
       runAutoUpdate(mr.manifest.songs).catch(() => {});
     }
+    // T2：同步成功后顺带拉一次指令 + 上报资产清单（fire-and-forget，不阻塞）——
+    // 覆盖负一屏同步中心手动同步「顺带拉指令」的语义
+    pollCommands().catch(() => {});
+    reportAssets().catch(() => {});
     return { ok: true, changed: mr.changed, version: mr.version, counts };
   } catch (e) {
     syncState.lastError = (e && e.message) || "同步失败";
@@ -451,10 +462,239 @@ function refreshSyncState() {
 }
 
 // ---------- 生命周期（appState） ----------
+// T2：前台 active 时同步 + 轮询指令 + 启动轮询 interval；后台/失活停止轮询
+//（WKWebView 后台 JS 定时器本就挂起，stopCommandPolling 防止回前台时堆积 tick）。
+// appActive 默认 true：initSync 即启动轮询（壳在 webReady 后会补推真实 appState，
+// 首个非 active 事件到达即停止），保证前台启动第一轮指令不被漏掉。
+let appActive = true;
+
 function handleAppState(payload) {
-  // 前台恢复：重新拉取 manifest（元数据可能已变）；后台/失活不动作
-  if (payload && payload.state === "active") {
-    syncNow();
+  const state = payload && payload.state;
+  if (state === "active") {
+    appActive = true;
+    syncNow(); // 前台恢复：重新拉取 manifest（元数据可能已变）
+    pollCommands().catch(() => {}); // 顺带拉指令（fire-and-forget；失败静默下轮再试）
+    ensureCommandPolling();
+  } else {
+    appActive = false;
+    stopCommandPolling();
+  }
+}
+
+// ---------- T2：设备标识（getDeviceId 原生桥） ----------
+// Keychain 持久 deviceId：nativePost getDeviceId → 等 deviceId 事件回执
+//（pendingQueries 模式同 assetStatus/metaLoaded）。结果缓存模块级 Promise（并发共享）；
+// 非原生环境 / 超时（3s）→ resolve(null)——指令轮询拿不到 deviceId 仍可拉广播指令
+//（GET pending 的 device_id 参数可选，拿不到就传空）。
+
+/** getDeviceId 回执等待超时（ms）：原生无回执不挂起轮询 */
+export const DEVICE_ID_TIMEOUT_MS = 3000;
+
+let deviceIdSeq = 0;
+let deviceIdPromise = null; // 结果缓存（Promise；null=未查询过）
+let deviceIdTimer = null; // 当前查询超时句柄（测试复位时取消，防挂起 promise 跨用例续跑）
+const deviceIdWaiters = new Map(); // requestId → resolve(deviceId|null)
+
+/** deviceId 回执分发：按 requestId 结算挂起的 getDeviceId 查询 */
+function handleDeviceId(payload) {
+  if (!payload || payload.requestId == null) return;
+  const resolve = deviceIdWaiters.get(payload.requestId);
+  if (!resolve) return; // 已超时/已消费的回执：忽略
+  resolve(payload.deviceId);
+}
+
+/**
+ * 获取设备标识（Keychain 持久 deviceId）。结果缓存模块变量（首次查询后复用）；
+ * 非原生环境 / 原生无回执（超时 3s）→ resolve(null)。
+ * @returns {Promise<string|null>}
+ */
+export function getDeviceId() {
+  if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
+  if (deviceIdPromise) return deviceIdPromise;
+  ensureSubscribed(); // 需要 deviceId 事件订阅
+  const requestId = String(++deviceIdSeq); // 字符串：与 Swift 侧 as? String 解析对齐
+  deviceIdPromise = new Promise((resolve) => {
+    deviceIdTimer = setTimeout(() => {
+      if (deviceIdWaiters.has(requestId)) {
+        deviceIdWaiters.delete(requestId);
+        resolve(null);
+      }
+    }, DEVICE_ID_TIMEOUT_MS);
+    deviceIdWaiters.set(requestId, (deviceId) => {
+      clearTimeout(deviceIdTimer);
+      deviceIdTimer = null;
+      deviceIdWaiters.delete(requestId);
+      resolve(typeof deviceId === "string" && deviceId ? deviceId : null);
+    });
+    nativePost({ cmd: "getDeviceId", requestId });
+  });
+  return deviceIdPromise;
+}
+
+// ---------- T2：指令轮询调度（60s interval + appState 启停） ----------
+
+/** 指令轮询间隔（ms） */
+export const COMMAND_POLL_MS = 60000;
+
+let commandPollTimer = null; // setInterval 句柄（仅 appState active 时存在）
+
+/** 启动指令轮询 interval（仅 active 时；已启动不重复；幂等） */
+export function ensureCommandPolling() {
+  if (!appActive) return;
+  if (commandPollTimer) return;
+  commandPollTimer = setInterval(() => {
+    pollCommands().catch(() => {});
+  }, COMMAND_POLL_MS);
+}
+
+/** 停止指令轮询 interval（inactive/background/stopSync 调用；幂等） */
+export function stopCommandPolling() {
+  if (commandPollTimer) {
+    clearInterval(commandPollTimer);
+    commandPollTimer = null;
+  }
+}
+
+// ---------- T2：指令轮询执行器（pollCommands） ----------
+// 纯拉模型（iOS 不开端口）：GET pending（拉取即标记 executing 防重复）→ 逐条执行
+//（串行：避免下载队列爆炸）→ 每条回执 ack（失败静默——后端 executing 超时 10 分钟
+// 可重拉兜底）。
+
+/**
+ * 轮询拉取并执行桌面待办指令（pushDownload / remoteDelete），逐条回执 ack。
+ * @returns {Promise<{ok:boolean, executed:number}>} executed=已处理指令数
+ *   （含执行失败的——ok 细节在各自 ack 里；拉取失败 → {ok:false, executed:0} 静默）
+ */
+export async function pollCommands() {
+  if (!syncEnabled() || !iosBridgeAvailable()) return { ok: false, executed: 0 };
+  const deviceId = await getDeviceId();
+  const url =
+    "/api/sync/commands/pending" + (deviceId ? "?device_id=" + encodeURIComponent(deviceId) : "");
+  let r;
+  try {
+    r = await apiGet(url);
+  } catch {
+    return { ok: false, executed: 0 }; // 网络失败静默（下轮再试）
+  }
+  if (!r || !r.ok) return { ok: false, executed: 0 };
+  const commands = Array.isArray(r.data && r.data.commands) ? r.data.commands : [];
+  if (!commands.length) return { ok: true, executed: 0 };
+  let executed = 0;
+  for (const cmd of commands) {
+    try {
+      await executeCommand(cmd, deviceId); // 串行：逐条执行 + 回执
+      executed += 1;
+    } catch {
+      executed += 1; // 单条异常也视为已处理（executeCommand 内部已兜底 ack）
+    }
+  }
+  // 执行过指令 → 顺带上报资产清单（fire-and-forget；失败静默）
+  reportAssets().catch(() => {});
+  return { ok: true, executed };
+}
+
+/**
+ * 执行单条指令并回执 ack（pushDownload / remoteDelete / 未知类型）。
+ * 回执网络失败静默（后端 executing 超时重拉兜底）。
+ */
+async function executeCommand(cmd, deviceId) {
+  const id = cmd && cmd.id;
+  const type = cmd && cmd.type;
+  let ok = true;
+  let error = "";
+  let detail = null;
+  try {
+    if (type === "pushDownload") {
+      const res = await handlePushDownload(cmd.payload);
+      ok = res.ok;
+      error = res.error || "";
+      detail = res.detail || null;
+    } else if (type === "remoteDelete") {
+      const paths = Array.isArray(cmd.payload && cmd.payload.paths) ? cmd.payload.paths : [];
+      nativePost({ cmd: "deleteAssets", paths }); // fire-and-forget：发出即视为提交
+      detail = { deleted: paths.length };
+    } else {
+      ok = false;
+      error = "unknown command type: " + type;
+    }
+  } catch (e) {
+    ok = false;
+    error = (e && e.message) || "command failed";
+  }
+  if (id != null) {
+    const body = { device_id: deviceId || "", ok: !!ok };
+    if (error) body.error = error;
+    if (detail) body.detail = detail;
+    try {
+      await apiPost("/api/sync/commands/" + encodeURIComponent(String(id)) + "/ack", body);
+    } catch {
+      /* 回执网络失败静默 */
+    }
+  }
+}
+
+/**
+ * pushDownload：payload.items[].path 是曲库歌曲路径（music/xxx.mp3）→ 从本地
+ * manifest 缓存（sync:songs）反查歌曲对象（严格相等匹配）→ buildSongItems 构造
+ * 下载项（url 走 resolveServerUrl、本地资产路径走 stableHash，与现有同步完全一致）
+ * → syncAssets 登记并发出 syncDownload。未匹配的 path 记入 skipped，不阻塞整体。
+ * @returns {Promise<{ok:boolean, error?:string, detail?:{skipped:string[]}}>}
+ */
+async function handlePushDownload(payload) {
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const paths = items.map((i) => i && i.path).filter((p) => typeof p === "string" && p);
+  if (!paths.length) return { ok: false, error: "no valid items" }; // items 空/全非法
+  const cached = await getCache("sync:songs");
+  const list = Array.isArray(cached) ? cached : [];
+  const byPath = new Map();
+  for (const s of list) {
+    if (s && s.path) byPath.set(s.path, s);
+  }
+  const matched = [];
+  const skipped = [];
+  for (const p of paths) {
+    const song = byPath.get(p);
+    if (song) matched.push(song);
+    else skipped.push(p);
+  }
+  if (!matched.length) {
+    // 全部反查失败：ok=false（detail 附 skipped 便于桌面端对账）
+    return { ok: false, error: "no valid items", detail: { skipped } };
+  }
+  const downloadItems = await buildSongItems(matched);
+  if (!downloadItems.length) {
+    return { ok: false, error: "no valid items", detail: skipped.length ? { skipped } : null };
+  }
+  syncAssets(downloadItems);
+  return { ok: true, detail: skipped.length ? { skipped } : null }; // 部分跳过：ok=true + skipped
+}
+
+// ---------- T2：资产清单上报（reportAssets，触发式） ----------
+// syncNow() 成功后 + pollCommands() 执行过指令后（fire-and-forget）触发；
+// deviceId 拿不到（非 iOS/超时）→ 静默跳过。
+
+/**
+ * 资产清单上报：assetIndex 回执 {assets} + assetsSize 回执 {total, byType} →
+ * POST /api/sync/device/assets。失败静默（下轮同步再报）。
+ * @returns {Promise<boolean>} 是否成功上报
+ */
+export async function reportAssets() {
+  if (!syncEnabled() || !iosBridgeAvailable()) return false;
+  const deviceId = await getDeviceId();
+  if (!deviceId) return false; // 拿不到设备标识：静默跳过上报
+  const [assets, sizeData] = await Promise.all([fetchAssetIndex(), fetchAssetsSizeDetailed()]);
+  if (!assets.length) return false; // 注册表空（老版本升级）→ 跳过
+  const body = {
+    device_id: deviceId,
+    assets,
+    total: sizeData && typeof sizeData.total === "number" ? sizeData.total : null,
+    byType: sizeData && sizeData.byType ? sizeData.byType : {},
+  };
+  try {
+    const r = await apiPost("/api/sync/device/assets", body);
+    return !!(r && r.ok);
+  } catch {
+    return false; // 上报失败静默
   }
 }
 
@@ -475,6 +715,7 @@ function ensureSubscribed() {
   unsubs.push(onNativeEvent("assetIndex", handleAssetIndex));
   unsubs.push(onNativeEvent("assetsDeleted", handleAssetsDeleted));
   unsubs.push(onNativeEvent("metaLoaded", handleMetaLoaded));
+  unsubs.push(onNativeEvent("deviceId", handleDeviceId));
 }
 
 /**
@@ -488,10 +729,12 @@ export function initSync() {
   if (!syncEnabled()) return;
   ensureSubscribed();
   syncNow();
+  ensureCommandPolling(); // T2：initSync 后启动指令轮询 interval（仅 appState active 时运行）
 }
 
-/** 卸载：取消订阅 + 清下载进度（App onUnmounted 调用） */
+/** 卸载：取消订阅 + 清下载进度 + 停指令轮询（App onUnmounted 调用） */
 export function stopSync() {
+  stopCommandPolling(); // T2：清理轮询 interval
   for (const unsub of unsubs) {
     try {
       unsub();
@@ -1325,4 +1568,14 @@ export function _resetSyncForTests() {
   assetsSizeWaiters.clear();
   assetIndexWaiters.clear();
   deletionWaiters.clear();
+  // T2：指令轮询 / 设备标识复位（取消挂起超时定时器，防跨用例续跑）
+  appActive = true;
+  stopCommandPolling();
+  if (deviceIdTimer) {
+    clearTimeout(deviceIdTimer);
+    deviceIdTimer = null;
+  }
+  deviceIdSeq = 0;
+  deviceIdPromise = null;
+  deviceIdWaiters.clear();
 }
