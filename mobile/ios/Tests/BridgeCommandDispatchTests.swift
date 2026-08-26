@@ -34,4 +34,26 @@ final class BridgeCommandDispatchTests: XCTestCase {
         bridge.handleCommand("totallyUnknown", payload: ["t": 1.0])
         XCTAssertTrue(events.isEmpty, "未知命令不产生任何原生 → Web 事件")
     }
+
+    /// openPairing 桥命令（前端"未连接"引导页"去配对"按钮）→ 原生发 qqplayerOpenPairing 通知
+    /// → 主界面打开配对 sheet（T4a 配对架构：主界面永远可达）。
+    func testOpenPairingCommandPostsNotification() {
+        let coordinator = WebShellView.Coordinator(server: nil)
+        var received = false
+        let observer = NotificationCenter.default.addObserver(
+            forName: .qqplayerOpenPairing, object: nil, queue: nil
+        ) { _ in
+            received = true
+        }
+        coordinator.handleBridgeCommand("openPairing", body: [:])
+        NotificationCenter.default.removeObserver(observer)
+        XCTAssertTrue(received, "openPairing 桥命令应发布 qqplayerOpenPairing 通知")
+    }
+
+    /// 未连接模式（server = nil）下 Coordinator 可正常创建：loadedServerId 用哨兵 ""，不设鉴权。
+    func testCoordinatorWithNilServerUsesSentinel() {
+        let coordinator = WebShellView.Coordinator(server: nil)
+        XCTAssertEqual(coordinator.loadedServerId, "")
+        XCTAssertEqual(coordinator.server?.serverId, nil)
+    }
 }

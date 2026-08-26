@@ -10,7 +10,8 @@ import WebKit
 /// - 消息桥：Web → Native（play/pause/seek/setVolume/setRate/setMetadata/…）→ AVPlayerBridge
 /// - 事件回传：Native → Web 走 evaluateJavaScript 调 window.qqplayerOnNativeEvent(name, payload)
 struct WebShellView: UIViewRepresentable {
-    let server: PairingRecord
+    /// 当前配对记录（nil = 未连接模式：清除注入 → 前端显示"未连接"引导页）
+    let server: PairingRecord?
 
     func makeUIView(context: Context) -> WKWebView {
         let controller = context.coordinator
@@ -43,9 +44,12 @@ struct WebShellView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // 服务器切换时（server 变化）重新注入并刷新
-        if context.coordinator.loadedServerId != server.serverId {
-            context.coordinator.loadedServerId = server.serverId
+        // 服务器切换时（server 变化，含 nil ↔ 非 nil 双向）重新注入并刷新；
+        // nil 与哨兵 "" 比较，保证未连接 → 已连接、已连接 → 未连接都触发重注入 + reload
+        let serverId = server?.serverId ?? ""
+        if context.coordinator.loadedServerId != serverId {
+            context.coordinator.loadedServerId = serverId
+            context.coordinator.server = server // 同步当前记录（reinjectServer/reportNativeCmd/401 用当前值，避免用旧记录重注入）
             context.coordinator.injectServer(server)
             context.coordinator.loadFrontend()
         }
@@ -56,7 +60,8 @@ struct WebShellView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, UIGestureRecognizerDelegate {
-        let server: PairingRecord
+        /// 当前配对记录（var：updateUIView 同步最新值；nil = 未连接模式）
+        var server: PairingRecord?
         let playerBridge = AVPlayerBridge()
         let downloadManager = DownloadManager()
         var loadedServerId: String
@@ -75,10 +80,11 @@ struct WebShellView: UIViewRepresentable {
 
         let userContentController: WKUserContentController
 
-        init(server: PairingRecord) {
+        init(server: PairingRecord?) {
             self.server = server
-            self.loadedServerId = server.serverId
-            playerBridge.authToken = server.token  // AVPlayer 拉流鉴权（真机 401 修复）
+            // nil（未连接）：loadedServerId 用哨兵 ""，authToken 置空（不设 AVPlayer 拉流鉴权）
+            self.loadedServerId = server?.serverId ?? ""
+            playerBridge.authToken = server?.token ?? ""  // AVPlayer 拉流鉴权（真机 401 修复）
             userContentController = WKUserContentController()
             super.init()
             userContentController.add(self, name: "qqplayerIos")
@@ -154,25 +160,33 @@ struct WebShellView: UIViewRepresentable {
             injectServer(server)
         }
 
-        /// localStorage 注入（apiClient 启动即读；随配对记录变化重新注入）
-        func injectServer(_ record: PairingRecord) {
-            let js = """
-            (function() {
-              try {
-                localStorage.setItem('qqplayer.server', \(WebShellView.jsonLiteral(record.url)));
-                localStorage.setItem('qqplayer.token', \(WebShellView.jsonLiteral(record.token)));
-              } catch (e) {}
-            })();
-            """
-            userContentController.removeAllUserScripts()
+        /// localStorage + 桥对象注入/清除（apiClient 启动即读；随配对记录变化重新注入）。
+        /// - record 非 nil：双写 server/token（现有行为不变）
+        /// - record 为 nil（未连接）：清除注入——removeItem 两键 + 桥对象 server/token 置空（保留其他桥字段）
+        func injectServer(_ record: PairingRecord?) {
+            let urlLiteral = WebShellView.jsonLiteral(record?.url ?? "")
+            let tokenLiteral = WebShellView.jsonLiteral(record?.token ?? "")
+            // localStorage 凭证写入/清除（前端 apiClient 读 qqplayer.server / qqplayer.token）
+            let credJS: String
+            if record != nil {
+                credJS = """
+                localStorage.setItem('qqplayer.server', \(urlLiteral));
+                localStorage.setItem('qqplayer.token', \(tokenLiteral));
+                """
+            } else {
+                credJS = """
+                localStorage.removeItem('qqplayer.server');
+                localStorage.removeItem('qqplayer.token');
+                """
+            }
             let shellJS = """
             (function() {
               try {
                 window.qqplayerNative = true;
                 window.qqplayerIosBridge = {
                   version: 1,
-                  server: \(WebShellView.jsonLiteral(record.url)),
-                  token: \(WebShellView.jsonLiteral(record.token)),
+                  server: \(urlLiteral),
+                  token: \(tokenLiteral),
                   postMessage: function(msg) {
                     try { window.webkit.messageHandlers.qqplayerIos.postMessage(msg); } catch (e) {}
                   }
@@ -184,6 +198,14 @@ struct WebShellView: UIViewRepresentable {
               } catch (e) {}
             })();
             """
+            let js = """
+            (function() {
+              try {
+                \(credJS)
+              } catch (e) {}
+            })();
+            """
+            userContentController.removeAllUserScripts()
             userContentController.addUserScript(
                 WKUserScript(source: shellJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
             )
@@ -194,20 +216,37 @@ struct WebShellView: UIViewRepresentable {
 
         /// 兑底重注入：页面加载完成后 evaluateJavaScript 重设 server/token（双写 localStorage + bridge）。
         /// documentStart user script 在页面已加载（updateUIView 后注入）时会错过，必须这里补。
+        /// server 为 nil（未连接）→ 清除两键 + 桥对象两字段置空（前端显示"未连接"引导页）。
         func reinjectServer() {
             guard let webView else { return }
-            let js = """
-            (function() {
-              try {
-                localStorage.setItem('qqplayer.server', \(WebShellView.jsonLiteral(server.url)));
-                localStorage.setItem('qqplayer.token', \(WebShellView.jsonLiteral(server.token)));
-                if (window.qqplayerIosBridge) {
-                  window.qqplayerIosBridge.server = \(WebShellView.jsonLiteral(server.url));
-                  window.qqplayerIosBridge.token = \(WebShellView.jsonLiteral(server.token));
-                }
-              } catch (e) {}
-            })();
-            """
+            let js: String
+            if let record = server {
+                js = """
+                (function() {
+                  try {
+                    localStorage.setItem('qqplayer.server', \(WebShellView.jsonLiteral(record.url)));
+                    localStorage.setItem('qqplayer.token', \(WebShellView.jsonLiteral(record.token)));
+                    if (window.qqplayerIosBridge) {
+                      window.qqplayerIosBridge.server = \(WebShellView.jsonLiteral(record.url));
+                      window.qqplayerIosBridge.token = \(WebShellView.jsonLiteral(record.token));
+                    }
+                  } catch (e) {}
+                })();
+                """
+            } else {
+                js = """
+                (function() {
+                  try {
+                    localStorage.removeItem('qqplayer.server');
+                    localStorage.removeItem('qqplayer.token');
+                    if (window.qqplayerIosBridge) {
+                      window.qqplayerIosBridge.server = '';
+                      window.qqplayerIosBridge.token = '';
+                    }
+                  } catch (e) {}
+                })();
+                """
+            }
             webView.evaluateJavaScript(js) { _, _ in }
         }
 
@@ -269,7 +308,12 @@ struct WebShellView: UIViewRepresentable {
                 return
             }
             guard let cmd = body["cmd"] as? String else { return }
-            // 桥消息按域分路由（各域 handler 见下方 extension；纯搬移，行为零变化）
+            handleBridgeCommand(cmd, body: body)
+        }
+
+        /// 桥命令路由（独立方法便于单元测试：openPairing 等纯逻辑命令可直接测）。
+        /// 按域分路由（各域 handler 见下方 extension；纯搬移，行为零变化）。
+        func handleBridgeCommand(_ cmd: String, body: [String: Any]) {
             switch cmd {
             case "nativeReady", "nativeLog", "pullRevealStatusBar":
                 handleUILifecycleCommand(cmd, body: body)
@@ -277,7 +321,7 @@ struct WebShellView: UIViewRepresentable {
                 handleSyncCommand(cmd, body: body)
             case "metaSave", "metaLoad":
                 handleMetaCommand(cmd, body: body)
-            case "unauthorized":
+            case "unauthorized", "openPairing":
                 handlePairingCommand(cmd)
             default:
                 handlePlaybackCommand(cmd, body: body) // playAudio + 播放命令透传（含未知命令静默）
@@ -380,16 +424,17 @@ struct WebShellView: UIViewRepresentable {
         }
 
         /// 锁屏/线控命令上报桌面后端（/api/debuglog；不依赖 WebView，后台锁屏也能到达）。
-        /// fire-and-forget：失败静默（内网开发端点，不影响播放）。
+        /// fire-and-forget：失败静默（内网开发端点，不影响播放）。未连接（server 为 nil）不上报。
         private func reportNativeCmd(_ cmd: String, _ t: Double?) {
-            var base = server.url
+            guard let record = server else { return }
+            var base = record.url
             if base.hasSuffix("/") { base.removeLast() }
             guard let url = URL(string: base + "/api/debuglog") else { return }
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            if !server.token.isEmpty {
-                req.setValue("Bearer \(server.token)", forHTTPHeaderField: "Authorization")
+            if !record.token.isEmpty {
+                req.setValue("Bearer \(record.token)", forHTTPHeaderField: "Authorization")
             }
             let line = "native remoteCmd \(cmd)" + (t.map { " t=\($0)" } ?? "")
             req.httpBody = try? JSONSerialization.data(withJSONObject: ["line": line])
@@ -590,18 +635,27 @@ extension WebShellView.Coordinator {
     }
 }
 
-// MARK: 桥消息分域 · 配对/鉴权（unauthorized）
+// MARK: 桥消息分域 · 配对/鉴权（unauthorized / openPairing）
 
 extension WebShellView.Coordinator {
-    /// 配对/鉴权域：401 → token 失效 → 清 Keychain 配对 → 回发现页重新配对
+    /// 配对/鉴权域：
+    /// - unauthorized：401 → token 失效 → 通知 RootView 弹提示 + 清配对 → server 变 nil
+    ///   → WebShellView 自动清除注入 + reload → 主界面"未连接"模式（不踢回发现页）
+    /// - openPairing：前端"未连接"引导页"去配对"按钮 → 主界面打开配对 sheet
     private func handlePairingCommand(_ cmd: String) {
-        guard cmd == "unauthorized" else { return }
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .qqplayerTokenInvalid,
-                object: nil,
-                userInfo: ["serverId": self.server.serverId]
-            )
+        switch cmd {
+        case "unauthorized":
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .qqplayerTokenInvalid,
+                    object: nil,
+                    userInfo: ["serverId": self.server?.serverId ?? ""]
+                )
+            }
+        case "openPairing":
+            NotificationCenter.default.post(name: .qqplayerOpenPairing, object: nil)
+        default:
+            break
         }
     }
 }
@@ -635,4 +689,5 @@ extension Notification.Name {
     static let qqplayerTokenInvalid = Notification.Name("qqplayerTokenInvalid")
     static let qqplayerScenePhase = Notification.Name("qqplayerScenePhase")
     static let qqplayerPullRevealStatusBar = Notification.Name("qqplayerPullRevealStatusBar")
+    static let qqplayerOpenPairing = Notification.Name("qqplayerOpenPairing")
 }

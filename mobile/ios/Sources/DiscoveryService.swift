@@ -139,7 +139,12 @@ final class DiscoveryService: ObservableObject {
                 self?.applyHost(ip, port: port, serviceName: server.serviceName, key: key)
                 conn.cancel()
             case .failed, .cancelled:
+                // 失败/取消：连接与解析任务一起清（只清 activeConnections 而残留 resolveTasks
+                // 会导致 browseResults 刷新时因 resolveTasks 命中而永久跳过重试——"永远解析中"根因之一）；
+                // 顺带 cancel 未触发的超时任务，避免 5s 后空转
                 self?.activeConnections[key] = nil
+                self?.resolveTasks[key]?.cancel()
+                self?.resolveTasks[key] = nil
             default:
                 break
             }
@@ -148,6 +153,8 @@ final class DiscoveryService: ObservableObject {
             if !resolved {
                 conn.cancel()
                 self?.activeConnections[key] = nil
+                // 超时也清解析任务：否则后续 browseResults 刷新会因 resolveTasks 残留跳过重试
+                self?.resolveTasks[key] = nil
             }
         }
         resolveTasks[key] = timeout

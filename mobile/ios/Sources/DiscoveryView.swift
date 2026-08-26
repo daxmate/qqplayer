@@ -5,6 +5,7 @@ import SwiftUI
 struct DiscoveryView: View {
     @EnvironmentObject private var pairingStore: PairingStore
     @ObservedObject private var discovery = DiscoveryService.shared
+    @Environment(\.dismiss) private var dismiss
 
     @State private var pairingSession: PairingSession?
     @State private var errorMessage: String?
@@ -75,6 +76,18 @@ struct DiscoveryView: View {
                 }
             }
             .navigationTitle("QQPlayer")
+            .toolbar {
+                // 主界面弹出的 sheet：显式关闭入口（配对/取消后手动收起）
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel("关闭")
+                }
+            }
             .alert("手动添加服务器", isPresented: $showManualAdd) {
                 TextField("192.168.1.5:17627", text: $manualAddress)
                     .keyboardType(.numbersAndPunctuation)
@@ -172,12 +185,10 @@ struct DiscoveryView: View {
     }
 
     private func startPairing(with server: DiscoveredServer) {
-        guard let host = server.host else {
-            errorMessage = "服务器地址尚未解析，请稍候重试"
-            return
-        }
         errorMessage = nil
-        // 用 stableURL（hostname.local）配对：主机 IP 变化后配对记录不失效；手动输入 IP 时退化为 IP URL
+        // 配对直接用 stableURL（hostname.local 由系统 mDNS 解析；手动输入 IP 场景 isIPAddressName 自然走 IP URL）。
+        // host 为 nil（解析中）也允许发起配对——IP 解析只用于列表展示，绝不是配对前置条件；
+        // 不可达/解析失败由 PairingClient 的 .network/.http 分支提示（如 "无法连接 …"）。
         let session = PairingSession(server: server, baseURL: server.stableURL)
         pairingSession = session
         Task {
