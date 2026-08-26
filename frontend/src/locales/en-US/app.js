@@ -33,5 +33,13 @@ export default {
     confirmDelete: 'Unpair from "{name}"?',
     noteSaved: "Note saved",
     deleted: "Device unpaired",
+    // iOS shell not-connected guide (NoConnectionView.vue): full-screen overlay when shell has no server
+    unpaired: {
+      title: "Not connected to desktop",
+      desc: "Connect to QQPlayer on your desktop to sync music, lyrics and reading progress",
+      pairNow: "Pair now",
+      manualHint: "If auto-discovery fails, you can enter the IP manually in the pairing page",
+      localOk: "Your local content still works",
+    },
   },
 };

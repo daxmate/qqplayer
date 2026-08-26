@@ -202,6 +202,9 @@
         }}</span>
       </div>
     </Transition>
+
+    <!-- 未连接引导页（仅 iOS 壳无 server 时全屏覆盖；桌面浏览器 isShellUnpaired 恒 false 不渲染） -->
+    <NoConnectionView v-if="shellUnpaired" class="no-connection-overlay" />
   </div>
 </template>
 
@@ -236,7 +239,9 @@ import PairingConfirmModal from "./components/PairingConfirmModal.vue";
 import BooksView from "./books/BooksView.vue";
 import VideosView from "./videos/VideosView.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
+import NoConnectionView from "./components/NoConnectionView.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
+import { isShellUnpaired } from "./composables/usePairingState.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
 import { useShellBridge } from "./composables/useShellBridge.js";
 import { showToast } from "./composables/useToast.js";
@@ -308,6 +313,10 @@ const bridge = useShellBridge();
 
 const centerRef = ref(null);
 let cleanupCoverObserve = null;
+
+// iOS 壳未连接引导页：仅壳环境（window.qqplayerNative 存在）且无 server 时为 true。
+// 配对成功后原生注入 server + reload → 重新加载时此值自然变 false（无需监听变化）。
+const shellUnpaired = ref(false);
 
 // 封面模糊背景：当前歌曲封面 URL（开关 + 有歌时显示；流媒体歌用 coverUrl 网络图）
 const blurCoverUrl = computed(() => {
@@ -499,6 +508,8 @@ async function backfillMetaFromFile() {
 }
 
 onMounted(() => {
+  // 未连接引导页判定：启动时检测一次（配对成功壳会 reload，无需轮询/监听）
+  shellUnpaired.value = isShellUnpaired();
   // 数据层在线状态/配对失效监听：离线降级与 401 特判的轻提示（见 apiClient）
   offlineUnsub = onOfflineChange((off) => {
     showToast(off ? t("app.offlineMode") : t("app.backOnline"));
@@ -576,6 +587,13 @@ onUnmounted(() => {
 .app > *:not(.bg-blur) {
   position: relative;
   z-index: 1;
+}
+/* 未连接引导页：全屏覆盖主界面（iOS 壳未配对时；桌面浏览器不渲染）。
+   必须压过上方通用规则（同特异性、后声明胜出）——否则 position 被改回 relative、层级降为 1 */
+.app > .no-connection-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
 }
 /* 顶栏 */
 .topbar {

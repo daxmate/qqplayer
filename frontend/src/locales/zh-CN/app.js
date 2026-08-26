@@ -78,5 +78,13 @@ export default {
     confirmDelete: "确定撤销与「{name}」的配对？",
     noteSaved: "备注已保存",
     deleted: "已撤销配对",
+    // iOS 壳未连接引导页（NoConnectionView.vue）：壳内无 server 时全屏覆盖
+    unpaired: {
+      title: "未连接桌面端",
+      desc: "连接桌面端 QQPlayer 后，即可同步音乐、歌词与阅读进度",
+      pairNow: "去配对",
+      manualHint: "若自动发现失败，可在配对页手动输入 IP",
+      localOk: "本机内容不受影响",
+    },
   },
 };
