@@ -1,5 +1,4 @@
 import AVFoundation
-import MediaPlayer
 import UIKit
 
 /// AVPlayer 播放桥（阶段2 核心）：Web → Native 的播放原语。
@@ -7,33 +6,37 @@ import UIKit
 /// - 事件回传（Web 侧 playerCore 适配层消费）：
 ///     loadedmetadata {duration} / playing {t} / paused {t} / ended / timeupdate {t, duration}
 ///     songChanged {index}（原生后台切歌后推送，Web 对齐状态不重新 load）
-/// - 锁屏 Now Playing：元数据（标题/歌手/专辑/封面）+ 进度；MPRemoteCommandCenter
-///   （play/pause/toggle/next/prev/changePlaybackPosition + 耳机线控）→ **原生直接执行**：
-///   后台锁屏时 WKWebView 的 JS 被 iOS 挂起，转发 Web 的命令要等回前台才执行（已实锤）——
-///   原生持有前端同步的播放顺序快照（setQueue），后台切歌/播放/暂停/seek 直接操作 AVPlayer。
-///   Web 仍是队列/切歌逻辑真源（app 内操作零变化），切歌后推 songChanged，前端跟随对齐。
+/// - 锁屏 Now Playing / 远端命令（play/pause/toggle/next/prev/changePlaybackPosition + 耳机线控）
+///   → **原生直接执行**：后台锁屏时 WKWebView 的 JS 被 iOS 挂起，转发 Web 的命令要等回前台
+///   才执行（已实锤）——原生持有前端同步的播放顺序快照（setQueue），后台切歌/播放/暂停/seek
+///   直接操作 AVPlayer。Web 仍是队列/切歌逻辑真源（app 内操作零变化），切歌后推 songChanged，
+///   前端跟随对齐。
+/// - 组件（Pass 2 结构拆分，纯搬移）：
+///     RemoteCommandManager —— MPRemoteCommandCenter 注册/回调 + setQueue 快照 + playQueueRelative
+///     MetadataManager —— 封面/锁屏元数据（applyMetadata/内嵌封面预读/异步拉取/进度同步）
+///   AVPlayer 在本类手里，组件通过闭包回调驱动播放/只读状态（见 init 接线）。
 final class AVPlayerBridge {
     private let player = AVPlayer()
-    /// 播放顺序快照（前端 setQueue 同步；锁屏/线控后台切歌用，Web 挂起时不依赖 JS）
-    private var queue: [[String: Any]] = []
-    private var queueIndex = 0
     /// Bearer token（配对鉴权）：AVPlayer 拉流/短音频时附加 Authorization 头。
     /// 真机 401 根因（2026-08-23）：127.0.0.1 免鉴权模拟器正常，真机必须带 token。
-    var authToken: String?
+    /// 同步转发给 MetadataManager（异步拉封面同样需要鉴权）。
+    var authToken: String? {
+        didSet { metadataManager.authToken = authToken }
+    }
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var didEndObserver: NSObjectProtocol?
     private var rateObservation: NSKeyValueObservation?
 
+    /// 锁屏/线控远端命令 + 原生队列切歌执行器（Pass 2 拆分组件）
+    private let remoteCommands = RemoteCommandManager()
+    /// 封面/锁屏元数据管理（Pass 2 拆分组件）
+    private let metadataManager = MetadataManager()
+
     /// 原生 → Web 事件（name, JSON payload）；由 WebShellController 桥接到 evaluateJavaScript
     var onEvent: ((String, [String: Any]) -> Void)?
     /// 远端命令 → Web（cmd: play|pause|toggle|next|prev|seekto）
     var onRemoteCommand: ((String, Double?) -> Void)?
-
-    private var nowPlayingArtwork: MPMediaItemArtwork?
-    /// 当前 item 的内嵌封面（APIC 预读缓存）：无线 CarPlay 脱离 Mac 网络且封面无缓存时
-    /// 唯一不依赖网络的封面来源；切歌时清空、新歌预读完成后填充（旧歌结果丢弃防乱序）。
-    private var embeddedArtwork: MPMediaItemArtwork?
 
     /// 音频中断（来电/其他 app 抢占/系统语音）恢复状态机：began 时记录中断前是否在播放，
     /// ended 后据此自动恢复（手动暂停后被打断不恢复）。纯逻辑在 InterruptionPolicy（可测）。
@@ -50,7 +53,25 @@ final class AVPlayerBridge {
     init() {
         configureAudioSession()
         setupTimeObserver()
-        setupRemoteCommands()
+        // 组件接线：AVPlayer/播放状态在本类手里，组件通过闭包回调驱动/只读（纯搬移，行为零变化）
+        metadataManager.currentRate = { [weak self] in Double(self?.player.rate ?? 0) }
+        metadataManager.currentTime = { [weak self] in self?.playerTime() ?? 0 }
+        metadataManager.currentDuration = { [weak self] in self?.playerDuration() ?? 0 }
+        metadataManager.currentItem = { [weak self] in self?.player.currentItem }
+        remoteCommands.onLoad = { [weak self] url in self?.load(url: url) }
+        remoteCommands.onPlay = { [weak self] in self?.player.play() }
+        remoteCommands.onPause = { [weak self] in self?.player.pause() }
+        remoteCommands.isPlaying = { [weak self] in (self?.player.rate ?? 0) > 0 }
+        remoteCommands.onApplyMetadata = { [weak self] meta in self?.metadataManager.applyMetadata(meta) }
+        remoteCommands.onPushEvent = { [weak self] name, payload in self?.push(name, payload) }
+        remoteCommands.onUpdatePlaybackState = { [weak self] playing in
+            self?.metadataManager.updateNowPlayingPlaybackState(playing: playing)
+        }
+        remoteCommands.onSeek = { [weak self] t in
+            self?.seek(to: CMTime(seconds: t, preferredTimescale: 600))
+        }
+        remoteCommands.onFallbackCommand = { [weak self] cmd in self?.onRemoteCommand?(cmd, nil) }
+        remoteCommands.install()
         // 播完 → ended 事件（Web 侧走自动切歌/单曲循环逻辑）
         didEndObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification,
@@ -87,11 +108,11 @@ final class AVPlayerBridge {
                 playAfterSeek = true
             } else {
                 player.play()
-                updateNowPlayingPlaybackState()
+                metadataManager.updateNowPlayingPlaybackState()
             }
         case "pause":
             player.pause()
-            updateNowPlayingPlaybackState()
+            metadataManager.updateNowPlayingPlaybackState()
         case "seek":
             if let t = payload["t"] as? Double {
                 seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
@@ -106,26 +127,18 @@ final class AVPlayerBridge {
             if let r = payload["r"] as? Double {
                 player.defaultRate = Float(r)
                 if player.rate > 0 { player.rate = Float(r) }
-                updateNowPlayingPlaybackState()
+                metadataManager.updateNowPlayingPlaybackState()
             }
         case "setMetadata":
-            applyMetadata(payload)
+            metadataManager.applyMetadata(payload)
         case "setPlaying":
             if let p = payload["playing"] as? Bool {
-                updateNowPlayingPlaybackState(playing: p)
+                metadataManager.updateNowPlayingPlaybackState(playing: p)
             }
         case "setQueue":
-            // 播放顺序快照：前端 selectSong 后同步（songs 数组 + 当前 index）→
+            // 播放顺序快照：前端 selectSong 后同步 → RemoteCommandManager 持有，
             // 锁屏/线控后台切歌由原生直接执行（Web 挂起时不依赖 JS）
-            if let songs = payload["songs"] as? [[String: Any]], !songs.isEmpty {
-                queue = songs
-                let raw = (payload["index"] as? Int) ?? 0
-                queueIndex = min(max(0, raw), queue.count - 1) // 越界夹取
-            } else {
-                // 容错：songs 非数组/空数组 → 清空快照（next/prev 走 Web 兑底）
-                queue = []
-                queueIndex = 0
-            }
+            remoteCommands.handleSetQueue(payload)
         default:
             break // 未知命令静默忽略（桌面壳消息如 pickLibrary/lyric 等也走这里）
         }
@@ -144,7 +157,7 @@ final class AVPlayerBridge {
                 if self.playAfterSeek {
                     self.playAfterSeek = false
                     self.player.play()
-                    self.updateNowPlayingPlaybackState()
+                    self.metadataManager.updateNowPlayingPlaybackState()
                 } else if self.player.rate == 0
                     && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
                     // seek 完成后仍是暂停（跳转暂停场景）：seek 期间 rate=0 的 paused 被抑制，
@@ -158,9 +171,9 @@ final class AVPlayerBridge {
     private func load(url: URL) {
         let item = makeItem(url: url)
         statusObservation?.invalidate()
-        embeddedArtwork = nil // 上一首的内嵌封面作废，等新歌预读
+        metadataManager.embeddedArtwork = nil // 上一首的内嵌封面作废，等新歌预读
         player.replaceCurrentItem(with: item)
-        loadEmbeddedArtwork(for: item) // 异步预读内嵌封面（applyMetadata 兑底用）
+        metadataManager.loadEmbeddedArtwork(for: item) // 异步预读内嵌封面（applyMetadata 兑底用）
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             guard item.status == .readyToPlay else {
                 if item.status == .failed {
@@ -171,7 +184,7 @@ final class AVPlayerBridge {
             let duration = item.duration.seconds
             if duration.isFinite && duration > 0 {
                 self?.push("loadedmetadata", ["duration": duration])
-                self?.updateNowPlaying(duration: duration)
+                self?.metadataManager.updateNowPlaying(duration: duration)
             }
         }
     }
@@ -218,7 +231,7 @@ final class AVPlayerBridge {
             let t = self.playerTime()
             let d = self.playerDuration()
             self.push("timeupdate", ["t": t, "duration": d])
-            self.updateNowPlayingProgress(t: t, duration: d, rate: Double(self.player.rate))
+            self.metadataManager.updateNowPlayingProgress(t: t, duration: d, rate: Double(self.player.rate))
         }
     }
 
@@ -258,254 +271,13 @@ final class AVPlayerBridge {
                 if self.interruptionPolicy.ended() {
                     try? AVAudioSession.sharedInstance().setActive(true)
                     self.player.play()
-                    self.updateNowPlayingPlaybackState()
+                    self.metadataManager.updateNowPlayingPlaybackState()
                     // 恢复事件回传 Web（中断期间前端已收到 paused，需恢复播放态）
                     self.push("playing", ["t": self.playerTime()])
                 }
             @unknown default:
                 break
             }
-        }
-    }
-
-    // MARK: - 锁屏 Now Playing
-
-    private func applyMetadata(_ payload: [String: Any]) {
-        let title = payload["title"] as? String ?? ""
-        let artist = payload["artist"] as? String ?? ""
-        let album = payload["album"] as? String ?? ""
-        let cover = payload["coverUrl"] as? String ?? ""
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: title.isEmpty ? "QQPlayer" : title,
-            MPMediaItemPropertyArtist: artist,
-            MPMediaItemPropertyAlbumTitle: album,
-            MPNowPlayingInfoPropertyPlaybackRate: player.rate,
-        ]
-        // 先保留旧封面兑底：任何时刻 nowPlayingInfo 都带 artwork 键，
-        // 避免「先同步发布无封面信息、后异步补图」顶掉旧封面——锁屏会刷新，
-        // 但 CarPlay 车机大多不刷新异步补的图（2026-08-25 真机空白根因 A）。
-        if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] {
-            info[MPMediaItemPropertyArtwork] = existing
-        } else if let art = nowPlayingArtwork {
-            info[MPMediaItemPropertyArtwork] = art
-        }
-        let duration = playerDuration()
-        if duration > 0 {
-            info[MPMediaItemPropertyPlaybackDuration] = duration
-            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playerTime()
-        }
-        if !cover.isEmpty {
-            // 封面策略决策（纯逻辑，CoverDecision 可测）：
-            // data: URL 同步解码即时有封面（不走异步，无「先空后补」窗口）；
-            // http 封面 → 先同步用内嵌封面兑底（CarPlay 即时刷新，不依赖网络/缓存），
-            // 再异步 loadArtwork 拉远程/本地图，成功后覆盖（锁屏会刷新到更佳图）。
-            switch CoverDecision.decide(coverUrl: cover, hasEmbedded: embeddedArtwork != nil) {
-            case .syncDataURL:
-                if let art = decodeArtwork(cover) {
-                    nowPlayingArtwork = art
-                    info[MPMediaItemPropertyArtwork] = art
-                } else {
-                    // 解码失败（坏 base64）：与历史 if/else 链一致，兑底内嵌 → 异步
-                    applyEmbeddedFallback(cover: cover, info: &info)
-                }
-            case .embeddedThenAsync:
-                applyEmbeddedFallback(cover: cover, info: &info)
-            case .asyncOnly:
-                fetchArtworkAsync(cover: cover, fallbackInfo: info)
-            }
-        }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-
-    private func updateNowPlaying(duration: Double) {
-        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        info[MPMediaItemPropertyPlaybackDuration] = duration
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playerTime()
-        info[MPNowPlayingInfoPropertyPlaybackRate] = player.rate
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-
-    private func updateNowPlayingProgress(t: Double, duration: Double, rate: Double) {
-        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = t
-        info[MPNowPlayingInfoPropertyPlaybackRate] = rate
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-
-    private func updateNowPlayingPlaybackState(playing: Bool? = nil) {
-        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        let p = playing ?? (player.rate > 0)
-        info[MPNowPlayingInfoPropertyPlaybackRate] = p ? player.rate : 0
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playerTime()
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-
-    /// 封面图：data: URL 直接解码；http(s) 异步拉取（附加 Bearer 鉴权头——真机 /api/cover
-    /// 401 兑底，2026-08-23）；相对路径按服务器 base 前缀补全（调用方已处理）
-    private func loadArtwork(_ cover: String, completion: @escaping (MPMediaItemArtwork?) -> Void) {
-        if cover.hasPrefix("data:image/") {
-            completion(decodeArtwork(cover))
-            return
-        }
-        guard let url = URL(string: cover), cover.hasPrefix("http") else {
-            completion(nil)
-            return
-        }
-        var request = URLRequest(url: url)
-        // 与前端 resolveNativeUrl 的 ?token= 双保险：URLSession 拉图带 Authorization 头
-        // （后端两者都认；第三方直链/本地资产无 token 时不带，保持原样）
-        if let token = authToken, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            DispatchQueue.main.async {
-                if let data, let img = UIImage(data: data) {
-                    completion(MPMediaItemArtwork(boundsSize: img.size) { _ in img })
-                } else {
-                    completion(nil)
-                }
-            }
-        }.resume()
-    }
-
-    /// 预读当前 item 的内嵌封面（APIC/artwork）：切歌后异步读音频文件元数据，
-    /// 供 applyMetadata 兑底（无线 CarPlay 脱离 Mac 网络 + 封面无缓存时唯一可靠来源）。
-    /// 读取是异步的：完成时若 item 已切换则丢弃结果（防旧歌封面覆盖新歌）。
-    private func loadEmbeddedArtwork(for item: AVPlayerItem) {
-        let asset = item.asset
-        Task {
-            var artworkData: Data?
-            // MP3 常见 id3 APIC；M4A 走 iTunes；其余容器 commonMetadata 兑底
-            let formats: [AVMetadataFormat] = [.id3Metadata, .iTunesMetadata, .quickTimeMetadata]
-            for format in formats {
-                if let items = try? await asset.loadMetadata(for: format) {
-                    artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
-                }
-                if artworkData != nil { break }
-            }
-            if artworkData == nil, let items = try? await asset.load(.commonMetadata) {
-                artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
-            }
-            guard let data = artworkData, let img = UIImage(data: data) else { return }
-            let art = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
-            await MainActor.run {
-                guard self.player.currentItem === item else { return } // 已切歌：丢弃
-                self.embeddedArtwork = art
-            }
-        }
-    }
-
-    /// 内嵌兑底 + 异步覆盖（embeddedThenAsync 主路径 / sync 解码失败兑底共用）：
-    /// 先同步写入内嵌封面（CarPlay 即时刷新，不依赖网络/缓存），
-    /// 再异步拉远程/本地图，成功后覆盖（锁屏会刷新到更佳图）。
-    private func applyEmbeddedFallback(cover: String, info: inout [String: Any]) {
-        if let embedded = embeddedArtwork {
-            nowPlayingArtwork = embedded
-            info[MPMediaItemPropertyArtwork] = embedded
-        }
-        fetchArtworkAsync(cover: cover, fallbackInfo: info)
-    }
-
-    /// 异步拉取封面成功后覆盖 nowPlayingInfo（成功才覆盖；失败保留兑底图）
-    private func fetchArtworkAsync(cover: String, fallbackInfo: [String: Any]) {
-        loadArtwork(cover) { [weak self] artwork in
-            guard let self else { return }
-            if let artwork {
-                self.nowPlayingArtwork = artwork
-                var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? fallbackInfo
-                updated[MPMediaItemPropertyArtwork] = artwork
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-            }
-        }
-    }
-
-    /// 同步解码 data:image/ 封面（base64）→ MPMediaItemArtwork；失败/非 data: 返回 nil。
-    /// 供 applyMetadata 同步路径与 loadArtwork 复用。
-    private func decodeArtwork(_ cover: String) -> MPMediaItemArtwork? {
-        guard cover.hasPrefix("data:image/") else { return nil }
-        let base64 = cover.split(separator: ",").dropFirst().joined(separator: ",")
-        if let data = Data(base64Encoded: String(base64)), let img = UIImage(data: data) {
-            return MPMediaItemArtwork(boundsSize: img.size) { _ in img }
-        }
-        return nil
-    }
-
-    // MARK: - 远端命令（锁屏/耳机线控）→ 原生直接执行
-
-    /// 锁屏/线控后台切歌：按 queue 快照相对移动（Web 挂起时原生独立执行）。
-    /// 复用 load（embeddedArtwork 预读/loadedmetadata 推送）+ applyMetadata（payload dict 直接可用）。
-    /// stream 歌 url 为空 → 跳过（MVP 限制：后台切歌只覆盖本地歌，流媒体直链有时效无法离线取）。
-    private func playQueueRelative(_ delta: Int) {
-        guard !queue.isEmpty else { return }
-        var cursor = QueueCursor(index: queueIndex)
-        guard cursor.advance(delta, count: queue.count) else { return }
-        queueIndex = cursor.index
-        let meta = queue[queueIndex]
-        guard let urlString = meta["url"] as? String, !urlString.isEmpty,
-              let url = URL(string: urlString) else { return } // stream 歌 url 为空：跳过（MVP 限制）
-        load(url: url)
-        player.play() // 锁屏切歌即播放（前端 songChanged 对齐为播放态）
-        applyMetadata(meta)
-        push("songChanged", ["index": queueIndex])
-        updateNowPlayingPlaybackState(playing: true)
-    }
-
-    private func setupRemoteCommands() {
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.isEnabled = true
-        center.pauseCommand.isEnabled = true
-        center.togglePlayPauseCommand.isEnabled = true
-        center.nextTrackCommand.isEnabled = true
-        center.previousTrackCommand.isEnabled = true
-        center.changePlaybackPositionCommand.isEnabled = true
-
-        center.playCommand.addTarget { [weak self] _ in
-            guard let self else { return .success }
-            self.player.play()
-            self.updateNowPlayingPlaybackState()
-            return .success
-        }
-        center.pauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .success }
-            self.player.pause()
-            self.updateNowPlayingPlaybackState()
-            return .success
-        }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .success }
-            if self.player.rate > 0 {
-                self.player.pause()
-            } else {
-                self.player.play()
-            }
-            self.updateNowPlayingPlaybackState()
-            return .success
-        }
-        center.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .success }
-            if self.queue.isEmpty {
-                // 兑底：未同步队列（旧客户端/未选歌）→ 转发 Web 执行（前端仍是队列真源）
-                self.onRemoteCommand?("next", nil)
-            } else {
-                self.playQueueRelative(+1)
-            }
-            return .success
-        }
-        center.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .success }
-            if self.queue.isEmpty {
-                self.onRemoteCommand?("prev", nil)
-            } else {
-                self.playQueueRelative(-1)
-            }
-            return .success
-        }
-        center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            let t = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime ?? 0
-            // 复用现有 seek（pendingSeek 串行化：seek 完成前到达的 play 延迟执行）
-            self?.seek(to: CMTime(seconds: t, preferredTimescale: 600))
-            return .success
         }
     }
 }
