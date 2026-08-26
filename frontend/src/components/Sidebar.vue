@@ -77,6 +77,10 @@
             >
               <Trash2 :size="12" />
             </button>
+            <!-- 推送到设备（歌单全部歌曲 → DevicePickerModal） -->
+            <button class="sb-act" :title="t('sidebar.pushToDevice')" @click="openPlaylistPush(p)">
+              <Send :size="12" />
+            </button>
           </span>
         </div>
         <!-- 行内改名输入 -->
@@ -128,6 +132,14 @@
       :kind="smartViewState.active"
       @close="closeSmartViewPanel"
     />
+
+    <!-- 设备选择浮层（歌单推送到设备，与 Playlist 同款） -->
+    <DevicePickerModal
+      :open="pushPickerOpen"
+      :devices="pushPickerDevices"
+      @close="pushPickerOpen = false"
+      @select="onPlaylistPushPicked"
+    />
   </aside>
 </template>
 
@@ -140,6 +152,7 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Send,
   Sparkles,
   History,
   TrendingUp,
@@ -167,6 +180,8 @@ import {
   countByDecade,
 } from "../composables/useSmartViews.js";
 import SmartViewPanel from "./SmartViewPanel.vue";
+import DevicePickerModal from "./DevicePickerModal.vue";
+import { fetchDevices, pushSongsToDevice } from "../utils/deviceCommands.js";
 
 const { t } = useI18n();
 
@@ -391,6 +406,50 @@ async function commitEdit() {
 
 function cancelEdit() {
   editingId.value = null;
+}
+
+// ============ 推送到设备（歌单行按钮 → DevicePickerModal） ============
+// 与 Playlist.openDevicePicker 同一链路：歌单歌曲路径反查曲库对象（流媒体/已删歌曲被过滤）
+// → 拉设备清单 → 无设备 toast 提示 → 弹 DevicePickerModal → 确认后推送
+const pushPickerOpen = ref(false);
+const pushPickerDevices = ref([]);
+const pushPickerSongs = ref([]); // 待推送的曲库歌曲对象数组（含 path）
+
+async function openPlaylistPush(p) {
+  // p = 歌单对象 {id, songPaths: [...]}
+  const paths = (p.songPaths || []).filter(Boolean);
+  if (!paths.length) {
+    showToast(t("playlist.pushFailed"), { type: "error" });
+    return;
+  }
+  const songs = state.songs.filter((s) => s && paths.includes(s.path)); // 路径反查歌曲对象
+  if (!songs.length) {
+    showToast(t("playlist.pushFailed"), { type: "error" });
+    return;
+  }
+  const r = await fetchDevices();
+  if (!r.ok || !r.devices.length) {
+    showToast(t("playlist.noDevicesToast"), { type: "error" });
+    return;
+  }
+  pushPickerSongs.value = songs;
+  pushPickerDevices.value = r.devices;
+  pushPickerOpen.value = true;
+}
+
+async function onPlaylistPushPicked(device) {
+  pushPickerOpen.value = false;
+  const songs = pushPickerSongs.value;
+  pushPickerSongs.value = [];
+  const r = await pushSongsToDevice(songs, device.device_id);
+  if (r.ok) {
+    const n = songs.length - (Array.isArray(r.skipped) ? r.skipped.length : 0);
+    showToast(t("playlist.pushSuccess", { n: Math.max(0, n) }));
+  } else {
+    showToast(t("playlist.pushFailedReason", { reason: r.error || r.reason || "" }), {
+      type: "error",
+    });
+  }
 }
 
 // ============ 删除 ============

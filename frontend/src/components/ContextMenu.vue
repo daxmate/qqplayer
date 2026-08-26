@@ -18,6 +18,12 @@
         <ListPlus :size="14" />
         {{ t("playlist.ctx.addToPlaylist") }}
       </button>
+      <template v-if="showPushDevice">
+        <button class="ctx-item" @click="emit('push-device')">
+          <Send :size="14" />
+          {{ t("playlist.pushToDevice") }}
+        </button>
+      </template>
       <template v-if="canGoArtist || canGoAlbum">
         <div class="ctx-sep"></div>
         <button v-if="canGoArtist" class="ctx-item" @click="emit('go-artist')">
@@ -47,7 +53,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import { Play, SkipForward, Heart, ListPlus, Mic, Disc, Tags, Trash2 } from "@lucide/vue";
+import { Play, SkipForward, Heart, ListPlus, Send, Mic, Disc, Tags, Trash2 } from "@lucide/vue";
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -57,6 +63,7 @@ const props = defineProps({
   canGoArtist: { type: Boolean, default: false },
   canGoAlbum: { type: Boolean, default: false },
   hasPath: { type: Boolean, default: false }, // 本地歌（path 非 null）才可移到废纸篓
+  showPushDevice: { type: Boolean, default: true }, // 是否显示「推送到设备」项（SmartViewPanel 等不监听 push-device 的调用方隐藏）
 });
 
 const emit = defineEmits([
@@ -64,6 +71,7 @@ const emit = defineEmits([
   "play-next",
   "toggle-fav",
   "add-playlist",
+  "push-device",
   "go-artist",
   "go-album",
   "edit-tags",

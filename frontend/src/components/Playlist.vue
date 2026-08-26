@@ -189,6 +189,16 @@
           <X :size="13" />
           {{ t("playlist.multi.clear") }}
         </button>
+        <!-- 推送到设备（放在末尾：现有测试按位置索引 pl-multi-btn，插入中间会破坏索引） -->
+        <button
+          class="pl-multi-btn"
+          :title="t('playlist.pushToDevice')"
+          data-testid="pl-multi-push-device"
+          @click="batchPushToDevice"
+        >
+          <Send :size="13" />
+          {{ t("playlist.pushToDevice") }}
+        </button>
       </div>
       <!-- 列头（桌面）：点击排序，三态循环 升序 → 降序 → 默认顺序；与工具条 select 共用 sortKey -->
       <div class="pl-cols">
@@ -386,7 +396,16 @@
       @go-album="ctxGoAlbum"
       @edit-tags="ctxEditTags"
       @delete="ctxDelete"
+      @push-device="ctxPushToDevice"
       @close="ctxOpen = false"
+    />
+
+    <!-- 设备选择浮层（推送到设备） -->
+    <DevicePickerModal
+      :open="pickerOpen"
+      :devices="pickerDevices"
+      @close="pickerOpen = false"
+      @select="onDevicePicked"
     />
 
     <!-- 编辑标签/刮削弹窗（右键目标歌曲；autoScrape 打开自动刮削） -->
@@ -441,6 +460,7 @@ import {
   Trash2,
   LocateFixed,
   Download,
+  Send,
   Loader2,
   Sparkles,
 } from "@lucide/vue";
@@ -476,6 +496,8 @@ import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../composables/useCoverURL.js";
 import ContextMenu from "./ContextMenu.vue";
 import TagEditorModal from "./TagEditorModal.vue";
+import DevicePickerModal from "./DevicePickerModal.vue";
+import { fetchDevices, pushSongsToDevice } from "../utils/deviceCommands.js";
 
 defineProps({
   compact: { type: Boolean, default: false },
@@ -947,6 +969,60 @@ function ctxEditTags() {
   const s = ctxSong.value;
   ctxClose();
   openTagEditor(s);
+}
+
+// ============ 推送到设备（右键单选 / 多选批量 → DevicePickerModal） ============
+const pickerOpen = ref(false);
+const pickerDevices = ref([]);
+const pickerSongs = ref([]); // 待推送的曲库歌曲对象数组（含 path）
+
+// 打开选择浮层：先拉设备清单，无已配对设备 → toast 提示（不弹浮层）
+async function openDevicePicker(songs) {
+  const list = (songs || []).filter((s) => s && s.path);
+  if (!list.length) {
+    showToast(t("playlist.pushFailed"), { type: "error" });
+    return;
+  }
+  const r = await fetchDevices();
+  if (!r.ok || !r.devices.length) {
+    showToast(t("playlist.noDevicesToast"), { type: "error" });
+    return;
+  }
+  pickerSongs.value = list;
+  pickerDevices.value = r.devices;
+  pickerOpen.value = true;
+}
+
+function ctxPushToDevice() {
+  const s = ctxSong.value;
+  ctxClose();
+  openDevicePicker(s ? [s] : []);
+}
+
+// 多选批量：选中路径 → 曲库歌曲对象（路径语义，网络歌天然被过滤）
+function batchPushToDevice() {
+  const paths = selectedPaths.value.filter((p) => p != null);
+  if (!paths.length) return;
+  const songs = state.songs.filter((s) => s && paths.includes(s.path));
+  openDevicePicker(songs);
+}
+
+// 浮层确认：推送选中歌曲到目标设备 → toast 成功/失败
+async function onDevicePicked(device) {
+  pickerOpen.value = false;
+  const songs = pickerSongs.value;
+  pickerSongs.value = [];
+  const r = await pushSongsToDevice(songs, device.device_id);
+  if (r.ok) {
+    const n = songs.length - (Array.isArray(r.skipped) ? r.skipped.length : 0);
+    showToast(t("playlist.pushSuccess", { n: Math.max(0, n) }));
+  } else if (r.reason === "no_valid_items") {
+    showToast(t("playlist.pushFailed"), { type: "error" });
+  } else {
+    showToast(t("playlist.pushFailedReason", { reason: r.error || r.reason || "" }), {
+      type: "error",
+    });
+  }
 }
 
 // ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报上下文 → 壳注入 NSMenu → 点击调 __qqCtxMenu → 事件派发到这里） ============

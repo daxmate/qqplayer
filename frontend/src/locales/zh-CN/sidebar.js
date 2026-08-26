@@ -6,6 +6,7 @@ export default {
     smartViews: "智能视图",
     rename: "重命名",
     deletePlaylist: "删除歌单",
+    pushToDevice: "推送到设备",
     playlistName: "歌单名称",
     createPlaceholder: "输入歌单名称，回车创建",
     noPlaylists: "还没有歌单",

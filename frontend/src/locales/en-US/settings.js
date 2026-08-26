@@ -133,6 +133,55 @@ export default {
     openSyncCenterDesc:
       "Swipe right from the left edge of the home screen: offline downloads, update checks, storage management, dicts and Wi-Fi switch",
     openSyncCenterGo: "Open",
+    // Device management panel (desktop admin: device command queue + iOS asset list)
+    devicePanelTitle: "Devices",
+    devicePanelDesc:
+      "Manage offline assets on paired iOS devices: push downloads, remote delete, command status",
+    devicePanelLoading: "Loading…",
+    noDevices: "No paired devices",
+    noDevicesHint:
+      "Pair an iOS device on the Pairing page first, then manage downloads and deletes here",
+    deviceLastSeen: "Last seen",
+    deviceAssets: "Assets",
+    deviceTotal: "Used",
+    deviceFiles: "{n} files",
+    deviceNoAssets: "No offline assets on this device",
+    deviceJustNow: "Just now",
+    deviceMinutesAgo: "{n} min ago",
+    deviceYesterday: "Yesterday",
+    deviceType: {
+      audio: "Audio",
+      cover: "Covers",
+      books: "Books",
+      dicts: "Dicts",
+    },
+    commandHistory: "Command history",
+    commandHistoryEmpty: "No commands yet",
+    commandType: {
+      pushDownload: "Push download",
+      remoteDelete: "Remote delete",
+    },
+    commandStatus: {
+      pending: "Queued",
+      executing: "Executing",
+      done: "Done",
+      failed: "Failed",
+    },
+    commandTarget: {
+      all: "All devices",
+    },
+    commandColType: "Type",
+    commandColStatus: "Status",
+    commandColTarget: "Target",
+    commandColCreated: "Created",
+    commandColAck: "Ack",
+    deleteAssets: "Delete selected",
+    deleteAssetsConfirm: "Delete selected assets?",
+    deleteAssetsConfirmDesc:
+      "A remote delete command will be sent to the device, removing {n} offline assets (cannot be undone).",
+    deleteAssetsDone: "Delete command sent",
+    deleteAssetsFailed: "Failed to send delete command",
+    refresh: "Refresh",
     // Download speed limit
     maxSpeed: "Download speed limit",
     maxSpeedDesc:

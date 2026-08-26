@@ -62,6 +62,7 @@
       :can-go-artist="ctxCanGoArtist"
       :can-go-album="ctxCanGoAlbum"
       :has-path="!!ctxSong?.path"
+      :show-push-device="false"
       @play="ctxPlay"
       @play-next="ctxPlayNext"
       @toggle-fav="ctxToggleFav"

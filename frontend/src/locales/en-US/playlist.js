@@ -12,6 +12,16 @@ export default {
       editTags: "Edit Tags / Scrape",
       deleteToTrash: "Move to Trash",
     },
+    pushToDevice: "Push to Device",
+    noDevicesToast: "No paired devices",
+    pushSuccess: "Pushed {n} songs",
+    pushFailed: "Push failed",
+    pushFailedReason: "Push failed: {reason}",
+    devicePicker: {
+      title: "Select Device",
+      confirm: "Push",
+      empty: "No paired devices",
+    },
     multi: {
       scrape: "Scrape Tags",
       scraping: "Scraping {n}…",

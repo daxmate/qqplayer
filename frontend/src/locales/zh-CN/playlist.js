@@ -58,6 +58,17 @@ export default {
       editTags: "编辑标签/刮削",
       deleteToTrash: "移到废纸篓",
     },
+    // 推送到设备（右键菜单 / 多选批量 / DevicePickerModal）
+    pushToDevice: "推送到设备",
+    noDevicesToast: "暂无已配对设备",
+    pushSuccess: "已推送 {n} 首歌曲",
+    pushFailed: "推送失败",
+    pushFailedReason: "推送失败：{reason}",
+    devicePicker: {
+      title: "选择设备",
+      confirm: "推送",
+      empty: "暂无已配对设备",
+    },
     // 多选批量（桌面）
     multi: {
       selected: "{n} 首已选",
