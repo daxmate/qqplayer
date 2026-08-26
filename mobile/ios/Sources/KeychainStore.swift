@@ -168,7 +168,7 @@ enum KeychainStore {
         ]
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         if status != errSecSuccess {
-            print("[Keychain] SecItemAdd failed: \(status) (\(Self.statusText(status))) service=\(service)")
+            WebShellView.appendNativeLog("[Keychain] SecItemAdd failed: \(status) (\(Self.statusText(status))) service=\(service)")
         }
         return status == errSecSuccess
     }

@@ -328,7 +328,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
               let item = active.removeValue(forKey: dataTask) else { return }
         closeHandle(for: dataTask)
         if let error {
-            print("[Download] didComplete error: \(error.localizedDescription)")
+            WebShellView.appendNativeLog("[Download] didComplete error: \(error.localizedDescription)")
             if (error as NSError).code == NSURLErrorCancelled {
                 emitDone(item, ok: false, sha256: item.sha256, localURL: nil, error: "cancelled")
             } else {
@@ -351,12 +351,12 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             return
         }
         guard let hash = sha256(of: item.partURL) else {
-            print("[Download] retry reason: 临时文件读取失败")
+            WebShellView.appendNativeLog("[Download] retry reason: 临时文件读取失败")
             retry(item, reason: "临时文件读取失败")
             return
         }
         guard contentHashMatches(item, hash: hash) else {
-            print("[Download] retry reason: sha256 不匹配")
+            WebShellView.appendNativeLog("[Download] retry reason: sha256 不匹配")
             retry(item, reason: "sha256 不匹配")
             return
         }

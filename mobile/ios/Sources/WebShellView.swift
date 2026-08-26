@@ -399,7 +399,7 @@ struct WebShellView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
             // 忽略 -999（页面重载/导航取消）
             if (error as NSError).code == NSURLErrorCancelled { return }
-            print("[WebShell] didFail: \(error.localizedDescription)")
+            WebShellView.appendNativeLog("[WebShell] didFail: \(error.localizedDescription)")
         }
 
         /// 递归移除 WKWebView 内部菜单交互（UIEditMenuInteraction / UIContextMenuInteraction）：
@@ -453,7 +453,7 @@ struct WebShellView: UIViewRepresentable {
             if webReady {
                 webView.evaluateJavaScript(call) { _, error in
                     if let error {
-                        print("[WebShell] push \(event) 失败: \(error.localizedDescription)")
+                        WebShellView.appendNativeLog("[WebShell] push \(event) 失败: \(error.localizedDescription)")
                     }
                 }
             } else {
