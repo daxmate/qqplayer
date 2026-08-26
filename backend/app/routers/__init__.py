@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from . import (
     annotations,
     books,
+    commands,
     debuglog,
     dict,
     favorites,
@@ -43,6 +44,7 @@ _ROUTER_MODULES = (
     video_online,
     videos,
     pairing,
+    commands,
     debuglog,
 )
 

@@ -66,6 +66,8 @@ PAIRING_TTL_SECONDS = 300
 # 配对请求限流：连续 3 次内正常；第 4 次起指数退避（base 60s）；两次间隔 >10min 重置计数
 PAIRING_RATE_BASE_SECONDS = 60
 PAIRING_RATE_RESET_SECONDS = 600
+# 设备指令队列：拉取后超时未回执自动回滚为 pending（客户端崩溃不卡死队列）
+COMMAND_PICK_TIMEOUT_SECONDS = 600
 # 电子书书架：书籍目录（books/<id>/ 下 book.epub + cover + index.json）与书架元数据
 BOOKS_DIR = DATA_DIR / "books"
 BOOKS_FILE = DATA_DIR / "books.json"

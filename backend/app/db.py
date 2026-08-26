@@ -19,7 +19,7 @@ import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app import state
@@ -76,9 +76,30 @@ CREATE TABLE IF NOT EXISTS ops (
     payload   TEXT NOT NULL DEFAULT '{}',
     ts        TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS commands (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    type       TEXT NOT NULL,
+    payload    TEXT NOT NULL,               -- JSON 字符串
+    device_id  TEXT,                        -- NULL = 广播
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending|executing|done|failed
+    created_at TEXT NOT NULL,
+    picked_at  TEXT,                        -- ISO8601，超时回滚用
+    ack_at     TEXT,
+    ack_by     TEXT,
+    error      TEXT
+);
+CREATE TABLE IF NOT EXISTS device_assets (
+    device_id  TEXT PRIMARY KEY,
+    assets     TEXT NOT NULL,               -- JSON [{path, sha256, size}]
+    total      INTEGER NOT NULL DEFAULT 0,
+    by_type    TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist ON playlist_songs(playlist_id, position);
 CREATE INDEX IF NOT EXISTS idx_playback_ts ON playback_events(ts);
 CREATE INDEX IF NOT EXISTS idx_ops_cursor ON ops(id);
+CREATE INDEX IF NOT EXISTS idx_commands_pending ON commands(status, device_id);
+CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at);
 """
 
 # 迁移源文件 → 目标表（阅读进度单独处理：books.json 只迁 progress 字段，文件不重命名）
@@ -599,4 +620,178 @@ def ops_list_since(cursor: int = 0, limit: int | None = None) -> list[dict]:
                 "ts": r["ts"],
             }
         )
+    return out
+
+
+# ============ commands（设备指令队列：桌面端写，iOS 轮询拉取执行 + 回执） ============
+def commands_create(cmd_type: str, payload: dict, device_id: str | None = None) -> dict:
+    """创建一条指令（device_id=None = 广播）；返回 {id, type, status, created_at}"""
+    _ensure_ready()
+    payload_str = json.dumps(payload, ensure_ascii=False)
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _write_lock, _session() as conn:
+        cur = conn.execute(
+            "INSERT INTO commands (type, payload, device_id, status, created_at) "
+            "VALUES (?,?,?,'pending',?)",
+            (cmd_type, payload_str, device_id, created_at),
+        )
+        cmd_id = int(cur.lastrowid)
+    return {"id": cmd_id, "type": cmd_type, "status": "pending", "created_at": created_at}
+
+
+def commands_pending_pick(device_id: str | None = None) -> list[dict]:
+    """原子拉取待执行指令：先回滚超时 executing → pending，再取 pending 并标记 executing。
+
+    超时兜底：executing 且 picked_at 距今超过 state.COMMAND_PICK_TIMEOUT_SECONDS（默认 10 分钟）
+    → 回滚为 pending（清 picked_at），客户端拉取后崩溃不卡死队列。
+    整个流程在全局写锁 + 单事务内完成，多端并发拉取不会重复拿到同一条。
+    """
+    _ensure_ready()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat(timespec="seconds")
+    cutoff_iso = (now - timedelta(seconds=state.COMMAND_PICK_TIMEOUT_SECONDS)).isoformat(
+        timespec="seconds"
+    )
+    with _write_lock, _session() as conn:
+        conn.execute(
+            "UPDATE commands SET status='pending', picked_at=NULL "
+            "WHERE status='executing' AND picked_at IS NOT NULL AND picked_at < ?",
+            (cutoff_iso,),
+        )
+        rows = conn.execute(
+            "SELECT id, type, payload, created_at FROM commands "
+            "WHERE status='pending' AND (device_id IS NULL OR device_id = ?) "
+            "ORDER BY id ASC",
+            (device_id,),
+        ).fetchall()
+        conn.executemany(
+            "UPDATE commands SET status='executing', picked_at=? WHERE id=? AND status='pending'",
+            [(now_iso, r["id"]) for r in rows],
+        )
+    out = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"] or "{}")
+        except ValueError:
+            payload = {}
+        out.append(
+            {"id": r["id"], "type": r["type"], "payload": payload, "created_at": r["created_at"]}
+        )
+    return out
+
+
+def commands_ack(cmd_id: int, device_id: str, ok: bool, error: str = "") -> dict | None:
+    """执行回执：ok → done（清 error）；否则 failed + error。
+
+    重复 ack 幂等覆盖（已 done/failed 再 ack 直接覆盖）；指令不存在返回 None。
+    """
+    _ensure_ready()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    status = "done" if ok else "failed"
+    with _write_lock, _session() as conn:
+        cur = conn.execute(
+            "UPDATE commands SET status=?, ack_at=?, ack_by=?, error=? WHERE id=?",
+            (status, now, device_id, "" if ok else error, cmd_id),
+        )
+        if cur.rowcount == 0:
+            return None
+    return {"ok": True}
+
+
+def commands_list(status: str | None = None, device_id: str | None = None) -> list[dict]:
+    """指令历史：id 降序；可选 status / device_id 过滤；payload 反序列化为对象。"""
+    _ensure_ready()
+    sql = "SELECT * FROM commands"
+    conds: list[str] = []
+    params: list = []
+    if status:
+        conds.append("status = ?")
+        params.append(status)
+    if device_id is not None:
+        conds.append("device_id = ?")
+        params.append(device_id)
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY id DESC"
+    with _session() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    out = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"] or "{}")
+        except ValueError:
+            payload = {}
+        out.append(
+            {
+                "id": r["id"],
+                "type": r["type"],
+                "payload": payload,
+                "status": r["status"],
+                "device_id": r["device_id"],
+                "created_at": r["created_at"],
+                "picked_at": r["picked_at"],
+                "ack_at": r["ack_at"],
+                "ack_by": r["ack_by"],
+                "error": r["error"],
+            }
+        )
+    return out
+
+
+# ============ device_assets（iOS 资产清单上报，按设备 upsert） ============
+def device_assets_upsert(
+    device_id: str, assets: list[dict], total: int = 0, by_type: dict | None = None
+) -> None:
+    """按 device_id 一行 upsert（assets JSON + total + byType + updated_at 全量覆盖）"""
+    _ensure_ready()
+    assets_str = json.dumps(assets, ensure_ascii=False)
+    by_type_str = json.dumps(by_type or {}, ensure_ascii=False)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _write_lock, _session() as conn:
+        conn.execute(
+            "INSERT INTO device_assets (device_id, assets, total, by_type, updated_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(device_id) DO UPDATE SET "
+            "assets=excluded.assets, total=excluded.total, "
+            "by_type=excluded.by_type, updated_at=excluded.updated_at",
+            (device_id, assets_str, int(total), by_type_str, now),
+        )
+
+
+def device_assets_get(device_id: str) -> dict | None:
+    """单设备最近资产上报；无上报返回 None。"""
+    _ensure_ready()
+    with _session() as conn:
+        row = conn.execute(
+            "SELECT * FROM device_assets WHERE device_id = ?", (device_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "device_id": row["device_id"],
+        "assets": json.loads(row["assets"] or "[]"),
+        "total": row["total"],
+        "byType": json.loads(row["by_type"] or "{}"),
+        "assets_updated_at": row["updated_at"],
+    }
+
+
+def device_assets_all() -> dict[str, dict]:
+    """全部设备最近资产上报（device_id → {assets, total, byType, assets_updated_at}）"""
+    _ensure_ready()
+    with _session() as conn:
+        rows = conn.execute("SELECT * FROM device_assets").fetchall()
+    out = {}
+    for r in rows:
+        try:
+            assets = json.loads(r["assets"] or "[]")
+            by_type = json.loads(r["by_type"] or "{}")
+        except ValueError:
+            assets, by_type = [], {}
+        out[r["device_id"]] = {
+            "assets": assets,
+            "total": r["total"],
+            "byType": by_type,
+            "assets_updated_at": r["updated_at"],
+        }
     return out
