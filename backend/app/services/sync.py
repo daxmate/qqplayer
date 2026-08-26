@@ -15,17 +15,43 @@ LWW 需要的行级 ts 比较用 db._session() 短连接直查现有表（保持
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app import db, state
 from app.services import library_scan
 
+try:
+    from mutagen import File as MutagenFile
+    from mutagen.mp4 import MP4
+except ImportError:
+    MutagenFile = None
+    MP4 = None
+
 # 合法实体（与 ops 表 entity 列对应；未知实体整批拒绝）
 _ENTITIES = {"favorites", "playlists", "reading_progress", "playback_events"}
 
 # manifest 中 dicts 下载用扩展名（DICTS_DIR 下按需下载的目标）
 _DICT_EXTS = {".mdx", ".mdd"}
+
+# 文件内容 SHA-256 增量缓存：path -> (mtime_ms, size, sha256)。
+# mtime+size 未变 → 直接复用，避免每次 manifest 都重读文件内容（大库/大文件关键）。
+_HASH_CACHE: dict[str, tuple[int, int, str]] = {}
+_HASH_CACHE_LOCK = threading.Lock()
+
+# 封面判定增量缓存：song path -> (audio_mtime_ms, audio_size, cover_info)。
+# 内嵌封面判定要 mutagen 打开文件（贵）；audio mtime+size 未变 → 复用。
+# 文件夹封面（file 来源）每轮 stat 现取（便宜、不读内容），封面文件自身变动即时可见。
+_COVER_CACHE: dict[str, tuple[int, int, dict]] = {}
+_COVER_CACHE_LOCK = threading.Lock()
+
+# 文件夹封面候选名（对齐 /api/cover 判定顺序，取第一个存在者）
+_COVER_NAMES = ("cover.jpg", "cover.png", "folder.jpg", "front.jpg")
+
+# 无封面时的统一空值（cover_source 用字符串 "null"，前端判断与 file/embedded 一致）
+_NO_COVER = {"cover_source": "null", "cover_path": None, "cover_size": 0, "cover_mtime": 0}
 
 
 def _now_iso() -> str:
@@ -56,8 +82,116 @@ def _ts_ms(value) -> float:
 
 
 # ============ manifest ============
+def _file_sha256(path: str, mtime: int, size: int) -> str:
+    """文件内容 SHA-256（增量缓存）：mtime+size 与缓存一致 → 复用；否则 1MB 流式重算。
+
+    读取失败（文件缺失/被删）→ ""，不写入缓存。锁只保护 dict 读写，哈希计算在锁外。
+    """
+    with _HASH_CACHE_LOCK:
+        hit = _HASH_CACHE.get(path)
+        if hit is not None and hit[0] == mtime and hit[1] == size:
+            return hit[2]
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+    except OSError:
+        return ""
+    digest = h.hexdigest()
+    with _HASH_CACHE_LOCK:
+        _HASH_CACHE[path] = (mtime, size, digest)
+    return digest
+
+
+def _embedded_cover_info(p: Path) -> dict:
+    """mutagen 判定内嵌封面：MP3 ID3 有 APIC key / MP4 有 covr → embedded；否则 null。
+
+    只查 key 存在性，不读图片数据。任何异常回退 null（与 /api/cover 容错一致）。
+    """
+    if MutagenFile is None:
+        return dict(_NO_COVER)
+    try:
+        audio = MutagenFile(str(p))
+        if audio is not None:
+            tags = getattr(audio, "tags", None)
+            if tags is not None:
+                for key in tags:
+                    if str(key).startswith("APIC"):
+                        return {
+                            "cover_source": "embedded",
+                            "cover_path": None,
+                            "cover_size": 0,
+                            "cover_mtime": 0,
+                        }
+            if isinstance(audio, MP4) and "covr" in audio:
+                return {
+                    "cover_source": "embedded",
+                    "cover_path": None,
+                    "cover_size": 0,
+                    "cover_mtime": 0,
+                }
+    except Exception:
+        pass
+    return dict(_NO_COVER)
+
+
+def _cover_info(song_path: str, audio_mtime: int, audio_size: int) -> dict:
+    """封面判定（对齐 /api/cover）：文件夹 cover.jpg/png/folder.jpg/front.jpg → file；
+    否则内嵌 APIC/covr → embedded；都没有 → null。
+
+    - 文件夹封面每轮 stat 现取（不读内容）：封面文件自身变动即时可见（失效检测目标）
+    - 内嵌判定走增量缓存：audio mtime+size 未变 → 复用，避免 mutagen 重复打开文件
+    """
+    p = Path(song_path)
+    for cname in _COVER_NAMES:
+        cand = p.parent / cname
+        try:
+            st = cand.stat()
+        except OSError:
+            continue
+        return {
+            "cover_source": "file",
+            "cover_path": cname,
+            "cover_size": st.st_size,
+            "cover_mtime": int(st.st_mtime * 1000),
+        }
+    with _COVER_CACHE_LOCK:
+        hit = _COVER_CACHE.get(song_path)
+        if hit is not None and hit[0] == audio_mtime and hit[1] == audio_size:
+            return hit[2]
+    info = _embedded_cover_info(p)
+    with _COVER_CACHE_LOCK:
+        _COVER_CACHE[song_path] = (audio_mtime, audio_size, info)
+    return info
+
+
+def _lyric_info(song: dict) -> tuple[str | None, int]:
+    """歌词信息：复用曲库扫描的 lyric 发现逻辑（同名 .srt/.lrc → 目录内唯一歌词文件）。
+
+    返回 (lyric_path 文件名, lyric_mtime ms)；歌词文件缺失 → (None, 0)。
+    """
+    name = song.get("lyric") or None
+    if not name:
+        return None, 0
+    try:
+        st = (Path(song["path"]).parent / name).stat()
+    except OSError:
+        return None, 0
+    return name, int(st.st_mtime * 1000)
+
+
 def _manifest_songs() -> list[dict]:
-    """本地歌曲清单：复用曲库扫描结果，size/mtime 从文件系统现取（差量下载依据）"""
+    """本地歌曲清单：复用曲库扫描结果，size/mtime 从文件系统现取（差量下载依据）。
+
+    增强字段（iOS 同步中心用，增量计算不拖慢扫描）：
+    - sha256：文件内容哈希（_HASH_CACHE 增量缓存，mtime+size 未变直接复用）
+    - cover_source/cover_path/cover_size/cover_mtime：对齐 /api/cover 判定
+    - lyric_path/lyric_mtime：复用曲库扫描的歌词发现逻辑
+    """
     out: list[dict] = []
     for s in library_scan.scan_library():
         if not s.get("path"):
@@ -65,19 +199,26 @@ def _manifest_songs() -> list[dict]:
         try:
             st = Path(s["path"]).stat()
             size, mtime = st.st_size, int(st.st_mtime * 1000)
+            ok = True
         except OSError:
             size, mtime = 0, 0
-        out.append(
-            {
-                "path": s["path"],
-                "name": s.get("name", "") or "",
-                "artist": s.get("artist", "") or "",
-                "album": s.get("album", "") or "",
-                "duration": s.get("duration"),
-                "size": size,
-                "mtime": mtime,
-            }
-        )
+            ok = False
+        digest = _file_sha256(s["path"], mtime, size) if ok else ""
+        lyric_path, lyric_mtime = _lyric_info(s)
+        item = {
+            "path": s["path"],
+            "name": s.get("name", "") or "",
+            "artist": s.get("artist", "") or "",
+            "album": s.get("album", "") or "",
+            "duration": s.get("duration"),
+            "size": size,
+            "mtime": mtime,
+            "sha256": digest,
+            "lyric_path": lyric_path,
+            "lyric_mtime": lyric_mtime,
+        }
+        item.update(_cover_info(s["path"], mtime, size))
+        out.append(item)
     return out
 
 

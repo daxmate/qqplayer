@@ -5,6 +5,7 @@
 
 import asyncio
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -17,21 +18,26 @@ sys.path.insert(0, str(ROOT))
 
 import backend  # noqa: E402
 from app import db, state  # noqa: E402
+from app.services import sync as sync_service  # noqa: E402
 
 client = TestClient(backend.app)
 
 REMOTE_HOST = "192.168.1.50"  # 模拟局域网 iOS 设备（非 localhost）
 
 
-def make_mp3(path: Path, title: str = "本地歌", artist: str = "本地歌手"):
-    """生成带 ID3 标签的假 mp3（与 test_backend / test_stream_backend 同款）"""
-    from mutagen.id3 import ID3, TIT2, TPE1
+def make_mp3(
+    path: Path, title: str = "本地歌", artist: str = "本地歌手", cover: bytes | None = None
+):
+    """生成带 ID3 标签的假 mp3（与 test_backend / test_stream_backend 同款）；cover 非空时加 APIC"""
+    from mutagen.id3 import APIC, ID3, TIT2, TPE1
 
     frame = b"\xff\xfb\x90\x00" + b"\x00" * 413  # 完整 128kbps/44100 MPEG1 L3 帧
     path.write_bytes(frame * 3)
     tags = ID3()
     tags.add(TIT2(encoding=3, text=title))
     tags.add(TPE1(encoding=3, text=artist))
+    if cover:
+        tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover))
     tags.save(path)
 
 
@@ -47,9 +53,13 @@ def _isolate_data(tmp_path, monkeypatch):
     (tmp_path / "lib").mkdir()
     state._settings = None
     state._scan_cache = None
+    sync_service._HASH_CACHE.clear()
+    sync_service._COVER_CACHE.clear()
     yield
     state._settings = None
     state._scan_cache = None
+    sync_service._HASH_CACHE.clear()
+    sync_service._COVER_CACHE.clear()
 
 
 @pytest.fixture()
@@ -83,7 +93,7 @@ def _push(ops: list[dict]) -> dict:
 
 # ============ GET /api/sync/manifest 内容正确性 ============
 def test_manifest_songs_fields(local_library):
-    """songs 条目：path/name/artist/album/duration/size/mtime；size/mtime 来自文件系统"""
+    """songs 条目：path/name/artist/album/duration/size/mtime；增强字段 sha256/封面/歌词"""
     m = client.get("/api/sync/manifest").json()
     assert m["version"] and m["generated_at"]
     assert m["media_url_template"] == "/api/audio?path={path}"
@@ -94,8 +104,125 @@ def test_manifest_songs_fields(local_library):
     assert s["artist"] == "本地歌手"
     assert s["size"] == local_library.stat().st_size
     assert s["mtime"] == int(local_library.stat().st_mtime * 1000)
+    # 增强字段：sha256 与文件内容一致；无封面/歌词 → 空值约定
+    assert s["sha256"] == hashlib.sha256(local_library.read_bytes()).hexdigest()
+    assert isinstance(s["sha256"], str) and len(s["sha256"]) == 64
+    assert s["cover_source"] in ("file", "embedded", "null")
+    assert s["cover_path"] is None and s["cover_size"] == 0 and s["cover_mtime"] == 0
+    assert s["lyric_path"] is None and s["lyric_mtime"] == 0
     # 网络歌（path=None）不进 manifest（客户端无法离线下载）
     assert all(x.get("path") for x in m["songs"])
+
+
+# ============ manifest 增强：sha256 增量缓存 ============
+def test_manifest_sha256_incremental_cache(local_library, monkeypatch):
+    """sha256 增量缓存：mtime+size 未变 → 二次调用不重算（不重复读文件内容）"""
+    real = hashlib.sha256
+    calls = {"n": 0}
+
+    def counting(data=b""):
+        calls["n"] += 1
+        return real(data)
+
+    monkeypatch.setattr(sync_service.hashlib, "sha256", counting)
+    sync_service._HASH_CACHE.clear()
+    client.get("/api/sync/manifest")
+    first = calls["n"]
+    assert first >= 1  # 首轮确实算了哈希
+    client.get("/api/sync/manifest")
+    assert calls["n"] == first  # 缓存命中，零重算
+    assert len(sync_service._HASH_CACHE) == 1
+    ((mtime, size, digest),) = sync_service._HASH_CACHE.values()
+    st = local_library.stat()
+    assert (mtime, size) == (int(st.st_mtime * 1000), st.st_size)
+    assert digest == real(local_library.read_bytes()).hexdigest()
+
+
+def test_manifest_sha256_changes_on_content_change(local_library):
+    """同 path 修改文件内容 → 缓存失效重算，sha256 变化"""
+    m1 = client.get("/api/sync/manifest").json()["songs"][0]
+    new_bytes = b"\xff\xfb\x90\x00" + b"\x11" * 1000
+    local_library.write_bytes(new_bytes)
+    # 显式推进 mtime（内容变了 mtime 通常也变；推进到不同毫秒保证缓存键必然失效）
+    st = local_library.stat()
+    os.utime(local_library, (st.st_atime + 5, st.st_mtime + 5))
+    m2 = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m2["sha256"] == hashlib.sha256(new_bytes).hexdigest()
+    assert m2["sha256"] != m1["sha256"]
+
+
+# ============ manifest 增强：封面来源 ============
+def test_manifest_cover_file(local_library):
+    """文件夹 cover.jpg → cover_source=file + cover_path/size/mtime 正确"""
+    cover = local_library.parent / "cover.jpg"
+    cover.write_bytes(b"fake-jpeg-bytes")
+    m = client.get("/api/sync/manifest").json()["songs"][0]
+    st = cover.stat()
+    assert m["cover_source"] == "file"
+    assert m["cover_path"] == "cover.jpg"
+    assert m["cover_size"] == st.st_size
+    assert m["cover_mtime"] == int(st.st_mtime * 1000)
+
+
+def test_manifest_cover_priority(local_library):
+    """cover.jpg 优先于 folder.jpg（对齐 /api/cover 判定顺序，取第一个存在者）"""
+    d = local_library.parent
+    (d / "folder.jpg").write_bytes(b"folder")
+    (d / "cover.jpg").write_bytes(b"cover")
+    m = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m["cover_source"] == "file"
+    assert m["cover_path"] == "cover.jpg"
+    assert m["cover_size"] == (d / "cover.jpg").stat().st_size
+
+
+def test_manifest_cover_embedded(tmp_path):
+    """无文件夹封面但音频内嵌 APIC → cover_source=embedded；判定结果进 _COVER_CACHE"""
+    path = tmp_path / "lib" / "embedded.mp3"
+    make_mp3(path, cover=b"\xff\xd8\xff\xe0fake-jpeg")
+    m = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m["cover_source"] == "embedded"
+    assert m["cover_path"] is None
+    assert m["cover_size"] == 0 and m["cover_mtime"] == 0
+    assert str(path) in sync_service._COVER_CACHE  # 内嵌判定已缓存（audio mtime+size 键）
+
+
+def test_manifest_cover_none(local_library):
+    """无文件夹封面且无内嵌 APIC → cover_source=null，其余字段空值"""
+    m = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m["cover_source"] == "null"
+    assert m["cover_path"] is None
+    assert m["cover_size"] == 0 and m["cover_mtime"] == 0
+
+
+# ============ manifest 增强：歌词 ============
+def test_manifest_lyric(local_library):
+    """同目录同名 .lrc → lyric_path/lyric_mtime 正确"""
+    lrc = local_library.with_suffix(".lrc")
+    lrc.write_text("[00:00.00]test", encoding="utf-8")
+    m = client.get("/api/sync/manifest").json()["songs"][0]
+    st = lrc.stat()
+    assert m["lyric_path"] == "local.lrc"
+    assert m["lyric_mtime"] == int(st.st_mtime * 1000)
+
+
+def test_manifest_lyric_unique_sibling(local_library):
+    """无同名歌词但目录内唯一 .lrc → 用该文件（复用曲库扫描的发现逻辑）"""
+    lrc = local_library.parent / "唯一歌词.lrc"
+    lrc.write_text("[00:00.00]only", encoding="utf-8")
+    m = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m["lyric_path"] == "唯一歌词.lrc"
+    assert m["lyric_mtime"] == int(lrc.stat().st_mtime * 1000)
+
+
+def test_manifest_lyric_missing_file(local_library):
+    """扫描缓存有 lyric 但文件已删 → lyric_path=null / lyric_mtime=0"""
+    lrc = local_library.with_suffix(".lrc")
+    lrc.write_text("[00:00.00]gone", encoding="utf-8")
+    m1 = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m1["lyric_path"] == "local.lrc"
+    lrc.unlink()
+    m2 = client.get("/api/sync/manifest").json()["songs"][0]
+    assert m2["lyric_path"] is None and m2["lyric_mtime"] == 0
 
 
 def test_manifest_playlists():
