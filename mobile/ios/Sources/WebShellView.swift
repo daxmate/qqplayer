@@ -273,7 +273,7 @@ struct WebShellView: UIViewRepresentable {
             switch cmd {
             case "nativeReady", "nativeLog", "pullRevealStatusBar":
                 handleUILifecycleCommand(cmd, body: body)
-            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize":
+            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize", "assetIndex", "setWifiOnly":
                 handleSyncCommand(cmd, body: body)
             case "metaSave", "metaLoad":
                 handleMetaCommand(cmd, body: body)
@@ -489,7 +489,7 @@ extension WebShellView.Coordinator {
     }
 }
 
-// MARK: 桥消息分域 · 同步/资产（syncDownload / hasAsset / cancelDownloads / deleteAssets / assetsSize）
+// MARK: 桥消息分域 · 同步/资产（syncDownload / hasAsset / cancelDownloads / deleteAssets / assetsSize / assetIndex / setWifiOnly）
 
 extension WebShellView.Coordinator {
     /// 同步/资产域：批量下载、本地资产查询/删除/占用、取消下载
@@ -508,7 +508,9 @@ extension WebShellView.Coordinator {
                       DownloadManager.isSafePath(path)
                 else { continue }
                 let size = (it["size"] as? NSNumber)?.int64Value
-                requests.append(DownloadManager.Request(url: url, path: path, sha256: sha256, size: size))
+                // wifiOnly：前端每次请求带当前开关状态；未带 → nil（落回 DownloadManager 当前开关）
+                let wifiOnly = it["wifiOnly"] as? Bool
+                requests.append(DownloadManager.Request(url: url, path: path, sha256: sha256, size: size, wifiOnly: wifiOnly))
             }
             downloadManager.enqueue(requests)
         case "hasAsset":
@@ -522,17 +524,32 @@ extension WebShellView.Coordinator {
         case "cancelDownloads":
             downloadManager.cancelAll()
         case "deleteAssets":
-            // 删除本地资产：{scope: "all"|"audio"|"books"|"dicts"}；
-            // 删除完成后回推 assetsDeleted（前端不依赖也保留，便于调试）
-            if let scope = body["scope"] as? String {
+            // 删除本地资产：{paths: ["audio/xx.m4a", ...]} 精确删除（孤儿清理）
+            // 或 {scope: "all"|"audio"|"books"|"dicts"} 整类删除；
+            // 完成后回推 assetsDeleted（paths/scope 原样回显，便于前端对账）
+            if let paths = body["paths"] as? [String] {
+                downloadManager.deleteAssets(paths: paths) { [weak self] in
+                    self?.pushToWeb(event: "assetsDeleted", payload: ["paths": paths])
+                }
+            } else if let scope = body["scope"] as? String {
                 downloadManager.deleteAssets(scope: scope) { [weak self] in
                     self?.pushToWeb(event: "assetsDeleted", payload: ["scope": scope])
                 }
             }
+        case "assetIndex":
+            // 全部已下载资产索引（sha256 对比做"可更新"检测）→ 回推 assetIndex {assets: [{path, sha256, size}]}
+            pushToWeb(event: "assetIndex", payload: ["assets": downloadManager.assetIndex()])
+        case "setWifiOnly":
+            // 仅 Wi-Fi 下载开关（fire-and-forget，无回执）
+            if let on = body["on"] as? Bool {
+                downloadManager.setWifiOnly(on)
+            }
         default:
-            // assetsSize：本地资产总占用 → 回推 assetsSize {total}（字节，Int64 → JS number）
-            let total = downloadManager.assetsSize()
-            pushToWeb(event: "assetsSize", payload: ["total": total])
+            // assetsSize：本地资产占用 → 回推 assetsSize {total, byType}（字节，Int64 → JS number）
+            let info = downloadManager.assetsSizeByType()
+            var payload: [String: Any] = ["total": info.total]
+            payload["byType"] = info.byType
+            pushToWeb(event: "assetsSize", payload: payload)
         }
     }
 }

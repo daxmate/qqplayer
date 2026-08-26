@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Network
 
 /// 资产下载管理器（阶段3）：Web 同步清单的本地缓存落地。
 /// - 存储根：Documents/qqplayer-assets/<path>（path = audio/<sha256>.m4a 等相对路径）
@@ -7,6 +8,10 @@ import Foundation
 /// - 校验：CryptoKit SHA256；已知 size 先比对；不匹配删 .part 重下（含首下共 3 次尝试）
 /// - 并发 ≤ 3；cancelDownloads 清队列 + 取消进行中
 /// - 事件闭包全部回主线程（WebShellView Coordinator 桥接 → pushToWeb）
+/// - 资产注册表：Documents/meta/assets.json（{path: {sha256, size}} 原子写）；
+///   下载完成/已存在校验通过时写入，删除时移除（assetIndex 桥命令全量回推）
+/// - 仅 Wi-Fi：syncDownload items 带 wifiOnly 时，蜂窝/无网下挂起不启动（状态视为 queued，
+///   不发进度）；NWPathMonitor 检测到 Wi-Fi 自动恢复；已在下载的任务不打断
 final class DownloadManager: NSObject, URLSessionDataDelegate {
     /// 下载请求（来自 Web syncDownload 消息）
     struct Request {
@@ -14,6 +19,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         let path: String      // 沙盒相对路径，如 audio/<sha256>.m4a
         let sha256: String    // 期望 hex
         let size: Int64?      // 可选：已知大小先比对
+        let wifiOnly: Bool?   // 可选：仅 Wi-Fi 下载（前端每次请求带开关状态；nil → 落回管理器当前开关）
     }
 
     /// 单任务状态（class：队列 → 进行中 同一实例迁移，属性原地更新）
@@ -22,6 +28,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         let path: String
         let sha256: String
         let size: Int64?
+        let wifiOnly: Bool    // 仅 Wi-Fi 下载（入队时固化：r.wifiOnly ?? 管理器当前开关）
         let fileURL: URL      // 最终文件
         let partURL: URL      // 临时文件 .part（断点续传载体）
         var received: Int64 = 0          // 本次会话已接收（不含续传起点）
@@ -30,11 +37,12 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         var attempts = 1                 // 已尝试次数（含本次，校验失败重下）
         var lastProgressEmit: TimeInterval = 0
 
-        init(url: URL, path: String, sha256: String, size: Int64?, fileURL: URL, partURL: URL) {
+        init(url: URL, path: String, sha256: String, size: Int64?, wifiOnly: Bool, fileURL: URL, partURL: URL) {
             self.url = url
             self.path = path
             self.sha256 = sha256
             self.size = size
+            self.wifiOnly = wifiOnly
             self.fileURL = fileURL
             self.partURL = partURL
         }
@@ -58,25 +66,62 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     private var active: [URLSessionDataTask: Item] = [:]
     private var handles: [URLSessionDataTask: FileHandle] = [:]
     private let storageRoot: URL
+    private let sessionConfig: URLSessionConfiguration
+    private let pathProvider: NetworkPathProviding
+
+    /// 仅 Wi-Fi 下载开关（setWifiOnly 桥命令设置；syncDownload items 未带 wifiOnly 时的兜底）
+    private(set) var wifiOnly = false
+
+    /// 资产注册表锁（独立于 stateLock：deleteAssets 后台线程与下载完成可能并发访问）
+    private let registryLock = NSLock()
+    private var registry: [String: AssetRecord] = [:]
+    private var registryLoaded = false
 
     private lazy var session: URLSession = {
+        URLSession(configuration: sessionConfig, delegate: self, delegateQueue: nil)
+    }()
+
+    /// 默认入口（App 内）：Documents/qqplayer-assets + 真机 NWPathMonitor + 默认 session 配置
+    convenience override init() {
+        // Documents 目录由系统保证存在且恒含首条目，first! 安全（同 MetaStore 先例）
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        self.init(
+            storageRoot: docs.appendingPathComponent("qqplayer-assets", isDirectory: true),
+            pathProvider: NWPathMonitorProvider()
+        )
+    }
+
+    /// 定制入口（测试用）：临时目录 + 注入网络路径提供者 + 注入 session 配置（URLProtocol mock）
+    /// + 注入注册表 URL（默认 Documents/meta/assets.json）
+    init(storageRoot: URL, pathProvider: NetworkPathProviding, sessionConfig: URLSessionConfiguration? = nil, registryURL: URL? = nil) {
+        self.storageRoot = storageRoot
+        self.pathProvider = pathProvider
+        self.sessionConfig = sessionConfig ?? Self.makeDefaultSessionConfig()
+        if let registryURL {
+            self.registryURL = registryURL
+        } else {
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            self.registryURL = docs.appendingPathComponent("meta", isDirectory: true).appendingPathComponent("assets.json")
+        }
+        super.init()
+        // 网络路径变化（如蜂窝 → Wi-Fi）→ 重新调度被挂起的 wifiOnly 任务
+        pathProvider.onPathChange = { [weak self] _ in
+            self?.startNextIfPossible()
+        }
+        pathProvider.start()
+    }
+
+    private static func makeDefaultSessionConfig() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 60
-        let s = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        return s
-    }()
-
-    override init() {
-        // Documents 目录由系统保证存在且恒含首条目，first! 安全（同 MetaStore 先例）
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        storageRoot = docs.appendingPathComponent("qqplayer-assets", isDirectory: true)
-        super.init()
+        return config
     }
 
     /// 释放资源（Coordinator deinit 调用；URLSession 强持有 delegate，必须显式 invalidate 断环）
     func shutdown() {
         session.invalidateAndCancel()
+        pathProvider.stop()
         for (_, handle) in handles {
             try? handle.close()
         }
@@ -104,6 +149,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             let fileURL = storageRoot.appendingPathComponent(r.path)
             let item = Item(
                 url: r.url, path: r.path, sha256: r.sha256.lowercased(), size: r.size,
+                wifiOnly: r.wifiOnly ?? wifiOnly,
                 fileURL: fileURL,
                 partURL: fileURL.appendingPathExtension("part")
             )
@@ -112,25 +158,29 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             let dup = queue.contains { $0.path == r.path } || active.values.contains { $0.path == r.path }
             stateLock.unlock()
             if dup { continue }
-            // 最终文件已存在：size/哈希校验通过 → 直接完成；不通过 → 删除重下
+            // 最终文件已存在：size/哈希校验通过 → 直接完成并写注册表；不通过 → 删除重下
             // size 未知（0）时不比对大小（避免把已存在文件误删）
             if FileManager.default.fileExists(atPath: item.fileURL.path) {
+                let hash = sha256(of: item.fileURL)
                 if let size = r.size, size > 0, fileSize(item.fileURL) != size {
                     try? FileManager.default.removeItem(at: item.fileURL)
-                } else if contentHashMatches(item, hash: sha256(of: item.fileURL)) {
-                    emitDone(item, ok: true, sha256: sha256(of: item.fileURL) ?? "", localURL: item.fileURL.absoluteString, error: nil)
+                } else if contentHashMatches(item, hash: hash) {
+                    registerAsset(path: item.path, sha256: hash ?? "", size: fileSize(item.fileURL))
+                    emitDone(item, ok: true, sha256: hash ?? "", localURL: item.fileURL.absoluteString, error: nil)
                     continue
                 } else {
                     try? FileManager.default.removeItem(at: item.fileURL)
                 }
             }
-            // .part 已完整（上次下载完未落盘）→ 校验后直接落盘
+            // .part 已完整（上次下载完未落盘）→ 校验后直接落盘并写注册表
             // 注意：size 未知（0）时不能做此判断——fileSize(part)>=0 恒真会把不存在的 .part 误判为完整
             if !FileManager.default.fileExists(atPath: item.fileURL.path),
                let size = r.size, size > 0, fileSize(item.partURL) >= size {
-                if contentHashMatches(item, hash: sha256(of: item.partURL)) {
+                let hash = sha256(of: item.partURL)
+                if contentHashMatches(item, hash: hash) {
                     try? FileManager.default.moveItem(at: item.partURL, to: item.fileURL)
-                    emitDone(item, ok: true, sha256: sha256(of: item.partURL) ?? "", localURL: item.fileURL.absoluteString, error: nil)
+                    registerAsset(path: item.path, sha256: hash ?? "", size: fileSize(item.fileURL))
+                    emitDone(item, ok: true, sha256: hash ?? "", localURL: item.fileURL.absoluteString, error: nil)
                     continue
                 }
                 try? FileManager.default.removeItem(at: item.partURL)
@@ -176,13 +226,45 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         let fm = FileManager.default
         let root = storageRoot
         let rootPrefix = root.path + "/"
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             for sub in subdirs {
                 let dir = root.appendingPathComponent(sub, isDirectory: true)
                 // 纵深防御：白名单子目录也再校验一次仍在 storageRoot 之下
                 guard dir.path.hasPrefix(rootPrefix) else { continue }
                 try? fm.removeItem(at: dir)
             }
+            // 注册表同步：移除被删子目录（audio/ 等前缀）下的全部条目
+            self?.unregisterAssets(prefixes: subdirs.map { $0 + "/" })
+            DispatchQueue.main.async {
+                completion?()
+            }
+        }
+    }
+
+    /// 精确删除：按路径删除指定资产（deleteAssets {paths: [...]} 桥命令，孤儿清理用）。
+    /// 每个 path 经 isSafePath 校验（纵深防御再校验解析后仍在 storageRoot 之下）；
+    /// 逐个删除最终文件与 .part；同步移除注册表条目。删除前 cancelAll()（同 scope 删除）。
+    /// 后台执行；completion 在主线程回调（WebShellView 回推 assetsDeleted 用）。
+    func deleteAssets(paths: [String], completion: (() -> Void)? = nil) {
+        let valid = paths.filter(Self.isSafePath)
+        guard !valid.isEmpty else {
+            DispatchQueue.main.async {
+                completion?()
+            }
+            return
+        }
+        cancelAll()
+        let fm = FileManager.default
+        let root = storageRoot
+        let rootPrefix = root.path + "/"
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            for p in valid {
+                let fileURL = root.appendingPathComponent(p)
+                guard fileURL.path.hasPrefix(rootPrefix) else { continue }
+                try? fm.removeItem(at: fileURL)
+                try? fm.removeItem(at: fileURL.appendingPathExtension("part"))
+            }
+            self?.unregisterAssets(paths: valid)
             DispatchQueue.main.async {
                 completion?()
             }
@@ -205,6 +287,36 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         return total
     }
 
+    /// 本地资产占用统计（assetsSize 桥命令回执扩展）：
+    /// total = 全部文件（同 assetsSize()，兼容旧前端只读 total）；
+    /// byType 按 storageRoot 顶层子目录递归求和（audio/covers/lyric/books/dicts/meta），
+    /// 根目录散文件与未知子目录 → other；各类型无目录则为 0。
+    func assetsSizeByType() -> (total: Int64, byType: [String: Int64]) {
+        let knownTypes = ["audio", "covers", "lyric", "books", "dicts", "meta"]
+        var byType: [String: Int64] = ["other": 0]
+        for t in knownTypes {
+            byType[t] = 0
+        }
+        var total: Int64 = 0
+        guard let enumerator = FileManager.default.enumerator(
+            at: storageRoot, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return (0, byType) }
+        let rootDepth = storageRoot.pathComponents.count
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  let size = values.fileSize else { continue }
+            total += Int64(size)
+            // 顶层目录（相对 storageRoot）→ 类型；根目录直属文件 → other
+            let comps = url.pathComponents
+            let top = comps.count > rootDepth ? comps[rootDepth] : "other"
+            let type = knownTypes.contains(top) ? top : "other"
+            byType[type, default: 0] += Int64(size)
+        }
+        return (total, byType)
+    }
+
     /// 查本地资产（异步经 onAssetStatus 回传）
     func checkAsset(path: String) {
         guard Self.isSafePath(path) else {
@@ -220,13 +332,142 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         }
     }
 
+    /// 仅 Wi-Fi 下载开关（setWifiOnly 桥命令；fire-and-forget 无回执）。
+    /// 开启不影响已下载/进行中任务（简单版：只在启动前检查）；
+    /// 关闭时若有被挂起的 wifiOnly 任务 → 立即重新调度（当前若是 Wi-Fi 即开始）。
+    func setWifiOnly(_ on: Bool) {
+        wifiOnly = on
+        WebShellView.appendNativeLog("[Download] wifiOnly=\(on)")
+        if !on {
+            startNextIfPossible()
+        }
+    }
+
+    /// 队列中等待启动的任务数（测试/调试）
+    var queuedCount: Int {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return queue.count
+    }
+
+    /// 进行中任务数（测试/调试）
+    var activeCount: Int {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return active.count
+    }
+
+    // MARK: - 资产注册表（Documents/meta/assets.json）
+
+    /// 注册表条目结构：{path: {sha256, size}}
+    private struct AssetRecord: Codable {
+        var sha256: String
+        var size: Int64
+    }
+
+    private let registryURL: URL
+
+    /// 全部已下载资产索引（assetIndex 桥命令回推）：[{path, sha256, size}]，按 path 排序。
+    /// 注册表文件缺失/损坏 → 空数组（同 hasAsset 容错语义：不阻塞前端）。
+    func assetIndex() -> [[String: Any]] {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        loadRegistryIfNeeded()
+        return registry
+            .map { path, rec in ["path": path, "sha256": rec.sha256, "size": rec.size] }
+            .sorted { ($0["path"] as? String ?? "") < ($1["path"] as? String ?? "") }
+    }
+
+    /// 注册表写入（下载完成 / 已存在校验通过 / .part 完整直接落盘后）：原子落盘
+    func registerAsset(path: String, sha256: String, size: Int64) {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        loadRegistryIfNeeded()
+        registry[path] = AssetRecord(sha256: sha256, size: size)
+        saveRegistry()
+    }
+
+    /// 注册表移除单条（删除单个文件后）
+    func unregisterAsset(path: String) {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        loadRegistryIfNeeded()
+        if registry.removeValue(forKey: path) != nil {
+            saveRegistry()
+        }
+    }
+
+    /// 注册表批量移除（deleteAssets paths 精确删除后；一次落盘）
+    func unregisterAssets(paths: [String]) {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        loadRegistryIfNeeded()
+        var changed = false
+        for p in paths where registry.removeValue(forKey: p) != nil {
+            changed = true
+        }
+        if changed {
+            saveRegistry()
+        }
+    }
+
+    /// 注册表按顶层前缀批量移除（deleteAssets scope 删除后；如 "audio/"）
+    func unregisterAssets(prefixes: [String]) {
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        loadRegistryIfNeeded()
+        let toRemove = registry.keys.filter { key in
+            prefixes.contains { key.hasPrefix($0) }
+        }
+        for k in toRemove {
+            registry.removeValue(forKey: k)
+        }
+        if !toRemove.isEmpty {
+            saveRegistry()
+        }
+    }
+
+    private func loadRegistryIfNeeded() {
+        guard !registryLoaded else { return }
+        registryLoaded = true
+        guard let data = try? Data(contentsOf: registryURL),
+              let decoded = try? JSONDecoder().decode([String: AssetRecord].self, from: data)
+        else { return }
+        registry = decoded
+    }
+
+    /// 注册表原子写（先 .tmp 再 rename，同 MetaStore 模式）；失败静默返回 false，不抛
+    @discardableResult
+    private func saveRegistry() -> Bool {
+        guard let data = try? JSONEncoder().encode(registry) else { return false }
+        let dir = registryURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let tmp = dir.appendingPathComponent("assets.json.tmp")
+            if FileManager.default.fileExists(atPath: tmp.path) {
+                try FileManager.default.removeItem(at: tmp)
+            }
+            try data.write(to: tmp)
+            if FileManager.default.fileExists(atPath: registryURL.path) {
+                try FileManager.default.removeItem(at: registryURL)
+            }
+            try FileManager.default.moveItem(at: tmp, to: registryURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - 调度
 
     private func startNextIfPossible() {
         var toStart: [URLSessionDataTask] = []
         stateLock.lock()
-        while active.count < maxConcurrent, let item = queue.first {
-            queue.removeFirst()
+        while active.count < maxConcurrent {
+            // Wi-Fi 限制：wifiOnly 且当前非 Wi-Fi（蜂窝/无网）→ 跳过不启动，任务保留在队列等待
+            // （不发进度/完成事件，状态可视为 queued）；NWPathMonitor 切 Wi-Fi 时再次调度
+            guard let idx = queue.firstIndex(where: { !$0.wifiOnly || pathProvider.isWifi }) else { break }
+            let item = queue.remove(at: idx)
             let task = makeDataTask(for: item)
             active[task] = item
             toStart.append(task)
@@ -367,6 +608,8 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             emitDone(item, ok: false, sha256: item.sha256, localURL: nil, error: "落盘失败: \(error.localizedDescription)")
             return
         }
+        // 校验通过落盘 → 写资产注册表（下载完成时机，先于 emitDone 保证事件到达时索引已就绪）
+        registerAsset(path: item.path, sha256: hash, size: fileSize(item.fileURL))
         emitDone(item, ok: true, sha256: hash, localURL: item.fileURL.absoluteString, error: nil)
     }
 
@@ -453,5 +696,49 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.onDone?(path, ok, hash, localURL, error)
         }
+    }
+}
+
+// MARK: - 网络路径提供者（Wi-Fi 限制可测性）
+
+/// 网络路径抽象：DownloadManager 只依赖 isWifi + onPathChange；
+/// 真机走 NWPathMonitor（NWPathMonitorProvider），测试注入可控 mock。
+protocol NetworkPathProviding: AnyObject {
+    /// 当前是否 Wi-Fi（蜂窝/无网/其他 → false）
+    var isWifi: Bool { get }
+    /// 路径变化回调（Wi-Fi 状态变化 → 重新调度被挂起的 wifiOnly 任务）
+    var onPathChange: ((Bool) -> Void)? { get set }
+    func start()
+    func stop()
+}
+
+/// 真机实现：NWPathMonitor 监听 Wi-Fi/蜂窝（iOS 12+，deployment target 16 满足）。
+/// 路径更新在主线程落地（DownloadManager 的事件回主线程约定一致）。
+final class NWPathMonitorProvider: NetworkPathProviding {
+    private let monitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "com.daxmate.qqplayer.network-path")
+    private(set) var isWifi = false
+    var onPathChange: ((Bool) -> Void)?
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let wifi = path.status == .satisfied && path.usesInterfaceType(.wifi)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let changed = self.isWifi != wifi
+                self.isWifi = wifi
+                if changed {
+                    self.onPathChange?(wifi)
+                }
+            }
+        }
+    }
+
+    func start() {
+        monitor.start(queue: monitorQueue)
+    }
+
+    func stop() {
+        monitor.cancel()
     }
 }
