@@ -237,7 +237,10 @@ final class AVPlayerBridge {
         return (d.isFinite && d > 0) ? d : 0
     }
 
-    // MARK: - 时间观察（≈250ms 一次，驱动 Web timeupdate + 锁屏进度）
+    // MARK: - 时间观察（≈250ms 一次，驱动 Web timeupdate）
+    // 锁屏进度不在此更新：Apple 官方（WWDC 2022 Meet NowPlayingUI）明确系统会按
+    // 上次 elapsedTime + playbackRate 自动推算进度，周期性整体重建 nowPlayingInfo
+    // 是反模式——每秒 4 次 flood 会淹没 CarPlay/手表的 artwork 更新（2026-08-26 封面停首图根因）
 
     private func setupTimeObserver() {
         let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
@@ -246,7 +249,7 @@ final class AVPlayerBridge {
             let t = self.playerTime()
             let d = self.playerDuration()
             self.push("timeupdate", ["t": t, "duration": d])
-            self.metadataManager.updateNowPlayingProgress(t: t, duration: d, rate: Double(self.player.rate))
+            // 锁屏/手表进度由系统自动推算；播放/暂停/seek/切歌/中断恢复由事件驱动更新（见各调用点）
         }
     }
 

@@ -127,7 +127,8 @@ final class MetadataManager {
         URLSession.shared.dataTask(with: request) { data, _, _ in
             DispatchQueue.main.async {
                 if let data, let img = UIImage(data: data) {
-                    completion(MPMediaItemArtwork(boundsSize: img.size) { _ in img })
+                    let resized = self.resizedArtworkImage(img)
+                    completion(MPMediaItemArtwork(boundsSize: resized.size) { _ in resized })
                 } else {
                     completion(nil)
                 }
@@ -154,7 +155,8 @@ final class MetadataManager {
                 artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
             }
             guard let data = artworkData, let img = UIImage(data: data) else { return }
-            let art = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+            let resized = resizedArtworkImage(img)
+            let art = MPMediaItemArtwork(boundsSize: resized.size) { _ in resized }
             await MainActor.run {
                 guard self.currentItem?() === item else { return } // 已切歌：丢弃
                 self.embeddedArtwork = art
@@ -192,8 +194,23 @@ final class MetadataManager {
         guard cover.hasPrefix("data:image/") else { return nil }
         let base64 = cover.split(separator: ",").dropFirst().joined(separator: ",")
         if let data = Data(base64Encoded: String(base64)), let img = UIImage(data: data) {
-            return MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+            let resized = resizedArtworkImage(img)
+            return MPMediaItemArtwork(boundsSize: resized.size) { _ in resized }
         }
         return nil
+    }
+
+    /// 封面统一缩到最长边 ≤1024（Apple 建议上限）：超大图（如 2500×2500）传到
+    /// Apple Watch/锁屏/CarPlay 会失败或严重延迟（2026-08-26 真机三端封面异常排查）。
+    /// 小图原样返回（零开销）。
+    private func resizedArtworkImage(_ image: UIImage, maxDimension: CGFloat = 1024) -> UIImage {
+        let longest = max(image.size.width, image.size.height)
+        guard longest > maxDimension else { return image }
+        let scale = maxDimension / longest
+        let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
     }
 }
