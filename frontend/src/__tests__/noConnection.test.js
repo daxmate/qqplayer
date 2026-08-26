@@ -1,5 +1,6 @@
-// 未连接引导页测试（T4b 契约）：
-// 1. isShellUnpaired() 判定：无 qqplayerNative → false；壳环境无 server → true；有 server → false
+// 未连接引导页测试（T4b 契约，2026-08-26 深夜修订：macOS 壳误判修复回归）：
+// 1. isShellUnpaired() 判定：无 qqplayerIosBridge（桌面浏览器/macOS 壳）→ false；
+//    iOS 壳无 server → true；有 server → false
 // 2. NoConnectionView 渲染：标题/按钮存在；点「去配对」→ 桥收到 {cmd:"openPairing"}
 // 3. App.vue 接入：未连接时渲染引导页、已连接不渲染（mock isShellUnpaired + 组件）
 //
@@ -103,17 +104,24 @@ afterEach(() => {
 
 // ============ 1. isShellUnpaired 判定 ============
 describe("isShellUnpaired 未连接判定", () => {
-  it("桌面浏览器（无 qqplayerNative）→ false，即使无 server", () => {
+  it("桌面浏览器（无 qqplayerIosBridge）→ false，即使无 server", () => {
+    expect(isShellUnpaired()).toBe(false);
+  });
+
+  it("macOS 壳（只有 qqplayerNative、无 qqplayerIosBridge）→ false，不拦桌面版", () => {
+    window.qqplayerNative = true; // macOS 壳只注入这个标记（不写 localStorage server）
     expect(isShellUnpaired()).toBe(false);
   });
 
   it("iOS 壳且无 server（localStorage 空 + 桥空）→ true", () => {
     window.qqplayerNative = true;
+    window.qqplayerIosBridge = {}; // iOS 壳恒注入桥；未配对时 server 为空
     expect(isShellUnpaired()).toBe(true);
   });
 
   it("localStorage 有 qqplayer.server → false（即使桥空）", () => {
     window.qqplayerNative = true;
+    window.qqplayerIosBridge = {};
     localStorage.setItem("qqplayer.server", "http://192.168.1.5:17627");
     expect(isShellUnpaired()).toBe(false);
   });
@@ -126,6 +134,7 @@ describe("isShellUnpaired 未连接判定", () => {
 
   it("localStorage 读取抛错 → false 且不抛（异常不拦主界面）", () => {
     window.qqplayerNative = true;
+    window.qqplayerIosBridge = {};
     const orig = localStorageStub.getItem;
     localStorageStub.getItem = () => {
       throw new Error("denied");
