@@ -12,6 +12,7 @@ import Foundation
 enum MetaStore {
     /// 元数据目录（Documents/meta/；与资产目录 qqplayer-assets/ 平级）
     private static var metaDir: URL {
+        // Documents 目录由系统保证存在且恒含首条目，first! 安全（同 DownloadManager 先例）
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return docs.appendingPathComponent("meta", isDirectory: true)
     }

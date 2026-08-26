@@ -30,6 +30,7 @@ final class MiniHTTPServer {
         self.assetsRoot = assetsRoot
         self.port = Self.fixedPort
         do {
+            // fixedPort 是编译期常量 17888（合法端口范围 1-65535），rawValue 恒非 nil，! 安全
             listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: Self.fixedPort)!)
         } catch {
             return nil

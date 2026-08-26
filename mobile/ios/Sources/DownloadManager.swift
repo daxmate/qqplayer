@@ -68,6 +68,7 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
     }()
 
     override init() {
+        // Documents 目录由系统保证存在且恒含首条目，first! 安全（同 MetaStore 先例）
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         storageRoot = docs.appendingPathComponent("qqplayer-assets", isDirectory: true)
         super.init()

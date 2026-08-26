@@ -379,7 +379,7 @@ struct WebShellView: UIViewRepresentable {
 
         // MARK: WKNavigationDelegate
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
             // 移除 WebKit 内部菜单交互：iOS 16+ 选区编辑菜单由 UIEditMenuInteraction 驱动
             // （WebKit bug 244149 无官方禁用 API；移除后选区拖拽手柄保留、不再弹系统菜单）
             stripSystemMenuInteractions(from: webView)
@@ -396,7 +396,7 @@ struct WebShellView: UIViewRepresentable {
             }
         }
 
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
             // 忽略 -999（页面重载/导航取消）
             if (error as NSError).code == NSURLErrorCancelled { return }
             print("[WebShell] didFail: \(error.localizedDescription)")
