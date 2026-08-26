@@ -15,6 +15,8 @@ import UIKit
 ///     RemoteCommandManager —— MPRemoteCommandCenter 注册/回调 + setQueue 快照 + playQueueRelative
 ///     MetadataManager —— 封面/锁屏元数据（applyMetadata/内嵌封面预读/异步拉取/进度同步）
 ///   AVPlayer 在本类手里，组件通过闭包回调驱动播放/只读状态（见 init 接线）。
+/// - 播放核心状态机（Pass 3 架构层）：pendingSeek/playAfterSeek/中断策略/播放状态收拢到
+///     PlayerStateMachine（纯模型，可测）——本类只按状态机返回值执行 AVPlayer 副作用/推事件。
 final class AVPlayerBridge {
     private let player = AVPlayer()
     /// Bearer token（配对鉴权）：AVPlayer 拉流/短音频时附加 Authorization 头。
@@ -38,17 +40,11 @@ final class AVPlayerBridge {
     /// 远端命令 → Web（cmd: play|pause|toggle|next|prev|seekto）
     var onRemoteCommand: ((String, Double?) -> Void)?
 
-    /// 音频中断（来电/其他 app 抢占/系统语音）恢复状态机：began 时记录中断前是否在播放，
-    /// ended 后据此自动恢复（手动暂停后被打断不恢复）。纯逻辑在 InterruptionPolicy（可测）。
-    private var interruptionPolicy = InterruptionPolicy()
+    /// 音频中断（来电/其他 app 抢占/系统语音）恢复 + seek 串行化 + 播放状态：
+    /// Pass 3 抽成纯模型 PlayerStateMachine（可测）——pendingSeek/playAfterSeek/中断策略
+    /// 都收在状态机里，本类只按返回值执行 AVPlayer 副作用/推事件。
+    private var machine = PlayerStateMachine()
     private var interruptionObserver: NSObjectProtocol?
-
-    /// seek 串行化状态（2026-08-23 跟唱跳句竞态修复）：
-    /// Web 侧 currentTime setter 与 play() 是两个独立桥消息，AVPlayer.seek 异步完成前
-    /// 若收到 play → 从旧位置开始播（"下一句没用"/乱跳）。
-    /// 这里：seek 到达记 pendingSeek，完成回调里若期间收到过 play 请求则接着播放。
-    private var pendingSeek: CMTime?
-    private var playAfterSeek = false
 
     init() {
         configureAudioSession()
@@ -78,18 +74,18 @@ final class AVPlayerBridge {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.push("ended", [:])
+            guard let self, let event = self.machine.itemEnded() else { return }
+            self.push(event, [:])
         }
         // 播放/暂停状态（含 remote/线控/插拔耳机中断恢复）统一回传 Web；
         // 缓冲等待（waitingToPlayAtSpecifiedRate）不算暂停，避免网络抖一下 UI 闪暂停。
-        // seek 期间（pendingSeek 非 nil）不推 paused：精确 seek 会短暂 rate=0，
+        // seek 期间（状态机 isSeeking）不推 paused：精确 seek 会短暂 rate=0，
         // 误推 paused 会乱序覆盖 Web 侧播放状态（跟唱高亮卡死/跳句后状态错乱，2026-08-23）。
         rateObservation = player.observe(\.rate, options: [.new]) { [weak self] p, _ in
             guard let self else { return }
-            if p.rate > 0 {
-                self.push("playing", ["t": self.playerTime()])
-            } else if self.pendingSeek == nil && p.timeControlStatus != .waitingToPlayAtSpecifiedRate {
-                self.push("paused", ["t": self.playerTime()])
+            let isWaiting = p.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            if let event = self.machine.rateChanged(rate: Double(p.rate), isWaiting: isWaiting) {
+                self.push(event, ["t": self.playerTime()])
             }
         }
     }
@@ -109,15 +105,15 @@ final class AVPlayerBridge {
             }
         },
         "play": { bridge, _ in
-            if bridge.pendingSeek != nil {
-                // seek 进行中：标记待播，seek 完成回调里再 play（跳句/断点恢复场景）
-                bridge.playAfterSeek = true
-            } else {
-                bridge.player.play()
-                bridge.metadataManager.updateNowPlayingPlaybackState()
-            }
+            // seek 进行中（状态机 isSeeking）：标记待播，seek 完成回调里再 play（跳句/断点恢复场景）
+            let wasSeeking = bridge.machine.isSeeking
+            bridge.machine.requestPlay()
+            guard !wasSeeking else { return }
+            bridge.player.play()
+            bridge.metadataManager.updateNowPlayingPlaybackState()
         },
         "pause": { bridge, _ in
+            bridge.machine.requestPause()
             bridge.player.pause()
             bridge.metadataManager.updateNowPlayingPlaybackState()
         },
@@ -163,29 +159,31 @@ final class AVPlayerBridge {
 
     // MARK: - 播放原语
 
-    /// seek + 完成回调：完成前到达的 play 请求延迟到 seek 完成后执行。
-    /// 重复 seek 会覆盖 pendingSeek（AVPlayer 自动取消前一个 seek）。
+    /// seek + 完成回调：完成前到达的 play 请求延迟到 seek 完成后执行（状态机 playAfterSeek）。
+    /// 重复 seek 会覆盖进行中的 seek（AVPlayer 自动取消前一个 seek；状态机 seeking 标记幂等）。
     private func seek(to time: CMTime) {
-        pendingSeek = time
+        machine.seekStarted()
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.pendingSeek = nil
-                if self.playAfterSeek {
-                    self.playAfterSeek = false
+                let shouldPlay = self.machine.playAfterSeek
+                let isPausedNow = self.player.rate == 0
+                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate
+                let event = self.machine.seekFinished(shouldPlay: shouldPlay, isPausedNow: isPausedNow)
+                if shouldPlay {
                     self.player.play()
                     self.metadataManager.updateNowPlayingPlaybackState()
-                } else if self.player.rate == 0
-                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
+                } else if let event {
                     // seek 完成后仍是暂停（跳转暂停场景）：seek 期间 rate=0 的 paused 被抑制，
                     // 这里补推一次，Web 侧暂停状态不错失
-                    self.push("paused", ["t": self.playerTime()])
+                    self.push(event, ["t": self.playerTime()])
                 }
             }
         }
     }
 
     private func load(url: URL) {
+        machine.itemLoaded() // 状态机回 loading（item 替换；loadedmetadata 由 status 观察推）
         let item = makeItem(url: url)
         statusObservation?.invalidate()
         metadataManager.embeddedArtwork = nil // 上一首的内嵌封面作废，等新歌预读
@@ -258,6 +256,11 @@ final class AVPlayerBridge {
         onEvent?(name, payload)
     }
 
+    /// 状态机事件 → 原生 → Web 推送（事件名由 PushEvent 决定）
+    private func push(_ event: PushEvent, _ payload: [String: Any]) {
+        push(event.name, payload)
+    }
+
     // MARK: - 音频会话（后台播放）
 
     private func configureAudioSession() {
@@ -266,6 +269,7 @@ final class AVPlayerBridge {
         try? session.setActive(true)
         // 音频中断（来电/其他 app 抢占/系统语音）→ 结束后自动恢复播放。
         // 音乐播放器惯例：只要中断前在播就恢复（系统 Music 同行为）；手动暂停后被打断不恢复。
+        // 中断策略在 PlayerStateMachine（InterruptionPolicy 语义）：began 记录，ended 决定。
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil,
@@ -276,16 +280,16 @@ final class AVPlayerBridge {
                   let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
             switch type {
             case .began:
-                // 中断前正在播放（排除缓冲等待）→ 结束后恢复
-                self.interruptionPolicy.began(wasPlaying: self.player.rate > 0
-                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate)
-                // 系统已暂停 AVPlayer；同步 Web 暂停态（避免 UI 停留播放态）
-                if self.player.rate == 0
-                    && self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
-                    self.push("paused", ["t": self.playerTime()])
+                let rate = self.player.rate
+                let isWaiting = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                // 中断前正在播放（排除缓冲等待）→ 结束后恢复；系统已暂停 AVPlayer，
+                // 暂停态同步 Web（避免 UI 停留播放态）
+                if let event = self.machine.interruptionBegan(
+                    wasPlaying: rate > 0 && !isWaiting, isWaiting: isWaiting) {
+                    self.push(event, ["t": self.playerTime()])
                 }
             case .ended:
-                if self.interruptionPolicy.ended() {
+                if self.machine.interruptionEnded() != nil {
                     try? AVAudioSession.sharedInstance().setActive(true)
                     self.player.play()
                     self.metadataManager.updateNowPlayingPlaybackState()
