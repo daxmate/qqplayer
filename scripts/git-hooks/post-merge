@@ -1,0 +1,23 @@
+#!/bin/bash
+# post-merge / post-checkout hook：git pull / 切分支后自动重新生成 iOS Xcode 工程文件。
+# 背景：mobile/ios/QQPlayer.xcodeproj 不入库（gitignore），新增/删除 Swift 文件后旧工程
+# 不认识新文件，手动 Xcode 编译会报“找不到类型”（如 PlayerStateMachine）。
+# xcodegen 按 project.yml（目录级 sources 配置）重新生成，几秒钟，静默执行。
+# 未安装 xcodegen 时跳过（不阻断 git 操作），并提示安装方式。
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+if [ ! -d "$ROOT/mobile/ios" ]; then
+  exit 0
+fi
+if ! command -v xcodegen >/dev/null 2>&1; then
+  echo "ℹ️  [git hook] 未安装 xcodegen，跳过 iOS 工程重新生成（brew install xcodegen 后自动生效）"
+  exit 0
+fi
+
+(cd "$ROOT/mobile/ios" && xcodegen generate >/dev/null 2>&1)
+if [ $? -eq 0 ]; then
+  echo "✅ [git hook] iOS Xcode 工程已重新生成（新 Swift 文件已收录，直接编译即可）"
+else
+  echo "⚠️  [git hook] xcodegen generate 失败（可手动：cd mobile/ios && xcodegen generate）"
+fi
+exit 0

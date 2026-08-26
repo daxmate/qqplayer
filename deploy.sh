@@ -97,6 +97,17 @@ if [ "$RESTART_ONLY" = "0" ] && [ -d mobile/ios ]; then
   else
     echo "    ⚠️ iOS 壳资源链接失败（不影响服务器部署；build.sh 编译时会重试）"
   fi
+  # 重新生成 Xcode 工程文件：.xcodeproj 不入库（gitignore），拉新代码后新增/删除的
+  # Swift 文件不会被旧工程收录，手动 Xcode 编译会报“找不到类型”——这里自动 xcodegen。
+  if command -v xcodegen >/dev/null 2>&1; then
+    if (cd mobile/ios && xcodegen generate >/dev/null 2>&1); then
+      echo "    ✅ Xcode 工程已重新生成 (xcodegen)"
+    else
+      echo "    ⚠️ xcodegen generate 失败（可手动：cd mobile/ios && xcodegen generate）"
+    fi
+  else
+    echo "    ⚠️ 未安装 xcodegen（brew install xcodegen；或手动：cd mobile/ios && xcodegen generate）"
+  fi
 fi
 
 # 4. 确保 launchd 托管（plist 缺失时自动创建并加载）
