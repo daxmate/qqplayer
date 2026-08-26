@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### 🐛 修复：封面三端失效根因 / macOS 壳误判 / 弹窗定位 / 签名与装机（2026-08-26）
+
+- **锁屏/手表/CarPlay 封面不随歌切换（根因修复）**：对照 Apple WWDC 2022「Meet NowPlayingUI」官方推荐，删除 0.25s 周期观察器对 `MPNowPlayingInfoCenter` 的整体重建（每秒 4 次 flood 会淹没带宽受限端点的 artwork 更新）——锁屏进度改由系统按 `elapsedPlaybackTime + playbackRate` 自动推算，播放/暂停/拖进度/切歌/中断恢复事件驱动更新；封面图统一缩到最长边 ≤1024（Apple 建议上限，超大图传 Apple Watch 会失败）
+- **macOS 壳进不去（误判未连接）**：未连接引导页判定 `isShellUnpaired` 原以 `window.qqplayerNative` 为壳标记，macOS 壳也注入该标记且不写 localStorage server → 被误判为 iOS 未连接、全屏引导页挡住桌面版；改为以 iOS 壳专属桥 `qqplayerIosBridge` 为前置条件，桌面浏览器/macOS 壳恒不拦截
+- **指定歌词弹窗贴底 + 界面被顶上去**：弹窗直接挂在 App 根下，被 `.app > *:not(.bg-blur)` 的 `position:relative` 覆盖（优先级更高）导致 `fixed` 失效、掉进文档流底部占位；改用 `<Teleport to="body">`（与设置弹窗一致）后垂直居中正常
+- **iOS 播放页左右边距统一 20px**：封面区 16 / 歌词区 0 / 控制区 14 与歌名行、进度条 20 不一致；全部统一为 20px（封面框宽度同步调整、歌词卡片内部滚动区归零防双重缩进）
+- **签名配置写死 + 一键装机**：`project.yml` 写入 `DEVELOPMENT_TEAM` 并移除强制 ad-hoc 的 `CODE_SIGN_IDENTITY="-"`——xcodegen 重新生成工程后无需再在 Xcode 重选 team/签名；`build.sh --install` 一键完成 前端构建 → 签名构建 → 自动探测 iPhone → 安装 → 启动（`-allowProvisioningUpdates` 自动管理免费签名 profile）
+
 ### ✨ 标签刮削全面增强（刮削设置 / 右键入口 / 批量刮削 / 年代歌单）
 
 - **设置面板新增「刮削」tab**：刮削字段选择（title/artist/album/cover/year/genre/track/album_artist 写入白名单，默认全选）、重命名规则模板（`{artist}` `{title}` `{album}` `{track}` `{year}` 占位符 + `/` 建子目录 + 实时预览）、源优先级排序（网易云 / MusicBrainz）、批量刮削开关（默认关闭）、自定义刮削源（插件）占位
