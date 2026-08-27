@@ -2,11 +2,11 @@
 
 安全网：任何一方改动漏同步 → 立即红。只读校验，不修改产品代码。
 - 前端注册表：frontend/src/settingsIndex.ts（64 个 SettingEntry，id/category/subTab）
-- 前端默认值：frontend/src/composables/{playerCore,useSettings}.js 的 *_SETTINGS_DEFAULTS 常量
+- 前端默认值：frontend/src/composables/{playerState,useSettings}.ts/.js 的 *_SETTINGS_DEFAULTS 常量
 - 后端白名单：app/services/settings.py _SETTINGS_SPEC（11 namespace）+ app/state.py LIBRARY_SETTINGS_DEFAULTS
 
 已知缺口清单（禁止静默新增；修复后同步更新下方两个常量）：
-  ambientEnabled / miniSpectrumEnabled —— playerCore.js 注释明确的「前端本地持久化」字段（白名单故意不收）
+  ambientEnabled / miniSpectrumEnabled —— playerState.ts 注释明确的「前端本地持久化」字段（白名单故意不收）
   amllBlur / amllSpring / amllScale    —— AMLL 三特效（环境差异化默认），后端无字段，仅 localStorage 写透
   （glassCover / coverSize / shortcutOpenSettings 已于 P0-3 补入白名单，从清单移除）
 
@@ -27,7 +27,7 @@ from app import state  # noqa: E402
 from app.services.settings import _SETTINGS_SPEC  # noqa: E402
 
 FRONTEND_INDEX = REPO / "frontend" / "src" / "settingsIndex.ts"
-PLAYER_CORE = REPO / "frontend" / "src" / "composables" / "playerCore.js"
+PLAYER_CORE = REPO / "frontend" / "src" / "composables" / "playerState.ts"
 USE_SETTINGS = REPO / "frontend" / "src" / "composables" / "useSettings.js"
 
 # ============ 已知缺口清单（见模块 docstring；修复后同步更新）============
@@ -74,9 +74,10 @@ def _parse_registry() -> list[tuple[str, str, str]]:
 
 
 def _parse_defaults(path: Path, const_name: str) -> set[str]:
-    """解析 `export const XXX = { ... };` 的顶层 key 集合（花括号配对，忽略 // 注释行）"""
+    """解析 `export const XXX = { ... };` 的顶层 key 集合（花括号配对，忽略 // 注释行）
+    兼容类型标注：`export const XXX: SomeType = { ... }`（P1-2 拆分后 playerState.ts 带类型）"""
     src = path.read_text(encoding="utf-8")
-    m = re.search(rf"export const {const_name}\s*=\s*\{{", src)
+    m = re.search(rf"export const {const_name}(?::[^=]+)?\s*=\s*{{", src)
     assert m, f"{const_name} 未在 {path.name} 找到"
     start = m.end() - 1
     depth = 0
