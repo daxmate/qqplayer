@@ -44,7 +44,7 @@ const {
   VIDEO_SETTINGS_DEFAULTS,
 } = await import("../composables/usePlayer.js");
 
-const VALID_TYPES = ["toggle", "slider", "select", "text"];
+const VALID_TYPES = ["toggle", "slider", "select", "text", "custom"];
 const VALID_SUBTABS = ["app", "desktop"];
 
 // 语言包 key 解析（点路径逐级下钻）
@@ -308,7 +308,7 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
   }
 
   // 音乐库字段契约（独立 /api/library/settings API，字段在 state.librarySettings）
-  const LIB_FIELDS = new Set(["ignoreHidden", "autoRefresh", "autoScanOnStart"]);
+  const LIB_FIELDS = new Set(["audioExts", "ignoreHidden", "autoRefresh", "autoScanOnStart"]);
 
   it("每个 entry.id 落在前端默认值命名空间 keys 并集（library/sleepTimer/别名特判）", () => {
     const union = new Set([

@@ -38,6 +38,7 @@ export default {
     duration: "时长",
     eq: "均衡器",
     eqDesc: "10 段均衡（31Hz~16kHz，±12dB），实时生效",
+    eqGains: "均衡器增益（十段）",
     eqPreset: "均衡器预设",
     abLoopMaxCount: "AB 循环次数上限",
     fontColorPlaceholder: "如 #ffffff",
@@ -106,6 +107,12 @@ export default {
     cookiesFromBrowserDesc:
       "选择浏览器后，在线视频自动读取其登录 Cookie（yt-dlp --cookies-from-browser），B站可解析更高清晰度",
     cookiesFromBrowserNone: "不使用",
+    cookiesFromBrowserVivaldi: "Vivaldi",
+    cookiesFromBrowserChrome: "Chrome",
+    cookiesFromBrowserSafari: "Safari",
+    cookiesFromBrowserEdge: "Edge",
+    cookiesFromBrowserFirefox: "Firefox",
+    cookiesFromBrowserBrave: "Brave",
 
     // ============ 下载 ============
     download: "在线下载",

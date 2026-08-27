@@ -38,6 +38,8 @@ FRONTEND_LOCAL_REGISTRY = {
     "amllBlur",
     "amllSpring",
     "amllScale",
+    "glassCover",
+    "coverSize",
 }
 FRONTEND_LOCAL_DEFAULTS = FRONTEND_LOCAL_REGISTRY | {
     "coverSize",
@@ -128,7 +130,7 @@ DEFAULTS_UNION = set().union(
 
 def test_registry_count():
     """注册表项数快照：新增设置项需同步更新（并检查三方白名单）"""
-    assert len(REGISTRY) == 64
+    assert len(REGISTRY) == 70
 
 
 def test_registry_mapped_ids_subset_of_backend_whitelist():

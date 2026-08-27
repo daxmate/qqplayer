@@ -35,184 +35,143 @@
             <!-- ============ 播放 ============ -->
             <section v-if="tab === 'playback'" class="settings-scroll">
               <div class="group">
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.playMode") }}</div>
-                  <div class="setting-desc">{{ t("settings.playModeDesc") }}</div>
-                  <div class="seg">
-                    <button
-                      v-for="m in playModeOptions"
-                      :key="m.value"
-                      class="seg-btn"
-                      :class="{ on: playbackSettings.playMode === m.value }"
-                      @click="playbackSettings.playMode = m.value"
-                    >
-                      {{ t(m.labelKey) }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="playbackSettings.resumeLast = !playbackSettings.resumeLast"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.resumeLast") }}</div>
-                      <div class="setting-desc">{{ t("settings.resumeLastDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.resumeLast }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="playbackSettings.rememberVolume = !playbackSettings.rememberVolume"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.rememberVolume") }}</div>
-                      <div class="setting-desc">{{ t("settings.rememberVolumeDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.rememberVolume }"
-                      ><i
-                    /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="toggleFade">
-                    <div>
-                      <div class="setting-label">{{ t("settings.fade") }}</div>
-                      <div class="setting-desc">{{ t("settings.fadeDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.fadeSec > 0 }"><i /></span>
-                  </div>
-                  <div v-if="playbackSettings.fadeSec > 0" class="fade-row">
-                    <span class="setting-desc">{{ t("settings.duration") }}</span>
-                    <input
-                      v-model.number="playbackSettings.fadeSec"
-                      class="slider"
-                      type="range"
-                      min="0.5"
-                      max="5"
-                      step="0.5"
-                    />
-                    <span class="val-badge">{{ playbackSettings.fadeSec }}s</span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="playbackSettings.eqEnabled = !playbackSettings.eqEnabled"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.eq") }}</div>
-                      <div class="setting-desc">{{ t("settings.eqDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.eqEnabled }"><i /></span>
-                  </div>
-                  <template v-if="playbackSettings.eqEnabled">
-                    <div class="eq-presets">
-                      <button
-                        v-for="(p, key) in EQ_PRESETS"
-                        :key="key"
-                        class="ext-chip"
-                        :class="{ on: playbackSettings.eqPreset === key }"
-                        @click="setEqPreset(key)"
-                      >
-                        {{ t(p.labelKey) }}
-                      </button>
-                    </div>
-                    <div class="eq-grid">
-                      <div v-for="(f, i) in EQ_BANDS" :key="f" class="eq-cell">
-                        <span class="eq-val"
-                          >{{ playbackSettings.eqGains[i] > 0 ? "+" : ""
-                          }}{{ playbackSettings.eqGains[i] }}</span
-                        >
-                        <input
-                          class="eq-slider"
-                          type="range"
-                          min="-12"
-                          max="12"
-                          step="1"
-                          :value="playbackSettings.eqGains[i]"
-                          @input="setEqGain(i, $event.target.value)"
-                        />
-                        <span class="eq-band">{{ fmtBand(f) }}</span>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="
-                      playbackSettings.visualizerEnabled = !playbackSettings.visualizerEnabled
-                    "
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.visualizer") }}</div>
-                      <div class="setting-desc">{{ t("settings.visualizerDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.visualizerEnabled }"
-                      ><i
-                    /></span>
-                  </div>
-                  <template v-if="playbackSettings.visualizerEnabled">
-                    <!-- 主区域：封面取色氛围背景（任务 C 混合方案） -->
-                    <div
-                      class="sub-toggle-row"
-                      @click="playbackSettings.ambientEnabled = !playbackSettings.ambientEnabled"
-                    >
+                <template v-for="e in playbackMain" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- 切歌淡入淡出：开关联动滑杆（fadeSec > 0 才显示） -->
+                  <div v-else-if="e.id === 'fadeSec'" class="setting-item">
+                    <div class="toggle-row" @click="toggleFade">
                       <div>
-                        <div class="setting-label sub">{{ t("settings.ambient") }}</div>
-                        <div class="setting-desc sub">{{ t("settings.ambientDesc") }}</div>
+                        <div class="setting-label">{{ t("settings.fade") }}</div>
+                        <div class="setting-desc">{{ t("settings.fadeDesc") }}</div>
                       </div>
-                      <span class="switch sm" :class="{ on: playbackSettings.ambientEnabled }">
-                        <i
+                      <span class="switch" :class="{ on: playbackSettings.fadeSec > 0 }"
+                        ><i
                       /></span>
                     </div>
-                    <!-- ControlBar：迷你频谱条 -->
+                    <div v-if="playbackSettings.fadeSec > 0" class="fade-row">
+                      <span class="setting-desc">{{ t("settings.duration") }}</span>
+                      <input
+                        v-model.number="playbackSettings.fadeSec"
+                        class="slider"
+                        type="range"
+                        min="0.5"
+                        max="5"
+                        step="0.5"
+                      />
+                      <span class="val-badge">{{ playbackSettings.fadeSec }}s</span>
+                    </div>
+                  </div>
+                  <!-- EQ 面板：开关 + 预设 chips + 十段滑杆（eqEnabled 联动） -->
+                  <div v-else-if="e.id === 'eqEnabled'" class="setting-item">
                     <div
-                      class="sub-toggle-row"
+                      class="toggle-row"
+                      @click="playbackSettings.eqEnabled = !playbackSettings.eqEnabled"
+                    >
+                      <div>
+                        <div class="setting-label">{{ t("settings.eq") }}</div>
+                        <div class="setting-desc">{{ t("settings.eqDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: playbackSettings.eqEnabled }"><i /></span>
+                    </div>
+                    <template v-if="playbackSettings.eqEnabled">
+                      <div class="eq-presets">
+                        <button
+                          v-for="(p, key) in EQ_PRESETS"
+                          :key="key"
+                          class="ext-chip"
+                          :class="{ on: playbackSettings.eqPreset === key }"
+                          @click="setEqPreset(key)"
+                        >
+                          {{ t(p.labelKey) }}
+                        </button>
+                      </div>
+                      <div class="eq-grid">
+                        <div v-for="(f, i) in EQ_BANDS" :key="f" class="eq-cell">
+                          <span class="eq-val"
+                            >{{ playbackSettings.eqGains[i] > 0 ? "+" : ""
+                            }}{{ playbackSettings.eqGains[i] }}</span
+                          >
+                          <input
+                            class="eq-slider"
+                            type="range"
+                            min="-12"
+                            max="12"
+                            step="1"
+                            :value="playbackSettings.eqGains[i]"
+                            @input="setEqGain(i, $event.target.value)"
+                          />
+                          <span class="eq-band">{{ fmtBand(f) }}</span>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                  <!-- 视觉样式：总开关 + 氛围背景/迷你频谱子开关 + 样式 chips（visualizerEnabled 联动） -->
+                  <div v-else-if="e.id === 'visualizerEnabled'" class="setting-item">
+                    <div
+                      class="toggle-row"
                       @click="
-                        playbackSettings.miniSpectrumEnabled = !playbackSettings.miniSpectrumEnabled
+                        playbackSettings.visualizerEnabled = !playbackSettings.visualizerEnabled
                       "
                     >
                       <div>
-                        <div class="setting-label sub">{{ t("settings.miniSpectrum") }}</div>
-                        <div class="setting-desc sub">{{ t("settings.miniSpectrumDesc") }}</div>
+                        <div class="setting-label">{{ t("settings.visualizer") }}</div>
+                        <div class="setting-desc">{{ t("settings.visualizerDesc") }}</div>
                       </div>
-                      <span class="switch sm" :class="{ on: playbackSettings.miniSpectrumEnabled }">
-                        <i
+                      <span class="switch" :class="{ on: playbackSettings.visualizerEnabled }"
+                        ><i
                       /></span>
                     </div>
-                    <!-- 6 样式 chips：现在语义 = ControlBar 迷你频谱样式（主区域已是氛围背景，不再有样式） -->
-                    <div
-                      v-if="playbackSettings.miniSpectrumEnabled"
-                      class="ext-grid viz-style-grid"
-                    >
-                      <button
-                        v-for="s in VISUALIZER_STYLES"
-                        :key="s.id"
-                        class="ext-chip"
-                        :class="{ on: playbackSettings.visualizerStyle === s.id }"
-                        @click="playbackSettings.visualizerStyle = s.id"
+                    <template v-if="playbackSettings.visualizerEnabled">
+                      <!-- 主区域：封面取色氛围背景（任务 C 混合方案） -->
+                      <div
+                        class="sub-toggle-row"
+                        @click="playbackSettings.ambientEnabled = !playbackSettings.ambientEnabled"
                       >
-                        {{ t(s.labelKey) }}
-                      </button>
-                    </div>
-                  </template>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="playbackSettings.streamStats = !playbackSettings.streamStats"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.streamStats") }}</div>
-                      <div class="setting-desc">{{ t("settings.streamStatsDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.streamStats }"><i /></span>
+                        <div>
+                          <div class="setting-label sub">{{ t("settings.ambient") }}</div>
+                          <div class="setting-desc sub">{{ t("settings.ambientDesc") }}</div>
+                        </div>
+                        <span class="switch sm" :class="{ on: playbackSettings.ambientEnabled }">
+                          <i
+                        /></span>
+                      </div>
+                      <!-- ControlBar：迷你频谱条 -->
+                      <div
+                        class="sub-toggle-row"
+                        @click="
+                          playbackSettings.miniSpectrumEnabled =
+                            !playbackSettings.miniSpectrumEnabled
+                        "
+                      >
+                        <div>
+                          <div class="setting-label sub">{{ t("settings.miniSpectrum") }}</div>
+                          <div class="setting-desc sub">{{ t("settings.miniSpectrumDesc") }}</div>
+                        </div>
+                        <span
+                          class="switch sm"
+                          :class="{ on: playbackSettings.miniSpectrumEnabled }"
+                        >
+                          <i
+                        /></span>
+                      </div>
+                      <!-- 6 样式 chips：现在语义 = ControlBar 迷你频谱样式（主区域已是氛围背景，不再有样式） -->
+                      <div
+                        v-if="playbackSettings.miniSpectrumEnabled"
+                        class="ext-grid viz-style-grid"
+                      >
+                        <button
+                          v-for="s in VISUALIZER_STYLES"
+                          :key="s.id"
+                          class="ext-chip"
+                          :class="{ on: playbackSettings.visualizerStyle === s.id }"
+                          @click="playbackSettings.visualizerStyle = s.id"
+                        >
+                          {{ t(s.labelKey) }}
+                        </button>
+                      </div>
+                    </template>
                   </div>
-                </div>
+                </template>
               </div>
 
               <div class="group">
@@ -220,58 +179,54 @@
                   <Repeat2 :size="13" />
                   {{ t("settings.abLoop") }}
                 </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="playbackSettings.abVisual = !playbackSettings.abVisual"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.abVisual") }}</div>
-                      <div class="setting-desc">{{ t("settings.abVisualDesc") }}</div>
+                <template v-for="e in playbackAb" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- AB 循环计数：开关 + 次数滑杆/步进器（abLoopCountOn 联动） -->
+                  <div v-else-if="e.id === 'abLoopCountOn'" class="setting-item">
+                    <div
+                      class="toggle-row"
+                      @click="playbackSettings.abLoopCountOn = !playbackSettings.abLoopCountOn"
+                    >
+                      <div>
+                        <div class="setting-label">{{ t("settings.abLoopCount") }}</div>
+                        <div class="setting-desc">{{ t("settings.abLoopCountDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: playbackSettings.abLoopCountOn }"
+                        ><i
+                      /></span>
                     </div>
-                    <span class="switch" :class="{ on: playbackSettings.abVisual }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="playbackSettings.abLoopCountOn = !playbackSettings.abLoopCountOn"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.abLoopCount") }}</div>
-                      <div class="setting-desc">{{ t("settings.abLoopCountDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: playbackSettings.abLoopCountOn }"
-                      ><i
-                    /></span>
-                  </div>
-                  <div v-if="playbackSettings.abLoopCountOn" class="fade-row">
-                    <span class="setting-desc">{{ t("settings.count") }}</span>
-                    <input
-                      v-model.number="playbackSettings.abLoopMaxCount"
-                      class="slider"
-                      type="range"
-                      min="1"
-                      max="20"
-                      step="1"
-                    />
-                    <div class="stepper">
-                      <button
-                        class="step-btn"
-                        :title="t('settings.minusOne')"
-                        @click="stepAbMax(-1)"
-                      >
-                        −
-                      </button>
-                      <span class="val-badge">{{
-                        t("settings.loopTimes", { n: playbackSettings.abLoopMaxCount })
-                      }}</span>
-                      <button class="step-btn" :title="t('settings.plusOne')" @click="stepAbMax(1)">
-                        ＋
-                      </button>
+                    <div v-if="playbackSettings.abLoopCountOn" class="fade-row">
+                      <span class="setting-desc">{{ t("settings.count") }}</span>
+                      <input
+                        v-model.number="playbackSettings.abLoopMaxCount"
+                        class="slider"
+                        type="range"
+                        min="1"
+                        max="20"
+                        step="1"
+                      />
+                      <div class="stepper">
+                        <button
+                          class="step-btn"
+                          :title="t('settings.minusOne')"
+                          @click="stepAbMax(-1)"
+                        >
+                          −
+                        </button>
+                        <span class="val-badge">{{
+                          t("settings.loopTimes", { n: playbackSettings.abLoopMaxCount })
+                        }}</span>
+                        <button
+                          class="step-btn"
+                          :title="t('settings.plusOne')"
+                          @click="stepAbMax(1)"
+                        >
+                          ＋
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </template>
               </div>
 
               <div class="group">
@@ -279,29 +234,38 @@
                   <Timer :size="13" />
                   {{ t("settings.sleepTimer") }}
                 </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="toggleSleepTimer">
-                    <div>
-                      <div class="setting-label">{{ t("settings.sleepTimer") }}</div>
-                      <div class="setting-desc">{{ t("settings.sleepTimerDesc") }}</div>
+                <template v-for="e in playbackSleep" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- 睡眠定时器：开关启动/取消倒计时 + 时长 chips（sleepTimerOn 联动） -->
+                  <div v-else-if="e.id === 'sleepTimerOn'" class="setting-item">
+                    <div class="toggle-row" @click="toggleSleepTimer">
+                      <div>
+                        <div class="setting-label">{{ t("settings.sleepTimer") }}</div>
+                        <div class="setting-desc">{{ t("settings.sleepTimerDesc") }}</div>
+                      </div>
+                      <span class="switch" :class="{ on: playbackSettings.sleepTimerOn }"
+                        ><i
+                      /></span>
                     </div>
-                    <span class="switch" :class="{ on: playbackSettings.sleepTimerOn }"><i /></span>
                   </div>
-                </div>
-                <div v-if="playbackSettings.sleepTimerOn" class="setting-item">
-                  <div class="setting-label">{{ t("settings.duration") }}</div>
-                  <div class="ext-grid">
-                    <button
-                      v-for="m in SLEEP_TIMER_OPTIONS"
-                      :key="m"
-                      class="ext-chip"
-                      :class="{ on: playbackSettings.sleepTimerMinutes === m }"
-                      @click="setSleepTimerMinutes(m)"
-                    >
-                      {{ t("settings.minutes", { n: m }) }}
-                    </button>
+                  <div
+                    v-if="e.id === 'sleepTimerOn' && playbackSettings.sleepTimerOn"
+                    class="setting-item"
+                  >
+                    <div class="setting-label">{{ t("settings.duration") }}</div>
+                    <div class="ext-grid">
+                      <button
+                        v-for="m in SLEEP_TIMER_OPTIONS"
+                        :key="m"
+                        class="ext-chip"
+                        :class="{ on: playbackSettings.sleepTimerMinutes === m }"
+                        @click="setSleepTimerMinutes(m)"
+                      >
+                        {{ t("settings.minutes", { n: m }) }}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </template>
               </div>
             </section>
 
@@ -338,47 +302,24 @@
                   <FileAudio :size="13" />
                   {{ t("settings.fileTypes") }}
                 </div>
-                <div class="setting-item">
-                  <div class="setting-desc">{{ t("settings.fileTypesDesc") }}</div>
-                  <div v-if="librarySettings" class="ext-grid">
-                    <button
-                      v-for="ext in audioExtOptions"
-                      :key="ext"
-                      class="ext-chip"
-                      :class="{ on: librarySettings.audioExts.includes(ext) }"
-                      @click="toggleExt(ext)"
-                    >
-                      {{ ext.slice(1).toUpperCase() }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="toggleSetting('ignoreHidden')">
-                    <div>
-                      <div class="setting-label">{{ t("settings.ignoreHidden") }}</div>
-                      <div class="setting-desc">{{ t("settings.ignoreHiddenDesc") }}</div>
+                <template v-for="e in libraryFiles" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- 音频格式多选 chips（audioExts 数组，至少保留一种） -->
+                  <div v-else-if="e.id === 'audioExts'" class="setting-item">
+                    <div class="setting-desc">{{ t("settings.fileTypesDesc") }}</div>
+                    <div v-if="librarySettings" class="ext-grid">
+                      <button
+                        v-for="ext in audioExtOptions"
+                        :key="ext"
+                        class="ext-chip"
+                        :class="{ on: librarySettings.audioExts.includes(ext) }"
+                        @click="toggleExt(ext)"
+                      >
+                        {{ ext.slice(1).toUpperCase() }}
+                      </button>
                     </div>
-                    <span class="switch" :class="{ on: libBool('ignoreHidden') }"><i /></span>
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="toggleSetting('autoRefresh')">
-                    <div>
-                      <div class="setting-label">{{ t("settings.autoRefresh") }}</div>
-                      <div class="setting-desc">{{ t("settings.autoRefreshDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: libBool('autoRefresh') }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="toggleSetting('autoScanOnStart')">
-                    <div>
-                      <div class="setting-label">{{ t("settings.autoScanOnStart") }}</div>
-                      <div class="setting-desc">{{ t("settings.autoScanOnStartDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: libBool('autoScanOnStart') }"><i /></span>
-                  </div>
-                </div>
+                </template>
               </div>
             </section>
 
@@ -389,35 +330,25 @@
                   <Video :size="13" />
                   {{ t("settings.video") }}
                 </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.bilibiliCookie") }}</div>
-                  <div class="setting-desc">{{ t("settings.bilibiliCookieDesc") }}</div>
-                  <div class="setting-control">
-                    <input
-                      v-model="videoSettings.bilibiliCookie"
-                      class="lib-input"
-                      type="text"
-                      :placeholder="t('settings.bilibiliCookiePlaceholder')"
-                      spellcheck="false"
-                      autocomplete="off"
-                    />
+                <template v-for="e in videoEntries" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- 浏览器 Cookie 来源：原生 select（照抄原模板） -->
+                  <div v-else-if="e.id === 'cookiesFromBrowser'" class="setting-item">
+                    <div class="setting-label">{{ t("settings.cookiesFromBrowser") }}</div>
+                    <div class="setting-desc">{{ t("settings.cookiesFromBrowserDesc") }}</div>
+                    <div class="setting-control">
+                      <select v-model="videoSettings.cookiesFromBrowser" class="lib-input">
+                        <option value="">{{ t("settings.cookiesFromBrowserNone") }}</option>
+                        <option value="vivaldi">Vivaldi</option>
+                        <option value="chrome">Chrome</option>
+                        <option value="safari">Safari</option>
+                        <option value="edge">Edge</option>
+                        <option value="firefox">Firefox</option>
+                        <option value="brave">Brave</option>
+                      </select>
+                    </div>
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.cookiesFromBrowser") }}</div>
-                  <div class="setting-desc">{{ t("settings.cookiesFromBrowserDesc") }}</div>
-                  <div class="setting-control">
-                    <select v-model="videoSettings.cookiesFromBrowser" class="lib-input">
-                      <option value="">{{ t("settings.cookiesFromBrowserNone") }}</option>
-                      <option value="vivaldi">Vivaldi</option>
-                      <option value="chrome">Chrome</option>
-                      <option value="safari">Safari</option>
-                      <option value="edge">Edge</option>
-                      <option value="firefox">Firefox</option>
-                      <option value="brave">Brave</option>
-                    </select>
-                  </div>
-                </div>
+                </template>
               </div>
             </section>
 
@@ -428,103 +359,34 @@
                   <Download :size="13" />
                   {{ t("settings.download") }}
                 </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.downloadDir") }}</div>
-                  <div class="setting-desc">{{ t("settings.downloadDirDesc") }}</div>
-                  <div class="setting-control">
-                    <input
-                      v-model="downloadSettings.downloadDir"
-                      class="lib-input"
-                      :placeholder="t('settings.downloadDirPlaceholder')"
-                      spellcheck="false"
-                    />
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.maxSpeed") }}</div>
-                  <div class="setting-desc">{{ t("settings.maxSpeedDesc") }}</div>
-                  <div class="setting-control">
-                    <input
-                      v-model.number="downloadSettings.maxSpeed"
-                      class="lib-input"
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      :placeholder="t('settings.maxSpeedPlaceholder')"
-                    />
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.defaultQuality") }}</div>
-                  <div class="setting-desc">{{ t("settings.defaultQualityDesc") }}</div>
-                  <div class="ext-grid">
-                    <button
-                      v-for="q in DOWNLOAD_QUALITY_OPTIONS"
-                      :key="q.key"
-                      class="ext-chip"
-                      :class="{ on: downloadSettings.defaultQuality === q.key }"
-                      @click="downloadSettings.defaultQuality = q.key"
-                    >
-                      {{ t(q.labelKey) }}
-                    </button>
-                  </div>
-                </div>
-
-                <!-- 歌曲海：下载品质 + 下载引擎 + aria2 参数 + 夸克账号 -->
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.quarkQuality") }}</div>
-                  <div class="setting-desc">{{ t("settings.quarkQualityDesc") }}</div>
-                  <div class="seg" style="margin-top: 4px">
-                    <button
-                      v-for="q in QUARK_QUALITY_OPTIONS"
-                      :key="q.key"
-                      class="seg-btn"
-                      :class="{ on: downloadSettings.quarkQuality === q.key }"
-                      @click="downloadSettings.quarkQuality = q.key"
-                    >
-                      {{ t(q.labelKey) }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.downloadEngine") }}</div>
-                  <div class="setting-desc">{{ t("settings.downloadEngineDesc") }}</div>
-                  <div class="seg" style="margin-top: 4px">
-                    <button
-                      v-for="e in DOWNLOAD_ENGINE_OPTIONS"
-                      :key="e.key"
-                      class="seg-btn"
-                      :class="{ on: downloadSettings.engine === e.key }"
-                      @click="downloadSettings.engine = e.key"
-                    >
-                      {{ t(e.labelKey) }}
-                    </button>
-                  </div>
-                </div>
-                <template v-if="downloadSettings.engine === 'aria2'">
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.aria2Rpc") }}</div>
-                    <div class="setting-control">
-                      <input
-                        v-model="downloadSettings.aria2Rpc"
-                        class="lib-input"
-                        :placeholder="t('settings.aria2RpcPlaceholder')"
-                        spellcheck="false"
-                      />
+                <template v-for="e in downloadEntries" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- aria2 参数（engine==='aria2' 才显示，照抄原模板） -->
+                  <template v-else-if="e.id === 'aria2Rpc'">
+                    <div v-if="downloadSettings.engine === 'aria2'" class="setting-item">
+                      <div class="setting-label">{{ t("settings.aria2Rpc") }}</div>
+                      <div class="setting-control">
+                        <input
+                          v-model="downloadSettings.aria2Rpc"
+                          class="lib-input"
+                          :placeholder="t('settings.aria2RpcPlaceholder')"
+                          spellcheck="false"
+                        />
+                      </div>
                     </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.aria2Secret") }}</div>
-                    <div class="setting-control">
-                      <input
-                        v-model="downloadSettings.aria2Secret"
-                        class="lib-input"
-                        type="password"
-                        :placeholder="t('settings.aria2SecretPlaceholder')"
-                        spellcheck="false"
-                      />
+                    <div v-if="downloadSettings.engine === 'aria2'" class="setting-item">
+                      <div class="setting-label">{{ t("settings.aria2Secret") }}</div>
+                      <div class="setting-control">
+                        <input
+                          v-model="downloadSettings.aria2Secret"
+                          class="lib-input"
+                          type="password"
+                          :placeholder="t('settings.aria2SecretPlaceholder')"
+                          spellcheck="false"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  </template>
                 </template>
                 <div class="setting-item">
                   <div class="setting-label">{{ t("settings.quarkAccount") }}</div>
@@ -866,67 +728,7 @@
                     <Type :size="13" />
                     {{ t("settings.lyricAppearance") }}
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.scrollEngine") }}</div>
-                    <div class="setting-desc">
-                      {{ t("settings.scrollEngineDesc") }}
-                    </div>
-                    <div class="seg">
-                      <button
-                        v-for="e in engineOptions"
-                        :key="e.value"
-                        class="seg-btn"
-                        :class="{ on: lyricSettings.engine === e.value }"
-                        @click="lyricSettings.engine = e.value"
-                      >
-                        {{ t(e.labelKey) }}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.lyricFont") }}</div>
-                    <div class="seg">
-                      <button
-                        v-for="f in fontOptions"
-                        :key="f.value"
-                        class="seg-btn"
-                        :class="{ on: lyricSettings.fontFamily === f.value }"
-                        :style="{ fontFamily: f.css }"
-                        @click="lyricSettings.fontFamily = f.value"
-                      >
-                        {{ t(f.labelKey) }}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">
-                      {{ t("settings.fontSize") }}
-                      <span class="val-badge">{{ lyricSettings.fontSize }}px</span>
-                    </div>
-                    <div class="setting-desc">{{ t("settings.fontSizeDesc") }}</div>
-                    <input
-                      v-model.number="lyricSettings.fontSize"
-                      class="slider"
-                      type="range"
-                      min="14"
-                      max="30"
-                      step="1"
-                    />
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.align") }}</div>
-                    <div class="seg">
-                      <button
-                        v-for="a in alignOptions"
-                        :key="a.value"
-                        class="seg-btn"
-                        :class="{ on: lyricSettings.align === a.value }"
-                        @click="lyricSettings.align = a.value"
-                      >
-                        {{ t(a.labelKey) }}
-                      </button>
-                    </div>
-                  </div>
+                  <SettingRow v-for="e in lyricAppearance" :key="e.id" :entry="e" />
                 </div>
 
                 <!-- 显示内容 -->
@@ -935,36 +737,7 @@
                     <Eye :size="13" />
                     {{ t("settings.lyricDisplay") }}
                   </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="lyricSettings.showRoma = !lyricSettings.showRoma"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.showRoma") }}</div>
-                        <div class="setting-desc">{{ t("settings.showRomaDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.showRoma }"><i /></span>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="toggle-row" @click="lyricSettings.showZh = !lyricSettings.showZh">
-                      <div>
-                        <div class="setting-label">{{ t("settings.showZh") }}</div>
-                        <div class="setting-desc">{{ t("settings.showZhDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.showZh }"><i /></span>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="toggle-row" @click="lyricSettings.showSec = !lyricSettings.showSec">
-                      <div>
-                        <div class="setting-label">{{ t("settings.showSection") }}</div>
-                        <div class="setting-desc">{{ t("settings.showSectionDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.showSec }"><i /></span>
-                    </div>
-                  </div>
+                  <SettingRow v-for="e in lyricDisplay" :key="e.id" :entry="e" />
                 </div>
 
                 <!-- 效果行为 -->
@@ -973,44 +746,7 @@
                     <Sparkles :size="13" />
                     {{ t("settings.lyricEffects") }}
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.focusPos") }}</div>
-                    <div class="seg">
-                      <button
-                        v-for="p in focusOptions"
-                        :key="p.value"
-                        class="seg-btn"
-                        :class="{ on: lyricSettings.focusPos === p.value }"
-                        @click="lyricSettings.focusPos = p.value"
-                      >
-                        {{ t(p.labelKey) }}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="lyricSettings.fadeMask = !lyricSettings.fadeMask"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.fadeMask") }}</div>
-                        <div class="setting-desc">{{ t("settings.fadeMaskDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.fadeMask }"><i /></span>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="lyricSettings.autoScroll = !lyricSettings.autoScroll"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.autoScroll") }}</div>
-                        <div class="setting-desc">{{ t("settings.autoScrollDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.autoScroll }"><i /></span>
-                    </div>
-                  </div>
+                  <SettingRow v-for="e in lyricEffects" :key="e.id" :entry="e" />
                   <!-- AMLL 三特效（仅 amll 引擎生效）：壳内默认开 = 满血；浏览器默认关防 CPU 高占用 -->
                   <div class="amll-head">
                     <span class="amll-head-label">{{ t("settings.amllEffects") }}</span>
@@ -1027,42 +763,7 @@
                   <div v-if="amllPerfHintOpen" class="setting-desc hint amll-perf-hint">
                     {{ t("settings.amllPerfHint") }}
                   </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="lyricSettings.amllBlur = !lyricSettings.amllBlur"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.amllBlur") }}</div>
-                        <div class="setting-desc">{{ t("settings.amllBlurDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.amllBlur }"><i /></span>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="lyricSettings.amllSpring = !lyricSettings.amllSpring"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.amllSpring") }}</div>
-                        <div class="setting-desc">{{ t("settings.amllSpringDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.amllSpring }"><i /></span>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="lyricSettings.amllScale = !lyricSettings.amllScale"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.amllScale") }}</div>
-                        <div class="setting-desc">{{ t("settings.amllScaleDesc") }}</div>
-                      </div>
-                      <span class="switch" :class="{ on: lyricSettings.amllScale }"><i /></span>
-                    </div>
-                  </div>
+                  <SettingRow v-for="e in lyricAmll" :key="e.id" :entry="e" />
                 </div>
 
                 <!-- 时间校准 -->
@@ -1071,30 +772,34 @@
                     <Timer :size="13" />
                     {{ t("settings.lyricCalib") }}
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-label">
-                      {{ t("settings.lyricOffset") }}
-                      <span class="val-badge">{{ fmtOffset }}</span>
-                      <button
-                        v-if="lyricSettings.offset !== 0"
-                        class="mini-btn"
-                        @click="lyricSettings.offset = 0"
-                      >
-                        {{ t("settings.reset") }}
-                      </button>
+                  <template v-for="e in lyricCalib" :key="e.id">
+                    <SettingRow v-if="!e.render" :entry="e" />
+                    <!-- 歌词延迟：徽标 + 一键归零 + 滑杆（offset 特殊显示） -->
+                    <div v-else-if="e.id === 'offset'" class="setting-item">
+                      <div class="setting-label">
+                        {{ t("settings.lyricOffset") }}
+                        <span class="val-badge">{{ fmtOffset }}</span>
+                        <button
+                          v-if="lyricSettings.offset !== 0"
+                          class="mini-btn"
+                          @click="lyricSettings.offset = 0"
+                        >
+                          {{ t("settings.reset") }}
+                        </button>
+                      </div>
+                      <div class="setting-desc">
+                        {{ t("settings.lyricOffsetDesc") }}
+                      </div>
+                      <input
+                        v-model.number="lyricSettings.offset"
+                        class="slider"
+                        type="range"
+                        min="-2"
+                        max="2"
+                        step="0.1"
+                      />
                     </div>
-                    <div class="setting-desc">
-                      {{ t("settings.lyricOffsetDesc") }}
-                    </div>
-                    <input
-                      v-model.number="lyricSettings.offset"
-                      class="slider"
-                      type="range"
-                      min="-2"
-                      max="2"
-                      step="0.1"
-                    />
-                  </div>
+                  </template>
                 </div>
 
                 <!-- 歌词来源 -->
@@ -1103,21 +808,7 @@
                     <Database :size="13" />
                     {{ t("settings.lyricSource") }}
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.sourcePriority") }}</div>
-                    <div class="seg">
-                      <button
-                        v-for="s in sourceOptions"
-                        :key="s.value"
-                        class="seg-btn"
-                        :class="{ on: lyricSettings.source === s.value }"
-                        @click="lyricSettings.source = s.value"
-                      >
-                        {{ t(s.labelKey) }}
-                      </button>
-                    </div>
-                    <div class="setting-desc">{{ t("settings.sourcePriorityDesc") }}</div>
-                  </div>
+                  <SettingRow v-for="e in lyricSource" :key="e.id" :entry="e" />
                 </div>
 
                 <!-- APP 歌词配色（参照桌面歌词） -->
@@ -1126,52 +817,60 @@
                     <Palette :size="13" />
                     {{ t("settings.colorSchemeGroup") }}
                   </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.colorScheme") }}</div>
-                    <div class="desktop-schemes">
-                      <button
-                        v-for="sc in LYRIC_SCHEMES"
-                        :key="sc.key"
-                        class="scheme-swatch"
-                        :class="{ on: lyricSettings.colorScheme === sc.key }"
-                        :title="t(sc.labelKey)"
-                        @click="applyLyricScheme(sc)"
-                      >
-                        <span
-                          class="scheme-dot"
-                          :style="{ background: sc.jp || 'var(--accent)' }"
-                        />
-                        <span class="scheme-dot" :style="{ background: sc.zh || 'var(--text2)' }" />
-                        <span class="scheme-name">{{ t(sc.labelKey) }}</span>
-                      </button>
+                  <template v-for="e in lyricColors" :key="e.id">
+                    <SettingRow v-if="!e.render" :entry="e" />
+                    <!-- 配色方案 swatches（applyLyricScheme 联动清除自定义色） -->
+                    <div v-else-if="e.id === 'colorScheme'" class="setting-item">
+                      <div class="setting-label">{{ t("settings.colorScheme") }}</div>
+                      <div class="desktop-schemes">
+                        <button
+                          v-for="sc in LYRIC_SCHEMES"
+                          :key="sc.key"
+                          class="scheme-swatch"
+                          :class="{ on: lyricSettings.colorScheme === sc.key }"
+                          :title="t(sc.labelKey)"
+                          @click="applyLyricScheme(sc)"
+                        >
+                          <span
+                            class="scheme-dot"
+                            :style="{ background: sc.jp || 'var(--accent)' }"
+                          />
+                          <span
+                            class="scheme-dot"
+                            :style="{ background: sc.zh || 'var(--text2)' }"
+                          />
+                          <span class="scheme-name">{{ t(sc.labelKey) }}</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.fontColor") }}</div>
-                    <div class="desktop-colors">
-                      <label class="color-field">
-                        <span>{{ t("settings.mainLine") }}</span>
-                        <input v-model="lyricSettings.jpColor" type="color" class="color-input" />
-                      </label>
-                      <label class="color-field">
-                        <span>{{ t("settings.translation") }}</span>
-                        <input v-model="lyricSettings.zhColor" type="color" class="color-input" />
-                      </label>
-                      <button
-                        v-if="lyricSettings.jpColor || lyricSettings.zhColor"
-                        class="mini-btn"
-                        @click="
-                          lyricSettings.jpColor = '';
-                          lyricSettings.zhColor = '';
-                        "
-                      >
-                        {{ t("settings.clearCustom") }}
-                      </button>
+                    <!-- 字体颜色（主行/翻译两个色块 + 清除自定义） -->
+                    <div v-else-if="e.id === 'jpColor'" class="setting-item">
+                      <div class="setting-label">{{ t("settings.fontColor") }}</div>
+                      <div class="desktop-colors">
+                        <label class="color-field">
+                          <span>{{ t("settings.mainLine") }}</span>
+                          <input v-model="lyricSettings.jpColor" type="color" class="color-input" />
+                        </label>
+                        <label class="color-field">
+                          <span>{{ t("settings.translation") }}</span>
+                          <input v-model="lyricSettings.zhColor" type="color" class="color-input" />
+                        </label>
+                        <button
+                          v-if="lyricSettings.jpColor || lyricSettings.zhColor"
+                          class="mini-btn"
+                          @click="
+                            lyricSettings.jpColor = '';
+                            lyricSettings.zhColor = '';
+                          "
+                        >
+                          {{ t("settings.clearCustom") }}
+                        </button>
+                      </div>
+                      <div class="setting-desc">
+                        {{ t("settings.fontColorDesc") }}
+                      </div>
                     </div>
-                    <div class="setting-desc">
-                      {{ t("settings.fontColorDesc") }}
-                    </div>
-                  </div>
+                  </template>
                 </div>
               </template>
 
@@ -1182,132 +881,49 @@
                     <MonitorPlay :size="13" />
                     {{ t("settings.lyricDesktop") }}
                   </div>
-                  <div class="setting-item">
-                    <div
-                      class="toggle-row"
-                      @click="desktopLyricSettings.showZh = !desktopLyricSettings.showZh"
-                    >
-                      <div>
-                        <div class="setting-label">{{ t("settings.showZh") }}</div>
-                        <div class="setting-desc">{{ t("settings.desktopShowZhDesc") }}</div>
+                  <template v-for="e in desktopEntries" :key="e.id">
+                    <SettingRow v-if="!e.render" :entry="e" />
+                    <!-- 配色方案 swatches（applyScheme 联动清除自定义色） -->
+                    <div v-else-if="e.id === 'desktopColorScheme'" class="setting-item">
+                      <div class="setting-label">{{ t("settings.colorScheme") }}</div>
+                      <div class="desktop-schemes">
+                        <button
+                          v-for="sc in DESKTOP_LYRIC_SCHEMES"
+                          :key="sc.key"
+                          class="scheme-swatch"
+                          :class="{ on: desktopLyricSettings.colorScheme === sc.key }"
+                          :title="t(sc.labelKey)"
+                          @click="applyScheme(sc)"
+                        >
+                          <span class="scheme-dot" :style="{ background: sc.jp }" />
+                          <span class="scheme-dot" :style="{ background: sc.zh }" />
+                          <span class="scheme-name">{{ t(sc.labelKey) }}</span>
+                        </button>
                       </div>
-                      <span class="switch" :class="{ on: desktopLyricSettings.showZh }"><i /></span>
                     </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.font") }}</div>
-                    <div class="seg">
-                      <button
-                        v-for="f in fontOptions"
-                        :key="f.value"
-                        class="seg-btn"
-                        :class="{ on: desktopLyricSettings.fontFamily === f.value }"
-                        @click="desktopLyricSettings.fontFamily = f.value"
-                      >
-                        {{ t(f.labelKey) }}
-                      </button>
+                    <!-- 字体颜色（主行/翻译两个色块，桌面版无清除按钮） -->
+                    <div v-else-if="e.id === 'desktopJpColor'" class="setting-item">
+                      <div class="setting-label">{{ t("settings.fontColor") }}</div>
+                      <div class="desktop-colors">
+                        <label class="color-field">
+                          <span>{{ t("settings.mainLine") }}</span>
+                          <input
+                            v-model="desktopLyricSettings.jpColor"
+                            type="color"
+                            class="color-input"
+                          />
+                        </label>
+                        <label class="color-field">
+                          <span>{{ t("settings.translation") }}</span>
+                          <input
+                            v-model="desktopLyricSettings.zhColor"
+                            type="color"
+                            class="color-input"
+                          />
+                        </label>
+                      </div>
                     </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.mainFontSize") }}</div>
-                    <div class="val-badge">{{ desktopLyricSettings.fontSize }}px</div>
-                    <input
-                      v-model.number="desktopLyricSettings.fontSize"
-                      class="slider"
-                      type="range"
-                      min="18"
-                      max="40"
-                      step="1"
-                    />
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.translationFontSize") }}</div>
-                    <div class="val-badge">{{ desktopLyricSettings.zhSize }}px</div>
-                    <input
-                      v-model.number="desktopLyricSettings.zhSize"
-                      class="slider"
-                      type="range"
-                      min="12"
-                      max="26"
-                      step="1"
-                    />
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.alignShort") }}</div>
-                    <div class="seg">
-                      <button
-                        v-for="a in alignOptions"
-                        :key="a.value"
-                        class="seg-btn"
-                        :class="{ on: desktopLyricSettings.align === a.value }"
-                        @click="desktopLyricSettings.align = a.value"
-                      >
-                        {{ t(a.labelKey) }}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.windowWidth") }}</div>
-                    <div class="val-badge">{{ desktopLyricSettings.width }}px</div>
-                    <input
-                      v-model.number="desktopLyricSettings.width"
-                      class="slider"
-                      type="range"
-                      min="300"
-                      max="800"
-                      step="10"
-                    />
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.windowHeight") }}</div>
-                    <div class="val-badge">{{ desktopLyricSettings.height }}px</div>
-                    <input
-                      v-model.number="desktopLyricSettings.height"
-                      class="slider"
-                      type="range"
-                      min="80"
-                      max="300"
-                      step="10"
-                    />
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.colorScheme") }}</div>
-                    <div class="desktop-schemes">
-                      <button
-                        v-for="sc in DESKTOP_LYRIC_SCHEMES"
-                        :key="sc.key"
-                        class="scheme-swatch"
-                        :class="{ on: desktopLyricSettings.colorScheme === sc.key }"
-                        :title="t(sc.labelKey)"
-                        @click="applyScheme(sc)"
-                      >
-                        <span class="scheme-dot" :style="{ background: sc.jp }" />
-                        <span class="scheme-dot" :style="{ background: sc.zh }" />
-                        <span class="scheme-name">{{ t(sc.labelKey) }}</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="setting-item">
-                    <div class="setting-label">{{ t("settings.fontColor") }}</div>
-                    <div class="desktop-colors">
-                      <label class="color-field">
-                        <span>{{ t("settings.mainLine") }}</span>
-                        <input
-                          v-model="desktopLyricSettings.jpColor"
-                          type="color"
-                          class="color-input"
-                        />
-                      </label>
-                      <label class="color-field">
-                        <span>{{ t("settings.translation") }}</span>
-                        <input
-                          v-model="desktopLyricSettings.zhColor"
-                          type="color"
-                          class="color-input"
-                        />
-                      </label>
-                    </div>
-                  </div>
+                  </template>
                   <div class="setting-item">
                     <button class="desktop-reset-btn" @click="resetDesktopLyric">
                       <RotateCcw :size="13" />
@@ -1331,42 +947,8 @@
                   <LayoutGrid :size="13" />
                   {{ t("settings.uiPrefs") }}
                 </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="uiSettings.showSongInfo = !uiSettings.showSongInfo"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.showSongInfo") }}</div>
-                      <div class="setting-desc">{{ t("settings.showSongInfoDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.showSongInfo }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="uiSettings.karaokeShowTime = !uiSettings.karaokeShowTime"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.karaokeShowTime") }}</div>
-                      <div class="setting-desc">{{ t("settings.karaokeShowTimeDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.karaokeShowTime }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div
-                    class="toggle-row"
-                    @click="uiSettings.karaokeShowNum = !uiSettings.karaokeShowNum"
-                  >
-                    <div>
-                      <div class="setting-label">{{ t("settings.karaokeShowNum") }}</div>
-                      <div class="setting-desc">{{ t("settings.karaokeShowNumDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.karaokeShowNum }"><i /></span>
-                  </div>
-                </div>
+                <SettingRow v-for="e in uiPrefs" :key="e.id" :entry="e" :mobile="isMobile" />
+                <!-- 卡拉OK跟唱模式：播放器状态（非设置字段），保留手写 -->
                 <div class="setting-item">
                   <div class="toggle-row" @click="state.karaokeOn = !state.karaokeOn">
                     <div>
@@ -1376,81 +958,37 @@
                     <span class="switch" :class="{ on: state.karaokeOn }"><i /></span>
                   </div>
                 </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="uiSettings.coverBlur = !uiSettings.coverBlur">
-                    <div>
-                      <div class="setting-label">{{ t("settings.coverBlur") }}</div>
-                      <div class="setting-desc">{{ t("settings.coverBlurDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.coverBlur }"><i /></span>
-                  </div>
-                </div>
-                <!-- 毛玻璃封面（仅移动端）：播放页背景铺当前歌曲封面模糊图 -->
-                <div v-if="isMobile" class="setting-item">
-                  <div class="toggle-row" @click="uiSettings.glassCover = !uiSettings.glassCover">
-                    <div>
-                      <div class="setting-label">{{ t("settings.glassCover") }}</div>
-                      <div class="setting-desc">{{ t("settings.glassCoverDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.glassCover }"><i /></span>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="uiSettings.showCover = !uiSettings.showCover">
-                    <div>
-                      <div class="setting-label">{{ t("settings.showCover") }}</div>
-                      <div class="setting-desc">{{ t("settings.showCoverDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.showCover }"><i /></span>
-                  </div>
-                </div>
-                <!-- 列表封面：列表行/卡片缩略图独立开关（与 showCover 大封面互不影响；桌面/移动端均生效） -->
-                <div class="setting-item">
+                <template v-for="e in uiCover" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" :mobile="isMobile" />
+                  <!-- 封面区域大小：自适应（0）或手动固定值（140~420）；滑块联动 + 恢复默认回自适应 -->
                   <div
-                    class="toggle-row"
-                    @click="uiSettings.showListCover = !uiSettings.showListCover"
+                    v-else-if="e.id === 'coverSize' && uiSettings.showCover && !isMobile"
+                    class="setting-item"
                   >
-                    <div>
-                      <div class="setting-label">{{ t("settings.showListCover") }}</div>
-                      <div class="setting-desc">{{ t("settings.showListCoverDesc") }}</div>
+                    <div class="setting-label">
+                      {{ t("settings.coverSize") }}
+                      <span class="val-badge">
+                        {{ coverSizeLabel }}
+                      </span>
+                      <button
+                        v-if="uiSettings.coverSize !== 0"
+                        class="mini-btn"
+                        @click="resetCoverSize()"
+                      >
+                        {{ t("settings.resetCoverSize") }}
+                      </button>
                     </div>
-                    <span class="switch" :class="{ on: uiSettings.showListCover }"><i /></span>
+                    <div class="setting-desc">{{ t("settings.coverSizeDesc") }}</div>
+                    <input
+                      v-model.number="coverSizeSlider"
+                      class="slider"
+                      type="range"
+                      :min="COVER_MIN"
+                      :max="COVER_MAX"
+                      step="10"
+                    />
                   </div>
-                </div>
-                <!-- 封面区域大小：自适应（0）或手动固定值（140~420）；滑块联动 + 恢复默认回自适应 -->
-                <div v-if="uiSettings.showCover && !isMobile" class="setting-item">
-                  <div class="setting-label">
-                    {{ t("settings.coverSize") }}
-                    <span class="val-badge">
-                      {{ coverSizeLabel }}
-                    </span>
-                    <button
-                      v-if="uiSettings.coverSize !== 0"
-                      class="mini-btn"
-                      @click="resetCoverSize()"
-                    >
-                      {{ t("settings.resetCoverSize") }}
-                    </button>
-                  </div>
-                  <div class="setting-desc">{{ t("settings.coverSizeDesc") }}</div>
-                  <input
-                    v-model.number="coverSizeSlider"
-                    class="slider"
-                    type="range"
-                    :min="COVER_MIN"
-                    :max="COVER_MAX"
-                    step="10"
-                  />
-                </div>
-                <div class="setting-item">
-                  <div class="toggle-row" @click="uiSettings.compact = !uiSettings.compact">
-                    <div>
-                      <div class="setting-label">{{ t("settings.compact") }}</div>
-                      <div class="setting-desc">{{ t("settings.compactDesc") }}</div>
-                    </div>
-                    <span class="switch" :class="{ on: uiSettings.compact }"><i /></span>
-                  </div>
-                </div>
+                </template>
               </div>
 
               <!-- 主题与强调色 -->
@@ -1459,48 +997,24 @@
                   <Palette :size="13" />
                   {{ t("settings.themeAccent") }}
                 </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.appearance") }}</div>
-                  <div class="seg" style="margin-top: 8px">
-                    <button
-                      v-for="th in themeOptions"
-                      :key="th.value"
-                      class="seg-btn"
-                      :class="{ on: uiSettings.theme === th.value }"
-                      @click="uiSettings.theme = th.value"
-                    >
-                      {{ t(th.labelKey) }}
-                    </button>
+                <template v-for="e in uiTheme" :key="e.id">
+                  <SettingRow v-if="!e.render" :entry="e" />
+                  <!-- 强调色预设（色板） -->
+                  <div v-else-if="e.id === 'accent'" class="setting-item">
+                    <div class="setting-label">{{ t("settings.accent") }}</div>
+                    <div class="accent-grid">
+                      <button
+                        v-for="a in ACCENT_OPTIONS"
+                        :key="a.key"
+                        class="accent-swatch"
+                        :class="{ on: uiSettings.accent === a.key }"
+                        :style="{ '--swatch': a.color, '--swatch2': a.color2 }"
+                        :title="a.key"
+                        @click="uiSettings.accent = a.key"
+                      />
+                    </div>
                   </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.miniTheme") }}</div>
-                  <div class="seg" style="margin-top: 8px">
-                    <button
-                      v-for="m in miniThemeOptions"
-                      :key="m.value"
-                      class="seg-btn"
-                      :class="{ on: uiSettings.miniTheme === m.value }"
-                      @click="uiSettings.miniTheme = m.value"
-                    >
-                      {{ t(m.labelKey) }}
-                    </button>
-                  </div>
-                </div>
-                <div class="setting-item">
-                  <div class="setting-label">{{ t("settings.accent") }}</div>
-                  <div class="accent-grid">
-                    <button
-                      v-for="a in ACCENT_OPTIONS"
-                      :key="a.key"
-                      class="accent-swatch"
-                      :class="{ on: uiSettings.accent === a.key }"
-                      :style="{ '--swatch': a.color, '--swatch2': a.color2 }"
-                      :title="a.key"
-                      @click="uiSettings.accent = a.key"
-                    />
-                  </div>
-                </div>
+                </template>
               </div>
             </section>
 
@@ -1711,9 +1225,6 @@ import {
   setEqGain,
   desktopLyricSettings,
   downloadSettings,
-  DOWNLOAD_QUALITY_OPTIONS,
-  QUARK_QUALITY_OPTIONS,
-  DOWNLOAD_ENGINE_OPTIONS,
   DOWNLOAD_SETTINGS_DEFAULTS,
   videoSettings,
   VIDEO_SETTINGS_DEFAULTS,
@@ -1755,6 +1266,8 @@ import {
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 import PairingSettings from "./PairingSettings.vue";
 import ScrapeResultModal from "./ScrapeResultModal.vue";
+import SettingRow from "./SettingRow.vue";
+import { entriesByCategory } from "../settingsIndex.js";
 import {
   scrapingSettings,
   SCRAPING_FIELDS,
@@ -2006,22 +1519,10 @@ function onNativeLibrary(e) {
   loadLibrary();
 }
 
-const themeOptions = [
-  { value: "dark", labelKey: "settings.themeDark" },
-  { value: "light", labelKey: "settings.themeLight" },
-  { value: "auto", labelKey: "settings.themeAuto" },
-];
-
 // 频点显示：1000 及以上缩写为 K（31/62/125/250/500/1K/2K/4K/8K/16K）
 function fmtBand(f) {
   return f >= 1000 ? `${f / 1000}K` : String(f);
 }
-
-const miniThemeOptions = [
-  { value: "theme", labelKey: "settings.miniThemeTheme" },
-  { value: "dark", labelKey: "settings.miniThemeDark" },
-  { value: "light", labelKey: "settings.miniThemeLight" },
-];
 
 // 音乐库设置（后端持久化）：模板里用 computed 解包，null=还没加载
 const librarySettings = computed(() => state.librarySettings);
@@ -2029,10 +1530,6 @@ const audioExtOptions = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus
 // 保存防抖：连续点开关/格式时合并成一次请求（patch 累积不丢）
 let libSaveTimer = null;
 let libPatch = {};
-
-function libBool(key) {
-  return librarySettings.value ? librarySettings.value[key] : false;
-}
 
 function saveLib(patch) {
   error.value = "";
@@ -2055,11 +1552,6 @@ function toggleExt(ext) {
   const next = cur.includes(ext) ? cur.filter((e) => e !== ext) : [...cur, ext];
   if (!next.length) return; // 至少保留一种格式，防止扫不出任何歌
   saveLib({ audioExts: next });
-}
-
-function toggleSetting(key) {
-  if (!librarySettings.value) return;
-  saveLib({ [key]: !librarySettings.value[key] });
 }
 
 // ============ 刮削设置（scraping · /api/library/settings 持久化） ============
@@ -2137,38 +1629,71 @@ function onBatchLibrary() {
 // 每次实例创建时求值（isPairingEnabled 非响应式，模块级缓存会过期）
 const categories = computed(() => getSettingsCategories());
 
-const playModeOptions = [
-  { value: "order", labelKey: "settings.playModeOrder" },
-  { value: "shuffle", labelKey: "settings.playModeShuffle" },
-  { value: "repeatOne", labelKey: "settings.playModeRepeatOne" },
-];
-const fontOptions = [
-  { value: "system", labelKey: "settings.fontSystem", css: "" },
-  { value: "serif", labelKey: "settings.fontSerif", css: '"Songti SC", "SimSun", serif' },
-  {
-    value: "rounded",
-    labelKey: "settings.fontRounded",
-    css: '"Yuanti SC", "PingFang SC", sans-serif',
-  },
-];
-const engineOptions = [
-  { value: "amll", labelKey: "settings.engineAmll" },
-  { value: "spring", labelKey: "settings.engineSpring" },
-  { value: "native", labelKey: "settings.engineNative" },
-];
-const alignOptions = [
-  { value: "left", labelKey: "settings.alignLeft" },
-  { value: "center", labelKey: "settings.alignCenter" },
-  { value: "right", labelKey: "settings.alignRight" },
-];
-const focusOptions = [
-  { value: 0.33, labelKey: "settings.focusUpperThird" },
-  { value: 0.5, labelKey: "settings.focusCenter" },
-];
-const sourceOptions = [
-  { value: "local", labelKey: "settings.sourceLocal" },
-  { value: "online", labelKey: "settings.sourceOnline" },
-];
+// ============ 注册表驱动渲染（P0-2）：普通设置 tab 的项来自 settingsIndex 注册表 ============
+// 分组保留手写结构，组内按注册表顺序渲染：纯简单项走 SettingRow，特殊交互项按 id 分发手写块
+// （render 标记的非宿主项（如 eqPreset/ambientEnabled 等块内成员）自然落空不渲染）。
+const pickIds = (arr, ids) => arr.filter((e) => ids.includes(e.id));
+const playbackEntries = entriesByCategory("playback");
+const playbackMain = pickIds(playbackEntries, [
+  "playMode",
+  "resumeLast",
+  "rememberVolume",
+  "fadeSec",
+  "eqEnabled",
+  "eqPreset",
+  "eqGains",
+  "visualizerEnabled",
+  "ambientEnabled",
+  "miniSpectrumEnabled",
+  "visualizerStyle",
+  "streamStats",
+]);
+const playbackAb = pickIds(playbackEntries, ["abVisual", "abLoopCountOn", "abLoopMaxCount"]);
+const playbackSleep = pickIds(playbackEntries, ["sleepTimerOn", "sleepTimerMinutes"]);
+const libraryEntries = entriesByCategory("library");
+const libraryFiles = pickIds(libraryEntries, [
+  "audioExts",
+  "ignoreHidden",
+  "autoRefresh",
+  "autoScanOnStart",
+]);
+const videoEntries = entriesByCategory("video");
+const downloadEntries = entriesByCategory("download");
+const lyricAppEntries = entriesByCategory("lyric").filter((e) => e.subTab === "app");
+const lyricAppearance = pickIds(lyricAppEntries, ["engine", "fontFamily", "fontSize", "align"]);
+const lyricDisplay = pickIds(lyricAppEntries, ["showRoma", "showZh", "showSec"]);
+const lyricEffects = pickIds(lyricAppEntries, ["focusPos", "fadeMask", "autoScroll"]);
+const lyricAmll = pickIds(lyricAppEntries, ["amllBlur", "amllSpring", "amllScale"]);
+const lyricCalib = pickIds(lyricAppEntries, ["offset"]);
+const lyricSource = pickIds(lyricAppEntries, ["source"]);
+const lyricColors = pickIds(lyricAppEntries, ["colorScheme", "jpColor", "zhColor"]);
+const desktopEntries = pickIds(
+  entriesByCategory("lyric").filter((e) => e.subTab === "desktop"),
+  [
+    "desktopShowZh",
+    "desktopFontFamily",
+    "desktopFontSize",
+    "desktopZhSize",
+    "desktopAlign",
+    "desktopWidth",
+    "desktopHeight",
+    "desktopColorScheme",
+    "desktopJpColor",
+    "desktopZhColor",
+  ],
+);
+const uiEntries = entriesByCategory("ui");
+const uiPrefs = pickIds(uiEntries, ["showSongInfo", "karaokeShowTime", "karaokeShowNum"]);
+const uiCover = pickIds(uiEntries, [
+  "coverBlur",
+  "glassCover",
+  "showCover",
+  "showListCover",
+  "coverSize",
+  "compact",
+]);
+const uiTheme = pickIds(uiEntries, ["theme", "miniTheme", "accent"]);
+
 // 歌词延迟徽标：+0.5s / -1.2s / 0.0s（正 = 歌词延后显示）
 const fmtOffset = computed(() => {
   const v = lyricSettings.offset;
@@ -2589,6 +2114,39 @@ onBeforeUnmount(() => {
 .lib-input:focus {
   border-color: var(--accent);
 }
+:deep(.setting-label) {
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+:deep(.setting-label svg) {
+  color: var(--text2);
+}
+:deep(.setting-desc) {
+  font-size: 12px;
+  color: var(--text3);
+}
+:deep(.setting-control) {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+:deep(.lib-input) {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+:deep(.lib-input:focus) {
+  border-color: var(--accent);
+}
 .btn {
   border-radius: 10px;
   padding: 9px 16px;
@@ -2674,6 +2232,35 @@ onBeforeUnmount(() => {
   }
 }
 .ext-chip.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 8px var(--accent-glow2);
+}
+:deep(.ext-grid) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+:deep(.ext-chip) {
+  min-width: 58px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text2);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+@media (hover: hover) {
+  :deep(.ext-chip:hover) {
+    color: var(--text);
+    border-color: var(--text3);
+  }
+}
+:deep(.ext-chip.on) {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
   border-color: transparent;
@@ -2871,7 +2458,44 @@ onBeforeUnmount(() => {
   color: #fff;
   box-shadow: 0 2px 8px var(--accent-glow2);
 }
+:deep(.seg) {
+  display: flex;
+  gap: 6px;
+  background: var(--bg2);
+  border-radius: 10px;
+  padding: 3px;
+}
+:deep(.seg-btn) {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text2);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  :deep(.seg-btn:hover) {
+    color: var(--text);
+  }
+}
+:deep(.seg-btn.on) {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  box-shadow: 0 2px 8px var(--accent-glow2);
+}
 .val-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: 8px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+:deep(.val-badge) {
   font-size: 11px;
   font-weight: 600;
   color: var(--accent);
@@ -2911,6 +2535,42 @@ onBeforeUnmount(() => {
   }
 }
 .slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: 3px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--accent);
+  cursor: pointer;
+}
+:deep(.slider) {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg2);
+  outline: none;
+  margin: 6px 0 2px;
+}
+:deep(.slider)::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: 3px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--accent);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+@media (hover: hover) {
+  :deep(.slider)::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+}
+:deep(.slider)::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -3029,6 +2689,14 @@ onBeforeUnmount(() => {
   cursor: pointer;
   padding: 2px 0;
 }
+:deep(.toggle-row) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
 /* 子开关（任务 C：氛围背景 / 迷你频谱）：缩进、小号字号、小号 switch */
 .sub-toggle-row {
   display: flex;
@@ -3086,6 +2754,34 @@ onBeforeUnmount(() => {
   border-color: transparent;
 }
 .switch.on i {
+  transform: translateX(22px);
+}
+:deep(.switch) {
+  flex-shrink: 0;
+  width: 48px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--card2);
+  position: relative;
+  transition: background 0.2s;
+  border: 1px solid var(--border);
+}
+:deep(.switch i) {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px var(--shadow-sm);
+}
+:deep(.switch.on) {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent;
+}
+:deep(.switch.on i) {
   transform: translateX(22px);
 }
 

@@ -9,6 +9,12 @@ export default {
     cookiesFromBrowserDesc:
       "Read login cookies from the selected browser for online video (yt-dlp --cookies-from-browser)",
     cookiesFromBrowserNone: "None",
+    cookiesFromBrowserVivaldi: "Vivaldi",
+    cookiesFromBrowserChrome: "Chrome",
+    cookiesFromBrowserSafari: "Safari",
+    cookiesFromBrowserEdge: "Edge",
+    cookiesFromBrowserFirefox: "Firefox",
+    cookiesFromBrowserBrave: "Brave",
     amllBlur: "AMLL Blur Effect",
     amllBlurDesc:
       "WebGL Gaussian blur on lyric lines (most performance-heavy; off by default in browser)",
@@ -17,6 +23,7 @@ export default {
     amllScale: "AMLL Scale Effect",
     amllScaleDesc: "Scale-up animation for the active line (amll engine only)",
     amllEffects: "AMLL Effects",
+    eqGains: "EQ Gains (10 bands)",
     amllPerfHint:
       "These three AMLL effects are performance-heavy; turning them off can significantly reduce CPU usage (especially in the browser).",
     // Scraping

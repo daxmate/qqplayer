@@ -13,6 +13,17 @@
 //   { id, category, subTab, labelKey, keywords[], type, get(), set(v),
 //     min?, max?, step?（slider）、options?: [{value,labelKey}]（select）、placeholder?（text） }
 //
+// 可选展示字段（SettingsModal SettingRow 消费，搜索层忽略）：
+//   render?        —— 特殊交互标记（手写块宿主/块内成员，非“纯简单项”）；
+//                     SettingsModal 按 id 分发手写块，标记仅用于排除 SettingRow 通用渲染
+//   descKey?       —— 说明文案语言包 key（缺省回落 settings.<id>Desc，无则隐藏）
+//   descAfter?     —— desc 渲染在控件下方（默认在上方）
+//   marginTop?     —— select 容器额外上边距（px，对齐原模板 seg 内联样式）
+//   chips?         —— select 容器样式："ext" 用 ext-grid/ext-chip，缺省 seg/seg-btn
+//   valueSuffix?   —— label 内/后值徽标后缀（如 "px"）；badge: "block" 时徽标为 label 后独立 div
+//   mobileOnly?    —— 仅移动端渲染（设置弹窗桌面端隐藏）
+//   inputType?     —— text 输入框 type（"number" 时 v-model.number 语义）
+//
 // 持久化说明：
 //   - 常规项：set() 只赋 settings reactive 属性，settingsSync 的 deep watch 自动
 //     防抖 PUT /api/settings 持久化（不要手动调 API）。
@@ -67,9 +78,13 @@ const engineOptions = [
   { value: "native", labelKey: "settings.engineNative" },
 ];
 const fontOptions = [
-  { value: "system", labelKey: "settings.fontSystem" },
-  { value: "serif", labelKey: "settings.fontSerif" },
-  { value: "rounded", labelKey: "settings.fontRounded" },
+  { value: "system", labelKey: "settings.fontSystem", css: "" },
+  { value: "serif", labelKey: "settings.fontSerif", css: '"Songti SC", "SimSun", serif' },
+  {
+    value: "rounded",
+    labelKey: "settings.fontRounded",
+    css: '"Yuanti SC", "PingFang SC", sans-serif',
+  },
 ];
 const alignOptions = [
   { value: "left", labelKey: "settings.alignLeft" },
@@ -83,6 +98,16 @@ const focusOptions = [
 const sourceOptions = [
   { value: "local", labelKey: "settings.sourceLocal" },
   { value: "online", labelKey: "settings.sourceOnline" },
+];
+// 浏览器 Cookie 来源（yt-dlp --cookies-from-browser；空串 = 不使用）
+const browserOptions = [
+  { value: "", labelKey: "settings.cookiesFromBrowserNone" },
+  { value: "vivaldi", labelKey: "settings.cookiesFromBrowserVivaldi" },
+  { value: "chrome", labelKey: "settings.cookiesFromBrowserChrome" },
+  { value: "safari", labelKey: "settings.cookiesFromBrowserSafari" },
+  { value: "edge", labelKey: "settings.cookiesFromBrowserEdge" },
+  { value: "firefox", labelKey: "settings.cookiesFromBrowserFirefox" },
+  { value: "brave", labelKey: "settings.cookiesFromBrowserBrave" },
 ];
 const themeOptions = [
   { value: "dark", labelKey: "settings.themeDark" },
@@ -118,6 +143,42 @@ function libSet(key, v) {
   saveLibrarySettings({ [key]: v }).catch(() => {});
 }
 
+// audioExts（多选数组）注册表语义：get 返回逗号拼接字符串（契约要求原始类型），
+// set 拆分回数组走 saveLibrarySettings 持久化；设置弹窗内由 render:"audioExts" 手写 chips 块消费。
+function audioExtsGet() {
+  const arr = state.librarySettings?.audioExts;
+  return Array.isArray(arr) ? arr.join(",") : "";
+}
+
+function audioExtsSet(v) {
+  const parts = String(v ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  libSet("audioExts", parts);
+}
+
+// eqGains（10 段数组）注册表语义：get 返回逗号拼接字符串（契约要求原始类型）；
+// set 数字串解析为 10 个 ±12 数字写入，非法输入原样存字符串（playerCore 脏数据归一化兜底）。
+function eqGainsGet() {
+  const arr = playbackSettings.eqGains;
+  return Array.isArray(arr) ? arr.join(",") : "";
+}
+
+function eqGainsSet(v) {
+  if (typeof v !== "string") {
+    playbackSettings.eqGains = Array.isArray(v) ? v : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return;
+  }
+  const parts = v.split(",").map((s) => s.trim());
+  const nums = parts.map(Number);
+  if (parts.length === 10 && nums.every((n) => Number.isFinite(n))) {
+    playbackSettings.eqGains = nums.map((n) => Math.max(-12, Math.min(12, Math.round(n))));
+  } else {
+    playbackSettings.eqGains = parts;
+  }
+}
+
 // ============ 睡眠定时器开关（保持与 SettingsModal 一致的计时语义）============
 function setSleepTimerOn(v) {
   if (v) {
@@ -130,9 +191,10 @@ function setSleepTimerOn(v) {
 // ============ 设置项索引 ============
 // 收录原则：SettingsModal.vue 全部可交互设置项（粒度 = 单个设置字段）。
 // 跳过项（交互形态超出 toggle/slider/select/text 契约，见任务汇报）：
-//   libraryFolder（动作型：POST /api/library + 校验/错误 UI）、audioExts（多选数组）、
-//   eqGains（10 段数组）、karaokeNextKey/karaokePrevKey（按键录制交互流）、
+//   libraryFolder（动作型：POST /api/library + 校验/错误 UI）、karaokeNextKey/karaokePrevKey（按键录制交互流）、
 //   desktopLyricSettings.enabled（不在设置弹窗，顶栏按钮控制）、reset 类按钮（动作非设置）。
+// 特殊交互项（audioExts/eqGains/cookiesFromBrowser/coverSize 等）已收录：
+//   get/set 以字符串形态满足契约（数组 join/split），SettingsModal 内由 render 标记分发手写块。
 export const settingsIndex = [
   // ==================== 播放 ====================
   {
@@ -140,6 +202,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.playMode",
+    descKey: "settings.playModeDesc",
     keywords: ["播放模式", "模式", "播放顺序", "随机", "单曲循环", "play mode", "shuffle"],
     type: "select",
     options: playModeOptions,
@@ -153,6 +216,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.resumeLast",
+    descKey: "settings.resumeLastDesc",
     keywords: ["恢复上次播放", "启动恢复", "上次播放", "断点续播", "resume", "last played"],
     type: "toggle",
     get: () => playbackSettings.resumeLast,
@@ -165,6 +229,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.rememberVolume",
+    descKey: "settings.rememberVolumeDesc",
     keywords: ["记住音量", "音量记忆", "音量", "volume"],
     type: "toggle",
     get: () => playbackSettings.rememberVolume,
@@ -177,6 +242,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.fade",
+    render: "fade",
     keywords: ["淡入淡出", "切歌过渡", "渐入渐出", "fade", "crossfade", "过渡"],
     type: "slider",
     min: 0,
@@ -192,6 +258,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.eq",
+    render: "eqPanel",
     keywords: ["均衡器", "eq", "均衡", "音效", "equalizer"],
     type: "toggle",
     get: () => playbackSettings.eqEnabled,
@@ -204,6 +271,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.eqPreset",
+    render: "eqPanel", // 属于 EQ 面板内部（eqEnabled 手写块），不单独渲染
     keywords: ["均衡器预设", "eq预设", "音效预设", "preset", "流行", "摇滚", "低音"],
     type: "select",
     options: eqPresetOptions,
@@ -213,10 +281,22 @@ export const settingsIndex = [
     },
   },
   {
+    id: "eqGains",
+    category: "playback",
+    subTab: null,
+    labelKey: "settings.eqGains",
+    render: "eqGains", // 十段滑杆特殊交互（EQ 面板内手写块），搜索层按 custom 文本内联编辑
+    keywords: ["均衡器增益", "eq增益", "十段", "eq gains", "equalizer", "自定义均衡"],
+    type: "custom",
+    get: eqGainsGet,
+    set: eqGainsSet,
+  },
+  {
     id: "abVisual",
     category: "playback",
     subTab: null,
     labelKey: "settings.abVisual",
+    descKey: "settings.abVisualDesc",
     keywords: ["AB循环可视化", "区间可视化", "ab视觉", "ab visual", "循环标记"],
     type: "toggle",
     get: () => playbackSettings.abVisual,
@@ -229,6 +309,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.abLoopCount",
+    render: "abLoop",
     keywords: ["循环计数", "防走开", "ab循环次数", "安全阀", "count", "loop count"],
     type: "toggle",
     get: () => playbackSettings.abLoopCountOn,
@@ -241,6 +322,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.abLoopMaxCount",
+    render: "abLoop", // 属于 AB 循环块（abLoopCountOn 手写块）内
     keywords: ["循环次数上限", "ab循环次数", "循环遍数", "loop count", "max count", "次数"],
     type: "slider",
     min: 1,
@@ -256,6 +338,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.visualizer",
+    render: "vizPanel",
     keywords: ["频谱", "可视化", "频谱图", "visualizer", "频谱条"],
     type: "toggle",
     get: () => playbackSettings.visualizerEnabled,
@@ -268,6 +351,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.ambient",
+    render: "vizPanel", // 视觉面板内部子开关
     keywords: ["氛围背景", "光晕", "封面取色", "ambient", "呼吸"],
     type: "toggle",
     get: () => playbackSettings.ambientEnabled,
@@ -280,6 +364,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.miniSpectrum",
+    render: "vizPanel", // 视觉面板内部子开关
     keywords: ["迷你频谱", "频谱条", "mini", "spectrum"],
     type: "toggle",
     get: () => playbackSettings.miniSpectrumEnabled,
@@ -292,6 +377,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.visualizerStyleLabel",
+    render: "vizPanel", // 视觉面板内部样式 chips
     keywords: [
       "视觉化样式",
       "频谱样式",
@@ -319,6 +405,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.streamStats",
+    descKey: "settings.streamStatsDesc",
     keywords: ["流媒体", "试听", "播放统计", "计入统计", "stream", "preview", "试听统计"],
     type: "toggle",
     get: () => playbackSettings.streamStats,
@@ -331,6 +418,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.sleepTimer",
+    render: "sleepTimer",
     keywords: ["睡眠定时器", "定时暂停", "定时器", "sleep", "sleep timer", "倒计时"],
     type: "toggle",
     get: () => playbackSettings.sleepTimerOn,
@@ -341,6 +429,7 @@ export const settingsIndex = [
     category: "playback",
     subTab: null,
     labelKey: "settings.duration",
+    render: "sleepTimer", // 属于睡眠定时器块（sleepTimerOn 手写块）内
     keywords: ["睡眠时长", "定时分钟", "sleep minutes", "时长", "定时"],
     // 契约：5-120（step 5）任意分钟都生效——后端 settings.py 同步接受 5-120 范围
     // （消费为纯前端倒计时）；桌面/移动端 chip 快捷值仍为 15/30/45/60/90。
@@ -356,10 +445,22 @@ export const settingsIndex = [
 
   // ==================== 音乐库 ====================
   {
+    id: "audioExts",
+    category: "library",
+    subTab: null,
+    labelKey: "settings.fileTypes",
+    render: "audioExts", // 多选 chips 特殊交互（设置弹窗内手写块），搜索层按 text 逗号编辑
+    keywords: ["文件类型", "音频格式", "扩展名", "格式", "file types", "ext", "mp3", "flac"],
+    type: "text",
+    get: audioExtsGet,
+    set: audioExtsSet,
+  },
+  {
     id: "ignoreHidden",
     category: "library",
     subTab: null,
     labelKey: "settings.ignoreHidden",
+    descKey: "settings.ignoreHiddenDesc",
     keywords: ["隐藏文件", "忽略隐藏", "隐藏", "hidden", "忽略"],
     type: "toggle",
     get: () => libGet("ignoreHidden"),
@@ -370,6 +471,7 @@ export const settingsIndex = [
     category: "library",
     subTab: null,
     labelKey: "settings.autoRefresh",
+    descKey: "settings.autoRefreshDesc",
     keywords: ["自动刷新", "刷新曲库", "监听文件夹", "refresh", "自动更新"],
     type: "toggle",
     get: () => libGet("autoRefresh"),
@@ -380,6 +482,7 @@ export const settingsIndex = [
     category: "library",
     subTab: null,
     labelKey: "settings.autoScanOnStart",
+    descKey: "settings.autoScanOnStartDesc",
     keywords: ["启动扫描", "开机扫描", "自动扫描", "scan", "启动时扫描"],
     type: "toggle",
     get: () => libGet("autoScanOnStart"),
@@ -392,12 +495,35 @@ export const settingsIndex = [
     category: "video",
     subTab: null,
     labelKey: "settings.bilibiliCookie",
+    descKey: "settings.bilibiliCookieDesc",
     keywords: ["B站", "bilibili", "哔哩哔哩", "cookie", "Cookie", "在线播放", "视频有声"],
     type: "text",
     placeholder: "settings.bilibiliCookiePlaceholder",
     get: () => videoSettings.bilibiliCookie,
     set: (v) => {
       videoSettings.bilibiliCookie = v;
+    },
+  },
+  {
+    id: "cookiesFromBrowser",
+    category: "video",
+    subTab: null,
+    labelKey: "settings.cookiesFromBrowser",
+    descKey: "settings.cookiesFromBrowserDesc",
+    render: "cookies", // 原生 select 特殊交互（设置弹窗内手写块）
+    keywords: [
+      "浏览器cookie",
+      "cookie来源",
+      "浏览器登录态",
+      "cookie from browser",
+      "vivaldi",
+      "chrome",
+    ],
+    type: "select",
+    options: browserOptions,
+    get: () => videoSettings.cookiesFromBrowser,
+    set: (v) => {
+      videoSettings.cookiesFromBrowser = v;
     },
   },
 
@@ -407,6 +533,7 @@ export const settingsIndex = [
     category: "download",
     subTab: null,
     labelKey: "settings.downloadDir",
+    descKey: "settings.downloadDirDesc",
     keywords: ["下载目录", "保存位置", "下载路径", "download dir", "目录", "下载文件夹"],
     type: "text",
     placeholder: "settings.downloadDirPlaceholder",
@@ -416,10 +543,29 @@ export const settingsIndex = [
     },
   },
   {
+    id: "maxSpeed",
+    category: "download",
+    subTab: null,
+    labelKey: "settings.maxSpeed",
+    descKey: "settings.maxSpeedDesc",
+    keywords: ["下载限速", "限速", "速度限制", "max speed", "限速下载"],
+    type: "text",
+    inputType: "number", // 数字输入（与改造前 v-model.number 一致）
+    min: 0,
+    step: 0.5,
+    placeholder: "settings.maxSpeedPlaceholder",
+    get: () => downloadSettings.maxSpeed,
+    set: (v) => {
+      downloadSettings.maxSpeed = v;
+    },
+  },
+  {
     id: "defaultQuality",
     category: "download",
     subTab: null,
     labelKey: "settings.defaultQuality",
+    descKey: "settings.defaultQualityDesc",
+    chips: "ext", // 设置弹窗用 ext-grid 样式（其余 select 默认 seg）
     keywords: ["音质", "默认音质", "码率", "quality", "无损", "flac", "hires"],
     type: "select",
     options: DOWNLOAD_QUALITY_OPTIONS.map((q) => ({ value: q.key, labelKey: q.labelKey })),
@@ -433,6 +579,8 @@ export const settingsIndex = [
     category: "download",
     subTab: null,
     labelKey: "settings.quarkQuality",
+    descKey: "settings.quarkQualityDesc",
+    marginTop: 4,
     keywords: ["歌曲海", "夸克", "下载品质", "mp3", "flac", "无损"],
     type: "select",
     options: QUARK_QUALITY_OPTIONS.map((q) => ({ value: q.key, labelKey: q.labelKey })),
@@ -446,6 +594,8 @@ export const settingsIndex = [
     category: "download",
     subTab: null,
     labelKey: "settings.downloadEngine",
+    descKey: "settings.downloadEngineDesc",
+    marginTop: 4,
     keywords: ["下载引擎", "aria2", "内置", "引擎", "下载方式"],
     type: "select",
     options: DOWNLOAD_ENGINE_OPTIONS.map((e) => ({ value: e.key, labelKey: e.labelKey })),
@@ -459,6 +609,7 @@ export const settingsIndex = [
     category: "download",
     subTab: null,
     labelKey: "settings.aria2Rpc",
+    render: "aria2",
     keywords: ["aria2", "rpc", "下载服务器", "地址"],
     type: "text",
     placeholder: "settings.aria2RpcPlaceholder",
@@ -472,6 +623,7 @@ export const settingsIndex = [
     category: "download",
     subTab: null,
     labelKey: "settings.aria2Secret",
+    render: "aria2", // 与 aria2Rpc 同块（engine==='aria2' 才显示）
     keywords: ["aria2", "密钥", "token", "secret", "密码"],
     type: "text",
     placeholder: "settings.aria2SecretPlaceholder",
@@ -487,6 +639,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.scrollEngine",
+    descKey: "settings.scrollEngineDesc",
     keywords: ["滚动引擎", "引擎", "engine", "amll", "弹簧", "原生"],
     type: "select",
     options: engineOptions,
@@ -513,6 +666,8 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.fontSize",
+    descKey: "settings.fontSizeDesc",
+    valueSuffix: "px", // 设置弹窗 label 内嵌值徽标（inline）
     keywords: ["字号", "歌词大小", "字体大小", "font size", "字大小"],
     type: "slider",
     min: 14,
@@ -541,6 +696,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.showRoma",
+    descKey: "settings.showRomaDesc",
     keywords: ["罗马音", "romaji", "罗马", "假名注音"],
     type: "toggle",
     get: () => lyricSettings.showRoma,
@@ -553,6 +709,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.showZh",
+    descKey: "settings.showZhDesc",
     keywords: ["中文翻译", "翻译", "译文", "翻译显示", "中文", "translation"],
     type: "toggle",
     get: () => lyricSettings.showZh,
@@ -565,6 +722,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.showSection",
+    descKey: "settings.showSectionDesc",
     keywords: ["段落标题", "小节标题", "副歌标题", "段落", "section", "标题"],
     type: "toggle",
     get: () => lyricSettings.showSec,
@@ -590,6 +748,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.fadeMask",
+    descKey: "settings.fadeMaskDesc",
     keywords: ["渐隐", "遮罩", "上下渐隐", "fade mask", "淡出"],
     type: "toggle",
     get: () => lyricSettings.fadeMask,
@@ -602,6 +761,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.autoScroll",
+    descKey: "settings.autoScrollDesc",
     keywords: ["自动滚动", "跟随滚动", "滚动", "autoscroll", "自动跟随"],
     type: "toggle",
     get: () => lyricSettings.autoScroll,
@@ -614,6 +774,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.amllBlur",
+    descKey: "settings.amllBlurDesc",
     keywords: ["amll模糊", "模糊效果", "高斯模糊", "歌词模糊", "amll blur", "blur"],
     type: "toggle",
     get: () => lyricSettings.amllBlur,
@@ -626,6 +787,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.amllSpring",
+    descKey: "settings.amllSpringDesc",
     keywords: ["弹簧动画", "物理动画", "amll弹簧", "弹簧", "spring", "amll spring"],
     type: "toggle",
     get: () => lyricSettings.amllSpring,
@@ -638,6 +800,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.amllScale",
+    descKey: "settings.amllScaleDesc",
     keywords: ["放大效果", "当前行放大", "amll放大", "scale", "放大动画"],
     type: "toggle",
     get: () => lyricSettings.amllScale,
@@ -650,6 +813,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.lyricOffset",
+    render: "offset",
     keywords: ["歌词延迟", "延迟校准", "偏移", "offset", "校准", "不同步"],
     type: "slider",
     min: -2,
@@ -665,6 +829,8 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.sourcePriority",
+    descKey: "settings.sourcePriorityDesc",
+    descAfter: true, // 原模板 desc 在控件下方
     keywords: ["歌词来源", "来源优先级", "本地优先", "在线优先", "source", "歌词源"],
     type: "select",
     options: sourceOptions,
@@ -678,6 +844,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.colorScheme",
+    render: "scheme",
     keywords: ["歌词配色", "配色方案", "颜色主题", "color scheme", "配色"],
     type: "select",
     options: LYRIC_SCHEMES.map((s) => ({ value: s.key, labelKey: s.labelKey })),
@@ -691,6 +858,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.mainLineColor",
+    render: "fontColor", // 主行+翻译颜色同块（jpColor 宿主）
     keywords: ["主行颜色", "歌词颜色", "颜色", "color", "主行"],
     type: "text",
     placeholder: "settings.fontColorPlaceholder",
@@ -704,6 +872,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "app",
     labelKey: "settings.translationColor",
+    render: "fontColor", // 与 jpColor 同块
     keywords: ["翻译颜色", "翻译行颜色", "译文颜色", "translation color"],
     type: "text",
     placeholder: "settings.fontColorPlaceholder",
@@ -719,6 +888,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.showZh",
+    descKey: "settings.desktopShowZhDesc",
     keywords: ["桌面歌词翻译", "桌面翻译", "翻译", "desktop translation", "悬浮窗翻译"],
     type: "toggle",
     get: () => desktopLyricSettings.showZh,
@@ -744,6 +914,8 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.mainFontSize",
+    valueSuffix: "px",
+    badge: "block", // 原模板徽标是 label 后的独立 div
     keywords: ["主行字号", "桌面字号", "字体大小", "font size", "主行大小"],
     type: "slider",
     min: 18,
@@ -759,6 +931,8 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.translationFontSize",
+    valueSuffix: "px",
+    badge: "block",
     keywords: ["翻译字号", "译文大小", "翻译大小", "translation size"],
     type: "slider",
     min: 12,
@@ -787,6 +961,8 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.windowWidth",
+    valueSuffix: "px",
+    badge: "block",
     keywords: ["窗体宽度", "窗口宽度", "宽度", "width", "悬浮窗宽度"],
     type: "slider",
     min: 300,
@@ -802,6 +978,8 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.windowHeight",
+    valueSuffix: "px",
+    badge: "block",
     keywords: ["窗体高度", "窗口高度", "高度", "height", "悬浮窗高度"],
     type: "slider",
     min: 80,
@@ -817,6 +995,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.colorScheme",
+    render: "scheme",
     keywords: ["桌面歌词配色", "配色方案", "color scheme", "悬浮窗配色", "配色"],
     type: "select",
     options: DESKTOP_LYRIC_SCHEMES.map((s) => ({ value: s.key, labelKey: s.labelKey })),
@@ -830,6 +1009,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.mainLineColor",
+    render: "fontColor", // 主行+翻译颜色同块（desktopJpColor 宿主）
     keywords: ["主行颜色", "桌面歌词颜色", "颜色", "color"],
     type: "text",
     placeholder: "settings.fontColorPlaceholder",
@@ -843,6 +1023,7 @@ export const settingsIndex = [
     category: "lyric",
     subTab: "desktop",
     labelKey: "settings.translationColor",
+    render: "fontColor", // 与 desktopJpColor 同块
     keywords: ["翻译颜色", "桌面翻译颜色", "译文颜色"],
     type: "text",
     placeholder: "settings.fontColorPlaceholder",
@@ -858,6 +1039,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.appearance",
+    marginTop: 8,
     keywords: ["主题", "外观", "深色", "浅色", "theme", "暗色", "亮色"],
     type: "select",
     options: themeOptions,
@@ -871,6 +1053,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.miniTheme",
+    marginTop: 8,
     keywords: ["迷你窗", "迷你窗外观", "迷你主题", "mini theme", "mini"],
     type: "select",
     options: miniThemeOptions,
@@ -884,6 +1067,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.accent",
+    render: "accent",
     keywords: ["强调色", "主题色", "accent", "颜色主题", "橙", "蓝", "绿", "紫", "粉", "青"],
     type: "select",
     options: accentOptions,
@@ -897,6 +1081,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.coverBlur",
+    descKey: "settings.coverBlurDesc",
     keywords: ["封面模糊", "模糊背景", "毛玻璃", "blur", "封面背景"],
     type: "toggle",
     get: () => uiSettings.coverBlur,
@@ -905,10 +1090,25 @@ export const settingsIndex = [
     },
   },
   {
+    id: "glassCover",
+    category: "ui",
+    subTab: null,
+    labelKey: "settings.glassCover",
+    descKey: "settings.glassCoverDesc",
+    mobileOnly: true, // 毛玻璃封面仅移动端生效（设置弹窗桌面端不渲染）
+    keywords: ["毛玻璃", "毛玻璃封面", "模糊封面", "glass cover", "玻璃", "移动端背景"],
+    type: "toggle",
+    get: () => uiSettings.glassCover,
+    set: (v) => {
+      uiSettings.glassCover = v;
+    },
+  },
+  {
     id: "showCover",
     category: "ui",
     subTab: null,
     labelKey: "settings.showCover",
+    descKey: "settings.showCoverDesc",
     keywords: ["显示封面", "封面", "隐藏封面", "封面显示", "show cover", "cover", "大封面"],
     type: "toggle",
     get: () => uiSettings.showCover,
@@ -921,6 +1121,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.showListCover",
+    descKey: "settings.showListCoverDesc",
     keywords: ["列表封面", "缩略图", "列表缩略图", "封面", "list cover", "thumbnail"],
     type: "toggle",
     get: () => uiSettings.showListCover,
@@ -929,10 +1130,28 @@ export const settingsIndex = [
     },
   },
   {
+    id: "coverSize",
+    category: "ui",
+    subTab: null,
+    labelKey: "settings.coverSize",
+    descKey: "settings.coverSizeDesc",
+    render: "coverSize", // 百分比/自适应特殊显示（设置弹窗内手写块），搜索层按 slider 内联调
+    keywords: ["封面大小", "封面区域", "封面尺寸", "cover size", "自适应"],
+    type: "slider",
+    min: 0,
+    max: 420,
+    step: 10,
+    get: () => uiSettings.coverSize,
+    set: (v) => {
+      uiSettings.coverSize = v;
+    },
+  },
+  {
     id: "compact",
     category: "ui",
     subTab: null,
     labelKey: "settings.compact",
+    descKey: "settings.compactDesc",
     keywords: ["紧凑模式", "紧凑", "compact", "密度"],
     type: "toggle",
     get: () => uiSettings.compact,
@@ -945,6 +1164,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.showSongInfo",
+    descKey: "settings.showSongInfoDesc",
     keywords: ["歌曲信息", "歌名歌手", "当前歌曲", "song info", "跟唱信息"],
     type: "toggle",
     get: () => uiSettings.showSongInfo,
@@ -957,6 +1177,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.karaokeShowTime",
+    descKey: "settings.karaokeShowTimeDesc",
     keywords: ["时间戳", "跟唱时间", "ktv时间", "起止时间", "timestamp"],
     type: "toggle",
     get: () => uiSettings.karaokeShowTime,
@@ -969,6 +1190,7 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.karaokeShowNum",
+    descKey: "settings.karaokeShowNumDesc",
     keywords: ["行号", "跟唱行号", "句号", "行号显示", "line number"],
     type: "toggle",
     get: () => uiSettings.karaokeShowNum,
