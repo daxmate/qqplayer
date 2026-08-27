@@ -302,17 +302,23 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             at: storageRoot, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return (0, byType) }
-        let rootDepth = storageRoot.pathComponents.count
+        // 真机坑（2026-08-27）：iOS 沙盒路径含 symlink（/var → /private/var），
+        // enumerator 返回的 url 可能是解析后形式（/private/var/...），与 storageRoot
+        // （/var/...）前缀不一致——按 pathComponents 从开头索引取顶层目录会错位 →
+        // 全部归 other（模拟器无此差异测不出；实测 macOS /tmp 同样复现）。
+        // 修复：资产结构恒为 <root>/<type>/<file>（audio/books/dicts/covers 两层），
+        // 类型 = 路径倒数第二段——不依赖 root 前缀，symlink 解析前后结果一致。
+        // 根目录散文件（倒数第二段是 root 名）与未知子目录 → other。
         for case let url as URL in enumerator {
             guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
                   values.isRegularFile == true,
                   let size = values.fileSize else { continue }
             total += Int64(size)
-            // 顶层目录（相对 storageRoot）→ 类型；根目录直属文件 → other
             let comps = url.pathComponents
-            let top = comps.count > rootDepth ? comps[rootDepth] : "other"
-            let type = knownTypes.contains(top) ? top : "other"
-            byType[type, default: 0] += Int64(size)
+            // <root>/<type>/<file> → 倒数第二段即类型；路径过短（根直属文件）→ other
+            let type = comps.count >= 3 ? comps[comps.count - 2] : ""
+            let bucket = knownTypes.contains(type) ? type : "other"
+            byType[bucket, default: 0] += Int64(size)
         }
         return (total, byType)
     }

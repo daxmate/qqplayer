@@ -215,6 +215,35 @@ final class DownloadManagerTests: XCTestCase {
         XCTAssertEqual(info.byType["other"], 0)
     }
 
+    func testAssetsSizeByTypeViaSymlinkedRoot() throws {
+        // 真机场景（2026-08-27）：iOS 沙盒路径含 symlink（/var → /private/var），
+        // enumerator 返回解析后路径（/private/var/...），与 storageRoot（/var/...）前缀
+        // 不一致 → 旧实现按 pathComponents 开头索引取顶层目录错位 → 全部归 other。
+        // macOS /tmp → /private/tmp 同型，可本地复现：storageRoot 用未解析 /tmp 路径，
+        // 枚举返回 /private/tmp/...（实测前缀不同但枚举成功）→ 类型必须按倒数第二段分类。
+        let root = URL(fileURLWithPath: "/tmp/qqplayer-dm-symlink-\(UUID().uuidString)/qqplayer-assets")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("audio"), withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 100).write(to: root.appendingPathComponent("audio/a.m4a"))
+        try Data(repeating: 0, count: 5).write(to: root.appendingPathComponent("stray.txt"))
+
+        let manager = DownloadManager(
+            storageRoot: root,
+            pathProvider: MockPathProvider(isWifi: true),
+            sessionConfig: makeSessionConfig(),
+            registryURL: registryURL
+        )
+        defer {
+            manager.shutdown()
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let info = manager.assetsSizeByType()
+        XCTAssertEqual(info.total, 105)
+        XCTAssertEqual(info.byType["audio"], 100, "symlink 前缀差异下 audio 子目录必须正确分类（真机全归 other 根因回归）")
+        XCTAssertEqual(info.byType["other"], 5)
+    }
+
     // MARK: - ③ deleteAssets paths 精确删除
 
     func testDeleteAssetsPathsRemovesFilesAndRegistry() throws {

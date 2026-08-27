@@ -1196,8 +1196,10 @@ export function clearAssets(scope: string): boolean {
   return true;
 }
 
-/** 资产占用查询超时（ms）：原生无回执不挂起调用方 */
-export const ASSETS_SIZE_TIMEOUT_MS = 8000;
+/** 资产占用查询超时（ms）：原生无回执不挂起调用方。
+ *  15s（原 8s）：真机下载繁忙时 assetsSize 枚举 4GB+ 文件系统可能超 8s，
+ *  超时返回 null → 存储管理显示全 0（2026-08-27 排查）；放宽 + 下载完成自动刷新兜底 */
+export const ASSETS_SIZE_TIMEOUT_MS = 15000;
 
 /** 资产占用回执分发：waiter 统一收完整 payload（{total, byType}），由各查询函数取用 */
 function handleAssetsSize(payload: AssetsSizeData) {
