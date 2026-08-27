@@ -7,6 +7,152 @@
 //     未判定前让位纵向滚动，避免抢列表滚动
 import { reactive, ref, onMounted, onBeforeUnmount } from "vue";
 
+// ============ 横向跟手手势（通用：封面切歌 / 歌词进入全歌词 / 全歌词右划返回） ============
+// 与 useEdgeSwipe 的分工：edge = 屏幕左缘专属（iOS 式页面返回）；本手势 = 任意起点横向拖动。
+// 要点：
+//   - 方向锁定：约 lockDx px 横向主导后才接管（未锁定前让位纵向滚动/下拉）；
+//     direction 只允许单方向时，反向手势直接放弃（不跟手、不触发）。
+//   - 触发判定 = 位移过阈值 且（释放速度快 或 慢速拖够大位移兜底）——与 edge 同一口径。
+//   - 触发后不自动归零：位移留给 onTrigger 做滑出/切歌/滑入编排，最后调 reset()；
+//     未触发自动归零（CSS transition 回弹）。
+//   - 监听生命周期由调用方控制：bind(el)/unbind()（元素可能随 v-if 出现）；
+//     封面与纵向下拉仲裁组合时，组件在自己的统一手势机里直接调 handleStart/Move/End，不 bind。
+export const SWIPE_LOCK_DX = 10; // 方向锁定阈值（px）：超过且横向主导才锁定
+// 触发判定常量（与 useEdgeSwipe 口径一致）
+export const SWIPE_THRESHOLD = 80; // 触发位移阈值（px）
+export const SWIPE_MIN_VELOCITY = 0.25; // 最低释放速度（px/ms）
+export const SWIPE_BIG_RATIO = 0.4; // 慢速大位移兜底：拖过 屏宽*比例 直接触发（不要求速度）
+
+export function useHorizontalSwipe(opts = {}) {
+  const {
+    enabled = () => true,
+    direction = "both", // 'both' | 'left' | 'right'：允许的滑动方向
+    threshold = SWIPE_THRESHOLD,
+    minVelocity = SWIPE_MIN_VELOCITY,
+    bigRatio = SWIPE_BIG_RATIO,
+    lockDx = SWIPE_LOCK_DX,
+    maxShiftRatio = 0.6, // 跟手最大位移 = 屏宽 * 比例（两侧同限）
+    excludeEdgeZone = false, // 左缘起点不横向接管（让位 useEdgeSwipe 页面返回，封面用）
+    onTrigger = () => {}, // (dir: 'left'|'right') => void，触发时调用
+  } = opts;
+
+  const shift = ref(0); // 跟手位移（px，带符号：负=左）
+  const dragging = ref(false); // 跟手中（true 时组件应关闭 transform transition）
+  let gesture = null; // { startX, startY, lastDx, lastT, lastV, locked, dir }
+  let el = null; // 当前绑定的元素
+
+  function setShift(v) {
+    shift.value = v;
+  }
+
+  function reset() {
+    shift.value = 0;
+  }
+
+  function handleStart(e) {
+    if (!enabled()) return;
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    gesture = {
+      startX: t.clientX,
+      startY: t.clientY,
+      lastDx: 0,
+      lastT: Date.now(),
+      lastV: 0,
+      locked: false,
+      dir: null,
+    };
+  }
+
+  function handleMove(e) {
+    const g = gesture;
+    if (!g) return;
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    const dx = t.clientX - g.startX;
+    const dy = t.clientY - g.startY;
+    if (!g.locked) {
+      // 未过锁定线 / 纵向主导 → 让位滚动；横向意图明确（且起点不在左缘返回区）才锁定接管
+      if (Math.abs(dx) > lockDx && Math.abs(dx) > Math.abs(dy)) {
+        if (excludeEdgeZone && g.startX < EDGE_ZONE) return; // 左缘让位 useEdgeSwipe
+        const dir = dx < 0 ? "left" : "right";
+        if (direction === "both" || direction === dir) {
+          g.locked = true;
+          g.dir = dir;
+        } else {
+          gesture = null; // 方向不符：放弃本次手势（不跟手、不触发）
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+    if (e.cancelable) e.preventDefault(); // 锁定后禁止浏览器横向手势/滚动
+    const now = Date.now();
+    const segV = (dx - g.lastDx) / Math.max(1, now - g.lastT);
+    g.lastDx = dx;
+    g.lastT = now;
+    if (segV !== 0) g.lastV = segV; // 带符号速度（回拉不计入本次段速）
+    const maxShift = window.innerWidth * maxShiftRatio;
+    shift.value = Math.max(-maxShift, Math.min(maxShift, dx));
+    dragging.value = true;
+  }
+
+  function handleEnd() {
+    const g = gesture;
+    gesture = null;
+    if (!g) return;
+    dragging.value = false;
+    const bigDrag = Math.abs(g.lastDx) >= window.innerWidth * bigRatio;
+    const triggered =
+      g.locked && Math.abs(g.lastDx) >= threshold && (Math.abs(g.lastV) >= minVelocity || bigDrag);
+    if (triggered) {
+      onTrigger(g.dir);
+      return; // 位移留给 onTrigger 编排（滑出），编排结束调 reset()
+    }
+    reset(); // 未触发：回弹（CSS transition 动画）
+  }
+
+  function handleCancel() {
+    if (!gesture) return;
+    gesture = null;
+    dragging.value = false;
+    reset();
+  }
+
+  function bind(target) {
+    unbind();
+    el = target;
+    if (!el) return;
+    el.addEventListener("touchstart", handleStart, { passive: true });
+    el.addEventListener("touchmove", handleMove, { passive: false });
+    el.addEventListener("touchend", handleEnd);
+    el.addEventListener("touchcancel", handleCancel);
+  }
+
+  function unbind() {
+    if (!el) return;
+    el.removeEventListener("touchstart", handleStart);
+    el.removeEventListener("touchmove", handleMove);
+    el.removeEventListener("touchend", handleEnd);
+    el.removeEventListener("touchcancel", handleCancel);
+    el = null;
+  }
+
+  return {
+    shift,
+    dragging,
+    handleStart,
+    handleMove,
+    handleEnd,
+    handleCancel,
+    bind,
+    unbind,
+    setShift,
+    reset,
+  };
+}
+
 // ============ 边缘滑动返回 ============
 export const EDGE_ZONE = 24; // 左缘判定区（px）：touchstart 必须落在此区间内
 export const EDGE_THRESHOLD = 80; // 触发返回的最小位移（px）

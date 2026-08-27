@@ -11,8 +11,17 @@
     <div class="mp-content">
       <!-- ============ 连播模式：Apple Music 三段式 ============ -->
       <template v-if="state.mode === 'continuous'">
-        <!-- ① 封面区（顶部，下拉返回手势区） -->
-        <div ref="coverRef" class="mp-cover-area" :title="t('mobile.player.pullDownHint')">
+        <!-- ① 封面区（顶部：下拉返回 + 横向切歌统一手势区；事件绑定在模板上，随元素出现/消失自动生效） -->
+        <div
+          ref="coverRef"
+          class="mp-cover-area"
+          :style="coverStyle"
+          :title="t('mobile.player.pullDownHint')"
+          @touchstart.passive="onCoverStart"
+          @touchmove="onCoverMove"
+          @touchend="onCoverEnd"
+          @touchcancel="onCoverCancel"
+        >
           <ChevronDown :size="15" class="mp-pull-hint" />
           <div class="mp-cover-box">
             <img
@@ -28,8 +37,16 @@
           </div>
         </div>
 
-        <!-- ② 小歌词区（固定高度、内部滚动、当前句居中、点句跳转） -->
-        <div class="mp-lyric-area">
+        <!-- ② 小歌词区（固定高度、内部滚动、当前句居中、点句跳转；左划进入全歌词） -->
+        <div
+          ref="lyricAreaRef"
+          class="mp-lyric-area"
+          :style="lyricAreaStyle"
+          @touchstart.passive="lyricSwipe.handleStart"
+          @touchmove="lyricSwipe.handleMove"
+          @touchend="lyricSwipe.handleEnd"
+          @touchcancel="lyricSwipe.handleCancel"
+        >
           <KaraokePanel
             :lyric="state.lyric"
             :current="currentLineIndex"
@@ -93,48 +110,12 @@
           <span class="mp-time">{{ fmt(state.duration) }}</span>
         </div>
 
-        <!-- ⑤ 底部控制区（循环/上一首/播放/下一首/歌单/月亮） -->
-        <div class="mp-controls-row">
-          <button
-            class="mp-cbtn mp-mode-btn"
-            :class="{ on: state.playMode !== 'order' }"
-            :title="playModeTitle"
-            @click="cyclePlayMode"
-          >
-            <Shuffle v-if="state.playMode === 'shuffle'" :size="18" />
-            <Repeat1 v-else-if="state.playMode === 'repeatOne'" :size="18" />
-            <Repeat v-else :size="18" />
-          </button>
-          <button class="mp-cbtn" :title="t('control.prevSong')" @click="prevSong">
-            <SkipBack :size="20" />
-          </button>
-          <button class="mp-cbtn mp-play" :title="t('control.playPause')" @click="togglePlay">
-            <Pause v-if="state.isPlaying" :size="26" />
-            <Play v-else :size="26" />
-          </button>
-          <button class="mp-cbtn" :title="t('control.nextSong')" @click="nextSong()">
-            <SkipForward :size="20" />
-          </button>
-          <button
-            class="mp-cbtn mp-queue-btn"
-            :class="{ on: queueOpen }"
-            :title="t('mobile.player.queue')"
-            @click="toggleQueue"
-          >
-            <ListMusic :size="18" />
-          </button>
-          <div class="mp-moon-wrap">
-            <button
-              class="mp-cbtn mp-moon-btn"
-              :class="{ on: sleepTimer.active }"
-              :title="t('mobile.player.sleepTimer')"
-              @click="openSleepSheet"
-            >
-              <Moon :size="18" :fill="sleepTimer.active ? 'currentColor' : 'none'" />
-            </button>
-            <span v-if="sleepTimerText" class="mp-sleep-timer">{{ sleepTimerText }}</span>
-          </div>
-        </div>
+        <!-- ⑤ 底部控制区（循环/上一首/播放/下一首/歌单/月亮）——共享组件，全歌词界面同款 -->
+        <MobileControlsRow
+          :queue-open="queueOpen"
+          @toggle-queue="toggleQueue"
+          @open-sleep="openSleepSheet"
+        />
       </template>
 
       <!-- ============ 跟唱模式：保持现状（全屏 KaraokePanel + karaoke 控制条） ============ -->
@@ -279,6 +260,62 @@
         </div>
       </Transition>
     </div>
+
+    <!-- ============ 全歌词界面（歌词区左划进入；右划/返回按钮关闭） ============ -->
+    <Transition name="mp-fl">
+      <div
+        v-if="fullLyricOpen"
+        ref="fullLyricRef"
+        class="mp-full-lyric"
+        :style="fullLyricStyle"
+        @touchstart.passive="fullLyricSwipe.handleStart"
+        @touchmove="fullLyricSwipe.handleMove"
+        @touchend="fullLyricSwipe.handleEnd"
+        @touchcancel="fullLyricSwipe.handleCancel"
+      >
+        <!-- 背景与主播放页一致：渐变常驻 + 封面毛玻璃（同款 mp-glass 逻辑） -->
+        <div class="mp-gradient" aria-hidden="true"></div>
+        <div v-if="glassOn && bgCoverUrl && !bgError" class="mp-glass" aria-hidden="true">
+          <img :src="bgCoverUrl" class="mp-glass-img" alt="" @error="bgError = true" />
+          <div class="mp-glass-scrim"></div>
+        </div>
+        <div class="mp-fl-content">
+          <div class="mp-fl-head">
+            <button
+              class="mp-fl-back"
+              :title="t('mobile.player.backToPlayer')"
+              @click="closeFullLyric"
+            >
+              <ChevronDown :size="20" />
+            </button>
+            <div class="mp-fl-info">
+              <div class="mp-fl-name">{{ state.currentSong?.name || t("control.noSong") }}</div>
+              <div class="mp-fl-artist">
+                {{ state.currentSong?.artist || "" }}
+                <template v-if="state.currentSong?.album">
+                  · {{ state.currentSong.album }}</template
+                >
+              </div>
+            </div>
+          </div>
+          <!-- 全屏歌词：复用 KaraokePanel（headless），字号略大于播放页（fontScale 1.15） -->
+          <div class="mp-fl-lyric">
+            <KaraokePanel
+              :lyric="state.lyric"
+              :current="currentLineIndex"
+              :expand-btn="false"
+              headless
+              :font-scale="1.15"
+            />
+          </div>
+          <MobileControlsRow
+            :queue-open="queueOpen"
+            @toggle-queue="toggleQueue"
+            @open-sleep="openSleepSheet"
+          />
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -296,13 +333,6 @@ import {
   Clock,
   ListMusic,
   ChevronDown,
-  Shuffle,
-  Repeat,
-  Repeat1,
-  Play,
-  Pause,
-  SkipBack,
-  SkipForward,
 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -312,10 +342,8 @@ import {
   isFavorite,
   toggleFavorite,
   currentLineIndex,
-  cyclePlayMode,
   prevSong,
   nextSong,
-  togglePlay,
   seek,
 } from "../../composables/usePlayer.js";
 import {
@@ -336,6 +364,8 @@ import { showToast, toastError } from "../../composables/useToast.js";
 import { resolveServerUrl } from "../../utils/apiClient.js";
 import KaraokePanel from "../KaraokePanel.vue";
 import ControlBar from "../ControlBar.vue";
+import MobileControlsRow from "./MobileControlsRow.vue";
+import { useHorizontalSwipe } from "../../composables/useSwipe.js";
 
 const emit = defineEmits(["back", "open-list"]);
 
@@ -370,40 +400,85 @@ watch(
   { immediate: true },
 );
 
-// ---------- 顶部下拉返回手势（仅连播模式封面区；歌词区滚动互不干扰） ----------
+// ---------- 封面区统一手势（下拉返回 + 横向切歌，方向仲裁共存） ----------
+// 下拉常量与行为保持原样：PULL_THRESHOLD / PULL_MAX / PULL_MIN_VELOCITY /
+// PULL_MIN_PX / PULL_SAMPLE_MIN_MS 均不动；仅把 touch 处理改为先做方向仲裁
+// （约 10px 锁定主方向），再分流到横向切歌 / 纵向下拉。
 const PULL_THRESHOLD = 100; // 松手位移阈值（px）
 const PULL_MAX = 160; // 跟手最大位移（px）
 const PULL_MIN_VELOCITY = 0.8; // 快速回甩最低速度（px/ms，位移超 PULL_MIN_PX 时触发）
 const PULL_MIN_PX = 40; // 速度判定所需最小位移（px）
 const PULL_SAMPLE_MIN_MS = 8; // 速度采样最小间隔：亚帧事件（测试/低采样）不产生速度样本
+const AXIS_LOCK_PX = 10; // 方向仲裁锁定阈值（px）：横向/纵向任一主导即锁定主方向
+const COVER_SLIDE_MS = 200; // 封面滑出动画时长（与 CSS transition 同步）
+const COVER_REPOSITION_FALLBACK_MS = 600; // 切歌后封面 URL 未变化（单曲/相同封面）的滑入兜底
+const FULL_LYRIC_SLIDE_MS = 200; // 全歌词界面滑出动画时长（与 CSS transition 同步）
 
 const coverRef = ref(null);
 const pullY = ref(0);
 const pullDragging = ref(false);
-let pullGesture = null; // { startY, lastY, lastT, lastV }
+let coverGesture = null; // { startX, startY, lastY, lastT, lastV, axis: null|'h'|'v' }
 
 const playerStyle = computed(() => ({
   transform: pullY.value ? `translateY(${pullY.value}px)` : "",
   transition: pullDragging.value ? "none" : "transform 0.25s ease",
 }));
 
-function onPullStart(e) {
+// 横向切歌：位移跟随（--mp-swipe-shift 由 useHorizontalSwipe 写入）+ 跟手/动画过渡切换
+const coverNoTransition = ref(false); // true=跟手/重定位（无过渡），false=滑出/回弹/滑入（CSS transition）
+const coverBusy = ref(false); // 滑出→切歌→滑入编排中：禁止新手势
+let pendingSlideIn = null; // { from }：切歌后重定位到对侧再滑入 0
+let choreoTimers = [];
+
+// 横向手势实例：direction both + 左缘让位（屏幕左缘由 MobileShell 的 useEdgeSwipe 负责页面返回）；
+// 监听不在此 bind——封面元素由下方统一手势机直接转发 handleStart/Move/End。
+const coverSwipe = useHorizontalSwipe({
+  enabled: () => !coverBusy.value && !fullLyricOpen.value,
+  direction: "both",
+  excludeEdgeZone: true,
+  onTrigger: (dir) => coverTriggered(dir),
+});
+
+const coverStyle = computed(() => ({
+  transform: coverSwipe.shift.value ? `translateX(${coverSwipe.shift.value}px)` : "",
+  transition: coverNoTransition.value ? "none" : "transform 0.22s ease",
+}));
+
+function onCoverStart(e) {
+  if (coverBusy.value || fullLyricOpen.value) return;
   const touch = e.touches && e.touches[0];
   if (!touch) return;
-  pullGesture = {
+  coverGesture = {
+    startX: touch.clientX,
     startY: touch.clientY,
     lastY: touch.clientY,
     lastT: Date.now(),
     lastV: 0,
+    axis: null,
   };
+  coverSwipe.handleStart(e);
 }
 
-function onPullMove(e) {
-  const g = pullGesture;
+function onCoverMove(e) {
+  const g = coverGesture;
   if (!g) return;
   const touch = e.touches && e.touches[0];
   if (!touch) return;
+  const dx = touch.clientX - g.startX;
   const dy = touch.clientY - g.startY;
+  if (!g.axis) {
+    // 方向仲裁：横向/纵向任一主导（> AXIS_LOCK_PX）即锁定主方向；未锁定前不 preventDefault
+    if (Math.abs(dx) > AXIS_LOCK_PX && Math.abs(dx) > Math.abs(dy)) g.axis = "h";
+    else if (dy > AXIS_LOCK_PX && dy > Math.abs(dx)) g.axis = "v";
+    else return;
+  }
+  if (g.axis === "h") {
+    // 横向：跟手位移交给 useHorizontalSwipe（内部含方向/阈值/速度判定）
+    coverSwipe.handleMove(e);
+    if (coverSwipe.dragging.value) coverNoTransition.value = true;
+    return;
+  }
+  // 纵向：原下拉逻辑（行为不变）
   if (dy <= 0) return; // 上滑不响应（让位系统行为）
   if (e.cancelable) e.preventDefault();
   const now = Date.now();
@@ -418,37 +493,142 @@ function onPullMove(e) {
   pullDragging.value = true;
 }
 
-function onPullEnd() {
-  const g = pullGesture;
-  pullGesture = null;
-  pullDragging.value = false;
+function onCoverEnd() {
+  const g = coverGesture;
+  coverGesture = null;
   if (!g) return;
-  const fastFlick = pullY.value >= PULL_MIN_PX && g.lastV >= PULL_MIN_VELOCITY;
-  if (pullY.value >= PULL_THRESHOLD || fastFlick) {
-    emit("back");
+  if (g.axis === "h") {
+    // 横向结束：开过渡（滑出或回弹）；达阈值由 onTrigger 编排，未达阈值内部回弹归零
+    coverNoTransition.value = false;
+    coverSwipe.handleEnd();
     return;
   }
-  pullY.value = 0; // 回弹（CSS transition）
+  pullDragging.value = false;
+  if (g.axis === "v") {
+    const fastFlick = pullY.value >= PULL_MIN_PX && g.lastV >= PULL_MIN_VELOCITY;
+    if (pullY.value >= PULL_THRESHOLD || fastFlick) {
+      emit("back");
+      return;
+    }
+    pullY.value = 0; // 回弹（CSS transition）
+  } else {
+    pullY.value = 0; // 未锁定：无位移
+  }
 }
 
+function onCoverCancel() {
+  coverGesture = null;
+  pullDragging.value = false;
+  pullY.value = 0;
+  coverNoTransition.value = false;
+  coverSwipe.handleCancel();
+}
+
+// 封面滑出→切歌→滑入编排：
+//   松手达阈值 → 带过渡滑出到 ±屏宽（约 200ms）→ 切歌 → 等封面 URL 变化（或兜底）
+//   → 无过渡重定位到 ∓屏宽 → 下一帧带过渡滑入 0。期间 coverBusy 锁住重复手势。
+function coverTriggered(dir) {
+  coverBusy.value = true;
+  coverNoTransition.value = false; // 开过渡：滑出动画
+  const w = window.innerWidth || 375;
+  coverSwipe.setShift(dir === "left" ? -w : w);
+  pendingSlideIn = { from: dir === "left" ? w : -w };
+  clearChoreoTimers();
+  choreoTimers.push(
+    setTimeout(() => {
+      // 滑出完成后切歌：左划 → 下一首，右划 → 上一首
+      if (dir === "left") nextSong();
+      else prevSong();
+      // 兜底：封面 URL 未变化（单曲队列/相同封面/加载失败）也要滑入回位
+      choreoTimers.push(setTimeout(doCoverSlideIn, COVER_REPOSITION_FALLBACK_MS));
+    }, COVER_SLIDE_MS),
+  );
+}
+
+function doCoverSlideIn() {
+  if (!pendingSlideIn) return;
+  const from = pendingSlideIn.from;
+  pendingSlideIn = null;
+  coverNoTransition.value = true; // 无过渡：重定位到对侧（新封面位置）
+  coverSwipe.setShift(from);
+  void coverRef.value?.offsetWidth; // 强制 reflow：重定位立即生效
+  requestAnimationFrame(() => {
+    coverNoTransition.value = false; // 开过渡：滑入到 0
+    coverSwipe.setShift(0);
+    coverBusy.value = false;
+  });
+}
+
+function clearChoreoTimers() {
+  choreoTimers.forEach(clearTimeout);
+  choreoTimers = [];
+}
+
+// 切歌后封面 URL 变化 → 立即触发滑入编排（不等兜底定时器）
+watch(coverUrl, () => {
+  if (pendingSlideIn) doCoverSlideIn();
+});
+
+// ---------- 歌词区手势：左划 → 进入全歌词界面（右划无动作；纵向滚动让位 KaraokePanel） ----------
+const lyricAreaRef = ref(null);
+const lyricSwipe = useHorizontalSwipe({
+  enabled: () => !fullLyricOpen.value && state.mode === "continuous",
+  direction: "left",
+  onTrigger: () => openFullLyric(),
+});
+const lyricAreaStyle = computed(() => ({
+  transform: lyricSwipe.shift.value ? `translateX(${lyricSwipe.shift.value}px)` : "",
+  transition: lyricSwipe.dragging.value ? "none" : "transform 0.22s ease",
+}));
+
+// ---------- 全歌词界面：右划 → 返回主播放页（跟手 + 达阈值滑出；返回按钮同） ----------
+const fullLyricOpen = ref(false);
+const fullLyricRef = ref(null);
+const fullLyricNoTransition = ref(false);
+let fullLyricCloseTimer = null;
+
+const fullLyricSwipe = useHorizontalSwipe({
+  enabled: () => fullLyricOpen.value,
+  direction: "right",
+  onTrigger: () => closeFullLyric(),
+});
+
+const fullLyricStyle = computed(() => ({
+  transform: fullLyricSwipe.shift.value ? `translateX(${fullLyricSwipe.shift.value}px)` : "",
+  transition: fullLyricNoTransition.value ? "none" : "transform 0.22s ease",
+}));
+
+function openFullLyric() {
+  if (fullLyricOpen.value) return;
+  clearTimeout(fullLyricCloseTimer);
+  fullLyricOpen.value = true;
+  fullLyricNoTransition.value = false;
+  fullLyricSwipe.setShift(0); // 入场从 0 开始（Transition 自带右滑入动画）
+  lyricSwipe.reset(); // 打开后重置歌词区位移
+}
+
+function closeFullLyric() {
+  if (!fullLyricOpen.value) return;
+  fullLyricNoTransition.value = false; // 开过渡：滑出到右侧
+  fullLyricSwipe.setShift(window.innerWidth || 375);
+  clearTimeout(fullLyricCloseTimer);
+  fullLyricCloseTimer = setTimeout(() => {
+    fullLyricOpen.value = false;
+    fullLyricSwipe.setShift(0); // 关闭后状态/位移清零
+    lyricSwipe.reset();
+  }, FULL_LYRIC_SLIDE_MS);
+}
+
+// ---------- 手势监听生命周期：事件绑定全部在模板上（@touch*），随元素 v-if 出现/消失自动生效；
+// 这里只做组件级清理（定时器）与播放页契约标记。 ----------
 onMounted(() => {
   window.__qqpPlayerOpen = true; // 契约：播放页打开时不触发原生状态条召唤
-  const el = coverRef.value;
-  if (!el) return;
-  el.addEventListener("touchstart", onPullStart, { passive: true });
-  el.addEventListener("touchmove", onPullMove, { passive: false });
-  el.addEventListener("touchend", onPullEnd);
-  el.addEventListener("touchcancel", onPullEnd);
 });
 
 onBeforeUnmount(() => {
   window.__qqpPlayerOpen = false;
-  const el = coverRef.value;
-  if (!el) return;
-  el.removeEventListener("touchstart", onPullStart);
-  el.removeEventListener("touchmove", onPullMove);
-  el.removeEventListener("touchend", onPullEnd);
-  el.removeEventListener("touchcancel", onPullEnd);
+  clearChoreoTimers();
+  if (fullLyricCloseTimer) clearTimeout(fullLyricCloseTimer);
 });
 
 // ---------- 歌名行 ----------
@@ -471,13 +651,6 @@ function fmt(time) {
   const s = Math.floor(time % 60);
   return m + ":" + String(s).padStart(2, "0");
 }
-
-// ---------- 播放模式 ----------
-const playModeTitle = computed(() => {
-  if (state.playMode === "shuffle") return t("control.modeShuffle");
-  if (state.playMode === "repeatOne") return t("control.modeRepeatOne");
-  return t("control.modeOrder");
-});
 
 // ---------- 底部面板开关（互斥） ----------
 const addOpen = ref(false);
@@ -610,7 +783,7 @@ function pickSleep(minutes) {
   flex-direction: column;
 }
 
-/* ---------- ① 封面区（下拉返回手势区） ---------- */
+/* ---------- ① 封面区（下拉返回 + 横向切歌统一手势区；手势全部由 JS 接管，禁浏览器手势干扰） ---------- */
 .mp-cover-area {
   flex-shrink: 0;
   display: flex;
@@ -618,7 +791,8 @@ function pickSleep(minutes) {
   align-items: center;
   justify-content: center;
   padding: calc(10px + env(safe-area-inset-top)) 20px 8px;
-  touch-action: manipulation;
+  touch-action: none;
+  will-change: transform;
 }
 .mp-pull-hint {
   color: var(--text3);
@@ -646,7 +820,7 @@ function pickSleep(minutes) {
   opacity: 0.75;
 }
 
-/* ---------- ② 小歌词区（5 行起步，弹性吃剩余空间 → 控制区贴底） ---------- */
+/* ---------- ② 小歌词区（5 行起步，弹性吃剩余空间 → 控制区贴底；左划进入全歌词） ---------- */
 .mp-lyric-area {
   flex: 1;
   min-height: 200px;
@@ -654,6 +828,9 @@ function pickSleep(minutes) {
   padding: 0 20px; /* 左右与上下区块统一 20px（2026-08-26） */
   display: flex;
   flex-direction: column;
+  /* 纵向滚动归浏览器/KaraokePanel，横向左划由 JS 接管（pan-y 让浏览器不抢横向） */
+  touch-action: pan-y;
+  will-change: transform;
 }
 .mp-lyric-area > * {
   flex: 1;
@@ -773,78 +950,109 @@ function pickSleep(minutes) {
   cursor: default;
 }
 
-/* ---------- ⑤ 底部控制区 ---------- */
-.mp-controls-row {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  gap: 4px;
-  padding: 6px 20px calc(10px + env(safe-area-inset-bottom));
-}
-.mp-cbtn {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    transform 0.12s,
-    background 0.15s;
-}
-.mp-cbtn:active {
-  transform: scale(0.92);
-  background: var(--card2);
-  color: var(--text);
-}
-.mp-cbtn.on {
-  color: var(--accent);
-}
-.mp-play {
-  width: 58px;
-  height: 58px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff;
-  box-shadow: 0 4px 16px var(--accent-glow2);
-}
-.mp-play:active {
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-}
-.mp-play svg {
-  margin-left: 2px; /* 播放三角视觉居中 */
-}
-.mp-moon-wrap {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-/* 月亮附近小字：倒计时/已到点（连续模式） */
-.mp-sleep-timer {
-  position: absolute;
-  top: calc(100% + 1px);
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-size: 9.5px;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
-/* 跟唱模式保留原居中一行小字 */
+/* ---------- ⑤ 底部控制区（共享组件 MobileControlsRow，样式在组件内） ---------- */
+/* 跟唱模式：保留原居中一行睡眠小字（自带基础样式，不依赖共享组件作用域） */
 .mp-sleep-line {
   position: static;
   transform: none;
+  white-space: nowrap;
   text-align: center;
   font-size: 12px;
   color: var(--text3);
+  font-variant-numeric: tabular-nums;
   padding: 2px 0 0;
   flex-shrink: 0;
+}
+
+/* ---------- ⑥ 全歌词界面（歌词区左划进入；覆盖主播放页，底部面板在其上） ---------- */
+.mp-full-lyric {
+  position: absolute;
+  inset: 0;
+  z-index: 55; /* 主播放页(50)之上、底部面板(60)之下 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  will-change: transform;
+}
+.mp-fl-content {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mp-fl-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 8px;
+}
+.mp-fl-back {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card2);
+  color: var(--text2);
+  flex-shrink: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.mp-fl-back:active {
+  background: var(--border);
+  color: var(--text);
+}
+.mp-fl-info {
+  flex: 1;
+  min-width: 0;
+}
+.mp-fl-name {
+  font-size: 17px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mp-fl-artist {
+  font-size: 12.5px;
+  color: var(--text3);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 全屏歌词：弹性占满中间，字号由 fontScale 放大；卡片底色透出毛玻璃（改透明） */
+.mp-fl-lyric {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 20px 10px;
+}
+.mp-fl-lyric > * {
+  flex: 1;
+  min-height: 0;
+}
+.mp-fl-lyric :deep(.karaoke-panel) {
+  background: transparent;
+  border-color: transparent;
+}
+.mp-fl-lyric :deep(.kp-scroll) {
+  padding-left: 0;
+  padding-right: 0;
+}
+/* 全歌词界面入场/出场：从右侧滑入/滑出（Apple Music 风格） */
+.mp-fl-enter-active,
+.mp-fl-leave-active {
+  transition: transform 0.26s ease;
+}
+.mp-fl-enter-from,
+.mp-fl-leave-to {
+  transform: translateX(100%);
 }
 
 /* ---------- 跟唱模式 ---------- */

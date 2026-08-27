@@ -73,6 +73,9 @@ export default {
       minutes: "{n} min",
       newPlaylistPlaceholder: "Playlist name",
       create: "Create",
+      // Full-lyrics view (swipe left on the lyric area)
+      fullLyric: "Full Lyrics",
+      backToPlayer: "Back to Player",
     },
     // Negative-screen sync center (MobileSync)
     syncCenter: {

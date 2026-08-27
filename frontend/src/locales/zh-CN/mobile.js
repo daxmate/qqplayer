@@ -73,6 +73,9 @@ export default {
       minutes: "{n} 分钟",
       newPlaylistPlaceholder: "输入歌单名称",
       create: "创建",
+      // 全歌词界面（歌词区左划进入）
+      fullLyric: "全歌词",
+      backToPlayer: "返回播放页",
     },
     // 负一屏同步中心（MobileSync）
     syncCenter: {

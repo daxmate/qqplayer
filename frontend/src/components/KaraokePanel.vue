@@ -113,6 +113,8 @@ const props = defineProps({
   // 纯歌词展示模式（移动端音乐模式）：隐藏面板头（逐句练习标题/AB 提示/歌词库入口），
   // 只留滚动歌词区；无歌词时 kp-empty 仍自带歌词库入口，不丢能力
   headless: { type: Boolean, default: false },
+  // 字号缩放（全歌词界面用）：默认 1 不影响现有使用方，>1 时按比例放大 --fs-active
+  fontScale: { type: Number, default: 1 },
 });
 
 function expandPanels() {
@@ -145,7 +147,7 @@ const FONTS = {
 // 字号/字体/渐隐 → CSS 变量与内联样式（与连播 LyricPanel 一致）
 const scrollStyle = computed(() => ({
   fontFamily: FONTS[lyricSettings.fontFamily] || "",
-  "--fs-active": lyricSettings.fontSize + "px",
+  "--fs-active": Math.round(lyricSettings.fontSize * props.fontScale) + "px",
   // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
   "--lyr-jp":
     lyricSettings.jpColor ||
