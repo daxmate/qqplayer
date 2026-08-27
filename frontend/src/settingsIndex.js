@@ -909,11 +909,23 @@ export const settingsIndex = [
     category: "ui",
     subTab: null,
     labelKey: "settings.showCover",
-    keywords: ["显示封面", "封面", "隐藏封面", "封面显示", "show cover", "cover"],
+    keywords: ["显示封面", "封面", "隐藏封面", "封面显示", "show cover", "cover", "大封面"],
     type: "toggle",
     get: () => uiSettings.showCover,
     set: (v) => {
       uiSettings.showCover = v;
+    },
+  },
+  {
+    id: "showListCover",
+    category: "ui",
+    subTab: null,
+    labelKey: "settings.showListCover",
+    keywords: ["列表封面", "缩略图", "列表缩略图", "封面", "list cover", "thumbnail"],
+    type: "toggle",
+    get: () => uiSettings.showListCover,
+    set: (v) => {
+      uiSettings.showListCover = v;
     },
   },
   {

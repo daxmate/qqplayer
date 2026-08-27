@@ -49,6 +49,7 @@ beforeEach(() => {
   playbackSettings.miniSpectrumEnabled = true;
   playbackSettings.visualizerStyle = "bars";
   uiSettings.showCover = true;
+  uiSettings.showListCover = true;
   // 弹窗 watch(open) 会触发 loadLibrary / loadLibrarySettings（fetch），stub 掉
   vi.stubGlobal(
     "fetch",
@@ -202,6 +203,31 @@ describe("SettingsModal 任务 K - 显示封面开关", () => {
     row.click();
     await nextTick();
     expect(uiSettings.showCover).toBe(true);
+    w.unmount();
+  });
+
+  it("界面分类：新增「列表封面」开关默认开，点击切换 uiSettings.showListCover（与 showCover 独立）", async () => {
+    const w = mount(SettingsModal, { props: { open: true } });
+    await nextTick();
+    const root = document.body.querySelector(".modal");
+    const uiNav = [...root.querySelectorAll(".nav-item")].find((el) =>
+      el.textContent.includes("界面"),
+    );
+    uiNav.click();
+    await nextTick();
+    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
+      el.textContent.includes("列表封面"),
+    );
+    expect(row).toBeTruthy();
+    expect(row.querySelector(".switch.on")).toBeTruthy();
+    row.click();
+    await nextTick();
+    expect(uiSettings.showListCover).toBe(false);
+    expect(uiSettings.showCover).toBe(true); // 大封面开关不受影响
+    expect(row.querySelector(".switch.on")).toBeFalsy();
+    row.click();
+    await nextTick();
+    expect(uiSettings.showListCover).toBe(true);
     w.unmount();
   });
 });

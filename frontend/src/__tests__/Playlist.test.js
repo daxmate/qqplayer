@@ -352,19 +352,19 @@ describe("Playlist", () => {
     expect(zz.find(".gr-cover img").attributes("src")).toContain("/api/cover?path=");
   });
 
-  it("专辑卡封面跟随「显示封面」设置：关闭后不渲染，重开恢复", async () => {
+  it("专辑卡封面跟随「列表封面」设置：关闭后不渲染，重开恢复", async () => {
     state.songs = SAMPLE;
     const wrapper = mount(Playlist);
     await wrapper.findAll(".pb-tab")[2].trigger("click"); // 专辑
     // 默认开启：封面渲染
     expect(wrapper.find(".gr-cover img").exists()).toBe(true);
     // 关闭 → 封面区域整个不渲染（meta 仍在）
-    uiSettings.showCover = false;
+    uiSettings.showListCover = false;
     await nextTick();
     expect(wrapper.find(".gr-cover").exists()).toBe(false);
     expect(wrapper.find(".gr-name").exists()).toBe(true);
     // 重开 → 恢复
-    uiSettings.showCover = true;
+    uiSettings.showListCover = true;
     await nextTick();
     expect(wrapper.find(".gr-cover img").exists()).toBe(true);
   });
@@ -387,15 +387,15 @@ describe("Playlist", () => {
     expect(items[1].find(".pl-cover").exists()).toBe(true);
   });
 
-  it("列表行封面跟随「显示封面」设置：关闭后整个封面区不渲染，重开恢复", async () => {
+  it("列表行封面跟随「列表封面」设置：关闭后整个封面区不渲染，重开恢复", async () => {
     state.songs = [{ id: "a", name: "A", artist: "", path: "/music/a.mp3" }];
     const wrapper = mount(Playlist);
     expect(wrapper.find(".pl-cover img").exists()).toBe(true);
-    uiSettings.showCover = false;
+    uiSettings.showListCover = false;
     await nextTick();
     expect(wrapper.find(".pl-cover").exists()).toBe(false);
     expect(wrapper.find(".pl-name").exists()).toBe(true);
-    uiSettings.showCover = true;
+    uiSettings.showListCover = true;
     await nextTick();
     expect(wrapper.find(".pl-cover img").exists()).toBe(true);
   });

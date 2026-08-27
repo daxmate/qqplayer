@@ -133,19 +133,19 @@ describe("MiniPlayerBar（移动端迷你播放条）", () => {
     expect(wrapper.emitted("open-player")).toBeFalsy();
   });
 
-  it("showCover=false 时封面容器不渲染，信息与控制区仍完整", async () => {
-    uiSettings.showCover = false;
+  it("showListCover=false 时封面容器不渲染，信息与控制区仍完整", async () => {
+    uiSettings.showListCover = false;
     state.currentIndex = 0;
     state.currentSong = lib[0];
     const wrapper = mount(MiniPlayerBar);
     expect(wrapper.find(".mp-cover").exists()).toBe(false);
     expect(wrapper.find(".mp-name").text()).toBe("雪の華");
     expect(wrapper.findAll(".mp-btn").length).toBe(2);
-    uiSettings.showCover = true;
+    uiSettings.showListCover = true;
   });
 
-  it("showCover=true 时封面正常渲染（回归）", () => {
-    uiSettings.showCover = true;
+  it("showListCover=true 时封面正常渲染（回归）", () => {
+    uiSettings.showListCover = true;
     state.currentIndex = 0;
     state.currentSong = lib[0];
     const wrapper = mount(MiniPlayerBar);

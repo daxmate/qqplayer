@@ -142,7 +142,7 @@ LIBRARY_SETTINGS_DEFAULTS = {
     "autoRefresh": True,  # watchdog 自动刷新（库变动自动重扫）
     "autoScanOnStart": True,  # 启动时自动扫描歌曲库
 }
-# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 9 字段（只读拷贝）
+# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 10 字段（只读拷贝）
 UI_SETTINGS_DEFAULTS = {
     "showSongInfo": False,  # 跟唱模式歌词面板顶部显示当前歌曲信息
     "karaokeShowTime": False,  # 跟唱模式每句显示起止时间戳
@@ -152,7 +152,8 @@ UI_SETTINGS_DEFAULTS = {
     "accent": "orange",  # 强调色预设 key
     "coverBlur": False,  # 封面模糊背景
     "compact": False,  # 紧凑模式
-    "showCover": True,  # 显示封面（关闭后隐藏封面图片，保留占位）
+    "showCover": True,  # 显示封面（大封面：播放器主区/移动端播放页/桌面歌词悬浮窗；关闭后隐藏封面图片，保留占位）
+    "showListCover": True,  # 列表封面（列表行/卡片缩略图；与 showCover 独立，默认开 = 现状零变化）
 }
 # lyric：前端 useSettings.js LYRIC_SETTINGS_DEFAULTS 全部 15 字段
 LYRIC_SETTINGS_DEFAULTS = {

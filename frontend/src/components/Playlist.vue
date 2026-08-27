@@ -113,7 +113,7 @@
           </span>
         </template>
         <template v-else>
-          <span v-if="uiSettings.showCover" class="gr-cover">
+          <span v-if="uiSettings.showListCover" class="gr-cover">
             <img
               v-if="g.coverUrl"
               :src="g.coverUrl"
@@ -259,7 +259,7 @@
           >
             <GripVertical :size="14" />
           </span>
-          <span v-if="uiSettings.showCover" class="pl-cover">
+          <span v-if="uiSettings.showListCover" class="pl-cover">
             <img
               v-if="coverSrc(song.path) && coverOk(song.path)"
               :src="coverSrc(song.path)"

@@ -1,7 +1,7 @@
 <template>
   <div class="mini-player" @click="$emit('open-player')">
-    <!-- 封面（showCover 关：整个容器不渲染，信息与控制区占满） -->
-    <div v-if="uiSettings.showCover" class="mp-cover">
+    <!-- 封面（showListCover 关：整个容器不渲染，信息与控制区占满） -->
+    <div v-if="uiSettings.showListCover" class="mp-cover">
       <img
         v-if="coverSrc(coverPath) && coverOk(coverPath)"
         :src="coverSrc(coverPath)"

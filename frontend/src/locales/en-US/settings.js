@@ -190,5 +190,12 @@ export default {
     // UI (mobile player)
     glassCover: "Glass cover background",
     glassCoverDesc: "Blur the current cover as the player background on mobile",
+    // UI covers (big cover vs list thumbnails are independent)
+    showCover: "Show cover",
+    showCoverDesc:
+      "Hide the big cover (player main area / mobile player page / desktop lyric overlay); the main lyrics area expands to fill",
+    showListCover: "List covers",
+    showListCoverDesc:
+      "Hide thumbnail covers in list rows/cards; the big player cover is unaffected",
   },
 };

@@ -27,7 +27,7 @@
             <span class="sv-drag" :title="t('playlist.dragOut')">
               <GripVertical :size="14" />
             </span>
-            <span v-if="uiSettings.showCover" class="sv-cover">
+            <span v-if="uiSettings.showListCover" class="sv-cover">
               <img
                 v-if="coverSrc(row.song.path) && coverOk(row.song.path)"
                 :src="coverSrc(row.song.path)"

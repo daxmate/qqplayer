@@ -254,20 +254,20 @@ describe("MobileSmartList 加载/错误/交互", () => {
   });
 });
 
-describe("MobileSmartList showCover 开关（关闭后封面容器不渲染）", () => {
-  it("showCover=false 时 .msv-cover 不渲染，行信息仍完整", async () => {
-    uiSettings.showCover = false;
+describe("MobileSmartList showListCover 开关（列表封面：关闭后封面容器不渲染）", () => {
+  it("showListCover=false 时 .msv-cover 不渲染，行信息仍完整", async () => {
+    uiSettings.showListCover = false;
     const wrapper = mount(MobileSmartList, { props: { kind: "recentAdded" } });
     await flushPromises();
     const item = wrapper.find(".msv-item");
     expect(item.exists()).toBe(true);
     expect(item.find(".msv-cover").exists()).toBe(false);
     expect(item.text()).toContain("雪の華");
-    uiSettings.showCover = true;
+    uiSettings.showListCover = true;
   });
 
-  it("showCover=true 时封面正常渲染（回归）", async () => {
-    uiSettings.showCover = true;
+  it("showListCover=true 时封面正常渲染（回归）", async () => {
+    uiSettings.showListCover = true;
     const wrapper = mount(MobileSmartList, { props: { kind: "recentAdded" } });
     await flushPromises();
     expect(wrapper.find(".msv-item .msv-cover").exists()).toBe(true);

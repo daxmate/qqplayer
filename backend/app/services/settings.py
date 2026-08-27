@@ -179,6 +179,7 @@ _SETTINGS_SPEC = {
         "coverBlur": (state.UI_SETTINGS_DEFAULTS["coverBlur"], _norm_bool),
         "compact": (state.UI_SETTINGS_DEFAULTS["compact"], _norm_bool),
         "showCover": (state.UI_SETTINGS_DEFAULTS["showCover"], _norm_bool),
+        "showListCover": (state.UI_SETTINGS_DEFAULTS["showListCover"], _norm_bool),
         # 任务 D：搜索历史（字符串数组，最新在前，最多 10 条）——后端统一设置存储，跨引擎同步
         "searchHistory": ([], lambda v, d: _norm_search_history(v, d)),
     },

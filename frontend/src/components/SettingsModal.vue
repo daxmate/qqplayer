@@ -1404,6 +1404,19 @@
                     <span class="switch" :class="{ on: uiSettings.showCover }"><i /></span>
                   </div>
                 </div>
+                <!-- 列表封面：列表行/卡片缩略图独立开关（与 showCover 大封面互不影响；桌面/移动端均生效） -->
+                <div class="setting-item">
+                  <div
+                    class="toggle-row"
+                    @click="uiSettings.showListCover = !uiSettings.showListCover"
+                  >
+                    <div>
+                      <div class="setting-label">{{ t("settings.showListCover") }}</div>
+                      <div class="setting-desc">{{ t("settings.showListCoverDesc") }}</div>
+                    </div>
+                    <span class="switch" :class="{ on: uiSettings.showListCover }"><i /></span>
+                  </div>
+                </div>
                 <!-- 封面区域大小：自适应（0）或手动固定值（140~420）；滑块联动 + 恢复默认回自适应 -->
                 <div v-if="uiSettings.showCover && !isMobile" class="setting-item">
                   <div class="setting-label">

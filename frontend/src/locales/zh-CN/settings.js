@@ -412,7 +412,10 @@ export default {
     glassCover: "毛玻璃封面",
     glassCoverDesc: "移动端播放页背景铺当前歌曲封面模糊图",
     showCover: "显示封面",
-    showCoverDesc: "关闭后隐藏封面（列表 / 播放器），主区歌词自动扩充铺满",
+    showCoverDesc:
+      "关闭后隐藏大封面（播放器主区 / 移动端播放页 / 桌面歌词悬浮窗），主区歌词自动扩充铺满",
+    showListCover: "列表封面",
+    showListCoverDesc: "关闭后隐藏列表行/卡片的缩略图封面，播放器大封面不受影响",
     coverSize: "封面区域大小",
     coverSizeDesc: "拖动分隔条或滑块调整封面/歌词区比例；自适应按窗口高度保底歌词可读",
     coverSizeAuto: "自适应",

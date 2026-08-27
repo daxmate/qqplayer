@@ -50,8 +50,8 @@
             }"
             @click="onRowClick(row)"
           >
-            <!-- showCover 关：整个封面容器不渲染（含回退图标），行信息占满 -->
-            <div v-if="uiSettings.showCover" class="msv-cover">
+            <!-- showListCover 关：整个封面容器不渲染（含回退图标），行信息占满 -->
+            <div v-if="uiSettings.showListCover" class="msv-cover">
               <img
                 v-if="coverSrc(row.song.path) && coverOk(row.song.path)"
                 :src="coverSrc(row.song.path)"

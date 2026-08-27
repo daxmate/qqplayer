@@ -870,7 +870,7 @@ def test_api_settings_get_all_namespaces():
     }
     assert s["library"]["path"] == ""
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
-    # ui 10 字段（含任务 D searchHistory）
+    # ui 11 字段（含任务 D searchHistory、任务：showListCover 列表封面）
     assert set(s["ui"]) == {
         "showSongInfo",
         "karaokeShowTime",
@@ -881,10 +881,12 @@ def test_api_settings_get_all_namespaces():
         "coverBlur",
         "compact",
         "showCover",
+        "showListCover",
         "searchHistory",
     }
     assert s["ui"]["theme"] == "dark" and s["ui"]["accent"] == "orange"
     assert s["ui"]["showCover"] is True
+    assert s["ui"]["showListCover"] is True
     assert s["ui"]["searchHistory"] == []
     # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
     assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
@@ -1022,6 +1024,15 @@ def test_api_settings_put_validation():
     s = r.json()["settings"]
     assert s["ui"]["showCover"] is True  # 非法类型回落默认 True
     assert s["playback"]["visualizerStyle"] == "bars"  # 非法枚举回落默认
+
+    # 任务：showListCover 列表封面开关（与 showCover 独立）合法值保留、非法类型回落默认 True
+    r = client.put("/api/settings", json={"ui": {"showListCover": False}})
+    s = r.json()["settings"]
+    assert s["ui"]["showListCover"] is False
+    assert s["ui"]["showCover"] is True  # 大封面开关不受影响
+    r = client.put("/api/settings", json={"ui": {"showListCover": "yes"}})
+    s = r.json()["settings"]
+    assert s["ui"]["showListCover"] is True  # 非法类型回落默认 True
 
 
 def test_api_settings_put_unknown_namespace_ignored():
