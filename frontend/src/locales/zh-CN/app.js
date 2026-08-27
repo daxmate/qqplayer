@@ -28,6 +28,7 @@ export default {
     noLyric: "暂无歌词",
     specifyLyric: "指定歌词",
     coverDragHint: "拖动调整封面/歌词区大小",
+    playlistWidthHint: "拖动调整列表面板宽度",
     // 封面
     coverAlt: "封面",
     // 数据层（apiClient 离线降级 / 配对失效提示）

@@ -235,6 +235,8 @@ html[data-compact="true"] .pl-list {
 }
 html[data-compact="true"] .pl-item {
   padding: 5px 8px;
+  /* 保持与基准行一致：右缘预留行尾操作按钮区（compact 的 padding 简写会覆盖 padding-right，需显式补回） */
+  padding-right: var(--pl-actions-w, 144px);
   gap: 8px;
 }
 html[data-compact="true"] .pl-item .pl-cover {

@@ -298,40 +298,45 @@
             <span class="eq-bar"></span>
             <span class="eq-bar"></span>
           </span>
-          <button
-            class="pl-action heart"
-            :class="{ on: isFavorite(song.path) }"
-            :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
-            @click.stop="toggleFavorite(song.path)"
-          >
-            <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
-          </button>
-          <button
-            class="pl-action"
-            :title="t('playlist.addMenu.title')"
-            @click.stop="openAddMenu($event, song.path)"
-          >
-            <ListPlus :size="14" />
-          </button>
-          <button
-            v-if="isStreamSong(song)"
-            class="pl-action dl"
-            :class="{ busy: downloading[song.streamId] }"
-            :title="downloading[song.streamId] ? t('playlist.downloading') : t('playlist.download')"
-            @click.stop="downloadSong(song)"
-          >
-            <Loader2 v-if="downloading[song.streamId]" :size="14" class="pl-spin" />
-            <Download v-else :size="14" />
-          </button>
-          <button
-            class="pl-action remove"
-            :title="
-              inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')
-            "
-            @click.stop="removeItem(vi)"
-          >
-            <X :size="14" />
-          </button>
+          <!-- 行尾操作按钮：绝对定位不占布局空间（文字区参照自动歌单占满整行），hover 显示 -->
+          <div class="pl-actions">
+            <button
+              class="pl-action heart"
+              :class="{ on: isFavorite(song.path) }"
+              :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
+              @click.stop="toggleFavorite(song.path)"
+            >
+              <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
+            </button>
+            <button
+              class="pl-action"
+              :title="t('playlist.addMenu.title')"
+              @click.stop="openAddMenu($event, song.path)"
+            >
+              <ListPlus :size="14" />
+            </button>
+            <button
+              v-if="isStreamSong(song)"
+              class="pl-action dl"
+              :class="{ busy: downloading[song.streamId] }"
+              :title="
+                downloading[song.streamId] ? t('playlist.downloading') : t('playlist.download')
+              "
+              @click.stop="downloadSong(song)"
+            >
+              <Loader2 v-if="downloading[song.streamId]" :size="14" class="pl-spin" />
+              <Download v-else :size="14" />
+            </button>
+            <button
+              class="pl-action remove"
+              :title="
+                inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')
+              "
+              @click.stop="removeItem(vi)"
+            >
+              <X :size="14" />
+            </button>
+          </div>
         </div>
         <div v-if="!visible.length" class="pl-empty">
           {{
@@ -1854,10 +1859,15 @@ function fmtDur(d) {
   box-shadow: inset 0 -2px 0 0 var(--accent);
 }
 .pl-item {
+  /* 行尾操作按钮区宽：最多 4 钮（收藏/加歌单/下载/移除）×26 + 3 gap×10 + 右缘 10 */
+  --pl-actions-w: 144px;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
+  /* 预留按钮区：非 hover 时文字占满行内剩余宽度（参照自动歌单），hover 按钮浮出不重叠 */
+  padding-right: var(--pl-actions-w);
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.12s;
@@ -1986,6 +1996,17 @@ function fmtDur(d) {
   50% {
     transform: scaleY(1);
   }
+}
+/* 行操作按钮容器：绝对定位在行尾右缘，不占布局空间（hover 显示时文字区右侧已预留 padding，不重叠） */
+.pl-actions {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 2;
 }
 /* 行操作按钮：桌面 hover 显示；触屏设备常显半透明（无 hover 能力，不依赖悬停） */
 .pl-action {

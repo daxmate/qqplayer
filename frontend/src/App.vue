@@ -88,6 +88,14 @@
         </button>
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
         <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
+        <!-- 列表面板宽度拖拽条（桌面）：位于 playlist 与 center 之间的 grid gap 上，绝对定位不占网格 -->
+        <div
+          v-if="state.playlistOpen"
+          class="pl-width-handle"
+          :class="{ dragging: plWidthDragging }"
+          :title="t('app.playlistWidthHint')"
+          @pointerdown="startPlWidthDrag"
+        />
         <section ref="centerRef" class="center">
           <!-- 氛围背景层（封面取色光晕，absolute 铺满 center；Cover/LyricPanel 在其上） -->
           <Visualizer class="ambient-layer" />
@@ -126,6 +134,14 @@
         <ActivityBar v-if="panelsActive" class="activity-bar" />
         <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
         <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
+        <!-- 列表面板宽度拖拽条（桌面）：位置推导与上方 grid 列宽一致（见样式注释） -->
+        <div
+          v-if="state.playlistOpen"
+          class="pl-width-handle"
+          :class="{ dragging: plWidthDragging }"
+          :title="t('app.playlistWidthHint')"
+          @pointerdown="startPlWidthDrag"
+        />
         <KaraokePanel
           class="panel karaoke-panel"
           :lyric="state.lyric"
@@ -265,6 +281,7 @@ import {
   dragging,
   observeCoverArea,
 } from "./composables/useCoverSize.js";
+import { startPlWidthDrag, dragging as plWidthDragging } from "./composables/usePlaylistWidth.js";
 import {
   state,
   loadSongs,
@@ -749,14 +766,14 @@ html[data-theme="dark"] .logo-img {
 }
 .main.continuous.has-tabbar.has-playlist,
 .main.karaoke.has-tabbar.has-playlist {
-  grid-template-columns: 64px 280px 1fr;
+  grid-template-columns: 64px var(--pl-w, 340px) 1fr;
   grid-template-areas:
     "activity playlist center"
     "activity controls controls";
 }
 .main.continuous.has-tabbar.has-music.has-playlist,
 .main.karaoke.has-tabbar.has-music.has-playlist {
-  grid-template-columns: 64px 200px 280px 1fr;
+  grid-template-columns: 64px 200px var(--pl-w, 340px) 1fr;
   grid-template-areas:
     "activity sidebar playlist center"
     "activity controls controls controls";
@@ -924,6 +941,34 @@ html[data-theme="dark"] .logo-img {
 }
 .cover-divider.dragging {
   background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+/* 列表面板宽度拖拽条：绝对定位覆盖 playlist 与 center 之间的 grid gap（14px），不占网格布局。
+   水平位置用与上方 grid 相同的列宽推导：main 左内边距 20 + activity 64 + gap 14
+   [+ sidebar 200 + gap 14（有音乐库时）] + 面板宽 var(--pl-w, 340px)；高度与面板行对齐（top/bottom 为 main 内边距 14） */
+.pl-width-handle {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  width: 14px;
+  border-radius: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 5;
+  transition: background 0.15s;
+}
+@media (hover: hover) {
+  .pl-width-handle:hover,
+  .pl-width-handle.dragging {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+}
+.main.continuous.has-tabbar.has-playlist .pl-width-handle,
+.main.karaoke.has-tabbar.has-playlist .pl-width-handle {
+  left: calc(20px + 64px + 14px + var(--pl-w, 340px));
+}
+.main.continuous.has-tabbar.has-music.has-playlist .pl-width-handle,
+.main.karaoke.has-tabbar.has-music.has-playlist .pl-width-handle {
+  left: calc(20px + 64px + 14px + 200px + 14px + var(--pl-w, 340px));
 }
 /* 氛围背景层在底层；其余内容（封面/歌词/空态）抬升一层 */
 .center > :not(.ambient-layer) {
