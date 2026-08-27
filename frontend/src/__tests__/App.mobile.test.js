@@ -33,6 +33,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const App = (await import("../App.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { uiSettings } = await import("../composables/useSettings.js");
 const { toggleSleepTimer, _resetSleepTimer } = await import("../composables/useSleepTimer.js");
 
 beforeEach(() => {
@@ -145,6 +146,33 @@ describe("ControlBar 睡眠定时器 isMobile 分支", () => {
     expect(wrapper.find(".mobile-player").exists()).toBe(true);
     expect(wrapper.find(".mp-sleep-timer").exists()).toBe(true); // MobilePlayer 自己的
     expect(wrapper.find(".controls .sleep-timer").exists()).toBe(false); // ControlBar 隐藏
+    wrapper.unmount();
+  });
+});
+
+describe("H3 coverBlur 背景层移动端守卫（bg-blur 仅桌面渲染）", () => {
+  beforeEach(() => {
+    uiSettings.coverBlur = true;
+    state.currentSong = { path: "/lib/a.mp3", name: "雪の華", artist: "中島美嘉" };
+  });
+  afterEach(() => {
+    uiSettings.coverBlur = false;
+    state.currentSong = null;
+  });
+
+  it("桌面：coverBlur 开启时渲染 .bg-blur 背景层", async () => {
+    mq.set(false);
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find(".bg-blur").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("移动：即使 coverBlur 开启也不渲染 .bg-blur（移动端由 mp-glass 毛玻璃承担，避免双重模糊）", async () => {
+    mq.set(true);
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find(".bg-blur").exists()).toBe(false);
     wrapper.unmount();
   });
 });

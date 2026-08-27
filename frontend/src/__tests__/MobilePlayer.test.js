@@ -398,3 +398,22 @@ describe("MobilePlayer 进度条与杂项", () => {
     expect(window.__qqpPlayerOpen).toBe(false);
   });
 });
+
+describe("MobilePlayer showCover 开关（播放页封面是核心 UI，隐藏封面图但保留手势区）", () => {
+  it("showCover=false：封面图隐藏，但 mp-cover-area 手势区保留（下拉返回/横滑切歌不失效）", () => {
+    uiSettings.showCover = false;
+    const wrapper = mount(MobilePlayer);
+    expect(wrapper.find(".mp-cover-area").exists()).toBe(true);
+    expect(wrapper.find(".mp-cover-box").exists()).toBe(false);
+    // 歌词区仍渲染（flex 自动上移占满）
+    expect(wrapper.find(".mp-lyric-area .karaoke-panel").exists()).toBe(true);
+    uiSettings.showCover = true;
+  });
+
+  it("showCover=true：封面图正常渲染（回归）", () => {
+    uiSettings.showCover = true;
+    const wrapper = mount(MobilePlayer);
+    expect(wrapper.find(".mp-cover-area .mp-cover-box").exists()).toBe(true);
+    expect(wrapper.find(".mp-cover-img").exists()).toBe(true);
+  });
+});

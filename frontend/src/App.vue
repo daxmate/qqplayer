@@ -1,6 +1,12 @@
 <template>
   <div class="app">
-    <div v-if="blurCoverUrl" class="bg-blur" :style="{ backgroundImage: `url(${blurCoverUrl})` }" />
+    <!-- 桌面封面模糊背景层：仅桌面渲染（移动端由 MobilePlayer 的 mp-glass 毛玻璃承担，
+         双重模糊叠层；isMobile 时 bg-blur 不渲染） -->
+    <div
+      v-if="blurCoverUrl && !isMobile"
+      class="bg-blur"
+      :style="{ backgroundImage: `url(${blurCoverUrl})` }"
+    />
     <!-- 移动端（<1024px）：页面栈式布局（分页容器 / 列表 / 负一屏设置区 / 全屏播放器 + 迷你播放条）
     （音乐页齿轮已由 MobileShell 内部处理 → 负一屏，不再弹桌面设置弹窗） -->
     <MobileShell v-if="isMobile" ref="shellRef" @open-sync="openSyncCenter" />

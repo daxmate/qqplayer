@@ -6,20 +6,17 @@ import {
   COVER_DEFAULT,
   centerH,
   vh,
-  winW,
   isManual,
   adaptiveSize,
   coverSizePx,
-  mobileCoverSize,
   startCoverDrag,
   resetCoverSize,
 } from "../composables/useCoverSize.js";
 
-// 重置模块级状态（centerH/vh/winW 是模块级 ref，测试间隔离）
-function setEnv(center, viewportH, viewportW) {
+// 重置模块级状态（centerH/vh 是模块级 ref，测试间隔离）
+function setEnv(center, viewportH) {
   centerH.value = center;
   vh.value = viewportH;
-  winW.value = viewportW;
 }
 
 describe("useCoverSize 自适应公式", () => {
@@ -123,11 +120,11 @@ describe("useCoverSize 拖拽", () => {
   });
 });
 
-describe("useCoverSize 恢复默认 + 移动端映射", () => {
+describe("useCoverSize 恢复默认", () => {
   beforeEach(() => {
     uiSettings.coverSize = 0;
     uiSettings.showCover = true;
-    setEnv(900, 900, 1440);
+    setEnv(900, 900);
   });
 
   it("resetCoverSize → 0（回自适应）", () => {
@@ -135,21 +132,5 @@ describe("useCoverSize 恢复默认 + 移动端映射", () => {
     resetCoverSize();
     expect(uiSettings.coverSize).toBe(0);
     expect(isManual.value).toBe(false);
-  });
-
-  it("移动端自适应（0）→ mobileCoverSize 0（走 CSS 默认）", () => {
-    expect(mobileCoverSize.value).toBe(0);
-  });
-
-  it("移动端手动 340 → 52vw 基准（390 宽 → 202.8 → 203）", () => {
-    uiSettings.coverSize = 340;
-    setEnv(900, 900, 390);
-    expect(mobileCoverSize.value).toBe(203);
-  });
-
-  it("移动端手动 200 → 按比例缩小（390 宽 → 119）", () => {
-    uiSettings.coverSize = 200;
-    setEnv(900, 900, 390);
-    expect(mobileCoverSize.value).toBe(119);
   });
 });

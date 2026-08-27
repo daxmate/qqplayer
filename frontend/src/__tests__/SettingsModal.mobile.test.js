@@ -125,3 +125,42 @@ describe("SettingsModal 毛玻璃封面开关（仅移动端）", () => {
     wrapper.unmount();
   });
 });
+
+describe("SettingsModal 歌词子 tab 移动端守卫（桌面歌词是桌面壳功能）", () => {
+  async function openLyricTab() {
+    const wrapper = mount(SettingsModal, { props: { open: true } });
+    await flushPromises();
+    const root = document.body.querySelector(".modal");
+    const nav = [...root.querySelectorAll(".nav-item")].find((el) =>
+      el.textContent.includes("歌词"),
+    );
+    expect(nav).toBeTruthy();
+    nav.click();
+    await nextTick();
+    return { wrapper, root };
+  }
+
+  it("移动端（<1024px）：歌词 tab 只显示「APP 歌词」子 tab，无「桌面歌词」", async () => {
+    mq.set(true);
+    const { wrapper, root } = await openLyricTab();
+    const tabs = [...root.querySelectorAll(".lyric-subtabs .seg-btn")].map((b) =>
+      b.textContent.trim(),
+    );
+    expect(tabs).toEqual(["APP 歌词"]);
+    // 桌面歌词面板内容不渲染
+    expect(root.textContent).not.toContain("桌面歌词");
+    wrapper.unmount();
+  });
+
+  it("桌面端（≥1024px）：歌词 tab 显示「APP 歌词 / 桌面歌词」两个子 tab", async () => {
+    mq.set(false);
+    const { wrapper, root } = await openLyricTab();
+    const tabs = [...root.querySelectorAll(".lyric-subtabs .seg-btn")].map((b) =>
+      b.textContent.trim(),
+    );
+    expect(tabs).toEqual(["APP 歌词", "桌面歌词"]);
+    // 默认 APP 歌词面板可见
+    expect(root.textContent).toContain("滚动引擎");
+    wrapper.unmount();
+  });
+});

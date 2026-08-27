@@ -42,6 +42,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const MobileList = (await import("../components/mobile/MobileList.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { uiSettings } = await import("../composables/useSettings.js");
 
 const lib = [
   { id: "a", path: "/lib/a.mp3", name: "雪の華", artist: "中島美嘉", album: "雪の華" },
@@ -290,6 +291,34 @@ describe("MobileList 分组列表（playlists/artists/albums）", () => {
     state.playlists = [];
     const wrapper = mountList({ kind: "playlists", title: "播放列表" });
     expect(wrapper.find(".ml-empty").text()).toBe("还没有歌单");
+  });
+});
+
+describe("MobileList showCover 开关（与桌面一致：关闭后封面容器不渲染）", () => {
+  it("歌曲行：showCover=false 时封面容器不渲染，行信息仍完整", () => {
+    uiSettings.showCover = false;
+    const wrapper = mountList();
+    const items = wrapper.findAll(".ml-item");
+    expect(items.length).toBe(3);
+    expect(items[0].find(".ml-row-cover").exists()).toBe(false);
+    expect(items[0].text()).toContain("雪の華");
+    uiSettings.showCover = true;
+  });
+
+  it("分组行：showCover=false 时封面容器（含首字母色块/图标）不渲染", () => {
+    uiSettings.showCover = false;
+    const wrapper = mountList({ kind: "artists", title: "艺术家" });
+    const rows = wrapper.findAll(".ml-group");
+    expect(rows.length).toBe(2);
+    expect(rows[0].find(".ml-row-cover").exists()).toBe(false);
+    expect(rows[0].text()).toContain("五月天");
+    uiSettings.showCover = true;
+  });
+
+  it("showCover=true 时封面正常渲染（回归）", () => {
+    uiSettings.showCover = true;
+    const wrapper = mountList();
+    expect(wrapper.findAll(".ml-item")[0].find(".ml-row-cover").exists()).toBe(true);
   });
 });
 

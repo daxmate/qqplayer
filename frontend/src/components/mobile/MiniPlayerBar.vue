@@ -1,13 +1,13 @@
 <template>
   <div class="mini-player" @click="$emit('open-player')">
-    <!-- 封面 -->
-    <div class="mp-cover">
+    <!-- 封面（showCover 关：整个容器不渲染，信息与控制区占满） -->
+    <div v-if="uiSettings.showCover" class="mp-cover">
       <img
-        v-if="coverUrl && !coverError"
-        :src="coverUrl"
+        v-if="coverSrc(coverPath) && coverOk(coverPath)"
+        :src="coverSrc(coverPath)"
         class="mp-cover-img"
         alt=""
-        @error="coverError = true"
+        @error="markCoverError(coverPath)"
       />
       <Music2 v-else :size="20" />
     </div>
@@ -40,25 +40,28 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, watch } from "vue";
 import { Music2, Play, Pause, SkipForward } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { state, togglePlay, nextSong } from "../../composables/usePlayer.js";
-import { resolveServerUrl } from "../../utils/apiClient.js";
+import { uiSettings } from "../../composables/useSettings.js";
+import { useCoverURL } from "../../composables/useCoverURL.js";
 
 const { t } = useI18n();
 
 defineEmits(["open-player"]);
 
-const coverUrl = ref("");
-const coverError = ref(false);
+// 封面异步解析（M1：与 MobileSmartList/桌面 Playlist 统一到 useCoverURL）——
+// 桌面/非壳同步远程直出（URL 与旧直出实现完全一致，渲染零变化）；
+// iOS 壳本地优先（离线可显示）+ 后台缓存（迷你条封面断网不再空白）。
+const { coverSrc, coverOk, markCoverError, resolveCover } = useCoverURL();
+const coverPath = computed(() => state.currentSong?.path || "");
 
-// 封面路径变化 → 重取（错误缓存按路径重置）
+// 封面路径变化 → 解析（useCoverURL 按 path 幂等；错误标记按 path 隔离）
 watch(
   () => state.currentSong?.path,
   (p) => {
-    coverError.value = false;
-    coverUrl.value = p ? resolveServerUrl("/api/cover?path=" + encodeURIComponent(p)) : "";
+    if (p) resolveCover(p, { download: true });
   },
   { immediate: true },
 );

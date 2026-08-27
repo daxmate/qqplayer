@@ -840,7 +840,7 @@
 
             <!-- ============ 歌词 ============ -->
             <section v-else-if="tab === 'lyric'" class="settings-scroll">
-              <!-- 子 tab：APP 歌词 / 桌面歌词 -->
+              <!-- 子 tab：APP 歌词 / 桌面歌词（桌面歌词是桌面壳功能，移动端隐藏子 tab——审计 L1） -->
               <div class="lyric-subtabs">
                 <button
                   class="seg-btn"
@@ -850,6 +850,7 @@
                   {{ t("settings.lyricApp") }}
                 </button>
                 <button
+                  v-if="!isMobile"
                   class="seg-btn"
                   :class="{ on: lyricSubTab === 'desktop' }"
                   @click="lyricSubTab = 'desktop'"
@@ -1174,8 +1175,8 @@
                 </div>
               </template>
 
-              <!-- ============ 桌面歌词（子 tab） ============ -->
-              <template v-else>
+              <!-- ============ 桌面歌词（子 tab；移动端不可达：子 tab 按钮已隐藏，此处显式守卫防未来代码直达） ============ -->
+              <template v-else-if="lyricSubTab === 'desktop' && !isMobile">
                 <div class="group">
                   <div class="group-title">
                     <MonitorPlay :size="13" />

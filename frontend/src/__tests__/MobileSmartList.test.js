@@ -28,6 +28,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const MobileSmartList = (await import("../components/mobile/MobileSmartList.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { uiSettings } = await import("../composables/useSettings.js");
 
 const lib = [
   { id: "a", path: "/lib/a.mp3", name: "雪の華", artist: "中島美嘉", album: "雪の華" },
@@ -250,5 +251,25 @@ describe("MobileSmartList 加载/错误/交互", () => {
     await flushPromises();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(fetchSpy.mock.calls[1][0]).toBe("/api/playback/stats");
+  });
+});
+
+describe("MobileSmartList showCover 开关（关闭后封面容器不渲染）", () => {
+  it("showCover=false 时 .msv-cover 不渲染，行信息仍完整", async () => {
+    uiSettings.showCover = false;
+    const wrapper = mount(MobileSmartList, { props: { kind: "recentAdded" } });
+    await flushPromises();
+    const item = wrapper.find(".msv-item");
+    expect(item.exists()).toBe(true);
+    expect(item.find(".msv-cover").exists()).toBe(false);
+    expect(item.text()).toContain("雪の華");
+    uiSettings.showCover = true;
+  });
+
+  it("showCover=true 时封面正常渲染（回归）", async () => {
+    uiSettings.showCover = true;
+    const wrapper = mount(MobileSmartList, { props: { kind: "recentAdded" } });
+    await flushPromises();
+    expect(wrapper.find(".msv-item .msv-cover").exists()).toBe(true);
   });
 });

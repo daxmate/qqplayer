@@ -79,7 +79,8 @@
             <span v-if="canReorder" class="ml-drag" :title="t('mobile.list.reorder')">
               <GripVertical :size="15" />
             </span>
-            <div class="ml-row-cover">
+            <!-- showCover 关（设置→界面→显示封面）：整个封面容器不渲染（含回退图标），行信息占满 -->
+            <div v-if="uiSettings.showCover" class="ml-row-cover">
               <img
                 v-if="coverSrc(song.path) && coverOk(song.path)"
                 :src="coverSrc(song.path)"
@@ -131,7 +132,8 @@
       <!-- 分组列表（播放列表/艺术家/专辑） -->
       <template v-else>
         <div v-for="g in filteredGroups" :key="g.key" class="ml-item ml-group" @click="onGroup(g)">
-          <div class="ml-row-cover">
+          <!-- 分组行封面容器同样遵守 showCover（隐藏后艺术家首字色块/图标一并隐藏） -->
+          <div v-if="uiSettings.showCover" class="ml-row-cover">
             <img
               v-if="g.coverPath && coverSrc(g.coverPath) && coverOk(g.coverKey)"
               :src="coverSrc(g.coverPath)"
@@ -214,6 +216,7 @@ import {
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
 import { deleteSongs } from "../../composables/useDeleteSong.js";
+import { uiSettings } from "../../composables/useSettings.js";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../../composables/useCoverURL.js";
 
 const props = defineProps({

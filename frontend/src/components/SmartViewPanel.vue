@@ -29,8 +29,8 @@
             </span>
             <span v-if="uiSettings.showCover" class="sv-cover">
               <img
-                v-if="coverOk(row.song.path)"
-                :src="coverUrl(row.song.path)"
+                v-if="coverSrc(row.song.path) && coverOk(row.song.path)"
+                :src="coverSrc(row.song.path)"
                 alt=""
                 loading="lazy"
                 @error="markCoverError(row.song.path)"
@@ -160,7 +160,7 @@ import {
 } from "../composables/useLibrary.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import { showToast, toastError } from "../composables/useToast.js";
-import { resolveServerUrl } from "../utils/apiClient.js";
+import { useCoverURL, COVER_CACHE_FIRST_N } from "../composables/useCoverURL.js";
 import {
   SMART_VIEWS,
   DECADE_BUCKETS,
@@ -650,17 +650,29 @@ onBeforeUnmount(() => {
   unbindCtxEvents();
 });
 
-// ============ 封面错误缓存 ============
-const coverErrors = ref(new Set());
-function coverOk(path) {
-  return !coverErrors.value.has(path);
-}
-function markCoverError(path) {
-  coverErrors.value.add(path);
-}
-function coverUrl(path) {
-  return resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
-}
+// ============ 封面异步解析（M1：与 MobileSmartList/Playlist 统一到 useCoverURL） ============
+// 删除组件内自写的 coverErrors/coverOk/markCoverError/coverUrl 实现，改用共享 composable：
+// 桌面/非壳同步远程直出（渲染结果与旧实现零变化，同一 /api/cover URL）；
+// iOS 壳本地优先（离线可显示）+ 前 N 行后台缓存（与移动端智能列表行为对齐）。
+const { coverSrc, coverOk, markCoverError, resolveCover } = useCoverURL();
+
+// 可见行解析 + 前 N 行后台缓存；播放中歌曲恒缓存（节流取舍见 useCoverURL 注释）
+watch(
+  rows,
+  (list) => {
+    list.forEach((row, i) => {
+      if (row.song?.path) resolveCover(row.song.path, { download: i < COVER_CACHE_FIRST_N });
+    });
+  },
+  { immediate: true },
+);
+watch(
+  () => state.currentSong?.path,
+  (p) => {
+    if (p) resolveCover(p, { download: true });
+  },
+  { immediate: true },
+);
 </script>
 
 <style scoped>

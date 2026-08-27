@@ -28,6 +28,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const MiniPlayerBar = (await import("../components/mobile/MiniPlayerBar.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
+const { uiSettings } = await import("../composables/useSettings.js");
 
 const lib = [
   { id: "a", path: "/lib/a.mp3", name: "雪の華", artist: "中島美嘉", album: "雪の華" },
@@ -130,5 +131,24 @@ describe("MiniPlayerBar（移动端迷你播放条）", () => {
     const wrapper = mount(MiniPlayerBar);
     await wrapper.find(".mp-btns").trigger("click");
     expect(wrapper.emitted("open-player")).toBeFalsy();
+  });
+
+  it("showCover=false 时封面容器不渲染，信息与控制区仍完整", async () => {
+    uiSettings.showCover = false;
+    state.currentIndex = 0;
+    state.currentSong = lib[0];
+    const wrapper = mount(MiniPlayerBar);
+    expect(wrapper.find(".mp-cover").exists()).toBe(false);
+    expect(wrapper.find(".mp-name").text()).toBe("雪の華");
+    expect(wrapper.findAll(".mp-btn").length).toBe(2);
+    uiSettings.showCover = true;
+  });
+
+  it("showCover=true 时封面正常渲染（回归）", () => {
+    uiSettings.showCover = true;
+    state.currentIndex = 0;
+    state.currentSong = lib[0];
+    const wrapper = mount(MiniPlayerBar);
+    expect(wrapper.find(".mp-cover").exists()).toBe(true);
   });
 });

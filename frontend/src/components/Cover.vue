@@ -29,13 +29,20 @@ const { t } = useI18n();
 // 2026-08-16（任务 E）由 visibility:hidden 改为 display:none——旧方案保留占位会把封面区空一块；
 // 用户明确要「歌词区自动扩充封面区」。Cover 当前仅两处使用（桌面主区 / 移动端全屏播放器），
 // 均无固定高度容器依赖，display:none 不破坏其他布局（small 变体为预留，暂无调用方）。
+//
+// 封面解析策略（M1 审计结论）：保留组件内直出，不迁移 useCoverURL composable——
+// ① 本组件实际唯一调用方是 App.vue 桌面主区（移动端播放页用 MobilePlayer 自带封面，不经过 Cover）；
+//    桌面/非壳环境下 useCoverURL 也只是同步远程直出，迁移后行为零差异；
+// ② 本组件同时处理流媒体歌（song.coverUrl 直用、不走 /api/cover），useCoverURL 仅支持
+//    path 型 /api/cover 解析，强行迁移需特判流媒体分支，复杂度不成比例；
+// ③ 已有 path→URL 缓存 + 错误回退缓存，与 useCoverURL 的覆盖需求相同。
 const showCover = computed(() => !!uiSettings.showCover);
 
 const props = defineProps({
   song: { type: Object, default: null },
   small: { type: Boolean, default: false },
-  // 显式尺寸 px（0/缺省 = 走 CSS 默认：桌面 min(46vh,340px)，移动端 mobile.css 覆盖 min(52vw,300px)）
-  // 桌面传入 coverSizePx（自适应计算/拖拽值）；移动端传入 mobileCoverSize（记忆值比例映射）
+  // 显式尺寸 px（0/缺省 = 走 CSS 默认：桌面 min(46vh,340px)）
+  // 桌面传入 coverSizePx（自适应计算/拖拽值）；本组件仅桌面使用（移动端播放页自带封面）
   size: { type: Number, default: 0 },
 });
 

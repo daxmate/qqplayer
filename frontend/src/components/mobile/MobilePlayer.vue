@@ -23,7 +23,10 @@
           @touchcancel="onCoverCancel"
         >
           <ChevronDown :size="15" class="mp-pull-hint" />
-          <div class="mp-cover-box">
+          <!-- showCover 关：只隐藏封面图（mp-cover-box），保留 mp-cover-area 手势区——
+               该区域承载下拉返回 + 横向切歌手势，整区隐藏会失去返回/切歌能力（无其他入口）；
+               歌词区 flex:1 自动上移占满，布局自洽。 -->
+          <div v-if="uiSettings.showCover" class="mp-cover-box">
             <img
               v-if="coverUrl && !coverError"
               :src="coverUrl"

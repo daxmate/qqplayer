@@ -28,13 +28,6 @@ export const CENTER_GAP = 12; // .center 列 gap（px，与 App.vue 样式保持
 // 测量值：center 容器高度（ResizeObserver）+ 视口高度（window resize）
 export const centerH = ref(0);
 export const vh = ref(0);
-// 移动端视口宽（mobileCoverSize 比例映射用；模块级 resize 监听保持响应式）
-export const winW = ref(typeof window !== "undefined" ? window.innerWidth : 0);
-if (typeof window !== "undefined") {
-  window.addEventListener("resize", () => {
-    winW.value = window.innerWidth;
-  });
-}
 
 // 手动模式（有记忆固定值）？
 export const isManual = computed(() => uiSettings.coverSize > 0);
@@ -103,13 +96,6 @@ export const coverSizePx = computed(() => {
     return Math.max(COVER_MIN, Math.min(uiSettings.coverSize, manualCap.value));
   }
   return adaptiveSize.value;
-});
-
-// 移动端封面尺寸：52vw 基准 × (记忆值 / 340) 比例映射（不做拖拽；0 = 自适应走 CSS 默认 min(52vw,300px)）
-export const mobileCoverSize = computed(() => {
-  if (!isManual.value) return 0;
-  const base = Math.min(winW.value * 0.52, 300);
-  return Math.round(base * (uiSettings.coverSize / COVER_DEFAULT));
 });
 
 // 恢复默认：清记忆值 → 回自适应模式
