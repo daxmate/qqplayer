@@ -35,6 +35,14 @@ function resolveKey(lang, key) {
   return key.split(".").reduce((o, k) => (o ? o[k] : undefined), lang);
 }
 
+// 切到指定分类导航（默认 tab 已改为「界面」，播放相关断言需先切换）
+async function gotoCategory(root, label) {
+  const nav = [...root.querySelectorAll(".nav-item")].find((el) => el.textContent.includes(label));
+  expect(nav).toBeTruthy();
+  nav.click();
+  await nextTick();
+}
+
 beforeEach(() => {
   playbackSettings.visualizerEnabled = true;
   playbackSettings.ambientEnabled = true;
@@ -59,6 +67,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     // Teleport 到 body
     const root = document.body.querySelector(".modal");
     expect(root).toBeTruthy();
+    await gotoCategory(root, "播放");
     expect(root.textContent).toContain("频谱可视化");
     // 默认打开
     const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
@@ -73,6 +82,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
     const root = document.body.querySelector(".modal");
+    await gotoCategory(root, "播放");
     const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
       el.textContent.includes("频谱可视化"),
     );
@@ -90,6 +100,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
     const root = document.body.querySelector(".modal");
+    await gotoCategory(root, "播放");
     const subRows = [...root.querySelectorAll(".sub-toggle-row")];
     expect(subRows.length).toBe(2);
     const ambientRow = subRows.find((el) => el.textContent.includes("氛围背景"));
@@ -116,6 +127,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
     const root = document.body.querySelector(".modal");
+    await gotoCategory(root, "播放");
     expect(root.querySelector(".viz-style-grid")).toBeFalsy();
     expect(root.querySelector(".sub-toggle-row")).toBeTruthy(); // 子开关仍在
     w.unmount();
@@ -126,6 +138,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
     const root = document.body.querySelector(".modal");
+    await gotoCategory(root, "播放");
     expect(root.querySelector(".viz-style-grid")).toBeFalsy();
     expect(root.querySelector(".sub-toggle-row")).toBeFalsy();
     w.unmount();
@@ -137,6 +150,7 @@ describe("SettingsModal 任务 K - 视觉化 6 样式 chips", () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
     const root = document.body.querySelector(".modal");
+    await gotoCategory(root, "播放");
     const chips = [...root.querySelectorAll(".viz-style-grid .ext-chip")];
     expect(chips).toHaveLength(6);
     expect(chips.map((c) => c.textContent.trim())).toEqual(

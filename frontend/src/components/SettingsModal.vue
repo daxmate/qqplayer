@@ -1781,7 +1781,7 @@ const dataDir = "~/Library/Application Support/qqplayer";
 const localUrl = "http://localhost:17627";
 const repoUrl = "https://github.com/daxmate/qqplayer";
 
-const tab = ref("playback");
+const tab = ref("ui");
 const lyricSubTab = ref("app"); // 歌词 tab 子页：'app' APP 歌词 | 'desktop' 桌面歌词
 const amllPerfHintOpen = ref(false); // AMLL 三特效性能提示（info 按钮）展开状态
 const libInput = ref("");
@@ -2119,14 +2119,14 @@ function onBatchLibrary() {
 // 分类导航：iOS 壳（发起方）隐藏配对管理，由桌面壳管理配对
 const categories = computed(() => {
   const list = [
+    { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
+    { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
     { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
     { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
-    { key: "video", labelKey: "settings.category.video", icon: Video },
+    { key: "scrape", labelKey: "settings.category.scrape", icon: Tags },
     { key: "download", labelKey: "settings.category.download", icon: Download },
     { key: "sync", labelKey: "settings.category.sync", icon: RefreshCw },
-    { key: "scrape", labelKey: "settings.category.scrape", icon: Tags },
-    { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
-    { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
+    { key: "video", labelKey: "settings.category.video", icon: Video },
     { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
     { key: "pairing", labelKey: "settings.category.pairing", icon: Smartphone },
     { key: "about", labelKey: "settings.category.about", icon: Info },
@@ -2296,7 +2296,7 @@ watch(
   () => props.open,
   (o) => {
     if (o) {
-      tab.value = "playback";
+      tab.value = "ui";
       error.value = "";
       loadLibrary().then(() => {
         libInput.value = state.libraryPath;
