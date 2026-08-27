@@ -236,6 +236,12 @@ interface AssetIndexPayload {
   assets?: AssetRecord[];
 }
 
+/** embeddedCover 回执 {requestId, dataURL}（getEmbeddedCover 挂起查询结算） */
+interface EmbeddedCoverPayload {
+  requestId?: string;
+  dataURL?: unknown;
+}
+
 /** assetsDeleted 完成回推 {paths} */
 interface AssetsDeletedPayload {
   paths?: string[];
@@ -595,6 +601,44 @@ export function cancelDownloads() {
   nativePost({ cmd: "cancelDownloads" });
   activeDownloads.clear();
   refreshSyncState();
+}
+
+// ---------- 内嵌封面查询（离线封面兑底：本地音频文件 APIC → data URL） ----------
+// 断网时 covers 缓存未命中（新下载的歌）→ 从本地音频文件提取内嵌封面图，
+// 不依赖网络（2026-08-27 用户原则：封面本地优先，没有才找主机）。
+const embeddedCoverWaiters = new Map<string, (dataURL: string | null) => void>(); // requestId → resolve
+
+export const EMBEDDED_COVER_TIMEOUT_MS = 5000;
+
+function handleEmbeddedCover(payload: EmbeddedCoverPayload) {
+  const requestId = payload && payload.requestId;
+  const resolve = requestId ? embeddedCoverWaiters.get(requestId) : undefined;
+  if (resolve) {
+    embeddedCoverWaiters.delete(requestId);
+    resolve(typeof payload.dataURL === "string" && payload.dataURL ? payload.dataURL : null);
+  }
+}
+
+/**
+ * 查询本地音频资产的内嵌封面（原生读 APIC → data: URL）。
+ * @param {string} assetPath 本地资产相对路径（audio/<hash>.<ext>，用 assetForSong 换算）
+ * @returns {Promise<string|null>} data URL；非 iOS 壳 / 无内嵌 / 超时 → null
+ */
+export function getEmbeddedCover(assetPath: string): Promise<string | null> {
+  if (!assetPath || !syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
+  ensureSubscribed();
+  return new Promise<string | null>((resolve) => {
+    const requestId = "ec" + Math.random().toString(36).slice(2);
+    const timer = setTimeout(() => {
+      embeddedCoverWaiters.delete(requestId);
+      resolve(null);
+    }, EMBEDDED_COVER_TIMEOUT_MS);
+    embeddedCoverWaiters.set(requestId, (dataURL) => {
+      clearTimeout(timer);
+      resolve(dataURL);
+    });
+    nativePost({ cmd: "getEmbeddedCover", path: assetPath, requestId });
+  });
 }
 
 // ---------- 本地资产 HTTP 映射（离线阅读/词典资产读取） ----------
@@ -978,6 +1022,7 @@ function ensureSubscribed() {
   unsubs.push(onNativeEvent("assetsDeleted", handleAssetsDeleted));
   unsubs.push(onNativeEvent("metaLoaded", handleMetaLoaded));
   unsubs.push(onNativeEvent("deviceId", handleDeviceId));
+  unsubs.push(onNativeEvent("embeddedCover", handleEmbeddedCover));
 }
 
 /**

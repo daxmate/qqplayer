@@ -46,6 +46,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
 // ---------- mock：apiClient ----------
 const apiMock = vi.hoisted(() => ({
   apiGet: vi.fn(),
+  isOffline: vi.fn(() => false), // 测试默认在线（useCoverURL 断网分支单独测）
   resolveServerUrl: vi.fn((p) =>
     /^https?:\/\//i.test(p) ? p : "http://192.168.1.50:17627" + (p.startsWith("/") ? p : "/" + p),
   ),
@@ -388,11 +389,17 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     // 第二次：网络失败（无缓存）→ 读文件回填；模拟原生 metaLoaded 回执返回刚才写入的 json
     apiMock.apiGet.mockResolvedValueOnce({ ok: false, status: 0, data: null, network: true });
     lyricState.lyric = [];
+    const metaLoadsBefore = bridgeMock.post.mock.calls.filter(
+      ([m]) => m && m.cmd === "metaLoad",
+    ).length;
     const p = lyricModule.loadLyric(0);
+    // 等第二次的 metaLoad 发出（第一次的残留 requestId 已超时清除，对不上）
     await vi.waitFor(() => {
-      expect(bridgeMock.post.mock.calls.some(([m]) => m && m.cmd === "metaLoad")).toBe(true);
+      expect(
+        bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "metaLoad").length,
+      ).toBeGreaterThan(metaLoadsBefore);
     });
-    const load = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaLoad");
+    const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad");
     bridgeMock.emit("metaLoaded", {
       requestId: load[0].requestId,
       kind: load[0].kind,
@@ -409,10 +416,15 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     apiMock.apiGet.mockResolvedValueOnce({ ok: false, status: 0, data: null, network: true });
     const p = lyricModule.loadLyric(0);
     // 模拟原生 metaLoaded 回执：文件缺失（无 json）→ resolve(null)
+    const metaLoadsBefore = bridgeMock.post.mock.calls.filter(
+      ([m]) => m && m.cmd === "metaLoad",
+    ).length;
     await vi.waitFor(() => {
-      expect(bridgeMock.post.mock.calls.some(([m]) => m && m.cmd === "metaLoad")).toBe(true);
+      expect(
+        bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "metaLoad").length,
+      ).toBeGreaterThan(metaLoadsBefore);
     });
-    const load = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaLoad");
+    const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad");
     bridgeMock.emit("metaLoaded", {
       requestId: load[0].requestId,
       kind: load[0].kind,

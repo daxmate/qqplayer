@@ -91,9 +91,20 @@ let offline = false;
 const offlineListeners = new Set();
 const unauthorizedListeners = new Set();
 
-/** 当前是否处于离线模式（网络失败 + 缓存兜底后进入；恢复在线自动退出） */
+/** 设备级断网（navigator.onLine=false：Wi-Fi/蜂窝全断）——WKWebView 反映系统网络状态 */
+function deviceOffline() {
+  try {
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+  } catch {
+    return false;
+  }
+}
+
+/** 当前是否处于离线模式（设备断网 或 网络请求失败降级；恢复在线自动退出）。
+ *  断网时所有主机请求都应跳过（本地优先原则，2026-08-27 用户明确）：
+ *  歌词/封面/同步等不再发起网络请求，直接走本地。 */
 export function isOffline() {
-  return offline;
+  return offline || deviceOffline();
 }
 
 /** 订阅离线/恢复在线切换：cb(offline: boolean)；返回取消订阅函数 */
@@ -231,7 +242,8 @@ function errorMessage(data, res) {
  * @param {boolean} [opts.force] 跳过缓存读（仍写缓存）——库变更后的强制刷新用
  * @param {boolean} [opts.raw] 返回原始 Response（大文件/二进制下载，不解析 JSON、不缓存）
  * @param {boolean} [opts.skip401] 关闭 401 特判（夸克登录 401 语义不同）
- * @param {number} [opts.timeout] 超时 ms（默认 0 = 不超时，与裸 fetch 行为一致）
+ * @param {number} [opts.timeout] 超时 ms（默认 10000——断网/服务器不可达时快速失败触发离线降级，
+ *   避免歌词/封面/同步挂起等系统 TCP 超时（30s+）；局域网请求 10s 内足够）
  */
 export async function api({
   url,
@@ -242,7 +254,7 @@ export async function api({
   force,
   raw,
   skip401,
-  timeout = 0,
+  timeout = 10000,
 } = {}) {
   const isGet = method === "GET" || method === "HEAD";
   const cacheKey = "GET:" + url;
@@ -253,6 +265,27 @@ export async function api({
     if (hit !== null && hit !== undefined) {
       return { ok: true, status: 200, data: hit, fromCache: true, offline: false, network: false };
     }
+  }
+
+  // 1.5 设备断网（navigator.onLine=false）→ 不发网络请求：直接读缓存（含过期，离线时旧数据优于无）
+  //     或按网络失败返回——本地优先原则（2026-08-27）：断网时主机通讯全部跳过，不等待超时
+  if (deviceOffline()) {
+    setOffline(true);
+    if (isGet && cache) {
+      const stale = await getCache(cacheKey);
+      if (stale !== null && stale !== undefined) {
+        return {
+          ok: true,
+          status: 200,
+          data: stale,
+          fromCache: true,
+          offline: true,
+          network: false,
+          degraded: true,
+        };
+      }
+    }
+    return { ok: false, status: 0, data: null, message: "网络连接失败", network: true };
   }
 
   // 2. 组装请求

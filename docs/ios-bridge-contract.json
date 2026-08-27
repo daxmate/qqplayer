@@ -26,7 +26,9 @@
       "domain": "playback",
       "sender": "nativeAudioBridge.js",
       "status": "active",
-      "payload": { "t": "number（秒，>=0；原生兼容 Int）" },
+      "payload": {
+        "t": "number（秒，>=0；原生兼容 Int）"
+      },
       "note": "currentTime setter；pendingSeek 串行化（seek 完成前到达的 play 延迟执行）"
     },
     {
@@ -34,7 +36,9 @@
       "domain": "playback",
       "sender": "nativeAudioBridge.js",
       "status": "active",
-      "payload": { "v": "number（0~1，原生夹取）" },
+      "payload": {
+        "v": "number（0~1，原生夹取）"
+      },
       "note": "volume setter 与 muted setter（muted → v=0）共用"
     },
     {
@@ -42,7 +46,9 @@
       "domain": "playback",
       "sender": "nativeAudioBridge.js",
       "status": "active",
-      "payload": { "r": "number（0.75/1.0/1.25）" },
+      "payload": {
+        "r": "number（0.75/1.0/1.25）"
+      },
       "note": "playbackRate setter；播放中生效（defaultRate + 当前 rate）"
     },
     {
@@ -66,7 +72,9 @@
       "domain": "playback",
       "sender": "nativeAudioBridge.js",
       "status": "active",
-      "payload": { "playing": "boolean" },
+      "payload": {
+        "playing": "boolean"
+      },
       "note": "锁屏播放态显式同步：playing/paused/ended 原生事件回执时前端回发，与原生状态机对齐"
     },
     {
@@ -98,7 +106,9 @@
       "domain": "playback",
       "sender": "DictLookupModal.vue",
       "status": "active",
-      "payload": { "url": "string（http/https）" },
+      "payload": {
+        "url": "string（http/https）"
+      },
       "note": "词典发音短音频原生播放（独立 AVPlayer，不弹系统播放器 UI；iOS 26 HTMLAudioElement 会弹 UI）"
     },
     {
@@ -114,7 +124,9 @@
       "domain": "lifecycle",
       "sender": null,
       "status": "shellOnly",
-      "payload": { "line": "string" },
+      "payload": {
+        "line": "string"
+      },
       "note": "前端诊断日志转原生通道（nativecmd.log 追加）；当前前端无发送方（壳预留，与 dbgLog → metaSave 双通道互补）"
     },
     {
@@ -186,7 +198,9 @@
       "domain": "sync",
       "sender": "sync.js",
       "status": "active",
-      "payload": { "on": "boolean" },
+      "payload": {
+        "on": "boolean"
+      },
       "note": "仅 Wi-Fi 下载开关（fire-and-forget 无回执；DownloadManager 蜂窝下挂起）"
     },
     {
@@ -194,8 +208,21 @@
       "domain": "sync",
       "sender": "sync.js",
       "status": "active",
-      "payload": { "requestId": "string" },
+      "payload": {
+        "requestId": "string"
+      },
       "note": "设备标识查询（Keychain 持久）→ 回推 deviceId {requestId, deviceId}"
+    },
+    {
+      "name": "getEmbeddedCover",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {
+        "path": "string（本地资产相对路径 audio/<hash>.<ext>，assetForSong 换算）",
+        "requestId": "string"
+      },
+      "note": "本地音频资产内嵌封面查询（APIC → data URL；读本地文件不依赖网络，离线封面兑底 2026-08-27，useCoverURL 调用）→ 回推 embeddedCover {requestId, dataURL}"
     },
     {
       "name": "metaSave",
@@ -213,7 +240,10 @@
       "domain": "meta",
       "sender": "sync.js",
       "status": "active",
-      "payload": { "kind": "string", "requestId": "string" },
+      "payload": {
+        "kind": "string",
+        "requestId": "string"
+      },
       "note": "元数据文件读 → 回推 metaLoaded {requestId, kind, json?}（缺失/损坏无 json 字段，前端 8s 超时兜底）"
     },
     {
@@ -252,21 +282,27 @@
       "name": "loadedmetadata",
       "domain": "playback",
       "emitter": "AVPlayerBridge",
-      "payload": { "duration": "number（秒）" },
+      "payload": {
+        "duration": "number（秒）"
+      },
       "note": "item status readyToPlay；前端 sink 直接处理（设 duration + 断点恢复 seek），同时 emit DOM loadedmetadata"
     },
     {
       "name": "playing",
       "domain": "playback",
       "emitter": "AVPlayerBridge",
-      "payload": { "t": "number（秒）" },
+      "payload": {
+        "t": "number（秒）"
+      },
       "note": "PushEvent.playing（rate 观察，非缓冲等待）+ 中断 ended 恢复；前端 sink → emit DOM play"
     },
     {
       "name": "paused",
       "domain": "playback",
       "emitter": "AVPlayerBridge",
-      "payload": { "t": "number（秒）" },
+      "payload": {
+        "t": "number（秒）"
+      },
       "note": "PushEvent.paused（rate==0 且非 seek 且非缓冲等待 / seek 完成补推 / 中断开始）；前端 sink → emit DOM pause"
     },
     {
@@ -280,21 +316,28 @@
       "name": "timeupdate",
       "domain": "playback",
       "emitter": "AVPlayerBridge",
-      "payload": { "t": "number（秒）", "duration": "number（秒）" },
+      "payload": {
+        "t": "number（秒）",
+        "duration": "number（秒）"
+      },
       "note": "~250ms 周期（addPeriodicTimeObserver）；前端 sink 驱动进度/锁屏对齐"
     },
     {
       "name": "error",
       "domain": "playback",
       "emitter": "AVPlayerBridge",
-      "payload": { "message": "string" },
+      "payload": {
+        "message": "string"
+      },
       "note": "⚠️ item load 失败（status==.failed）；前端当前无消费者（sink default 分支无人订阅即丢弃）——已知缺口"
     },
     {
       "name": "songChanged",
       "domain": "playback",
       "emitter": "RemoteCommandManager",
-      "payload": { "index": "number（播放顺序快照中的新位置）" },
+      "payload": {
+        "index": "number（播放顺序快照中的新位置）"
+      },
       "note": "锁屏/线控后台切歌成功（playQueueRelative）；前端对齐状态不重新 load"
     },
     {
@@ -387,21 +430,38 @@
       "name": "deviceId",
       "domain": "sync",
       "emitter": "WebShellView（KeychainStore.deviceId）",
-      "payload": { "requestId": "string", "deviceId": "string" },
+      "payload": {
+        "requestId": "string",
+        "deviceId": "string"
+      },
       "note": "getDeviceId 回执（Keychain 持久设备标识）"
+    },
+    {
+      "name": "embeddedCover",
+      "domain": "sync",
+      "emitter": "WebShellView（readEmbeddedCover：AVURLAsset 多格式元数据 → jpeg data URL）",
+      "payload": {
+        "requestId": "string",
+        "dataURL": "string（data:image/jpeg;base64,...；无内嵌/失败为空串）"
+      },
+      "note": "getEmbeddedCover 回执（本地音频文件 APIC 提取，断网可用）"
     },
     {
       "name": "appState",
       "domain": "lifecycle",
       "emitter": "WebShellView（scenePhase → NotificationCenter）",
-      "payload": { "state": "string（active|inactive|background）" },
+      "payload": {
+        "state": "string（active|inactive|background）"
+      },
       "note": "前后台切换；flushPendingEvents 时补发当前状态；前端 sync 模块随 active 启停轮询/恢复同步"
     },
     {
       "name": "swipe",
       "domain": "ui",
       "emitter": "WebShellView（UIPanGestureRecognizer）",
-      "payload": { "dir": "string（left|right）" },
+      "payload": {
+        "dir": "string（left|right）"
+      },
       "note": "原生水平滑动手势 → Reader 翻页（垂直滚动留给 WebView）；Reader.vue onNativeEvent 订阅"
     }
   ]

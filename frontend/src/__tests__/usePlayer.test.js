@@ -2486,7 +2486,10 @@ describe("歌单", () => {
     await deletePlaylist("p1");
     expect(state.playlists.map((p) => p.id)).toEqual(["p2"]);
     expect(state.activePlaylistId).toBeNull();
-    expect(fetch).toHaveBeenCalledWith("/api/playlists/p1", { method: "DELETE" });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists/p1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
     // 失败回滚
     vi.stubGlobal(
       "fetch",
@@ -2529,9 +2532,10 @@ describe("歌单", () => {
     );
     await removeFromPlaylist("p1", "/a.mp3");
     expect(isInPlaylist("p1", "/a.mp3")).toBe(false);
-    expect(fetch).toHaveBeenCalledWith("/api/playlists/p1/songs/" + encodeURIComponent("/a.mp3"), {
-      method: "DELETE",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/playlists/p1/songs/" + encodeURIComponent("/a.mp3"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
     // 失败回滚
     state.playlists[0].songPaths = ["/b.mp3"];
     vi.stubGlobal(

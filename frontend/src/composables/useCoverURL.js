@@ -19,8 +19,14 @@
 //   - 同一 path 幂等：已解析出 URL 后直接跳过（查询/下载不重复）
 
 import { ref } from "vue";
-import { resolveServerUrl } from "../utils/apiClient.js";
-import { syncEnabled, cachedCoverURL, cacheCover } from "../utils/sync.js";
+import { resolveServerUrl, isOffline } from "../utils/apiClient.js";
+import {
+  syncEnabled,
+  cachedCoverURL,
+  cacheCover,
+  getEmbeddedCover,
+  assetForSong,
+} from "../utils/sync.js";
 
 /** 列表前 N 行封面后台缓存（行号超出只查不下载） */
 export const COVER_CACHE_FIRST_N = 30;
@@ -58,8 +64,33 @@ export function useCoverURL() {
     return !coverErrors.value.has(path);
   }
 
-  /** 封面加载失败标记（远程 404 / 断网时回退图标，保留原兜底逻辑） */
+  /** 封面加载失败标记（远程 404 / 断网时回退图标，保留原兜底逻辑）。
+   *  远程 URL 加载失败（断网/离线切换）→ 先尝试本地兑底（封面缓存 → 内嵌 APIC），
+   *  成功则替换 URL 并取消错误标记；都无才保持隐藏（2026-08-27 离线封面兑底）。 */
   function markCoverError(path) {
+    const cur = urlMap.get(path);
+    if (cur && cur.value && cur.value.startsWith("http")) {
+      const prev = cur.value;
+      cachedCoverURL(path)
+        .then(async (local) => {
+          if (cur.value !== prev) return; // 已被其他路径更新
+          if (local) {
+            cur.value = local;
+            coverErrors.value.delete(path);
+            return;
+          }
+          const audioItem = await assetForSong({ path });
+          const embedded = audioItem ? await getEmbeddedCover(audioItem.path) : null;
+          if (cur.value !== prev) return;
+          if (embedded) {
+            cur.value = embedded;
+            coverErrors.value.delete(path);
+          }
+        })
+        .catch(() => {
+          /* 兑底失败：保持错误标记 */
+        });
+    }
     coverErrors.value.add(path);
   }
 
@@ -77,14 +108,24 @@ export function useCoverURL() {
       r.value = remoteURL(path);
       return;
     }
-    // iOS 壳：本地优先异步解析
+    // iOS 壳：本地优先异步解析——封面缓存 → 远程（在线）；断网则本地缓存 → 内嵌 APIC（不请求主机）。
+    // 在线封面秒出（不等待内嵌查询）；远程加载失败由 @error → markCoverError 兑底内嵌。
     cachedCoverURL(path)
-      .then((local) => {
+      .then(async (local) => {
         const cur = urlMap.get(path);
         if (!cur || cur.value) return; // 已结算（并发解析先到先得）
         if (local) {
           cur.value = local;
-        } else {
+          return;
+        }
+        if (isOffline()) {
+          // 断网：不请求远程——内嵌 APIC 兑底（读本地音频文件元数据）
+          const audioItem = await assetForSong({ path });
+          const embedded = audioItem ? await getEmbeddedCover(audioItem.path) : null;
+          if (!cur.value && embedded) cur.value = embedded;
+          return;
+        }
+        if (!cur.value) {
           cur.value = remoteURL(path);
           if (opts.download) cacheCover(path); // fire-and-forget 后台缓存
         }
@@ -92,7 +133,7 @@ export function useCoverURL() {
       .catch(() => {
         // 查询失败（原生无回执/超时等）：回退远程，不影响封面展示
         const cur = urlMap.get(path);
-        if (cur && !cur.value) cur.value = remoteURL(path);
+        if (cur && !cur.value && !isOffline()) cur.value = remoteURL(path);
       });
   }
 

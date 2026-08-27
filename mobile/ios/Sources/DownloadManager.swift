@@ -137,6 +137,14 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
         !path.isEmpty && !path.hasPrefix("/") && !path.contains("..")
     }
 
+    /// 资产相对路径 → 本地文件 URL（安全校验；不存在返回 nil）——
+    /// getEmbeddedCover 等按路径读本地文件的场景用
+    func assetFileURL(_ path: String) -> URL? {
+        guard Self.isSafePath(path) else { return nil }
+        let url = storageRoot.appendingPathComponent(path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     /// 存储根绝对路径（调试/展示用）
     var storageRootPath: String { storageRoot.path }
 

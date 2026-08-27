@@ -77,6 +77,9 @@ function lyricUrl(path, prefer) {
   return "/api/lyric?path=" + encodeURIComponent(path) + "&prefer=" + encodeURIComponent(prefer);
 }
 
+/** 歌词文件本地读取快速超时（ms）：原生 metaLoad 异常挂起时兜底，防歌词加载被拖住 */
+const LOCAL_LYRIC_READ_TIMEOUT_MS = 1500;
+
 // ============ 歌词加载（默认当前歌）；来源优先级按 lyricSettings.source：============
 // 'local' 本地优先 | 'online' 在线优先（在线失败后端自动回退本地）
 export async function loadLyric(index = state.currentIndex) {
@@ -96,15 +99,32 @@ export async function loadLyric(index = state.currentIndex) {
     return;
   }
   try {
-    // 歌词正文：1h 缓存 + 离线兜底；手动指定/清除后失效
+    // 本地优先（2026-08-27 用户原则：播放/歌词本地优先，没有才找主机）：
+    // 先读歌词文件兜底（同步中心落盘 Documents/meta/lyric:<hash>.json，毫秒级）——
+    // 命中立即显示，离线也秒出（不等待网络超时）；随后远程并行拉取，成功则覆盖刷新（在线更新）。
+    // 快速超时兜底：原生 metaLoad 异常挂起时 1.5s 视为无文件，不阻塞歌词加载。
+    const local = await Promise.race([
+      loadLyricFile(song),
+      new Promise((resolve) => setTimeout(() => resolve(null), LOCAL_LYRIC_READ_TIMEOUT_MS)),
+    ]);
+    if (local) {
+      state.lyric = local.lines;
+      state.lyricFormat = local.format;
+      state.lyricSource = local.source;
+    }
+    // 远程：断网时 api 内部短路立即失败（不等待超时）；在线成功 → 覆盖 + 更新文件
     const r = await apiGet(lyricUrl(state.songs[index].path, lyricSettings.source), {
       cache: { ttl: 3600, offline: true },
     });
     if (r.ok) {
       const data = r.data || {};
-      state.lyric = data.lines || [];
-      state.lyricFormat = data.format || null;
-      state.lyricSource = data.source || null;
+      const lines = data.lines || [];
+      // 仅当远程有内容（或本地为空）时覆盖——本地已显示且远程空（后端无歌词）保持现状
+      if (lines.length || !local) {
+        state.lyric = lines;
+        state.lyricFormat = data.format || null;
+        state.lyricSource = data.source || null;
+      }
       // 歌词文件兜底写（fire-and-forget）：最后一次成功结果，不区分 prefer 来源
       saveLyricFile(song, {
         lines: state.lyric,
@@ -113,17 +133,13 @@ export async function loadLyric(index = state.currentIndex) {
       });
       return;
     }
+    // 远程失败（断网/超时）：本地已显示则保持；未命中则已在上面的 local 分支处理
+    if (local) return;
   } catch {
-    /* 网络错误走文件兜底 */
+    /* 网络错误：本地已显示则保持；未命中走下方空歌词 */
+    if (await loadLyricFile(song)) return;
   }
-  // 失败/离线兜底：网络错误且 IndexedDB 缓存 miss → 读歌词文件回填；文件也没有 → 空歌词
-  const cached = await loadLyricFile(song);
-  if (cached) {
-    state.lyric = cached.lines;
-    state.lyricFormat = cached.format;
-    state.lyricSource = cached.source;
-    return;
-  }
+  // 本地文件也没有（新歌从未同步过歌词）→ 空歌词
   state.lyric = [];
   state.lyricFormat = null;
   state.lyricSource = null;

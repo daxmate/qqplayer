@@ -59,7 +59,7 @@ describe("统一出口与归一化", () => {
     const fetchMock = vi.fn(async () => okJson({ items: [1] }));
     vi.stubGlobal("fetch", fetchMock);
     const r = await apiGet("/api/x");
-    expect(fetchMock).toHaveBeenCalledWith("/api/x", { method: "GET" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/x", expect.objectContaining({ method: "GET" }));
     expect(r).toMatchObject({ ok: true, status: 200, data: { items: [1] }, fromCache: false });
   });
 
@@ -112,7 +112,7 @@ describe("统一出口与归一化", () => {
     expect(init.headers).toEqual({ "Content-Type": "application/json" });
 
     await apiDelete("/api/playlists/p1");
-    expect(fetchMock.mock.calls[1][1]).toEqual({ method: "DELETE" });
+    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ method: "DELETE" }));
   });
 
   it("FormData 原样透传（不 stringify、不设 Content-Type）", async () => {

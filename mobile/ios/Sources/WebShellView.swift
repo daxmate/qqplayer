@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import WebKit
 
@@ -334,7 +335,7 @@ struct WebShellView: UIViewRepresentable {
             switch cmd {
             case "nativeReady", "nativeLog", "pullRevealStatusBar":
                 handleUILifecycleCommand(cmd, body: body)
-            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize", "assetIndex", "setWifiOnly", "getDeviceId":
+            case "syncDownload", "hasAsset", "cancelDownloads", "deleteAssets", "assetsSize", "assetIndex", "setWifiOnly", "getDeviceId", "getEmbeddedCover":
                 handleSyncCommand(cmd, body: body)
             case "metaSave", "metaLoad":
                 handleMetaCommand(cmd, body: body)
@@ -623,10 +624,54 @@ extension WebShellView.Coordinator {
             var payload: [String: Any] = ["total": info.total]
             payload["byType"] = info.byType
             pushToWeb(event: "assetsSize", payload: payload)
+        case "getEmbeddedCover":
+            // 本地音频资产内嵌封面（APIC → data URL）：断网时前端封面兑底（2026-08-27）。
+            // 读本地文件不依赖网络；无内嵌/文件缺失 → 回执空串，前端回退远程/占位。
+            if let path = body["path"] as? String, let requestId = body["requestId"] as? String {
+                Task {
+                    let dataURL = await Self.readEmbeddedCover(
+                        assetPath: path, downloadManager: self.downloadManager
+                    )
+                    self.pushToWeb(event: "embeddedCover", payload: ["requestId": requestId, "dataURL": dataURL ?? ""])
+                }
+            }
         default:
             // 未知同步命令静默忽略
             break
         }
+    }
+
+    /// 读本地音频资产的内嵌封面 → data: URL（jpeg，缩放到 ≤1024）。
+    /// 无内嵌 / 文件缺失 / 解码失败 → nil（回执空串，前端回退）。
+    /// 复用 EmbeddedArtworkExtractor + 与 MetadataManager.loadEmbeddedArtwork 同构的
+    /// 多格式读取（id3/iTunes/quickTime + commonMetadata 兑底）。
+    static func readEmbeddedCover(assetPath: String, downloadManager: DownloadManager) async -> String? {
+        guard let fileURL = downloadManager.assetFileURL(assetPath) else { return nil }
+        let asset = AVURLAsset(url: fileURL)
+        var artworkData: Data?
+        let formats: [AVMetadataFormat] = [.id3Metadata, .iTunesMetadata, .quickTimeMetadata]
+        for format in formats {
+            if let items = try? await asset.loadMetadata(for: format) {
+                artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
+            }
+            if artworkData != nil { break }
+        }
+        if artworkData == nil, let items = try? await asset.load(.commonMetadata) {
+            artworkData = EmbeddedArtworkExtractor.artworkData(from: items)
+        }
+        guard let data = artworkData, let img = UIImage(data: data) else { return nil }
+        // 缩放 ≤1024（对齐锁屏封面策略：过大图锁屏会拒）
+        let longest = max(img.size.width, img.size.height)
+        var resized = img
+        if longest > 1024 {
+            let scale = 1024 / longest
+            let newSize = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+            resized = UIGraphicsImageRenderer(size: newSize).image { _ in
+                img.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        }
+        guard let jpeg = resized.jpegData(compressionQuality: 0.8) else { return nil }
+        return "data:image/jpeg;base64," + jpeg.base64EncodedString()
     }
 }
 
