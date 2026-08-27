@@ -96,110 +96,28 @@
       </template>
     </div>
 
-    <!-- 网格视图：歌手 / 专辑卡片 -->
-    <div v-if="gridMode" class="pl-grid">
-      <button
-        v-for="g in gridGroups"
-        :key="gridKey(g)"
-        class="gr-card"
-        :class="{ album: browseMode === 'albums' }"
-        @click="enterGroup(g)"
-      >
-        <template v-if="browseMode === 'artists'">
-          <span class="gr-avatar" :style="{ background: hashBg(g.name) }">{{ g.name[0] }}</span>
-          <span class="gr-meta">
-            <span class="gr-name">{{ g.name }}</span>
-            <span class="gr-count">{{ t("playlist.songsCount", { n: g.count }) }}</span>
-          </span>
-        </template>
-        <template v-else>
-          <span v-if="coverVisible('list')" class="gr-cover">
-            <img
-              v-if="g.coverPath && coverSrc(g.coverPath) && coverOk(g.coverPath)"
-              :src="coverSrc(g.coverPath)"
-              alt=""
-              loading="lazy"
-              @error="markCoverError(g.coverPath)"
-            />
-            <Music v-else :size="20" />
-          </span>
-          <span class="gr-meta">
-            <span class="gr-name">{{ g.album }}</span>
-            <span class="gr-count"
-              >{{ g.artist }} · {{ t("playlist.songsCount", { n: g.count }) }}</span
-            >
-          </span>
-        </template>
-      </button>
-      <div v-if="!gridGroups.length" class="pl-empty">
-        {{
-          state.loading
-            ? t("playlist.empty.scanning")
-            : browseMode === "artists"
-              ? t("playlist.empty.noMatchArtist")
-              : t("playlist.empty.noMatchAlbum")
-        }}
-      </div>
-    </div>
+    <!-- 网格视图：歌手 / 专辑卡片（聚合/卡片/搜索过滤在 PlaylistBrowse 内部） -->
+    <PlaylistBrowse
+      v-if="gridMode"
+      :browse-mode="browseMode"
+      :query="query"
+      :loading="state.loading"
+      :cover-src="coverSrc"
+      :cover-ok="coverOk"
+      :mark-cover-error="markCoverError"
+      :resolve-cover="resolveCover"
+      @enter-group="enterGroup"
+    />
 
     <!-- 多选批量操作条（桌面：⌘/Ctrl 点选进入多选态）+ 列头 + 歌曲列表 -->
     <div v-else class="pl-body">
-      <div v-if="multiMode" class="pl-multi">
-        <span class="pl-multi-count">
-          {{ t("playlist.multi.selected", { n: selectedPaths.length }) }}
-        </span>
-        <button class="pl-multi-btn" :title="t('playlist.multi.fav')" @click="batchFavorite">
-          <Heart :size="13" fill="none" />
-          {{ t("playlist.multi.fav") }}
-        </button>
-        <button
-          class="pl-multi-btn"
-          :title="t('playlist.multi.addToPlaylist')"
-          @click="batchAddPlaylist"
-        >
-          <ListPlus :size="13" />
-          {{ t("playlist.multi.addToPlaylist") }}
-        </button>
-        <!-- 批量刮削（仅开启批量刮削后显示） -->
-        <button
-          v-if="scrapingSettings.batch_enabled"
-          class="pl-multi-btn"
-          :disabled="scrapeBatchState.loading"
-          :title="t('playlist.multi.scrape')"
-          data-testid="pl-multi-scrape"
-          @click="batchScrape"
-        >
-          <Loader2 v-if="scrapeBatchState.loading" :size="13" class="spin" />
-          <Sparkles v-else :size="13" />
-          {{
-            scrapeBatchState.loading
-              ? t("playlist.multi.scraping", { n: selectedPaths.length })
-              : t("playlist.multi.scrape")
-          }}
-        </button>
-        <button
-          class="pl-multi-btn danger"
-          :title="t('playlist.multi.deleteToTrash')"
-          @click="batchDelete"
-        >
-          <Trash2 :size="13" />
-          {{ t("playlist.multi.deleteToTrash") }}
-        </button>
-        <button class="pl-multi-btn" :title="t('playlist.multi.clear')" @click="clearSelection">
-          <X :size="13" />
-          {{ t("playlist.multi.clear") }}
-        </button>
-        <!-- 推送到设备（放在末尾：现有测试按位置索引 pl-multi-btn，插入中间会破坏索引） -->
-        <button
-          class="pl-multi-btn"
-          :title="t('playlist.pushToDevice')"
-          data-testid="pl-multi-push-device"
-          @click="batchPushToDevice"
-        >
-          <Send :size="13" />
-          {{ t("playlist.pushToDevice") }}
-        </button>
-      </div>
+      <!-- 多选批量操作条（桌面：⌘/Ctrl 点选进入多选态）：多选状态在 PlaylistBatchBar 内部 -->
+      <PlaylistBatchBar
+        ref="batchBar"
+        @delete="openDeleteDialog"
+        @add-playlist="openAddMenuBatch"
+        @push-device="batchPushToDevice"
+      />
       <!-- 列头（桌面）：点击排序，三态循环 升序 → 降序 → 默认顺序；与工具条 select 共用 sortKey -->
       <div class="pl-cols">
         <span class="pl-cols-idx" aria-hidden="true"></span>
@@ -241,103 +159,29 @@
         </button>
       </div>
       <div ref="listEl" class="pl-list">
-        <div
+        <PlaylistRow
           v-for="({ song, i }, vi) in visible"
           :key="song.id"
-          class="pl-item"
-          :class="{ active: i === state.currentIndex, selected: isSelected(song.path) }"
-          :data-path="song.path"
-          @click="onRowClick(vi, $event)"
-          @contextmenu.prevent="openCtxMenu($event, vi)"
-        >
-          <span
-            v-if="canDragOut"
-            class="pl-drag"
-            :title="canReorder ? t('playlist.dragSort') : t('playlist.dragOut')"
-            draggable="true"
-            @dragstart="onRowDragStart($event, song.path)"
-          >
-            <GripVertical :size="14" />
-          </span>
-          <span v-if="coverVisible('list')" class="pl-cover">
-            <img
-              v-if="coverSrc(song.path) && coverOk(song.path)"
-              :src="coverSrc(song.path)"
-              :alt="song.name"
-              loading="lazy"
-              @error="markCoverError(song.path)"
-            />
-          </span>
-          <span class="pl-idx">{{ vi + 1 }}</span>
-          <div class="pl-info">
-            <div class="pl-name">
-              {{ song.name }}
-              <span
-                v-if="isFavorite(song.path)"
-                class="pl-fav-mark"
-                :title="t('playlist.fav.faved')"
-              >
-                <Heart :size="10" fill="currentColor" />
-              </span>
-            </div>
-            <div class="pl-artist">
-              {{ song.artist }}
-              <span v-if="song.duration" class="pl-dur">{{ fmtDur(song.duration) }}</span>
-              <span v-if="song.has_lyric" class="pl-lyric" :title="t('playlist.hasLyric')">
-                <Mic :size="11" />
-              </span>
-            </div>
-          </div>
-          <span
-            v-if="i === state.currentIndex"
-            class="pl-eq"
-            :title="t('playlist.locate.title')"
-            @click.stop="locateCurrent"
-          >
-            <span class="eq-bar"></span>
-            <span class="eq-bar"></span>
-            <span class="eq-bar"></span>
-          </span>
-          <!-- 行尾操作按钮：绝对定位不占布局空间（文字区参照自动歌单占满整行），hover 显示 -->
-          <div class="pl-actions">
-            <button
-              class="pl-action heart"
-              :class="{ on: isFavorite(song.path) }"
-              :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
-              @click.stop="toggleFavorite(song.path)"
-            >
-              <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
-            </button>
-            <button
-              class="pl-action"
-              :title="t('playlist.addMenu.title')"
-              @click.stop="openAddMenu($event, song.path)"
-            >
-              <ListPlus :size="14" />
-            </button>
-            <button
-              v-if="isStreamSong(song)"
-              class="pl-action dl"
-              :class="{ busy: downloading[song.streamId] }"
-              :title="
-                downloading[song.streamId] ? t('playlist.downloading') : t('playlist.download')
-              "
-              @click.stop="downloadSong(song)"
-            >
-              <Loader2 v-if="downloading[song.streamId]" :size="14" class="pl-spin" />
-              <Download v-else :size="14" />
-            </button>
-            <button
-              class="pl-action remove"
-              :title="
-                inPlaylistView ? t('playlist.removeFromPlaylist') : t('playlist.removeFromQueue')
-              "
-              @click.stop="removeItem(vi)"
-            >
-              <X :size="14" />
-            </button>
-          </div>
-        </div>
+          :song="song"
+          :vi="vi"
+          :active="i === state.currentIndex"
+          :selected="isSelected(song.path)"
+          :can-drag-out="canDragOut"
+          :can-reorder="canReorder"
+          :downloading="downloading"
+          :in-playlist-view="inPlaylistView"
+          :cover-src="coverSrc"
+          :cover-ok="coverOk"
+          :mark-cover-error="markCoverError"
+          @click="onRowClick"
+          @contextmenu="openCtxMenu"
+          @dragstart="onRowDragStart"
+          @favorite="toggleFavorite"
+          @add-menu="openAddMenu"
+          @download="downloadSong"
+          @remove="removeItem"
+          @locate="locateCurrent"
+        />
         <div v-if="!visible.length" class="pl-empty">
           {{
             state.loading
@@ -356,33 +200,8 @@
       </div>
     </div>
 
-    <!-- 加歌浮层 -->
-    <Teleport to="body">
-      <div v-if="addMenuOpen" class="am-backdrop" @click="addMenuOpen = false"></div>
-      <div v-if="addMenuOpen" ref="addMenuEl" class="add-menu" :style="addMenuStyle">
-        <div class="am-title">
-          <ListPlus :size="13" />
-          {{ t("playlist.addMenu.title") }}
-        </div>
-        <div
-          v-for="p in state.playlists"
-          :key="p.id"
-          class="am-item"
-          :class="{ in: addMenuIn(p.id) }"
-          @click="toggleAdd(p.id)"
-        >
-          <ListMusic :size="13" />
-          <span class="am-name">{{ p.name }}</span>
-          <span class="am-state">
-            <Check v-if="addMenuIn(p.id)" :size="13" />
-            <Plus v-else :size="13" />
-          </span>
-        </div>
-        <div v-if="!state.playlists.length" class="am-empty">
-          {{ t("playlist.addMenu.noPlaylists") }}
-        </div>
-      </div>
-    </Teleport>
+    <!-- 加歌浮层（Teleport to body 防裁剪；位置计算/开关状态在 AddToPlaylistMenu 内部） -->
+    <AddToPlaylistMenu ref="addMenuRef" />
 
     <!-- 右键菜单（桌面，Teleport 到 body 防裁剪） -->
     <ContextMenu
@@ -445,30 +264,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import Sortable from "sortablejs";
 import { smartViewState } from "../composables/useSmartViews.js";
-import {
-  Music,
-  Mic,
-  RefreshCw,
-  Search,
-  Heart,
-  X,
-  GripVertical,
-  ListPlus,
-  ListMusic,
-  Check,
-  Plus,
-  ArrowLeft,
-  Trash2,
-  LocateFixed,
-  Download,
-  Send,
-  Loader2,
-  Sparkles,
-} from "@lucide/vue";
+import { Music, RefreshCw, Search, Heart, ArrowLeft, Trash2, LocateFixed } from "@lucide/vue";
 import {
   state,
   activePlaylist,
@@ -478,30 +277,24 @@ import {
   isFavorite,
   toggleFavorite,
   removeFromQueue,
-  isInPlaylist,
-  addToPlaylist,
   removeFromPlaylist,
-  setPlaylistOrder,
-  reorderQueue,
-  persistQueueOrder,
-  DRAG_SONG_TYPE,
-  _resetPlayMode,
-  isStreamSong,
   downloadSettings,
 } from "../composables/usePlayer.js";
-import { coverVisible } from "../composables/useCoverGuard.ts";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
-import { scrapingSettings } from "../composables/useScrapingSettings.js";
-import { scrapeBatchState, runScrapeBatch } from "../composables/useScrapeBatch.js";
 import ScrapeResultModal from "./ScrapeResultModal.vue";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
 import { apiPost } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
-import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../composables/useCoverURL.js";
 import ContextMenu from "./ContextMenu.vue";
 import TagEditorModal from "./TagEditorModal.vue";
 import DevicePickerModal from "./DevicePickerModal.vue";
+import PlaylistRow from "./PlaylistRow.vue";
+import AddToPlaylistMenu, { computeAddMenuPos } from "./AddToPlaylistMenu.vue";
+import PlaylistBatchBar from "./PlaylistBatchBar.vue";
+import PlaylistBrowse from "./PlaylistBrowse.vue";
+import { usePlaylistContextMenu } from "../composables/usePlaylistContextMenu.ts";
+import { usePlaylistDnD } from "../composables/usePlaylistDnD.ts";
 import { fetchDevices, pushSongsToDevice } from "../utils/deviceCommands.js";
 
 // 注：曾有过 compact prop（class 绑定），无任何调用方且与全局 html[data-compact] 机制重复，已移除。
@@ -510,6 +303,8 @@ const { t } = useI18n();
 
 // 封面 URL 异步解析（阶段 F1）：iOS 壳本地优先（离线可显示），未命中远程 + 后台缓存；
 // 桌面/非壳远程直出（行为零变化）。coverSrc 未解析完成返回 ""，模板 v-if 配合隐藏 <img>。
+// 解析动作在主组件（watch visible 驱动），行内读取/错误标记通过 props 传入 PlaylistRow
+// （useCoverURL 的 urlMap 每实例一份，解析与读取必须同源）。
 const { coverSrc, coverOk, markCoverError, resolveCover } = useCoverURL();
 
 // ============ 视图：全部歌曲 / 歌单（独立视图）/ 分组浏览 ============
@@ -561,64 +356,6 @@ const viewSongs = computed(() => {
 // 网格视图：浏览 tab 非列表且未进入分组
 const gridMode = computed(() => browseMode.value !== "songs" && !browseFilter.value);
 
-// 歌手分组聚合（名称 → 歌曲数）
-const artistGroups = computed(() => {
-  const m = new Map();
-  for (const s of state.songs) {
-    const name = norm(s.artist, UNKNOWN_ARTIST);
-    m.set(name, (m.get(name) || 0) + 1);
-  }
-  return [...m.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => a.name.localeCompare(b.name, "zh"));
-});
-
-// 专辑分组聚合（按专辑名，歌手去重显示，取代表歌封面——封面 URL 经 useCoverURL 统一解析，
-// 契约 2026-08-27：不手写 path→/api/cover 映射；桌面直出行为零变化）
-const albumGroups = computed(() => {
-  const m = new Map();
-  for (const s of state.songs) {
-    const album = norm(s.album, UNKNOWN_ALBUM);
-    const artist = norm(s.artist, UNKNOWN_ARTIST);
-    const cur = m.get(album);
-    if (cur) {
-      cur.count++;
-      if (!cur.artists.has(artist)) cur.artists.add(artist);
-    } else {
-      m.set(album, {
-        album,
-        artists: new Set([artist]),
-        count: 1,
-        coverPath: s.path, // 代表歌 path；渲染时 coverSrc(coverPath) 取 URL
-      });
-    }
-  }
-  return [...m.values()]
-    .map((g) => {
-      const list = [...g.artists];
-      return {
-        ...g,
-        artist:
-          list.length > 2 ? list.slice(0, 2).join(" / ") + t("playlist.etc") : list.join(" / "),
-      };
-    })
-    .sort((a, b) => a.album.localeCompare(b.album, "zh"));
-});
-
-// 网格视图当前分组列表（支持搜索过滤卡片）
-const gridGroups = computed(() => {
-  const groups = browseMode.value === "artists" ? artistGroups.value : albumGroups.value;
-  const q = normalizeQuery(query.value);
-  if (!q) return groups;
-  return groups.filter((g) => {
-    const text = browseMode.value === "artists" ? g.name : g.album + " " + g.artist;
-    return normalizeText(text).includes(q);
-  });
-});
-
-const gridKey = (g) =>
-  browseMode.value === "artists" ? "a:" + g.name : "l:" + g.album + ":" + g.artist;
-
 // 分组详情标题（未知歌手/专辑保留原名）
 const browseFilterTitle = computed(() => {
   const f = browseFilter.value;
@@ -640,14 +377,6 @@ function enterGroup(g) {
       ? { type: "artist", value: g.name }
       : { type: "album", value: g.album, artist: g.artist };
   query.value = "";
-}
-
-// 歌手首字母色块：名字哈希 → 渐变背景
-function hashBg(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  const hue = h % 360;
-  return `linear-gradient(135deg, hsl(${hue} 48% 52%), hsl(${(hue + 42) % 360} 45% 40%))`;
 }
 
 // ============ 搜索 / 排序 / 收藏过滤 ============
@@ -704,15 +433,6 @@ watch(
   { immediate: true },
 );
 
-// 专辑分组代表歌封面：useCoverURL 统一解析（resolveCover 幂等；只查不下载，专辑数远小于行数）
-watch(
-  () => albumGroups.value.map((g) => g.coverPath).filter(Boolean),
-  (paths) => {
-    for (const p of paths) resolveCover(p);
-  },
-  { immediate: true },
-);
-
 // ============ 列头点击排序（三态循环：升序 → 降序 → 默认顺序） ============
 // 不同列 → 切列并重置为升序；同列升 → 降；同列降 → 回到默认（曲库原始顺序）
 function onColSort(key) {
@@ -752,21 +472,16 @@ function pick(i) {
 }
 
 // ============ 多选批量（桌面：⌘/Ctrl 点选进入多选态） ============
-const selectedPaths = ref([]);
-const multiMode = computed(() => selectedPaths.value.length > 0);
+// 多选状态由 PlaylistBatchBar 持有（isSelected/清空/切换经模板 ref 转发）
+const batchBar = ref(null);
+const multiMode = computed(() => !!batchBar.value?.isMulti());
 
 function isSelected(path) {
-  return path != null && selectedPaths.value.includes(path);
-}
-
-function toggleSelected(path) {
-  const i = selectedPaths.value.indexOf(path);
-  if (i >= 0) selectedPaths.value.splice(i, 1);
-  else selectedPaths.value.push(path);
+  return path != null && !!batchBar.value?.isSelected(path);
 }
 
 function clearSelection() {
-  selectedPaths.value = [];
+  batchBar.value?.clearSelection();
 }
 
 // 行点击：多选态 = 切换选中；⌘/Ctrl+点选 = 进入多选态并选中；否则播放
@@ -777,197 +492,51 @@ function onRowClick(vi, e) {
   if (!entry) return;
   const path = entry.song.path;
   const mod = e?.metaKey || e?.ctrlKey;
-  if (multiMode.value) {
-    if (path != null) toggleSelected(path);
-    return;
-  }
-  if (mod) {
-    if (path != null) toggleSelected(path);
+  if (multiMode.value || mod) {
+    if (path != null) batchBar.value?.toggleSelected(path);
     return;
   }
   // 必须用 entry.i（全局曲库索引）：viewSongs 可能被过滤/歌单/排序，视图索引 ≠ 曲库索引
   pick(entry.i);
 }
 
-// 批量收藏：只加不删（幂等），新增数 toast
-async function batchFavorite() {
-  const paths = selectedPaths.value.filter((p) => p != null && !isFavorite(p));
-  if (!paths.length) return;
-  for (const p of paths) await toggleFavorite(p);
-  showToast(t("playlist.fav.batchAdded", { n: paths.length }));
-}
-
-// 批量加歌单：复用 addMenu 浮层（批量模式 = 只加不删）
-function batchAddPlaylist() {
-  const paths = selectedPaths.value.filter((p) => p != null);
-  if (!paths.length) return;
-  openAddMenuBatch(paths);
-}
-
+// 批量加歌单：复用 addMenu 浮层（批量模式 = 只加不删），路径由 PlaylistBatchBar emit 上来
 function openAddMenuBatch(paths) {
-  addMenuMode.value = "batch";
-  addMenuPaths.value = paths;
-  addMenuPos.value = {
-    top: ADD_MENU_MARGIN,
-    left: Math.max(ADD_MENU_MARGIN, window.innerWidth - ADD_MENU_WIDTH - 340),
-    flip: false,
-  };
-  addMenuOpen.value = true;
+  addMenuRef.value?.openForBatch(paths);
 }
 
-// 批量移到废纸篓（与单曲同一链路：确认弹窗 → DELETE → toast → loadSongs）
-function batchDelete() {
-  openDeleteDialog(selectedPaths.value);
-}
-
-// ============ 批量刮削（多选 → POST /api/tags/scrape-batch） ============
-// 按钮仅当设置里开启 batch_enabled 后显示（关闭时入口隐藏）；批量写入会改文件名，
-// 完成后刷新曲库 + 清空多选；结果面板（ScrapeResultModal）展示 summary + 明细。
-async function batchScrape() {
-  if (!scrapingSettings.batch_enabled) return;
-  const paths = selectedPaths.value.filter((p) => p != null);
-  if (!paths.length) return;
-  await runScrapeBatch({ paths });
-  // 请求结束（成功/未启用/失败都收敛）：改没改名都刷一次保险，多选清空
-  await loadSongs({ force: true });
-  clearSelection();
-}
-
-// ============ 右键菜单（桌面） ============
-const ctxOpen = ref(false);
-const ctxSong = ref(null);
-const ctxIdx = ref(-1); // 曲库队列索引（viewSongs 可能被过滤/排序，用原始 i）
-const ctxPos = ref({ x: 0, y: 0 });
-
-function openCtxMenu(e, vi) {
-  const entry = visible.value[vi];
-  if (!entry) return;
-  ctxSong.value = entry.song;
-  ctxIdx.value = entry.i;
-  ctxPos.value = { x: e.clientX, y: e.clientY };
-  ctxOpen.value = true;
-}
-
-function ctxClose() {
-  ctxOpen.value = false;
-}
-
-// 进歌手/进专辑：仅可跳转时显示（已在该分组视图内 → 隐藏对应入口）
-const ctxCanGoArtist = computed(() => {
-  const s = ctxSong.value;
-  if (!s || !s.artist) return false;
-  const v = norm(s.artist, UNKNOWN_ARTIST);
-  return !(browseFilter.value?.type === "artist" && browseFilter.value.value === v);
-});
-const ctxCanGoAlbum = computed(() => {
-  const s = ctxSong.value;
-  if (!s || !s.album) return false;
-  const v = norm(s.album, UNKNOWN_ALBUM);
-  return !(browseFilter.value?.type === "album" && browseFilter.value.value === v);
+// ============ 右键菜单（桌面）+ 壳右键事件桥 ============
+// ctx 状态/动作/全局事件绑定在 usePlaylistContextMenu（浏览器与 Swift 壳 NSMenu 共用同一套动作）；
+// 弹窗（加歌浮层/废纸篓确认/标签编辑/设备选择）仍由主组件协调，经依赖注入传入。
+const {
+  ctxOpen,
+  ctxSong,
+  ctxPos,
+  openCtxMenu,
+  ctxCanGoArtist,
+  ctxCanGoAlbum,
+  ctxPlay,
+  ctxPlayNext,
+  ctxToggleFav,
+  ctxAddPlaylist,
+  ctxGoArtist,
+  ctxGoAlbum,
+  ctxDelete,
+  ctxEditTags,
+  ctxPushToDevice,
+} = usePlaylistContextMenu({
+  getVisible: () => visible.value,
+  browseFilter,
+  norm,
+  UNKNOWN_ARTIST,
+  UNKNOWN_ALBUM,
+  openAddMenuAt,
+  openDeleteDialog,
+  openTagEditor,
+  openDevicePicker,
 });
 
-// 播放指定曲库索引的歌（浏览器/壳右键菜单共用；idx 越界静默）
-function playFor(idx) {
-  if (idx >= 0 && idx < state.songs.length) {
-    selectSong(idx);
-    play();
-  }
-}
-
-function ctxPlay() {
-  playFor(ctxIdx.value);
-  ctxClose();
-}
-
-// 下一首播放：把该歌挪到当前歌之后并立即播放（列表即队列，避免重复条目）
-function playNextFor(idx) {
-  if (idx < 0 || idx >= state.songs.length) return;
-  const cur = state.currentIndex;
-  if (cur < 0 || idx === cur) {
-    selectSong(idx);
-    play();
-    return;
-  }
-  const song = state.songs[idx];
-  state.songs.splice(idx, 1);
-  // 取走后当前歌索引可能前移；插到当前歌之后
-  const cur2 = idx < cur ? cur - 1 : cur;
-  state.songs.splice(cur2 + 1, 0, song);
-  _resetPlayMode(); // 洗牌队列失效，selectSong 会按新歌重建
-  selectSong(cur2 + 1);
-  play();
-}
-
-function ctxPlayNext() {
-  playNextFor(ctxIdx.value);
-  ctxClose();
-}
-
-function ctxToggleFav() {
-  const p = ctxSong.value?.path;
-  if (p != null) toggleFavorite(p);
-  ctxClose();
-}
-
-// 加歌单：复用现有 addMenu 浮层，锚定在鼠标位置（假 rect 右对齐 → 菜单从光标处展开）
-function ctxAddPlaylist() {
-  const p = ctxSong.value?.path;
-  if (p == null) {
-    ctxClose();
-    return;
-  }
-  const { x, y } = ctxPos.value;
-  ctxClose();
-  openAddMenuAt(p, {
-    getBoundingClientRect: () => ({
-      left: x,
-      top: y,
-      right: x + ADD_MENU_WIDTH,
-      bottom: y + 4,
-      width: ADD_MENU_WIDTH,
-      height: 4,
-    }),
-  });
-}
-
-// 进歌手/进专辑分组视图（浏览器/壳右键菜单共用）：按歌曲数据设置 browseFilter
-function goArtistFor(song) {
-  if (song?.artist) {
-    browseFilter.value = { type: "artist", value: norm(song.artist, UNKNOWN_ARTIST) };
-  }
-}
-
-function goAlbumFor(song) {
-  if (song?.album) {
-    browseFilter.value = {
-      type: "album",
-      value: norm(song.album, UNKNOWN_ALBUM),
-      artist: song.artist,
-    };
-  }
-}
-
-function ctxGoArtist() {
-  goArtistFor(ctxSong.value);
-  ctxClose();
-}
-
-function ctxGoAlbum() {
-  goAlbumFor(ctxSong.value);
-  ctxClose();
-}
-
-function ctxDelete() {
-  const p = ctxSong.value?.path;
-  if (p == null) {
-    ctxClose();
-    return;
-  }
-  ctxClose();
-  openDeleteDialog([p]);
-}
-
-// 编辑标签/刮削：打开 TagEditorModal（autoScrape 自动触发刮削），编辑对象 = 被右键的歌曲
+// ============ 编辑标签/刮削（右键目标歌曲；autoScrape 打开自动刮削） ============
 // （不切换当前播放；弹窗内保存/刮削都以该歌曲的 path 为准）
 const tagEditorOpen = ref(false);
 const tagEditorSong = ref(null);
@@ -976,12 +545,6 @@ function openTagEditor(song) {
   if (!song?.path) return;
   tagEditorSong.value = song;
   tagEditorOpen.value = true;
-}
-
-function ctxEditTags() {
-  const s = ctxSong.value;
-  ctxClose();
-  openTagEditor(s);
 }
 
 // ============ 推送到设备（右键单选 / 多选批量 → DevicePickerModal） ============
@@ -1006,16 +569,8 @@ async function openDevicePicker(songs) {
   pickerOpen.value = true;
 }
 
-function ctxPushToDevice() {
-  const s = ctxSong.value;
-  ctxClose();
-  openDevicePicker(s ? [s] : []);
-}
-
-// 多选批量：选中路径 → 曲库歌曲对象（路径语义，网络歌天然被过滤）
-function batchPushToDevice() {
-  const paths = selectedPaths.value.filter((p) => p != null);
-  if (!paths.length) return;
+// 多选批量：选中路径（PlaylistBatchBar emit）→ 曲库歌曲对象（路径语义，网络歌天然被过滤）
+function batchPushToDevice(paths) {
   const songs = state.songs.filter((s) => s && paths.includes(s.path));
   openDevicePicker(songs);
 }
@@ -1036,88 +591,6 @@ async function onDevicePicked(device) {
       type: "error",
     });
   }
-}
-
-// ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报上下文 → 壳注入 NSMenu → 点击调 __qqCtxMenu → 事件派发到这里） ============
-// 与浏览器右键菜单共用同一套实现（playFor/playNextFor/goArtistFor/goAlbumFor/openAddMenuAt/openDeleteDialog），
-// 壳内与浏览器行为完全一致；事件只在原生壳内由 __qqCtxMenu 派发，浏览器永不触发。
-function ctxSongFromEvent(e) {
-  const path = e.detail?.path;
-  if (path == null) return null;
-  return state.songs.find((s) => s.path === path) ?? null;
-}
-
-function onCtxPlay(e) {
-  const s = ctxSongFromEvent(e);
-  if (s) playFor(state.songs.indexOf(s));
-}
-
-function onCtxPlayNext(e) {
-  const s = ctxSongFromEvent(e);
-  if (s) playNextFor(state.songs.indexOf(s));
-}
-
-function onCtxToggleFav(e) {
-  const s = ctxSongFromEvent(e);
-  if (s?.path != null) toggleFavorite(s.path);
-}
-
-// 加歌单：与 ctxAddPlaylist 同一锚定方式（右键坐标 → 假 rect 右对齐 → 浮层从光标处展开）
-function onCtxAddPlaylist(e) {
-  const p = e.detail?.path;
-  if (p == null) return;
-  const { x, y } = e.detail;
-  openAddMenuAt(p, {
-    getBoundingClientRect: () => ({
-      left: x,
-      top: y,
-      right: x + ADD_MENU_WIDTH,
-      bottom: y + 4,
-      width: ADD_MENU_WIDTH,
-      height: 4,
-    }),
-  });
-}
-
-// 移到废纸篓：与 ctxDelete 同一确认弹窗链路
-function onCtxDeleteSong(e) {
-  const p = e.detail?.path;
-  if (p != null) openDeleteDialog([p]);
-}
-
-function onCtxGoArtist(e) {
-  const s = ctxSongFromEvent(e);
-  if (s) goArtistFor(s);
-}
-
-function onCtxGoAlbum(e) {
-  const s = ctxSongFromEvent(e);
-  if (s) goAlbumFor(s);
-}
-
-// 编辑标签/刮削（壳菜单）：与浏览器右键菜单同一链路 → 打开 TagEditorModal(autoScrape)
-function onCtxEditTags(e) {
-  const s = ctxSongFromEvent(e);
-  if (s) openTagEditor(s);
-}
-
-const CTX_EVENTS = [
-  ["qqplayer:ctx-play", onCtxPlay],
-  ["qqplayer:ctx-playnext", onCtxPlayNext],
-  ["qqplayer:ctx-togglefav", onCtxToggleFav],
-  ["qqplayer:ctx-addplaylist", onCtxAddPlaylist],
-  ["qqplayer:ctx-deletesong", onCtxDeleteSong],
-  ["qqplayer:ctx-goartist", onCtxGoArtist],
-  ["qqplayer:ctx-goalbum", onCtxGoAlbum],
-  ["qqplayer:ctx-edittags", onCtxEditTags],
-];
-
-function bindCtxEvents() {
-  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn);
-}
-
-function unbindCtxEvents() {
-  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn);
 }
 
 // ============ 行操作：移除（跟随视图语义） / 加歌 ============
@@ -1160,78 +633,21 @@ async function downloadSong(song) {
   }
 }
 
-// 加歌浮层：锚定触发按钮（getBoundingClientRect 动态定位，保留 Teleport 到 body 防裁剪）
-const addMenuOpen = ref(false);
-// 目标路径：单曲=[path]（切换收藏态）；批量=多 path（只加不删）
-const addMenuPaths = ref([]);
-const addMenuMode = ref("single"); // 'single' 切换 | 'batch' 只加
-const addMenuEl = ref(null); // 浮层根元素（用于测量实际高度）
-const addMenuAnchor = ref(null); // 触发按钮元素（resize/滚动时重取 rect）
-const addMenuPos = ref({ top: 0, left: 0 });
+// 加歌浮层（AddToPlaylistMenu）：状态/位置计算/Teleport 全在子组件内，主组件只做打开转发与 Esc 协调
+const addMenuRef = ref(null);
 
-const ADD_MENU_WIDTH = 220; // 与 .add-menu width 一致
-const ADD_MENU_GAP = 6; // 浮层与按钮间距
-const ADD_MENU_EST_HEIGHT = 220; // 预估高度（标题 + 常见歌单数），渲染后用实际高度精修
-const ADD_MENU_MARGIN = 8; // 视口边缘留白
-
-// 纯函数：按钮 rect + 浮层高度 + 视口尺寸 → { top, left, flip }
-// 右对齐按钮右缘（浮层宽 220 向左展开）：与旧视觉"右侧弹层"一致，且不盖住行内其他内容
-function computeAddMenuPos(btnRect, menuHeight, vw = window.innerWidth, vh = window.innerHeight) {
-  const below = Math.max(ADD_MENU_MARGIN, btnRect.bottom + ADD_MENU_GAP);
-  // 下方放不下 → 翻转到按钮上方
-  const flip = below + menuHeight > vh - ADD_MENU_MARGIN;
-  const top = flip ? Math.max(ADD_MENU_MARGIN, btnRect.top - menuHeight - ADD_MENU_GAP) : below;
-  // 右边界 clamp + 左侧兜底（窄窗口时右缘 - 220 可能为负）
-  const left = Math.max(
-    ADD_MENU_MARGIN,
-    Math.min(btnRect.right - ADD_MENU_WIDTH, vw - ADD_MENU_WIDTH - ADD_MENU_MARGIN),
-  );
-  return { top, left, flip };
-}
-
-function measureMenuHeight() {
-  const h = addMenuEl.value ? addMenuEl.value.getBoundingClientRect().height : 0;
-  return h > 0 ? h : ADD_MENU_EST_HEIGHT;
-}
-
-function applyAddMenuPos(rect) {
-  addMenuPos.value = computeAddMenuPos(rect, measureMenuHeight());
-}
-
+// 行内按钮：锚定触发按钮（getBoundingClientRect 动态定位）
 function openAddMenu(e, path) {
-  openAddMenuAt(path, e?.currentTarget);
+  addMenuRef.value?.openForSingle(path, e?.currentTarget);
 }
 
 // 统一入口：anchor 为带 getBoundingClientRect 的元素（行内按钮 / 右键菜单鼠标位置的假 rect）
 function openAddMenuAt(path, anchor) {
-  addMenuMode.value = "single";
-  addMenuPaths.value = [path];
-  if (anchor && typeof anchor.getBoundingClientRect === "function") {
-    addMenuAnchor.value = anchor;
-    addMenuPos.value = computeAddMenuPos(anchor.getBoundingClientRect(), ADD_MENU_EST_HEIGHT);
-    addMenuOpen.value = true;
-    // 渲染后用实际浮层高度精修（歌单多时浮层更高，翻转判定更准）
-    nextTick(() => {
-      if (!addMenuOpen.value || !addMenuAnchor.value) return;
-      applyAddMenuPos(addMenuAnchor.value.getBoundingClientRect());
-    });
-  } else {
-    // 兜底：取不到按钮 rect 时退回首屏右上方（接近旧位置）
-    addMenuPos.value = {
-      top: ADD_MENU_MARGIN,
-      left: Math.max(ADD_MENU_MARGIN, window.innerWidth - ADD_MENU_WIDTH - 340),
-      flip: false,
-    };
-    addMenuOpen.value = true;
-  }
+  addMenuRef.value?.openForSingle(path, anchor);
 }
 
-const addMenuStyle = computed(() => ({
-  top: addMenuPos.value.top + "px",
-  left: addMenuPos.value.left + "px",
-}));
-
-// Esc 关闭（优先级：删除弹窗 → 右键菜单 → 加歌浮层 → 多选态）；resize/滚动重算（scroll 用捕获阶段，任意滚动容器都能触发）
+// Esc 关闭（优先级：删除弹窗 → 右键菜单 → 加歌浮层 → 多选态）；
+// resize/滚动重算（scroll 用捕获阶段）在 AddToPlaylistMenu 内部自管
 function onKeydown(e) {
   if (e.key !== "Escape") return;
   if (deleteOpen.value) {
@@ -1242,53 +658,18 @@ function onKeydown(e) {
     ctxOpen.value = false;
     return;
   }
-  if (addMenuOpen.value) {
-    addMenuOpen.value = false;
+  if (addMenuRef.value?.isOpen()) {
+    addMenuRef.value.close();
     return;
   }
   if (multiMode.value) clearSelection();
 }
-function onViewportChange() {
-  if (!addMenuOpen.value || !addMenuAnchor.value) return;
-  applyAddMenuPos(addMenuAnchor.value.getBoundingClientRect());
-}
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
-  window.addEventListener("resize", onViewportChange);
-  window.addEventListener("scroll", onViewportChange, true);
-  bindCtxEvents(); // 壳右键菜单动作（浏览器内事件永不派发，无副作用）
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
-  window.removeEventListener("resize", onViewportChange);
-  window.removeEventListener("scroll", onViewportChange, true);
-  unbindCtxEvents();
 });
-
-async function toggleAdd(pid) {
-  const paths = addMenuPaths.value;
-  if (!paths.length) return;
-  try {
-    if (addMenuMode.value === "batch") {
-      // 批量：只加不删（幂等），避免逐首移除弹多条撤销 toast
-      for (const p of paths) {
-        if (!isInPlaylist(pid, p)) await addToPlaylist(pid, p);
-      }
-    } else if (isInPlaylist(pid, paths[0])) {
-      await removeFromPlaylist(pid, paths[0]);
-    } else {
-      await addToPlaylist(pid, paths[0]);
-    }
-  } catch (e) {
-    toastError(e.message);
-  }
-}
-
-// 浮层内歌单的勾选态：单曲 = 该歌在歌单；批量 = 全部选中歌都在歌单
-function addMenuIn(pid) {
-  const paths = addMenuPaths.value;
-  return paths.length > 0 && paths.every((p) => isInPlaylist(pid, p));
-}
 
 // ============ 移到废纸篓（确认 → DELETE → toast → 刷新，单曲/批量同一链路） ============
 const deleteOpen = ref(false);
@@ -1334,125 +715,14 @@ async function doDelete() {
   }
 }
 
-// ============ 歌单拖拽排序（sortablejs / 壳内 Pointer Events 模拟） ============
-const listEl = ref(null);
-let sortable = null;
-let shellDragCleanup = null; // 壳内拖拽清理函数（useShellDrag）
-
-function setupSortable() {
-  sortable?.destroy();
-  sortable = null;
-  shellDragCleanup?.();
-  shellDragCleanup = null;
-  if (!listEl.value) return;
-  if (inNativeShell()) {
-    // 壳内（WKWebView 无 HTML5 DnD）：手柄 pointer 事件模拟排序 + 拖到侧栏歌单；
-    // 任何视图都挂（canDragOut 恒真），getCanReorder 控制列表内排序是否放行（过滤时禁）
-    shellDragCleanup = setupShellRowDrag({
-      listEl: listEl.value,
-      getCanDrag: () => canDragOut.value,
-      getCanReorder: () => canReorder.value,
-      isPlaylistView: () => !!state.activePlaylistId,
-      onQueueReorder: (from, to) => {
-        reorderQueue(from, to);
-        persistQueueOrder().catch((e) => toastError(e.message));
-      },
-      onPlaylistReorder: (paths) => {
-        setPlaylistOrder(state.activePlaylistId, paths).catch((e) => toastError(e.message));
-      },
-    });
-    return;
-  }
-  // 浏览器：列表内排序只在无过滤时初始化 SortableJS（过滤时排序禁，但行手柄仍可 HTML5 DnD 拖出加歌单）
-  if (!canReorder.value) return;
-  sortable = Sortable.create(listEl.value, {
-    handle: ".pl-drag",
-    animation: 150,
-    ghostClass: "pl-ghost",
-    supportPointer: true, // pointer 事件统一鼠标/触控笔/触摸（触屏可拖拽排序）
-    onEnd: ({ oldIndex, newIndex }) => {
-      if (oldIndex === newIndex) return;
-      if (state.activePlaylistId) {
-        // 歌单视图：重排歌单内歌曲顺序
-        const paths = [...listEl.value.querySelectorAll(".pl-item")].map((el) => el.dataset.path);
-        setPlaylistOrder(state.activePlaylistId, paths).catch((e) => toastError(e.message));
-      } else {
-        // 全部歌曲视图：重排播放队列顺序并持久化（后端 /api/queue/order，刷新后恢复）
-        reorderQueue(oldIndex, newIndex);
-        persistQueueOrder().catch((e) => toastError(e.message));
-      }
-    },
-  });
-}
-
-watch([activePlaylist, canReorder], () => nextTick(setupSortable));
-onMounted(() => nextTick(setupSortable));
-onBeforeUnmount(() => {
-  sortable?.destroy();
-  shellDragCleanup?.();
-  clearTimeout(locateTimer);
+// ============ 歌单拖拽排序 + 定位当前播放 ============
+// sortablejs/壳内 pointer 模拟/拖出加歌单数据源/定位滚动全部在 usePlaylistDnD
+// （生命周期自管：重建/初始化/清理集中在 composable 内）
+const { listEl, onRowDragStart, locateCurrent } = usePlaylistDnD({
+  canReorder,
+  canDragOut,
+  visible,
 });
-
-// ============ 拖拽到侧栏歌单（HTML5 DnD：歌曲行手柄 → Sidebar 歌单项） ============
-// 与 sortablejs 同源共用手柄：sortablejs 用 pointerdown + 原生 dragstart 驱动列表内排序，
-// 我们只附加 dataTransfer 元数据，drop 目标只有 Sidebar 歌单，两套语义互不干扰。
-function onRowDragStart(e, path) {
-  if (!path) {
-    // 网络歌（path=null）不能加入歌单
-    e.preventDefault();
-    return;
-  }
-  const dt = e.dataTransfer;
-  if (!dt) return;
-  dt.setData(DRAG_SONG_TYPE, path);
-  dt.effectAllowed = "copy";
-}
-
-// ============ 定位当前播放（工具条按钮 / EQ 标记点击） ============
-let locateTimer = null;
-
-// 滚动 .pl-list 让行可见：行在视口内不动，否则滚到行顶（带内边距留白）
-function scrollRowIntoList(list, rowEl) {
-  const pad = 6;
-  const listRect = list.getBoundingClientRect();
-  const rowRect = rowEl.getBoundingClientRect();
-  const relTop = rowRect.top - listRect.top + list.scrollTop;
-  const relBottom = relTop + rowRect.height;
-  const viewTop = list.scrollTop;
-  const viewBottom = viewTop + list.clientHeight;
-  if (relTop < viewTop || relBottom > viewBottom) {
-    const top = Math.max(0, relTop - pad);
-    if (typeof list.scrollTo === "function") {
-      list.scrollTo({ top, behavior: "smooth" });
-    } else {
-      list.scrollTop = top;
-    }
-  }
-}
-
-function locateCurrent() {
-  const idx = state.currentIndex;
-  if (idx < 0 || !listEl.value) return;
-  const domIdx = visible.value.findIndex((v) => v.i === idx);
-  if (domIdx < 0) {
-    // 搜索/过滤中当前播放行不可见 → 提示
-    showToast(t("playlist.locate.notVisible"));
-    return;
-  }
-  const rowEl = listEl.value.querySelectorAll(".pl-item")[domIdx];
-  if (!rowEl) return;
-  scrollRowIntoList(listEl.value, rowEl);
-  // 临时高亮闪烁
-  rowEl.classList.add("pl-locate");
-  clearTimeout(locateTimer);
-  locateTimer = setTimeout(() => rowEl.classList.remove("pl-locate"), 1500);
-}
-
-function fmtDur(d) {
-  const m = Math.floor(d / 60);
-  const s = Math.floor(d % 60);
-  return m + ":" + String(s).padStart(2, "0");
-}
 </script>
 
 <style scoped>
@@ -1577,107 +847,6 @@ function fmtDur(d) {
   font-size: 11px;
   color: var(--text3);
   flex-shrink: 0;
-}
-/* 歌手/专辑网格 */
-.pl-grid {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 12px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  align-content: start;
-}
-.gr-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 7px;
-  padding: 12px 6px 10px;
-  border-radius: 12px;
-  background: var(--card);
-  border: 1px solid transparent;
-  transition: all 0.12s;
-  text-align: center;
-}
-@media (hover: hover) {
-  .gr-card:hover {
-    background: var(--card2);
-    border-color: var(--border);
-    transform: translateY(-1px);
-  }
-  .gr-card.album:hover {
-    transform: none;
-  }
-}
-/* 专辑卡：1 列横排（封面在左，信息在右） */
-.gr-card.album {
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  text-align: left;
-}
-.gr-card.album .gr-cover {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-.gr-card.album .gr-meta {
-  flex: 1;
-}
-.gr-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 19px;
-  font-weight: 700;
-  box-shadow: 0 3px 10px var(--shadow-sm);
-  flex-shrink: 0;
-}
-.gr-cover {
-  width: 58px;
-  height: 58px;
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--card2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text3);
-  box-shadow: 0 3px 10px var(--shadow-sm);
-  flex-shrink: 0;
-}
-.gr-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.gr-meta {
-  min-width: 0;
-  width: 100%;
-}
-.gr-name {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.gr-count {
-  display: block;
-  font-size: 10.5px;
-  color: var(--text3);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 /* 工具条 */
 .pl-tools {
@@ -1830,300 +999,11 @@ function fmtDur(d) {
   display: flex;
   flex-direction: column;
 }
-.pl-drag {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text3);
-  cursor: grab;
-  flex-shrink: 0;
-  opacity: 0.5;
-  /* 触屏拖拽：禁止浏览器接管手势（否则拖拽变成页面滚动） */
-  touch-action: none;
-}
-@media (hover: hover) {
-  .pl-drag:hover {
-    opacity: 1;
-    color: var(--text2);
-  }
-}
-.pl-drag:active {
-  cursor: grabbing;
-}
-.pl-ghost {
-  opacity: 0.4;
-  background: var(--card2);
-}
-/* 壳内拖拽（pointer 模拟）：源行幽灵跟随指针 + 插入位置指示线 */
-.pl-item.pl-drag-source {
-  opacity: 0.45;
-  background: var(--card2);
-  cursor: grabbing;
-  position: relative;
-  z-index: 2;
-  transition: none;
-}
-.pl-item.pl-drop-before {
-  box-shadow: inset 0 2px 0 0 var(--accent);
-}
-.pl-item.pl-drop-after {
-  box-shadow: inset 0 -2px 0 0 var(--accent);
-}
-.pl-item {
-  /* 行尾操作按钮区宽：最多 4 钮（收藏/加歌单/下载/移除）×26 + 3 gap×10 + 右缘 10 */
-  --pl-actions-w: 144px;
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
-  /* 预留按钮区：非 hover 时文字占满行内剩余宽度（参照自动歌单），hover 按钮浮出不重叠 */
-  padding-right: var(--pl-actions-w);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-@media (hover: hover) {
-  .pl-item:hover {
-    background: var(--card2);
-  }
-}
-.pl-item.active {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 22%, transparent),
-    color-mix(in srgb, var(--accent2) 12%, transparent)
-  );
-}
-/* 多选态行 */
-.pl-item.selected {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-@media (hover: hover) {
-  .pl-item.selected:hover {
-    background: var(--accent-soft);
-  }
-}
-.pl-idx {
-  width: 20px;
-  font-size: 12px;
-  color: var(--text3);
-  text-align: right;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-.pl-cover {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--card2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text3);
-  flex-shrink: 0;
-}
-.pl-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.pl-info {
-  flex: 1;
-  min-width: 0;
-}
-.pl-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pl-fav-mark {
-  display: inline-flex;
-  vertical-align: -1px;
-  margin-left: 4px;
-  color: var(--red);
-}
-.pl-artist {
-  font-size: 11.5px;
-  color: var(--text3);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pl-dur {
-  margin-left: 6px;
-  font-variant-numeric: tabular-nums;
-}
-.pl-lyric {
-  display: inline-flex;
-  vertical-align: -2px;
-  margin-left: 4px;
-  color: var(--text2);
-}
-.pl-eq {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 13px;
-  flex-shrink: 0;
-  color: var(--accent);
-  cursor: pointer;
-}
-/* 定位当前播放：行临时高亮闪烁 */
-.pl-item.pl-locate {
-  animation: pl-locate-flash 1.4s ease-out;
-}
-@keyframes pl-locate-flash {
-  0% {
-    background: color-mix(in srgb, var(--accent) 35%, transparent);
-  }
-  100% {
-    background: transparent;
-  }
-}
-.eq-bar {
-  width: 3px;
-  border-radius: 1.5px;
-  background: currentColor;
-  height: 100%;
-  animation: eq-bounce 1s ease-in-out infinite;
-}
-.eq-bar:nth-child(2) {
-  animation-delay: -0.33s;
-}
-.eq-bar:nth-child(3) {
-  animation-delay: -0.66s;
-}
-@keyframes eq-bounce {
-  0%,
-  100% {
-    transform: scaleY(0.35);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-/* 行操作按钮容器：绝对定位在行尾右缘，不占布局空间（hover 显示时文字区右侧已预留 padding，不重叠） */
-.pl-actions {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 2;
-}
-/* 行操作按钮：桌面 hover 显示；触屏设备常显半透明（无 hover 能力，不依赖悬停） */
-.pl-action {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text3);
-  opacity: 0;
-  transition: all 0.12s;
-  flex-shrink: 0;
-}
-@media (hover: hover) {
-  .pl-item:hover .pl-action {
-    opacity: 1;
-  }
-  .pl-action:hover {
-    background: var(--border);
-    color: var(--text);
-  }
-  .pl-action.remove:hover {
-    color: var(--red);
-  }
-}
-@media (hover: none) {
-  .pl-action {
-    opacity: 0.55;
-  }
-}
-.pl-action.heart.on {
-  opacity: 1;
-  color: var(--red);
-}
-.pl-action.dl.busy {
-  opacity: 1;
-  color: var(--accent);
-}
-.pl-spin {
-  animation: pl-dl-spin 0.9s linear infinite;
-}
-.spin {
-  animation: pl-dl-spin 0.9s linear infinite;
-}
-@keyframes pl-dl-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
 .pl-empty {
   text-align: center;
   color: var(--text3);
   font-size: 13px;
   padding: 30px 0;
-}
-/* 多选批量操作条 */
-.pl-multi {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--accent-soft);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-.pl-multi-count {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  margin-right: auto;
-}
-.pl-multi-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--text2);
-  font-size: 11.5px;
-  font-weight: 600;
-  transition: all 0.12s;
-}
-.pl-multi-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-@media (hover: hover) {
-  .pl-multi-btn:hover {
-    background: var(--border);
-    color: var(--text);
-  }
-}
-.pl-multi-btn.danger {
-  color: var(--red);
-}
-@media (hover: hover) {
-  .pl-multi-btn.danger:hover {
-    background: var(--red-soft);
-    color: var(--red);
-  }
 }
 /* 移到废纸篓确认弹窗 */
 .dt-backdrop {
@@ -2191,69 +1071,5 @@ function fmtDur(d) {
   .dt-btn.danger:hover {
     background: color-mix(in srgb, var(--red) 85%, #000);
   }
-}
-/* 加歌浮层 */
-.am-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-}
-.add-menu {
-  position: fixed;
-  z-index: 91;
-  width: 220px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px var(--shadow-strong);
-  padding: 6px;
-}
-.am-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text2);
-  padding: 6px 8px 8px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
-}
-.am-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 12.5px;
-  color: var(--text2);
-  cursor: pointer;
-  transition: background 0.12s;
-}
-@media (hover: hover) {
-  .am-item:hover {
-    background: var(--card2);
-    color: var(--text);
-  }
-}
-.am-item.in {
-  color: var(--accent);
-}
-.am-name {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.am-state {
-  display: inline-flex;
-  flex-shrink: 0;
-}
-.am-empty {
-  text-align: center;
-  color: var(--text3);
-  font-size: 12px;
-  padding: 16px 0;
 }
 </style>
