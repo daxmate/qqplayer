@@ -45,6 +45,8 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
 // ---------- mock：apiClient ----------
 const apiMock = vi.hoisted(() => ({
   apiGet: vi.fn(),
+  apiPost: vi.fn(),
+  isOffline: vi.fn(() => false), // 测试默认在线（离线短路单独测）
   resolveServerUrl: vi.fn((p) =>
     /^https?:\/\//i.test(p) ? p : "http://192.168.1.50:17627" + (p.startsWith("/") ? p : "/" + p),
   ),
@@ -730,5 +732,66 @@ describe("mergeVocab / mergeAnnotations：标注按书 LWW、生词按 id 逐条
     const b1 = annotations.find((a) => a.bookId === "b1");
     expect(b1.highlights[0].id).toBe("hl_local"); // 本地书更新 → 保留（不整表覆盖）
     expect(annotations.length).toBe(1);
+  });
+});
+
+describe("离线短路（主机不可达 · 契约 docs/host-reachability.md）", () => {
+  beforeEach(async () => {
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    sync._resetSyncForTests(); // 复位模块状态（appActive/轮询定时器/deviceId 缓存）
+    apiMock.apiGet.mockClear();
+    apiMock.apiPost.mockClear();
+    apiMock.isOffline.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    apiMock.isOffline.mockReturnValue(false);
+    vi.useRealTimers();
+  });
+
+  it("syncNow 离线 → 返回 {ok:false, message:'主机离线'}，不设 syncing（不转动画）、不发请求", async () => {
+    await setNativeEnv();
+    apiMock.isOffline.mockReturnValue(true);
+    const r = await sync.syncNow();
+    expect(r).toEqual({ ok: false, message: "主机离线" });
+    expect(sync.syncState.syncing).toBe(false);
+    expect(apiMock.apiGet).not.toHaveBeenCalled();
+  });
+
+  it("ensureCommandPolling 离线 → 不启动 interval；恢复在线后再启动", async () => {
+    await setNativeEnv();
+    apiMock.apiGet.mockResolvedValue({ ok: true, data: { commands: [] } });
+    vi.useFakeTimers();
+    // 离线：不启动轮询
+    apiMock.isOffline.mockReturnValue(true);
+    sync.ensureCommandPolling();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(apiMock.apiGet).not.toHaveBeenCalled();
+    // 恢复在线：启动轮询（60s 后拉一次指令；getDeviceId 查询需再等 3s 超时结算）
+    apiMock.isOffline.mockReturnValue(false);
+    sync.ensureCommandPolling();
+    await vi.advanceTimersByTimeAsync(60000);
+    await vi.advanceTimersByTimeAsync(5000); // deviceId 查询超时（3s）→ 落到 apiGet
+    expect(apiMock.apiGet).toHaveBeenCalled();
+    sync.stopCommandPolling();
+  });
+
+  it("pollCommands 离线 → 短路返回，不发请求", async () => {
+    await setNativeEnv();
+    apiMock.isOffline.mockReturnValue(true);
+    const r = await sync.pollCommands();
+    expect(r).toEqual({ ok: false, executed: 0 });
+    expect(apiMock.apiGet).not.toHaveBeenCalled();
+  });
+
+  it("reportAssets 离线 → 短路返回 false，不发请求", async () => {
+    await setNativeEnv();
+    apiMock.isOffline.mockReturnValue(true);
+    const r = await sync.reportAssets();
+    expect(r).toBe(false);
+    expect(apiMock.apiPost).not.toHaveBeenCalled();
   });
 });

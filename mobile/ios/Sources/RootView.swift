@@ -49,6 +49,8 @@ struct ConnectedView: View {
     @State private var showStatusBar = false
     /// 自动收回任务（连续下拉重置）
     @State private var statusBarHideTask: Task<Void, Never>?
+    /// 主机可达性（hostStatus 桥命令推送）：false = 主机当前不可达（灰点「离线」）
+    @State private var hostOnline = true
 
     var body: some View {
         // WebView 全屏铺满（顶部状态栏区 + 底部 home indicator 区都由前端背景覆盖）：
@@ -70,6 +72,10 @@ struct ConnectedView: View {
             .onReceive(NotificationCenter.default.publisher(for: .qqplayerPullRevealStatusBar)) { _ in
                 revealStatusBar()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .qqplayerHostStatus)) { note in
+                // 主机可达性探测结果 → 状态条三态（绿点「已连接」/ 灰点「离线（主机不可达）」）
+                hostOnline = (note.userInfo?["online"] as? Bool) ?? true
+            }
             .onReceive(NotificationCenter.default.publisher(for: .qqplayerOpenPairing)) { _ in
                 // 前端"未连接"引导页"去配对"按钮 → 打开配对 sheet（未连接/已连接都响应）
                 showSwitch = true
@@ -78,14 +84,15 @@ struct ConnectedView: View {
 
     /// 状态条浮层：圆角胶囊（不再通栏毛玻璃色块），平时滑出屏幕外不可见；
     /// 隐藏时禁止命中（allowsHitTesting(false)），不拦截页面触摸。
-    /// 已连接：绿点 + 服务器名 + 切换按钮；未连接：灰点 + "未连接桌面端"，点击整条打开配对。
+    /// 三态：绿点「已连接 xxx」/ 灰点「离线（主机不可达）」（配对记录在但主机探测不可达，
+    /// 不再误导性显示「已连接」）/ 灰点「未连接桌面端」（server 为 nil），点击整条打开配对。
     private var statusBarOverlay: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(server == nil ? Color.gray : Color.green)
+                .fill(server == nil || !hostOnline ? Color.gray : Color.green)
                 .frame(width: 8, height: 8)
             if let server {
-                Text("已连接 \(server.serverName)")
+                Text(hostOnline ? "已连接 \(server.serverName)" : "离线（主机不可达）")
                     .font(.footnote)
                     .foregroundColor(.primary)
                     .lineLimit(1)

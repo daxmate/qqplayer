@@ -13,6 +13,7 @@ from . import (
     lyrics,
     media,
     pairing,
+    ping,
     playback,
     playlists,
     quark,
@@ -46,6 +47,7 @@ _ROUTER_MODULES = (
     pairing,
     commands,
     debuglog,
+    ping,
 )
 
 

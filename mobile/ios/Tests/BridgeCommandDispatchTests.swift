@@ -50,6 +50,21 @@ final class BridgeCommandDispatchTests: XCTestCase {
         XCTAssertTrue(received, "openPairing 桥命令应发布 qqplayerOpenPairing 通知")
     }
 
+    /// hostStatus 桥命令（前端主机可达性探测结果）→ 原生发 qqplayerHostStatus 通知
+    /// → RootView 状态条三态（灰点「离线（主机不可达）」）。
+    func testHostStatusCommandPostsNotification() {
+        let coordinator = WebShellView.Coordinator(server: nil)
+        var received: Bool?
+        let observer = NotificationCenter.default.addObserver(
+            forName: .qqplayerHostStatus, object: nil, queue: nil
+        ) { note in
+            received = note.userInfo?["online"] as? Bool
+        }
+        coordinator.handleBridgeCommand("hostStatus", body: ["online": false])
+        NotificationCenter.default.removeObserver(observer)
+        XCTAssertEqual(received, false, "hostStatus offline 应发布 qqplayerHostStatus 通知（online=false）")
+    }
+
     /// 未连接模式（server = nil）下 Coordinator 可正常创建：loadedServerId 用哨兵 ""，不设鉴权。
     func testCoordinatorWithNilServerUsesSentinel() {
         let coordinator = WebShellView.Coordinator(server: nil)

@@ -13,7 +13,7 @@
 // - 锁屏元数据：currentSong 变化由 playerCore 调 nativeSendMetadata() 推送
 // - 401：apiClient onUnauthorized → 通知壳清 Keychain token 回配对页（绝不静默）
 
-import { onUnauthorized } from "../utils/apiClient.js";
+import { isOffline, onOfflineChange, onUnauthorized } from "../utils/apiClient.js";
 
 const BRIDGE_KEY = "qqplayerIosBridge";
 
@@ -438,11 +438,24 @@ export function nativeSendMetadata(song: LockScreenSong | null | undefined, cove
   });
 }
 
+/** 同步主机可达性状态 → 原生状态条（hostStatus 桥命令 {online: bool}）。
+ *  启动探测完成后（App.vue）显式调用一次；offline 变化由下方订阅自动推送；
+ *  非原生环境 no-op。 */
+export function syncHostStatus() {
+  if (!isNativePlayback()) return;
+  nativePost({ cmd: "hostStatus", online: !isOffline() });
+}
+
 // ---------- 安装（原生模式下模块加载即挂 401 通知 + 事件入口） ----------
 if (isNativePlayback()) {
   installNativeEventSink();
   // 401（token 失效）→ 壳清 Keychain 回配对页
   onUnauthorized(() => {
     nativePost({ cmd: "unauthorized" });
+  });
+  // 主机可达性 → 状态条：offline 变化即推送（启动探测完成时 App.vue 也会
+  // 显式 syncHostStatus() 一次，保证探测结果落状态条）
+  onOfflineChange((off: boolean) => {
+    nativePost({ cmd: "hostStatus", online: !off });
   });
 }

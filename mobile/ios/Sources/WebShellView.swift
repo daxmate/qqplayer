@@ -339,8 +339,8 @@ struct WebShellView: UIViewRepresentable {
                 handleSyncCommand(cmd, body: body)
             case "metaSave", "metaLoad":
                 handleMetaCommand(cmd, body: body)
-            case "unauthorized", "openPairing":
-                handlePairingCommand(cmd)
+            case "unauthorized", "openPairing", "hostStatus":
+                handlePairingCommand(cmd, body: body)
             default:
                 handlePlaybackCommand(cmd, body: body) // playAudio + 播放命令透传（含未知命令静默）
             }
@@ -713,7 +713,8 @@ extension WebShellView.Coordinator {
     /// - unauthorized：401 → token 失效 → 通知 RootView 弹提示 + 清配对 → server 变 nil
     ///   → WebShellView 自动清除注入 + reload → 主界面"未连接"模式（不踢回发现页）
     /// - openPairing：前端"未连接"引导页"去配对"按钮 → 主界面打开配对 sheet
-    private func handlePairingCommand(_ cmd: String) {
+    /// - hostStatus：主机可达性探测结果 → 状态条三态（RootView 灰点「离线（主机不可达）」）
+    private func handlePairingCommand(_ cmd: String, body: [String: Any]) {
         switch cmd {
         case "unauthorized":
             DispatchQueue.main.async {
@@ -725,6 +726,15 @@ extension WebShellView.Coordinator {
             }
         case "openPairing":
             NotificationCenter.default.post(name: .qqplayerOpenPairing, object: nil)
+        case "hostStatus":
+            // 主机可达性（前端探测结果）：online=false → 灰点「离线（主机不可达）」
+            // （配对记录仍在，只是主机当前不可达——不再误导性显示「已连接」）
+            let online = body["online"] as? Bool ?? true
+            NotificationCenter.default.post(
+                name: .qqplayerHostStatus,
+                object: nil,
+                userInfo: ["online": online]
+            )
         default:
             break
         }
@@ -761,4 +771,5 @@ extension Notification.Name {
     static let qqplayerScenePhase = Notification.Name("qqplayerScenePhase")
     static let qqplayerPullRevealStatusBar = Notification.Name("qqplayerPullRevealStatusBar")
     static let qqplayerOpenPairing = Notification.Name("qqplayerOpenPairing")
+    static let qqplayerHostStatus = Notification.Name("qqplayerHostStatus")
 }

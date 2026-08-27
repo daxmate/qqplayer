@@ -44,7 +44,7 @@
 
 import { reactive } from "vue";
 import { onNativeEvent, nativePost } from "../composables/nativeAudioBridge.js";
-import { apiGet, apiPost, resolveServerUrl } from "./apiClient.js";
+import { apiGet, apiPost, isOffline, resolveServerUrl } from "./apiClient.js";
 import { getCache, setCache } from "./cacheDb.js";
 
 // ---------- 类型（TS 化；宽松边界：原生回执/API 数据按 any 处理，行为零变化） ----------
@@ -456,6 +456,9 @@ export function mergeVocab(local: unknown, remote: unknown): unknown[] {
  */
 export async function syncNow(): Promise<SyncNowResult> {
   if (!syncEnabled()) return { enabled: false, ok: false };
+  // 主机离线/设备断网：全局短路——不发请求、不设 syncing（杜绝动画转圈）；
+  // 恢复在线由恢复探测触发（App.vue 补一次 syncNow）
+  if (isOffline()) return { ok: false, message: "主机离线" };
   if (syncInFlight) return { ok: false, message: "sync in progress" };
   syncInFlight = true;
   syncState.syncing = true;
@@ -938,8 +941,9 @@ export const COMMAND_POLL_MS = 60000;
 
 let commandPollTimer: ReturnType<typeof setInterval> | null = null; // setInterval 句柄（仅 appState active 时存在）
 
-/** 启动指令轮询 interval（仅 active 时；已启动不重复；幂等） */
+/** 启动指令轮询 interval（仅 active 且在线时；已启动不重复；幂等） */
 export function ensureCommandPolling() {
+  if (isOffline()) return; // 离线：不启动轮询（恢复在线后再启动）
   if (!appActive) return;
   if (commandPollTimer) return;
   commandPollTimer = setInterval(() => {
@@ -966,6 +970,7 @@ export function stopCommandPolling() {
  *   （含执行失败的——ok 细节在各自 ack 里；拉取失败 → {ok:false, executed:0} 静默）
  */
 export async function pollCommands(): Promise<{ ok: boolean; executed: number }> {
+  if (isOffline()) return { ok: false, executed: 0 }; // 离线：不发请求（恢复后自动补）
   if (!syncEnabled() || !iosBridgeAvailable()) return { ok: false, executed: 0 };
   const deviceId = await getDeviceId();
   const url =
@@ -1084,6 +1089,7 @@ async function handlePushDownload(
  * @returns {Promise<boolean>} 是否成功上报
  */
 export async function reportAssets(): Promise<boolean> {
+  if (isOffline()) return false; // 离线：不发请求（恢复后自动补）
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   const deviceId = await getDeviceId();
   if (!deviceId) return false; // 拿不到设备标识：静默跳过上报

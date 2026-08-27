@@ -48,6 +48,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
 // ---------- mock：apiClient ----------
 const apiMock = vi.hoisted(() => ({
   apiGet: vi.fn(),
+  isOffline: vi.fn(() => false), // 测试默认在线（离线短路单独测）
   resolveServerUrl: vi.fn((p) =>
     /^https?:\/\//i.test(p) ? p : "http://192.168.1.50:17627" + (p.startsWith("/") ? p : "/" + p),
   ),

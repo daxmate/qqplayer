@@ -263,6 +263,16 @@
       "note": "'未连接'引导页'去配对'按钮 → 壳发 qqplayerOpenPairing 通知 → 主界面打开配对 sheet"
     },
     {
+      "name": "hostStatus",
+      "domain": "pairing",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": {
+        "online": "boolean（主机可达性探测结果：true=可达；offline 变化时推送 + 启动探测完成后推送一次）"
+      },
+      "note": "主机可达性（契约 docs/host-reachability.md）→ 原生状态条三态：壳发 qqplayerHostStatus 通知 → RootView 绿点「已连接 xxx」/ 灰点「离线（主机不可达）」（配对记录在但主机探测不可达，不再误导性显示「已连接」）/ 灰点「未连接桌面端」"
+    },
+    {
       "name": "http",
       "domain": "network",
       "sender": "apiClient.js",

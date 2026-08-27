@@ -36,6 +36,10 @@ def register_auth_middleware(app) -> None:
         # 白名单：配对端点全程免鉴权（iOS 发起配对时还没有 token）
         if path.startswith("/api/pairing"):
             return await call_next(request)
+        # 白名单：主机可达性探测（probeHost 在 token 无效/过期/未配对时也要能探测，
+        # 不因 401 误判主机离线）
+        if path == "/api/ping":
+            return await call_next(request)
         # 本机来源免鉴权（桌面浏览器/壳直接访问）
         client_host = request.client.host if request.client else ""
         if client_host in _LOCALHOST_HOSTS:

@@ -12,6 +12,8 @@ import {
   onUnauthorized,
   flushPendingOps,
   writeLocal,
+  probeHost,
+  getHostReachable,
   resetApiClientState,
   resolveServerUrl,
 } from "../utils/apiClient.js";
@@ -263,7 +265,7 @@ describe("离线降级", () => {
     expect(isOffline()).toBe(false);
   });
 
-  it("恢复在线：任一成功请求触发恢复事件", async () => {
+  it("恢复在线：probeHost 探测成功触发恢复事件（离线期间请求短路，恢复只由探测驱动）", async () => {
     await setCache("GET:/api/lyric", { lines: [] }, 3600);
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 61 * 1000); // 过期缓存
@@ -277,14 +279,155 @@ describe("离线降级", () => {
     );
     await apiGet("/api/lyric", { cache: { ttl: 60, offline: true } });
     expect(isOffline()).toBe(true);
-    // 网络恢复
+    // 离线期间：请求短路（不发网络请求），恢复只由探测驱动
+    const fetchMock = vi.fn(async () => okJson({ ok: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await apiGet("/api/ping");
+    expect(r.ok).toBe(false); // 短路快速失败
+    expect(fetchMock).not.toHaveBeenCalled();
+    // 探测成功 → 恢复在线 + 事件
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => okJson({ ok: 1 })),
     );
-    await apiGet("/api/ping");
+    const ok = await probeHost();
+    expect(ok).toBe(true);
     expect(isOffline()).toBe(false);
     expect(changes).toEqual([true, false]);
+    vi.useRealTimers();
+  });
+});
+
+describe("主机可达性探测（probeHost）", () => {
+  it("探测成功 → hostReachable=online，offline 保持 false；请求 GET /api/ping", async () => {
+    const fetchMock = vi.fn(async () => okJson({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const ok = await probeHost();
+    expect(ok).toBe(true);
+    expect(getHostReachable()).toBe("online");
+    expect(isOffline()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith("/api/ping", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("探测失败（网络错误）→ hostReachable=offline + offline=true（全局短路）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    const ok = await probeHost();
+    expect(ok).toBe(false);
+    expect(getHostReachable()).toBe("offline");
+    expect(isOffline()).toBe(true);
+  });
+
+  it("超时（2500ms 快速失败，不等待系统 TCP 超时）→ offline", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted", "AbortError")),
+            );
+          }),
+      ),
+    );
+    const p = probeHost();
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(await p).toBe(false);
+    expect(getHostReachable()).toBe("offline");
+    expect(isOffline()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("并发探测合并（inFlight）：同时调用只发一次请求", async () => {
+    const fetchMock = vi.fn(async () => okJson({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const [a, b] = await Promise.all([probeHost(), probeHost()]);
+    expect(a).toBe(true);
+    expect(b).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("离线期间恢复探测：30s 定时器自动重探，成功即解除离线（不永远离线）", async () => {
+    vi.useFakeTimers();
+    // 首次探测失败 → offline + 启动 30s 恢复探测
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    await probeHost();
+    expect(isOffline()).toBe(true);
+    // 30s 后主机回来：恢复探测自动重探成功 → 解除离线
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => okJson({ ok: true })),
+    );
+    await vi.advanceTimersByTimeAsync(30000);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(isOffline()).toBe(false);
+    expect(getHostReachable()).toBe("online");
+    vi.useRealTimers();
+  });
+
+  it("window online 事件触发恢复探测（设备网络恢复）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    await probeHost();
+    expect(isOffline()).toBe(true);
+    // 网络恢复：online 事件 → probeHost 重探成功
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => okJson({ ok: true })),
+    );
+    window.dispatchEvent(new Event("online"));
+    await vi.waitFor(() => expect(isOffline()).toBe(false));
+    expect(getHostReachable()).toBe("online");
+  });
+
+  it("离线短路：hostOffline 时 GET 无缓存快速失败、写请求不发请求", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    await probeHost(); // → offline
+    const fetchMock = vi.fn(async () => okJson({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await apiGet("/api/songs");
+    expect(r.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await apiPost("/api/favorites/toggle", { path: "/a.mp3" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("离线 GET 有缓存（含过期）→ 读缓存不请求网络", async () => {
+    await setCache("GET:/api/lyric", { lines: [] }, 3600);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 61 * 1000); // 让缓存过期（maxAge 判定 miss）
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    await probeHost(); // → offline
+    const fetchMock = vi.fn(async () => okJson({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await apiGet("/api/lyric", { cache: { ttl: 60, offline: true } });
+    expect(r).toMatchObject({ ok: true, data: { lines: [] }, fromCache: true });
+    expect(fetchMock).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 });

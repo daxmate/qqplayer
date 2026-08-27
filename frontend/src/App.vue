@@ -265,15 +265,23 @@ import { useShellBridge } from "./composables/useShellBridge.js";
 import { showToast } from "./composables/useToast.js";
 import {
   apiGet,
+  isOffline,
   onOfflineChange,
   onUnauthorized,
   flushPendingOps,
+  probeHost,
   resolveServerUrl,
 } from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import { usePairingConfirm } from "./composables/usePairingConfirm.js";
-import { initSync, nativeMetaLoad } from "./utils/sync.js";
-import { isNativePlayback } from "./composables/nativeAudioBridge.js";
+import {
+  initSync,
+  nativeMetaLoad,
+  syncNow,
+  pollCommands,
+  ensureCommandPolling,
+} from "./utils/sync.js";
+import { isNativePlayback, syncHostStatus } from "./composables/nativeAudioBridge.js";
 import { loadScrapingSettings } from "./composables/useScrapingSettings.js";
 import {
   coverSizePx,
@@ -457,6 +465,7 @@ function onOpenBrowse(e) {
 
 let cleanupDragImport = null;
 let offlineUnsub = null;
+let offlineRecoveryUnsub = null;
 let unauthorizedUnsub = null;
 
 // 启动自检（静默，不弹 UI、不影响正常流程）：验证相对 /api 请求在当前页面源下可直达后端。
@@ -528,7 +537,7 @@ async function backfillMetaFromFile() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   // 未连接引导页判定：启动时检测一次（配对成功壳会 reload，无需轮询/监听）
   shellUnpaired.value = isShellUnpaired();
   // 数据层在线状态/配对失效监听：离线降级与 401 特判的轻提示（见 apiClient）
@@ -538,10 +547,27 @@ onMounted(() => {
   unauthorizedUnsub = onUnauthorized(() => {
     showToast(t("app.repairRequired"), { type: "error" });
   });
-  // 回放上次会话遗留的 dirty 队列（离线时的收藏/歌单/播放记录/阅读进度）
-  flushPendingOps();
-  // 启动自检：与正常启动加载并发，GET /api/settings 只读无副作用
-  runStartupSelfTest();
+  // 恢复在线自动补动作：同步 + 指令轮询 + dirty 队列回放（幂等：syncNow 有
+  // syncInFlight 保护；列表/封面刷新由各模块自行监听 onOfflineChange）
+  offlineRecoveryUnsub = onOfflineChange((off) => {
+    if (off) return;
+    syncNow();
+    pollCommands();
+    ensureCommandPolling();
+    flushPendingOps();
+  });
+  // ① 主机可达性探测：最先 await（与 UI 渲染并行——setup 同步部分已跑完，不阻塞首帧）；
+  //    不可达 → 全局离线：syncNow/轮询/自检全部短路（不发请求、不转动画、不报错）
+  await probeHost();
+  syncHostStatus(); // 探测完成 → 状态条初始态（在线绿点 / 离线灰点，都推送一次）
+  // ② 启动动作 gate：离线跳过自检与 dirty 队列回放（恢复在线后由 offlineRecoveryUnsub 自动补）
+  if (!isOffline()) {
+    // 回放上次会话遗留的 dirty 队列（离线时的收藏/歌单/播放记录/阅读进度）
+    flushPendingOps();
+    // 启动自检：与正常启动加载并发，GET /api/settings 只读无副作用
+    runStartupSelfTest();
+  }
+  // ③ 以下离线也执行：本地优先（列表走缓存/本地文件，必须能看）
   // iOS 壳元数据文件兜底回填（与正常加载并行；空 state 才赋值，网络成功覆盖）
   backfillMetaFromFile();
   // 队列顺序持久化：先拉取再加载歌曲（loadSongs 恢复顺序依赖该缓存）
@@ -569,6 +595,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   offlineUnsub?.();
+  offlineRecoveryUnsub?.();
   unauthorizedUnsub?.();
   window.removeEventListener("qqplayer:open-browse", onOpenBrowse);
   cleanupDragImport?.();

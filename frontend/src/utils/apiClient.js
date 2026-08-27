@@ -122,6 +122,10 @@ export function onUnauthorized(cb) {
 function setOffline(v) {
   if (offline === v) return;
   offline = v;
+  // 离线 → 启动恢复探测（30s 定时 + window online 事件）；恢复 → 停止。
+  // 保证「离线后不永远离线」：恢复探测无条件定期执行，成功即自动解除。
+  if (v) startRecoveryProbe();
+  else stopRecoveryProbe();
   for (const cb of offlineListeners) {
     try {
       cb(v);
@@ -131,14 +135,98 @@ function setOffline(v) {
   }
 }
 
-/** 测试用：复位模块级状态（离线标志 + 监听器 + 挂起定时器） */
+/** 测试用：复位模块级状态（离线标志 + 监听器 + 挂起定时器 + 探测状态） */
 export function resetApiClientState() {
   offline = false;
   offlineListeners.clear();
   unauthorizedListeners.clear();
+  hostReachable = "unknown";
+  probeInFlight = null;
+  stopRecoveryProbe();
+  if (onlineHandler && typeof window !== "undefined") {
+    window.removeEventListener("online", onlineHandler);
+    onlineHandler = null;
+  }
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
+  }
+}
+
+// ---------- 主机可达性（hostReachable · 契约 docs/host-reachability.md） ----------
+// 可达性 = 实时探测结果（GET /api/ping），不是历史配对记录。启动探测（App onMounted
+// 最先 await）+ 恢复探测（offline 期间每 30s 定时 + window online 事件，成功即停）。
+// hostReachable 是「探测状态」，offline 是「结果状态」：探测失败 → offline=true 全局
+// 短路（请求不发、不挂起）；探测成功 → setOffline(false) 自动恢复。
+
+let hostReachable = "unknown"; // "unknown" | "online" | "offline"
+let probeInFlight = null; // 并发探测合并（复用同一 Promise）
+let recoveryTimer = null; // offline 期间 30s 恢复探测 interval
+let onlineHandler = null; // window online 事件句柄（设备网络恢复 → 立即重探）
+
+/** 探测超时（ms）：快速失败，绝不等待系统 TCP 超时 */
+export const HOST_PROBE_TIMEOUT_MS = 2500;
+
+/** 恢复探测间隔（ms）：offline 期间每 30s 无条件探测一次（成功即停） */
+export const HOST_RECOVERY_PROBE_MS = 30000;
+
+/** 当前主机可达性状态：'unknown' | 'online' | 'offline' */
+export function getHostReachable() {
+  return hostReachable;
+}
+
+function startRecoveryProbe() {
+  // window online 事件（设备网络恢复 → 立即探测；浏览器环境，测试无 window 跳过）
+  if (typeof window !== "undefined" && !onlineHandler) {
+    onlineHandler = () => {
+      if (!deviceOffline()) probeHost(); // 设备网络确实恢复才探测（避免无意义请求）
+    };
+    window.addEventListener("online", onlineHandler);
+  }
+  if (recoveryTimer) return;
+  recoveryTimer = setInterval(() => {
+    probeHost(); // 幂等（inFlight 合并）；成功会自动 setOffline(false) 停表
+  }, HOST_RECOVERY_PROBE_MS);
+}
+
+function stopRecoveryProbe() {
+  if (recoveryTimer) {
+    clearInterval(recoveryTimer);
+    recoveryTimer = null;
+  }
+}
+
+/**
+ * 主机可达性探测：GET /api/ping（快速超时）。
+ * 走原始 fetch（nativeHttpFetch/fetchWithTimeout）绕过 api() 短路——离线时请求已
+ * 短路发不出去，探测本身必须永远真实发请求。
+ * 任何 HTTP 响应（含 401/404/500，只要主机回了话）都证明主机可达；
+ * 仅无响应 / 超时 / 网络错误判离线。
+ * 幂等：并发探测合并（inFlight 复用同一 Promise）。
+ * @returns {Promise<boolean>} 探测是否成功
+ */
+export async function probeHost() {
+  if (probeInFlight) return probeInFlight;
+  probeInFlight = (async () => {
+    let ok = false;
+    try {
+      const res = nativeHttpAvailable()
+        ? await nativeHttpFetch(baseURL() + "/api/ping", { method: "GET" }, HOST_PROBE_TIMEOUT_MS)
+        : await fetchWithTimeout(baseURL() + "/api/ping", { method: "GET" }, HOST_PROBE_TIMEOUT_MS);
+      // 任何合法 Response（ok boolean / status number）都算主机在线
+      ok = !!res && (typeof res.ok === "boolean" || typeof res.status === "number");
+    } catch {
+      ok = false; // 网络错误 / 超时 → 主机不可达
+    }
+    hostReachable = ok ? "online" : "offline";
+    if (ok) setOffline(false);
+    else setOffline(true);
+    return ok;
+  })();
+  try {
+    return await probeInFlight;
+  } finally {
+    probeInFlight = null;
   }
 }
 
@@ -267,9 +355,10 @@ export async function api({
     }
   }
 
-  // 1.5 设备断网（navigator.onLine=false）→ 不发网络请求：直接读缓存（含过期，离线时旧数据优于无）
-  //     或按网络失败返回——本地优先原则（2026-08-27）：断网时主机通讯全部跳过，不等待超时
-  if (deviceOffline()) {
+  // 1.5 离线短路（设备断网 或 主机不可达/请求降级）→ 不发网络请求：GET 有 cache
+  //     读缓存（含过期——离线时旧数据优于无）、无 cache 快速失败；写请求快速失败。
+  //     绝不等待系统 TCP 超时（本地优先原则 2026-08-27；主机离线由恢复探测解除）
+  if (isOffline()) {
     setOffline(true);
     if (isGet && cache) {
       const stale = await getCache(cacheKey);
