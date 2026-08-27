@@ -117,6 +117,27 @@ async function replyHasAsset({ exists, localURL }) {
   });
 }
 
+/** 等最新 metaLoad 发出并回执（json 可空）。
+ * 消除 nativeMetaLoad 8s 挂起（META_LOAD_TIMEOUT_MS）在真实 timer 下的 flaky：
+ * 全量跑时 CPU 繁忙，1.5s 本地读超时可能延迟到用例结束后才触发，挂起的 loadLyric
+ * 醒来后消费后续用例的 apiGet once 队列 → 确定性回执让 loadLyricFile 立即 resolve。 */
+async function replyMetaLoad(json = null) {
+  const metaLoadsBefore = bridgeMock.post.mock.calls.filter(
+    ([m]) => m && m.cmd === "metaLoad",
+  ).length;
+  await vi.waitFor(() => {
+    expect(
+      bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "metaLoad").length,
+    ).toBeGreaterThan(metaLoadsBefore);
+  });
+  const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad");
+  bridgeMock.emit("metaLoaded", {
+    requestId: load[0].requestId,
+    kind: load[0].kind,
+    json,
+  });
+}
+
 describe("cover/lyric 缓存 key（stableHash 派生）", () => {
   beforeEach(async () => {
     delete window.qqplayerNative;
@@ -335,6 +356,7 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     bridgeMock.post.mockClear();
     bridgeMock.handlers.clear();
     sync._resetSyncForTests();
+    apiMock.apiGet.mockReset(); // 清跨用例 once 队列泄漏（挂起 loadLyric 醒来后消费错位）
     vi.stubGlobal("localStorage", localStorageStub);
     clearLs();
     // 动态导入 useLyric（playerCore 有模块加载期副作用，隔离测试）；
@@ -347,6 +369,7 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     lyricState.lyric = [];
     lyricState.lyricFormat = null;
     lyricState.lyricSource = null;
+    await flush(); // 清上一用例残留的 timer/微任务
   });
 
   it("非 iOS 壳：成功加载不写文件（不发 metaSave）", async () => {
@@ -365,11 +388,17 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
       ok: true,
       data: { lines: [{ s: 0, e: 5, text: ["词"] }], format: "lrc", source: "local" },
     });
-    await lyricModule.loadLyric(0);
+    const p = lyricModule.loadLyric(0);
+    await replyMetaLoad(); // 文件不存在 → 走远程；消除 8s 挂起 flaky
+    await p;
     expect(lyricState.lyric.length).toBe(1);
-    await flush();
-    const save = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaSave");
-    expect(save).toBeTruthy();
+    // saveLyricFile 是 fire-and-forget（lyricKindKey await 链），全量跑 CPU 忙时
+    // 单次 flush 可能不够 → waitFor 确定性等待 metaSave 发出
+    let save;
+    await vi.waitFor(() => {
+      save = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaSave");
+      expect(save).toBeTruthy();
+    });
     expect(save[0].kind).toMatch(/^lyric:[0-9a-f]+$/);
     const data = JSON.parse(save[0].json);
     expect(data.lines.length).toBe(1);
@@ -383,11 +412,15 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
       ok: true,
       data: { lines: [{ s: 0, e: 5, text: ["离线词"] }], format: "lrc", source: "local" },
     });
-    await lyricModule.loadLyric(0);
+    const p1 = lyricModule.loadLyric(0);
+    await replyMetaLoad(); // 文件不存在 → 走远程；消除 8s 挂起 flaky
+    await p1;
     expect(lyricState.lyric[0].text[0]).toBe("离线词");
-    await flush();
-    const save = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaSave");
-    expect(save).toBeTruthy();
+    let save;
+    await vi.waitFor(() => {
+      save = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaSave");
+      expect(save).toBeTruthy();
+    });
     // 第二次：网络失败（无缓存）→ 读文件回填；模拟原生 metaLoaded 回执返回刚才写入的 json
     apiMock.apiGet.mockResolvedValueOnce({ ok: false, status: 0, data: null, network: true });
     lyricState.lyric = [];
