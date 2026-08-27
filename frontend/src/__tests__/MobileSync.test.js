@@ -74,6 +74,8 @@ describe("MobileSync 负一屏同步中心", () => {
     const text = wrapper.text();
     expect(text).toContain("音乐");
     expect(text).toContain("图书");
+    expect(text).toContain("阅读标注与生词"); // P2-B：标注/生词同步状态区
+    expect(text).toContain("暂无标注与生词"); // 空态（无缓存数据）
     expect(text).toContain("词典");
     expect(text).toContain("下载状态");
     expect(text).toContain("存储管理");

@@ -1,6 +1,6 @@
-"""阅读器 V2 标注路由：按书分组的高亮 / 书签 / 笔记 + 书内搜索（annotations.json 持久化）。
+"""阅读器 V2 标注路由：按书分组的高亮 / 书签 / 笔记 + 书内搜索（SQLite kv_store[annotations] 持久化）。
 
-存储结构（annotations_store，JsonStore 延迟解析路径）：
+存储结构（db.annotations_load/save）：
 {
   "<bookId>": {
     "highlights": [{"id": "hl_<hex>", "cfi": "...", "text": "...", "color": "yellow",
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
 
-from app import state
+from app import db, state
 from app.services.book_import import _find_rootfile, _local, _resolve, _split_sentences
 
 router = APIRouter()
@@ -45,7 +45,7 @@ def _fresh_book() -> dict:
 
 def _require_book(bid: str) -> None:
     """写操作前置校验：书不在书架 → 404（契约指定 detail）"""
-    if not any(b.get("id") == bid for b in state.books_store.load()):
+    if not any(b.get("id") == bid for b in db.books_load()):
         raise HTTPException(404, "book not found")
 
 
@@ -67,7 +67,7 @@ def _now() -> int:
 
 def _load_book(bid: str) -> tuple[dict, dict]:
     """读标注库，返回 (顶层 data, 该书分组)；书无分组时建空结构（未落盘）"""
-    data = state.annotations_store.load()
+    data = db.annotations_load()
     return data, data.setdefault(bid, _fresh_book())
 
 
@@ -78,7 +78,7 @@ def api_annotations_get(bid: str):
 
     V4：旧数据（无 style 字段的高亮）响应时规范化补 "style": "highlight"（不写回磁盘）。
     """
-    data = state.annotations_store.load()
+    data = db.annotations_load()
     book = data.get(bid)
     if book is None:
         return _fresh_book()
@@ -121,7 +121,7 @@ def api_highlight_create(bid: str, body: dict):
         "createdAt": _now(),
     }
     book["highlights"].append(item)
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return {"id": item["id"]}
 
 
@@ -129,7 +129,7 @@ def api_highlight_create(bid: str, body: dict):
 def api_highlight_delete(bid: str, hid: str):
     """删除高亮 → 204；书/高亮不存在 → 404"""
     _require_book(bid)
-    data = state.annotations_store.load()
+    data = db.annotations_load()
     book = data.get(bid)
     if book is None:
         raise HTTPException(404, "book not found")
@@ -137,7 +137,7 @@ def api_highlight_delete(bid: str, hid: str):
     book["highlights"] = [h for h in highlights if h.get("id") != hid]
     if len(book["highlights"]) == len(highlights):
         raise HTTPException(404, "highlight not found")
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return Response(status_code=204)
 
 
@@ -156,7 +156,7 @@ def api_bookmark_create(bid: str, body: dict):
         "createdAt": _now(),
     }
     book["bookmarks"].append(item)
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return {"id": item["id"]}
 
 
@@ -164,7 +164,7 @@ def api_bookmark_create(bid: str, body: dict):
 def api_bookmark_delete(bid: str, bid2: str):
     """删除书签 → 204；书/书签不存在 → 404（路径参数名 bid2 按契约原文，实为书签 id）"""
     _require_book(bid)
-    data = state.annotations_store.load()
+    data = db.annotations_load()
     book = data.get(bid)
     if book is None:
         raise HTTPException(404, "book not found")
@@ -172,7 +172,7 @@ def api_bookmark_delete(bid: str, bid2: str):
     book["bookmarks"] = [m for m in bookmarks if m.get("id") != bid2]
     if len(book["bookmarks"]) == len(bookmarks):
         raise HTTPException(404, "bookmark not found")
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return Response(status_code=204)
 
 
@@ -194,7 +194,7 @@ def api_note_create(bid: str, body: dict):
         "updatedAt": now,
     }
     book["notes"].append(item)
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return {"id": item["id"]}
 
 
@@ -206,7 +206,7 @@ def api_note_update(bid: str, nid: str, body: dict):
     text = body.get("text")
     if not isinstance(text, str):
         raise HTTPException(400, "text 必须是字符串")
-    data = state.annotations_store.load()
+    data = db.annotations_load()
     book = data.get(bid)
     note = None
     if book is not None:
@@ -215,7 +215,7 @@ def api_note_update(bid: str, nid: str, body: dict):
         raise HTTPException(404, "note not found")
     note["text"] = text
     note["updatedAt"] = _now()
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return note
 
 
@@ -223,7 +223,7 @@ def api_note_update(bid: str, nid: str, body: dict):
 def api_note_delete(bid: str, nid: str):
     """删除笔记 → 204；书/笔记不存在 → 404"""
     _require_book(bid)
-    data = state.annotations_store.load()
+    data = db.annotations_load()
     book = data.get(bid)
     if book is None:
         raise HTTPException(404, "book not found")
@@ -231,7 +231,7 @@ def api_note_delete(bid: str, nid: str):
     book["notes"] = [n for n in notes if n.get("id") != nid]
     if len(book["notes"]) == len(notes):
         raise HTTPException(404, "note not found")
-    state.annotations_store.save(data)
+    db.annotations_save(data)
     return Response(status_code=204)
 
 

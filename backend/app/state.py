@@ -10,8 +10,6 @@ import sys
 import threading
 from pathlib import Path
 
-from app.storage import JsonStore
-
 # 仓库根（backend/app/state.py 上溯 3 级；dist/frontend/scripts 等相对路径均以仓库根为基准）。
 # PyInstaller 打包（frozen）时资源位于解包目录 _MEIPASS：前端 dist 以 datas=[('dist','dist')]
 # 打进包，运行时 ROOT 指向 _MEIPASS 才能挂载静态文件。
@@ -45,8 +43,9 @@ def _default_data_dir() -> Path:
 
 # 用户数据目录（收藏等，不放仓库）；打包版冒烟测试用 QQPLAYER_DATA_DIR 覆盖防污染真实数据
 DATA_DIR = _default_data_dir()
-# SQLite 存储（标准库 sqlite3，WAL）：favorites/playlists/playback_events/reading_progress/ops 表
-# （iOS companion 同步底座；旧 JSON 首次启动自动迁移，settings/pairing/大文件仍走原 JSON）
+# SQLite 存储（标准库 sqlite3，WAL）：favorites/playlists/playback_events/reading_progress/
+# ops/commands/device_assets 表 + kv_store 统一 KV 表（queue_order/network_songs/books/
+# annotations/vocab/pairing 六域；旧 JSON 首次启动自动迁移，settings/quark_cookies/大文件仍走原 JSON）
 DB_PATH = DATA_DIR / "qqplayer.db"
 # sqlite3 连接 busy 超时（秒）：并发写锁等待上限
 DB_BUSY_TIMEOUT = 5
@@ -287,13 +286,8 @@ ALIGN_MODEL_URL = "https://modelscope.cn/models/mlx-community/Qwen3-ForcedAligne
 # 词典上传目录：上传的 MDX/MDD 文件（<uuid>.mdx / <uuid>.mdd，同 uuid 自动配对）
 DICTS_DIR = DATA_DIR / "dicts"
 
-# ============ P1 存储抽象：JSON store 实例 ============
-# 路径全部延迟解析（path_getter 可调用）：测试 patch state.XXX_FILE 后
-# load/save 自动走新路径，import 时不需要固化路径。
-# 注：favorites/playlists/playback 已迁 SQLite（app/db.py），此处只保留仍用 JSON 的域。
-queue_order_store = JsonStore(lambda: QUEUE_ORDER_FILE, default=[])
-network_songs_store = JsonStore(lambda: NETWORK_SONGS_FILE, default=[])
-books_store = JsonStore(lambda: BOOKS_FILE, default=[])
-annotations_store = JsonStore(lambda: ANNOTATIONS_FILE, default={})
-vocab_store = JsonStore(lambda: VOCAB_FILE, default=[])
-pairing_store = JsonStore(lambda: PAIRING_FILE, default={"devices": [], "pending": []})
+# ============ 存储归一（P2-B）：6 个 JsonStore 全部退役 ============
+# queue_order/network_songs/books/annotations/vocab/pairing 已迁 SQLite kv_store
+# （backend/app/db.py：db.queue_order_load/save 等薄封装，语义等价原 JsonStore）。
+# 对应文件路径常量（QUEUE_ORDER_FILE 等）仍保留：作为首次启动自动迁移的源文件。
+# settings.json（P0 设置真源）与 quark_cookies.json 仍走原 JSON 存储，不迁。

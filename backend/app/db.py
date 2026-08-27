@@ -1,8 +1,10 @@
 """SQLite 存储层（标准库 sqlite3，WAL 模式，短连接 + 全局写锁）。
 
 为 iOS companion 同步（ops 游标查询 / 多端并发写 / last-write-wins 合并）提供数据库底座：
-favorites / playlists(+playlist_songs) / playback_events / reading_progress / ops 五张表。
-settings.json / pairing.json / queue_order.json / network_songs.json / 大文件 仍走原 JSON 存储，不迁。
+favorites / playlists(+playlist_songs) / playback_events / reading_progress / ops / commands /
+device_assets 表 + kv_store 统一 KV 表（queue_order / network_songs / books / annotations /
+vocab / pairing 六个 JSON 域，各一个 key，value 整份 JSON）。
+settings.json（P0 设置真源） / quark_cookies.json / 大文件 仍走原 JSON 存储，不迁。
 
 设计约定：
 - 路径延迟解析：db_path() 每次调用取 state.DB_PATH（测试 monkeypatch 注入临时路径即生效）
@@ -14,6 +16,7 @@ settings.json / pairing.json / queue_order.json / network_songs.json / 大文件
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import sqlite3
@@ -95,6 +98,11 @@ CREATE TABLE IF NOT EXISTS device_assets (
     by_type    TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS kv_store (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL,                    -- 整份 JSON 字符串
+    ts    TEXT NOT NULL DEFAULT ''          -- 最近写入时间（ISO，调试/同步版本依据用）
+);
 CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist ON playlist_songs(playlist_id, position);
 CREATE INDEX IF NOT EXISTS idx_playback_ts ON playback_events(ts);
 CREATE INDEX IF NOT EXISTS idx_ops_cursor ON ops(id);
@@ -103,6 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at);
 """
 
 # 迁移源文件 → 目标表（阅读进度单独处理：books.json 只迁 progress 字段，文件不重命名）
+# KV 域迁移：旧 JSON 文件 → kv_store 单 key（books.json 整份迁移，含元数据）
 
 _init_lock = threading.Lock()
 _write_lock = threading.Lock()
@@ -182,12 +191,26 @@ def _rename_to_bak(path: Path) -> None:
         logger.warning("SQLite 迁移：重命名 %s 失败（保持原文件）", path)
 
 
-def _migrate_from_json() -> None:
-    """favorites/playlists/playback 三文件 + books.json 的 progress 字段 → SQLite。
+# 统一 KV 域的迁移源（attr 为 state 上的文件路径常量 → kv_store key → 展示名）
+_KV_MIGRATIONS = (
+    ("QUEUE_ORDER_FILE", "queue_order", "queue_order.json"),
+    ("NETWORK_SONGS_FILE", "network_songs", "network_songs.json"),
+    ("BOOKS_FILE", "books", "books.json"),
+    ("ANNOTATIONS_FILE", "annotations", "annotations.json"),
+    ("VOCAB_FILE", "vocab", "vocab.json"),
+    ("PAIRING_FILE", "pairing", "pairing.json"),
+)
 
-    规则：旧文件存在 && 对应表为空 → 导入 + 旧文件改名 .migrated.bak；
-    表非空（已迁移/已有数据）→ 跳过；解析失败 → 记 warning 不阻断，下次启动再试。
+
+def _migrate_from_json() -> None:
+    """favorites/playlists/playback 三文件 + books.json 的 progress 字段 + 6 个 KV 域 → SQLite。
+
+    规则：旧文件存在 && 目标（表/KV key）为空 → 导入 + 旧文件改名 .migrated.bak；
+    目标非空（已迁移/已有数据）→ 跳过；解析失败 → 记 warning 不阻断，下次启动再试。
+    注意：books.json 的 reading_progress 迁移必须先于 books KV 迁移执行——
+    books.json 迁入 kv_store 后会被改名 .migrated.bak，进度迁移就找不到源文件了。
     """
+    _migrate_reading_progress()  # 优先：趁 books.json 还没改名时提取 progress 字段
     pairs = (
         ("FAVORITES_FILE", "favorites", _migrate_favorites),
         ("PLAYLISTS_FILE", "playlists", _migrate_playlists),
@@ -198,7 +221,8 @@ def _migrate_from_json() -> None:
         if not Path(src).exists() or not _table_empty(table):
             continue
         fn(Path(src))
-    _migrate_reading_progress()
+    for attr, key, label in _KV_MIGRATIONS:
+        _migrate_kv(attr, key, label)
 
 
 def _migrate_favorites(src: Path) -> None:
@@ -285,11 +309,40 @@ def _migrate_playback(src: Path) -> None:
         logger.warning("SQLite 迁移：playback.json 导入失败：%s（下次启动重试）", e)
 
 
+def _kv_key_exists(key: str) -> bool:
+    """kv_store 是否已有该 key（幂等迁移依据）"""
+    with _session() as conn:
+        return (
+            conn.execute("SELECT 1 FROM kv_store WHERE key = ? LIMIT 1", (key,)).fetchone()
+            is not None
+        )
+
+
+def _migrate_kv(attr: str, key: str, label: str) -> None:
+    """单个 KV 域迁移：旧 JSON 存在 && key 空 → 整份导入 + 旧文件改名 .migrated.bak。
+
+    结构异常（JSON 合法但与默认值类型不符）→ 记 warning 不导入不改名，下次再试。
+    """
+    src = getattr(state, attr)
+    if not Path(src).exists() or _kv_key_exists(key):
+        return
+    try:
+        data = json.loads(Path(src).read_text("utf-8"))
+        if not isinstance(data, type(_KV_DEFAULTS[key])):
+            logger.warning("SQLite 迁移：%s 结构异常，跳过导入（下次启动重试）", label)
+            return
+        _kv_write(key, json.dumps(data, ensure_ascii=False))
+        _rename_to_bak(Path(src))
+        logger.info("SQLite 迁移：%s → kv_store[%s]", label, key)
+    except (ValueError, OSError) as e:
+        logger.warning("SQLite 迁移：%s 导入失败：%s（下次启动重试）", label, e)
+
+
 def _migrate_reading_progress() -> None:
     """books.json 的 progress 字段 → reading_progress 表。
 
-    注意：books.json 不重命名 —— 它仍是书架元数据（title/author/addedAt）的活数据源，
-    这里只迁出 progress 字段；幂等靠「表为空才导入」保证。
+    注意：books.json 的 KV 迁移（整份迁走并改名）由 _migrate_from_json 在本函数之后
+    执行——本函数只迁出 progress 字段；幂等靠「表为空才导入」保证。
     """
     src = state.BOOKS_FILE
     if not Path(src).exists() or not _table_empty("reading_progress"):
@@ -315,6 +368,127 @@ def _migrate_reading_progress() -> None:
         logger.info("SQLite 迁移：books.json progress → reading_progress 表（%s 条）", n)
     except (ValueError, OSError) as e:
         logger.warning("SQLite 迁移：books.json 进度导入失败：%s（下次启动重试）", e)
+
+
+# ============ 统一 KV 存储（queue_order/network_songs/books/annotations/vocab/pairing） ============
+# 6 个原 JsonStore 域全部归一进 SQLite：每域一个 key，value 整份 JSON。
+# 读写接口保持原「load / save」风格（路由层改造最小，语义等价 JsonStore）。
+# 默认值照 state.py 旧 store 定义：annotations {}、pairing {"devices":[],"pending":[]}、其余 []。
+
+_KV_DEFAULTS: dict[str, object] = {
+    "queue_order": [],
+    "network_songs": [],
+    "books": [],
+    "annotations": {},
+    "vocab": [],
+    "pairing": {"devices": [], "pending": []},
+}
+
+
+def _kv_get(key: str) -> str | None:
+    """读原始 JSON 字符串；key 不存在返回 None"""
+    _ensure_ready()
+    with _session() as conn:
+        row = conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def _kv_write(key: str, value: str) -> None:
+    """原始写入（upsert）+ 刷新 ts；不触发 _ensure_ready（迁移内部复用，防锁重入）"""
+    now = datetime.now(timezone.utc).isoformat()
+    with _write_lock, _session() as conn:
+        conn.execute(
+            "INSERT INTO kv_store (key, value, ts) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, ts=excluded.ts",
+            (key, value, now),
+        )
+
+
+def _kv_set(key: str, value: str) -> None:
+    """写入（upsert）+ 刷新 ts"""
+    _ensure_ready()
+    _kv_write(key, value)
+
+
+def _kv_load(key: str) -> object:
+    """读并反序列化；缺失/损坏 → 默认值深拷贝（等价 JsonStore.load 语义）。
+
+    深拷贝防调用方直接改默认值污染后续读取；损坏值不删除（保守，可人工恢复）。
+    """
+    raw = _kv_get(key)
+    if raw is None:
+        return copy.deepcopy(_KV_DEFAULTS[key])
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("SQLite KV：%s 解析失败，回默认值（原值保留）", key)
+        return copy.deepcopy(_KV_DEFAULTS[key])
+    if not isinstance(data, type(_KV_DEFAULTS[key])):
+        logger.warning("SQLite KV：%s 结构异常，回默认值（原值保留）", key)
+        return copy.deepcopy(_KV_DEFAULTS[key])
+    return data
+
+
+def _kv_ts(key: str) -> str:
+    """该 key 最近写入时间（ISO；从未写入返回空串）"""
+    _ensure_ready()
+    with _session() as conn:
+        row = conn.execute("SELECT ts FROM kv_store WHERE key = ?", (key,)).fetchone()
+    return row["ts"] if row else ""
+
+
+# ---- 播放队列顺序（前端拖拽排序后保存，启动/刷新时恢复） ----
+def queue_order_load() -> list:
+    return _kv_load("queue_order")
+
+
+def queue_order_save(paths: list) -> None:
+    _kv_set("queue_order", json.dumps(paths, ensure_ascii=False))
+
+
+# ---- 网络曲库条目（网易云等在线源登记，播放时实时取直链） ----
+def network_songs_load() -> list:
+    return _kv_load("network_songs")
+
+
+def network_songs_save(entries: list) -> None:
+    _kv_set("network_songs", json.dumps(entries, ensure_ascii=False))
+
+
+# ---- 书架元数据（books/<id>/ 目录下的 book.epub + cover + index.json 不动） ----
+def books_load() -> list:
+    return _kv_load("books")
+
+
+def books_save(books: list) -> None:
+    _kv_set("books", json.dumps(books, ensure_ascii=False))
+
+
+# ---- 阅读器 V2 标注：{bookId: {highlights[], bookmarks[], notes[]}} ----
+def annotations_load() -> dict:
+    return _kv_load("annotations")
+
+
+def annotations_save(data: dict) -> None:
+    _kv_set("annotations", json.dumps(data, ensure_ascii=False))
+
+
+# ---- 阅读器 V2 生词本：[{id, word, context, bookId, bookTitle, cfi, addedAt}] ----
+def vocab_load() -> list:
+    return _kv_load("vocab")
+
+
+def vocab_save(items: list) -> None:
+    _kv_set("vocab", json.dumps(items, ensure_ascii=False))
+
+
+# ---- 移动端配对：{devices[], pending[], server_id?}（token 只存 SHA-256 哈希） ----
+def pairing_load() -> dict:
+    return _kv_load("pairing")
+
+
+def pairing_save(data: dict) -> None:
+    _kv_set("pairing", json.dumps(data, ensure_ascii=False))
 
 
 # ============ favorites ============

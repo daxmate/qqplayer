@@ -306,14 +306,23 @@ export function getSyncState() {
 
 // ---------- manifest 同步 ----------
 const MANIFEST_URL = "/api/sync/manifest";
-const COLLECTION_KEYS = ["songs", "playlists", "favorites", "books", "dicts"];
+const COLLECTION_KEYS = [
+  "songs",
+  "playlists",
+  "favorites",
+  "books",
+  "dicts",
+  "annotations", // 阅读标注（manifest annotations：按书全量，LWW 合并）
+  "vocab", // 生词本（manifest vocab：全量，按 id 逐条 merge）
+];
 
 /** 同步缓存结构版本：manifest 缓存（sync:meta / sync:* 集合）的 schema 变更时 +1，
  *  强制旧缓存失效重拉——manifest version 只随数据变化（mtime/ops/scan），
  *  后端给字段加结构（如 dicts.title 真实词典名）时 version 不变，旧缓存永远不刷新
  *  （2026-08-27：词典区显示 hash 文件名根因）。
- *  历史：v1 无该字段（首版）；v2 = dicts 条目含 title。 */
-const CACHE_SCHEMA_VERSION = 2;
+ *  历史：v1 无该字段（首版）；v2 = dicts 条目含 title；v3 = 新增 sync:annotations /
+ *  sync:vocab 集合（结构变更，旧缓存必须重拉才会写入新集合）。 */
+const CACHE_SCHEMA_VERSION = 3;
 
 let syncInFlight = false;
 
@@ -336,7 +345,17 @@ async function fetchAndCacheManifest(): Promise<ManifestResult> {
     for (const key of COLLECTION_KEYS) {
       const list = Array.isArray(manifest[key]) ? manifest[key] : [];
       counts[key] = list.length;
-      await setCache("sync:" + key, list);
+      if (key === "annotations") {
+        // 按书 LWW：与已有缓存合并（本地有、远端无的书保留；同书 version 大者胜）
+        const prev = await getCache("sync:annotations");
+        await setCache("sync:annotations", mergeAnnotations(prev, list));
+      } else if (key === "vocab") {
+        // 按 id 逐条 merge：本地/远端各自独有条目都保留，共有 id 取 addedAt 大者胜
+        const prev = await getCache("sync:vocab");
+        await setCache("sync:vocab", mergeVocab(prev, list));
+      } else {
+        await setCache("sync:" + key, list);
+      }
     }
     await setCache("sync:meta", {
       version,
@@ -348,12 +367,92 @@ async function fetchAndCacheManifest(): Promise<ManifestResult> {
   return { ok: true, changed, version, manifest };
 }
 
+/** 书标注条目 → 该书最新改动时间（ms）：全部条目 createdAt/updatedAt 最大值。
+ *  与后端 _annotations_version 同构（manifest annotations[].version）。 */
+function annotationsBookVersion(book: unknown): number {
+  if (!book || typeof book !== "object") return 0;
+  const b = book as Record<string, unknown>;
+  let ts = 0;
+  for (const kind of ["highlights", "bookmarks", "notes"]) {
+    const arr = Array.isArray(b[kind]) ? b[kind] : [];
+    for (const item of arr) {
+      if (!item || typeof item !== "object") continue;
+      const it = item as Record<string, unknown>;
+      for (const f of ["createdAt", "updatedAt"]) {
+        const v = it[f];
+        if (typeof v === "number" && Number.isFinite(v)) ts = Math.max(ts, Math.floor(v));
+      }
+    }
+  }
+  return ts;
+}
+
+/**
+ * 标注合并（按书 LWW）：remote（manifest 新拉取）与 local（已有缓存）按书合并，
+ * 该书 version（最新改动 ts）大者胜；仅本地有的书保留（不丢本地数据）。
+ * 用于写入 sync:annotations 缓存，避免整表覆盖丢对端标注。
+ * @returns 合并后的 annotations 数组（manifest 条目形状 {bookId, version, highlights, bookmarks, notes}）
+ */
+export function mergeAnnotations(local: unknown, remote: unknown): unknown[] {
+  const loc = Array.isArray(local) ? local : [];
+  const rem = Array.isArray(remote) ? remote : [];
+  const byId = new Map<string, unknown>();
+  for (const b of loc) {
+    if (b && typeof b === "object" && (b as Record<string, unknown>).bookId != null) {
+      byId.set(String((b as Record<string, unknown>).bookId), b);
+    }
+  }
+  for (const b of rem) {
+    if (!b || typeof b !== "object") continue;
+    const book = b as Record<string, unknown>;
+    if (book.bookId == null) continue;
+    const id = String(book.bookId);
+    const prev = byId.get(id);
+    if (prev && annotationsBookVersion(prev) > annotationsBookVersion(book)) {
+      continue; // 本地该书更新 → 保留（LWW）
+    }
+    byId.set(id, book);
+  }
+  return [...byId.values()];
+}
+
+/**
+ * 生词合并（按 id 逐条 merge）：本地/远端各自独有条目都保留，共有 id 取 addedAt 大者胜。
+ * 用于写入 sync:vocab 缓存，避免整表覆盖丢对端新词（远端新增保留、本地新增也保留）。
+ * @returns 合并后的 vocab 数组（manifest 条目形状 {id, word, context, bookId, bookTitle, cfi, addedAt}）
+ */
+export function mergeVocab(local: unknown, remote: unknown): unknown[] {
+  const loc = Array.isArray(local) ? local : [];
+  const rem = Array.isArray(remote) ? remote : [];
+  const byId = new Map<string, unknown>();
+  for (const v of loc) {
+    if (v && typeof v === "object" && (v as Record<string, unknown>).id != null) {
+      byId.set(String((v as Record<string, unknown>).id), v);
+    }
+  }
+  for (const v of rem) {
+    if (!v || typeof v !== "object") continue;
+    const entry = v as Record<string, unknown>;
+    if (entry.id == null) continue;
+    const id = String(entry.id);
+    const prev = byId.get(id);
+    if (
+      prev &&
+      Number((prev as Record<string, unknown>).addedAt || 0) > Number(entry.addedAt || 0)
+    ) {
+      continue; // 本地条目更新 → 保留（LWW）
+    }
+    byId.set(id, entry);
+  }
+  return [...byId.values()];
+}
+
 /**
  * 拉取桌面 manifest 并缓存元数据集合。
  * @returns {Promise<{ok:boolean, enabled?:boolean, changed?:boolean, version?:string,
  *   counts?:object, message?:string}>}
  *   enabled=false → 桌面浏览器（未启用）；ok=false → 拉取失败（message 为原因）；
- *   成功 → {ok:true, changed, version, counts:{songs,playlists,favorites,books,dicts}}
+ *   成功 → {ok:true, changed, version, counts:{songs,playlists,favorites,books,dicts,annotations,vocab}}
  */
 export async function syncNow(): Promise<SyncNowResult> {
   if (!syncEnabled()) return { enabled: false, ok: false };

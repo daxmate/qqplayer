@@ -93,6 +93,13 @@ export default {
       syncAllDesc:
         "一键拉全：缺失的音乐（音频+封面）、图书、词典下载，歌词失效自动刷新，自动更新开启时可更新项一并应用",
       syncAllDone: "同步完成，已开始下载 {n} 个文件",
+      // 阅读标注 + 生词
+      readerData: "阅读标注与生词",
+      readerDataLabel: "高亮 / 书签 / 笔记 与 生词",
+      readerDataDesc: "数据随同步自动拉取（按书 / 按词合并，不覆盖本地新增），无需下载文件",
+      readerDataGo: "立即同步",
+      readerDataSynced: "{books} 本书标注 · {vocab} 个生词",
+      readerDataEmpty: "暂无标注与生词",
       // 词典区
       dicts: "词典",
       dictsDesc: "词典文件离线下载（阅读时本地优先）；逐项可下载 / 删除",

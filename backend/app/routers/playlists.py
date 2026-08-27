@@ -1,11 +1,11 @@
-"""歌单 + 播放队列顺序路由（持久化 playlists.json / queue_order.json）。"""
+"""歌单 + 播放队列顺序路由（持久化 SQLite：playlists 表 / kv_store[queue_order]）。"""
 
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from app import db, state
+from app import db
 
 router = APIRouter()
 
@@ -133,7 +133,7 @@ def api_playlists_order(pid: str, body: dict):
 @router.get("/api/queue/order")
 def api_queue_order_get():
     """播放队列顺序（前端启动时恢复；空列表 = 未自定义顺序，按曲库默认顺序）"""
-    return {"paths": state.queue_order_store.load()}
+    return {"paths": db.queue_order_load()}
 
 
 @router.put("/api/queue/order")
@@ -142,5 +142,5 @@ def api_queue_order_put(body: dict):
     paths = body.get("paths")
     if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
         raise HTTPException(400, "paths 必须是字符串数组")
-    state.queue_order_store.save(paths)
+    db.queue_order_save(paths)
     return {"paths": paths}

@@ -5,9 +5,10 @@
 大多不带 token；由本文件 autouse fixture 统一关闭，配对/鉴权测试在自己文件里
 显式开启（monkeypatch state.AUTH_ENABLED = True）。
 
-SQLite 隔离（autouse）：每个测试独立临时 DB（DB_PATH → tmp_path）+ 四个迁移源
-JSON 路径一并指向临时目录 —— 既保证绝不触碰真实用户数据（真实目录的
-favorites.json 等不会被自动迁移改名），也让按需写入 JSON 的测试走真实迁移流程。
+SQLite 隔离（autouse）：每个测试独立临时 DB（DB_PATH → tmp_path）+ 全部迁移源
+JSON 路径（favorites/playlists/playback/books/queue_order/network_songs/
+annotations/vocab/pairing）一并指向临时目录 —— 既保证绝不触碰真实用户数据
+（真实目录的旧 JSON 不会被自动迁移改名），也让按需写入 JSON 的测试走真实迁移流程。
 """
 
 import sys
@@ -45,6 +46,11 @@ def _sqlite_isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "PLAYLISTS_FILE", tmp_path / "playlists.json")
     monkeypatch.setattr(state, "PLAYBACK_FILE", tmp_path / "playback.json")
     monkeypatch.setattr(state, "BOOKS_FILE", tmp_path / "books.json")
+    monkeypatch.setattr(state, "QUEUE_ORDER_FILE", tmp_path / "queue_order.json")
+    monkeypatch.setattr(state, "NETWORK_SONGS_FILE", tmp_path / "network_songs.json")
+    monkeypatch.setattr(state, "ANNOTATIONS_FILE", tmp_path / "annotations.json")
+    monkeypatch.setattr(state, "VOCAB_FILE", tmp_path / "vocab.json")
+    monkeypatch.setattr(state, "PAIRING_FILE", tmp_path / "pairing.json")
     db.reset()  # 清初始化标志：本测试的 DB 首次访问时重建/重迁移
     yield
     db.reset()

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
-from app import state  # noqa: E402
+from app import db, state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -27,7 +27,7 @@ def _isolate(tmp_path, monkeypatch):
     """标注存储/书架元数据隔离：全部走临时目录"""
     monkeypatch.setattr(state, "ANNOTATIONS_FILE", tmp_path / "annotations.json")
     monkeypatch.setattr(state, "BOOKS_FILE", tmp_path / "books.json")
-    state.books_store.save(
+    db.books_save(
         [
             {"id": "b1", "title": "测试书一", "addedAt": 1, "progress": None},
             {"id": "b2", "title": "测试书二", "addedAt": 2, "progress": None},
@@ -108,7 +108,7 @@ def test_highlight_style_default_and_invalid_fall_back_highlight():
 
 
 def test_highlight_legacy_get_normalized_no_writeback():
-    """V4 旧数据规范化：无 style 字段的高亮 GET 补 "style":"highlight"，磁盘文件不写回"""
+    """V4 旧数据规范化：无 style 字段的高亮 GET 补 "style":"highlight"，存储不写回"""
     legacy = {
         "b1": {
             "highlights": [
@@ -118,15 +118,13 @@ def test_highlight_legacy_get_normalized_no_writeback():
             "notes": [],
         }
     }
-    state.annotations_store.save(legacy)
-    before = (state.ANNOTATIONS_FILE).read_text("utf-8")
+    db.annotations_save(legacy)
     hl = client.get(H).json()["highlights"][0]
     assert hl["id"] == "hl_old1"
     assert hl["style"] == "highlight"
     assert client.get(H).json()["highlights"][0]["style"] == "highlight"
-    # 不写回磁盘：文件里仍无 style 字段
-    assert "style" not in (state.ANNOTATIONS_FILE).read_text("utf-8")
-    assert (state.ANNOTATIONS_FILE).read_text("utf-8") == before
+    # 不写回存储：SQLite 里仍无 style 字段（规范化只发生在响应层）
+    assert db.annotations_load()["b1"]["highlights"][0].get("style") is None
 
 
 def test_highlight_text_required():

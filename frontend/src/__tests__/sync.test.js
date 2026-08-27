@@ -64,6 +64,26 @@ const manifestV1 = {
   favorites: [{ path: "/Music/a.mp3", name: "A", ts: "" }],
   books: [{ id: "b1", title: "测试书" }],
   dicts: [{ name: "oxford.mdx", path: "oxford.mdx", size: 10 }],
+  annotations: [
+    {
+      bookId: "b1",
+      version: 100,
+      highlights: [{ id: "hl_1", cfi: "c", text: "x", createdAt: 100 }],
+      bookmarks: [],
+      notes: [],
+    },
+  ],
+  vocab: [
+    {
+      id: "vw_1",
+      word: "hello",
+      context: "",
+      bookId: "b1",
+      bookTitle: "书",
+      cfi: "",
+      addedAt: 100,
+    },
+  ],
 };
 
 const manifestV2 = {
@@ -126,12 +146,22 @@ describe("syncNow：manifest 拉取 + version 对比 + 集合写入", () => {
     expect(r.ok).toBe(true);
     expect(r.changed).toBe(true);
     expect(r.version).toBe(manifestV1.version);
-    expect(r.counts).toEqual({ songs: 1, playlists: 1, favorites: 1, books: 1, dicts: 1 });
+    expect(r.counts).toEqual({
+      songs: 1,
+      playlists: 1,
+      favorites: 1,
+      books: 1,
+      dicts: 1,
+      annotations: 1,
+      vocab: 1,
+    });
     expect(await getCache("sync:songs")).toEqual(manifestV1.songs);
     expect(await getCache("sync:playlists")).toEqual(manifestV1.playlists);
     expect(await getCache("sync:favorites")).toEqual(manifestV1.favorites);
     expect(await getCache("sync:books")).toEqual(manifestV1.books);
     expect(await getCache("sync:dicts")).toEqual(manifestV1.dicts);
+    expect(await getCache("sync:annotations")).toEqual(manifestV1.annotations);
+    expect(await getCache("sync:vocab")).toEqual(manifestV1.vocab);
     const meta = await getCache("sync:meta");
     expect(meta.version).toBe(manifestV1.version);
     expect(sync.getSyncState().lastSyncAt).toBeTruthy();
@@ -164,15 +194,27 @@ describe("syncNow：manifest 拉取 + version 对比 + 集合写入", () => {
     await setNativeEnv();
     apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifestV1 });
     await sync.syncNow();
-    expect((await getCache("sync:meta")).schemaVersion).toBe(2);
+    expect((await getCache("sync:meta")).schemaVersion).toBe(3);
     // 手写旧结构缓存（无 schemaVersion）模拟升级前：version 相同但缓存必须刷新
     const oldMeta = { version: manifestV1.version, generatedAt: "", syncedAt: 0 };
     await setCache("sync:meta", oldMeta);
     await setCache("sync:dicts", [{ name: "f37e...mdx", path: "f37e...mdx" }]); // 旧结构：无 title
     const r = await sync.syncNow();
     expect(r.changed).toBe(true);
-    expect((await getCache("sync:meta")).schemaVersion).toBe(2);
+    expect((await getCache("sync:meta")).schemaVersion).toBe(3);
     expect(await getCache("sync:dicts")).toEqual(manifestV1.dicts); // 缓存已按新结构重写
+    // v2 → v3：旧缓存无 annotations/vocab 集合 → 重写后写入新集合（结构变更强制刷新）
+    const oldMetaV2 = {
+      version: manifestV1.version,
+      schemaVersion: 2,
+      generatedAt: "",
+      syncedAt: 0,
+    };
+    await setCache("sync:meta", oldMetaV2);
+    const r3 = await sync.syncNow();
+    expect(r3.changed).toBe(true); // schemaVersion 2 ≠ 3 → 强制重拉
+    expect(await getCache("sync:annotations")).toEqual(manifestV1.annotations);
+    expect(await getCache("sync:vocab")).toEqual(manifestV1.vocab);
   });
 
   it("拉取失败：返回 {ok:false, message}，lastError 记录", async () => {
@@ -558,5 +600,135 @@ describe("initSync：事件订阅 + 下载进度聚合 + appState 触发同步",
     await flush();
     bridgeMock.emit("syncAssetProgress", { path: "audio/x.mp3", received: 10, total: 100 });
     expect(st.pendingCount).toBe(1);
+  });
+});
+
+describe("mergeVocab / mergeAnnotations：标注按书 LWW、生词按 id 逐条 merge（P2-B）", () => {
+  beforeEach(async () => {
+    delete window.qqplayerNative;
+    delete window.qqplayerIosBridge;
+    apiMock.apiGet.mockReset();
+    bridgeMock.post.mockClear();
+    bridgeMock.handlers.clear();
+    sync._resetSyncForTests();
+  });
+
+  it("mergeVocab：本地/远端各自独有条目都保留（不丢对端新词）", () => {
+    const local = [
+      { id: "vw_1", word: "hello", addedAt: 100 }, // 共有 id，本地旧
+      { id: "vw_local", word: "local-only", addedAt: 200 }, // 仅本地
+    ];
+    const remote = [
+      { id: "vw_1", word: "hello", addedAt: 300 }, // 远端新 → 胜
+      { id: "vw_remote", word: "remote-only", addedAt: 400 }, // 仅远端
+    ];
+    const merged = sync.mergeVocab(local, remote);
+    const byId = Object.fromEntries(merged.map((v) => [v.id, v]));
+    expect(Object.keys(byId).sort()).toEqual(["vw_1", "vw_local", "vw_remote"]);
+    expect(byId["vw_1"].addedAt).toBe(300); // 大者胜
+    expect(byId["vw_local"].word).toBe("local-only"); // 本地新增保留
+    expect(byId["vw_remote"].word).toBe("remote-only"); // 远端新增保留
+  });
+
+  it("mergeVocab：本地条目比远端新 → 保留本地（LWW）", () => {
+    const local = [{ id: "vw_1", word: "hello", addedAt: 500 }];
+    const remote = [{ id: "vw_1", word: "hello", addedAt: 300 }];
+    expect(sync.mergeVocab(local, remote)).toEqual(local);
+  });
+
+  it("mergeVocab：非数组/空输入容错（undefined → 直接取对端）", () => {
+    expect(sync.mergeVocab(undefined, [{ id: "v", addedAt: 1 }])).toEqual([
+      { id: "v", addedAt: 1 },
+    ]);
+    expect(sync.mergeVocab([{ id: "v", addedAt: 1 }], null)).toEqual([{ id: "v", addedAt: 1 }]);
+    expect(sync.mergeVocab(undefined, undefined)).toEqual([]);
+  });
+
+  it("mergeAnnotations：按书 version 大者胜；仅本地有的书保留", () => {
+    const local = [
+      {
+        bookId: "b1",
+        version: 500, // 本地新 → 保留
+        highlights: [{ id: "hl_local", createdAt: 500 }],
+        bookmarks: [],
+        notes: [],
+      },
+      {
+        bookId: "b_local",
+        version: 10, // 仅本地
+        highlights: [],
+        bookmarks: [],
+        notes: [],
+      },
+    ];
+    const remote = [
+      {
+        bookId: "b1",
+        version: 300,
+        highlights: [{ id: "hl_remote", createdAt: 300 }],
+        bookmarks: [],
+        notes: [],
+      },
+      {
+        bookId: "b2",
+        version: 700, // 仅远端
+        highlights: [],
+        bookmarks: [],
+        notes: [],
+      },
+    ];
+    const merged = sync.mergeAnnotations(local, remote);
+    const byBook = Object.fromEntries(merged.map((a) => [a.bookId, a]));
+    expect(Object.keys(byBook).sort()).toEqual(["b1", "b2", "b_local"]);
+    expect(byBook["b1"].highlights[0].id).toBe("hl_local"); // 本地更新 → 保留
+    expect(byBook["b2"].version).toBe(700); // 远端新增保留
+    expect(byBook["b_local"].version).toBe(10); // 本地独有保留
+  });
+
+  it("mergeAnnotations：远端书更新 → 整书替换（LWW）", () => {
+    const local = [
+      {
+        bookId: "b1",
+        version: 100,
+        highlights: [{ id: "hl_old", createdAt: 100 }],
+        bookmarks: [],
+        notes: [],
+      },
+    ];
+    const remote = [
+      {
+        bookId: "b1",
+        version: 200,
+        highlights: [],
+        bookmarks: [{ id: "bm_new", createdAt: 200 }],
+        notes: [],
+      },
+    ];
+    expect(sync.mergeAnnotations(local, remote)).toEqual(remote);
+  });
+
+  it("fetchAndCacheManifest：annotations/vocab 写入时与既有缓存合并（不整表覆盖）", async () => {
+    await setNativeEnv();
+    // 预置本地缓存：本地独有的生词 + 更新的标注书（模拟本端已有数据）
+    await setCache("sync:vocab", [{ id: "vw_local", word: "local", addedAt: 99999 }]);
+    await setCache("sync:annotations", [
+      {
+        bookId: "b1",
+        version: 99999,
+        highlights: [{ id: "hl_local", createdAt: 99999 }],
+        bookmarks: [],
+        notes: [],
+      },
+    ]);
+    apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifestV1 });
+    const r = await sync.syncNow();
+    expect(r.ok).toBe(true);
+    const vocab = await getCache("sync:vocab");
+    const ids = vocab.map((v) => v.id).sort();
+    expect(ids).toEqual(["vw_1", "vw_local"]); // 本地词保留 + 远端词并入
+    const annotations = await getCache("sync:annotations");
+    const b1 = annotations.find((a) => a.bookId === "b1");
+    expect(b1.highlights[0].id).toBe("hl_local"); // 本地书更新 → 保留（不整表覆盖）
+    expect(annotations.length).toBe(1);
   });
 });

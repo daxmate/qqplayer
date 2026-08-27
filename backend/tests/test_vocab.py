@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import backend  # noqa: E402
-from app import state  # noqa: E402
+from app import db, state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -31,10 +31,10 @@ def _add(word="hello", **extra):
 
 def _set_added_at(seconds_by_word: dict) -> None:
     """直接改磁盘数据设定 addedAt（保证排序断言确定，不依赖真实时钟）"""
-    items = state.vocab_store.load()
+    items = db.vocab_load()
     for it in items:
         it["addedAt"] = seconds_by_word[it["word"]]
-    state.vocab_store.save(items)
+    db.vocab_save(items)
 
 
 # ============ 创建 ============

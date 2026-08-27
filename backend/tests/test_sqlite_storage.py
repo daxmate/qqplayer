@@ -21,6 +21,7 @@ _TABLES = (
     "playback_events",
     "reading_progress",
     "ops",
+    "kv_store",
 )
 
 
@@ -39,7 +40,7 @@ def _table_names(tmp_path) -> set[str]:
 
 # ============ 建表 ============
 def test_schema_created_on_first_access(tmp_path):
-    """首次访问自动建表：六张表齐备"""
+    """首次访问自动建表：七张表齐备"""
     assert db.favorites_load() == []
     names = _table_names(tmp_path)
     for t in _TABLES:
@@ -121,7 +122,10 @@ def test_migrate_playback(tmp_path, monkeypatch):
 
 
 def test_migrate_reading_progress(tmp_path, monkeypatch):
-    """books.json 的 progress 字段 → reading_progress 表；books.json 不重命名"""
+    """books.json：progress 字段先迁 reading_progress 表，整份再迁 kv_store[books] 并改名。
+
+    顺序保证（P2-B）：进度迁移必须赶在 books.json 被改名之前，否则进度丢失。
+    """
     src = tmp_path / "books.json"
     src.write_text(
         json.dumps(
@@ -145,8 +149,12 @@ def test_migrate_reading_progress(tmp_path, monkeypatch):
     assert db.progress_get("b1") == {"cfi": "epubcfi(/6/2)", "updatedAt": 123}
     assert db.progress_get("b2") == {"cfi": "epubcfi(/6/8!/4)", "location": 0.42, "updatedAt": 456}
     assert db.progress_get("b3") is None
-    assert src.exists()  # 书架元数据源仍在，绝不改名
-    assert not (tmp_path / "books.json.migrated.bak").exists()
+    # 书架元数据整份进 kv_store[books]（原字段原样保留），旧文件改名 .migrated.bak
+    books = db.books_load()
+    assert [b["id"] for b in books] == ["b1", "b2", "b3"]
+    assert books[0]["progress"] == {"cfi": "epubcfi(/6/2)", "updatedAt": 123}
+    assert not src.exists()
+    assert (tmp_path / "books.json.migrated.bak").exists()
 
 
 def test_migrate_all_via_first_api_touch(tmp_path, monkeypatch):
@@ -374,8 +382,6 @@ def test_ops_append_and_list_since(tmp_path):
 # ============ API 集成 ============
 def test_api_progress_merged_in_books_list(tmp_path, monkeypatch):
     """GET /api/books 合并 SQLite 进度；PUT 只写 SQLite"""
-    import app.routers.books as books_router
-
     books_file = tmp_path / "books.json"
     books_file.write_text(
         json.dumps(
@@ -399,7 +405,10 @@ def test_api_progress_merged_in_books_list(tmp_path, monkeypatch):
     assert books["b2"]["progress"] is None
     # 未读返回 null
     assert client.get("/api/books/b2/progress").json() is None
-    assert books_router.state.books_store  # books_store 仍存在（书架元数据未迁走）
+    # P2-B：书架元数据已迁 kv_store[books]（books_store 退役，旧 JSON 自动迁移）
+    assert [b["id"] for b in db.books_load()] == ["b1", "b2"]
+    assert not (tmp_path / "books.json").exists()  # 旧文件已改名 .migrated.bak
+    assert (tmp_path / "books.json.migrated.bak").exists()
 
 
 def test_api_favorites_backed_by_sqlite(tmp_path, monkeypatch):
@@ -412,3 +421,130 @@ def test_api_favorites_backed_by_sqlite(tmp_path, monkeypatch):
     }
     assert not src.exists()  # 不写 JSON
     assert db.favorites_load() == ["/a.mp3"]
+
+
+# ============ 统一 KV 存储（P2-B：queue_order/network_songs/books/annotations/vocab/pairing） ============
+def test_kv_defaults_and_roundtrip(tmp_path):
+    """六域默认值 + load/save 往返（默认值照 state.py 旧 store 定义）"""
+    assert db.queue_order_load() == []
+    assert db.network_songs_load() == []
+    assert db.books_load() == []
+    assert db.annotations_load() == {}
+    assert db.vocab_load() == []
+    assert db.pairing_load() == {"devices": [], "pending": []}
+    # 往返：queue_order（列表）
+    db.queue_order_save(["/a.mp3", "stream:1"])
+    assert db.queue_order_load() == ["/a.mp3", "stream:1"]
+    # 往返：annotations（按书 dict）
+    db.annotations_save(
+        {"b1": {"highlights": [{"id": "hl_1", "cfi": "c"}], "bookmarks": [], "notes": []}}
+    )
+    assert db.annotations_load()["b1"]["highlights"][0]["id"] == "hl_1"
+    # 往返：pairing（dict + 嵌套列表）
+    db.pairing_save({"devices": [{"device_id": "d1"}], "pending": [], "server_id": "s1"})
+    got = db.pairing_load()
+    assert got["devices"] == [{"device_id": "d1"}] and got["server_id"] == "s1"
+    # 覆盖写入：整份替换（等价原 JSON save 语义）
+    db.pairing_save({"devices": [], "pending": []})
+    assert db.pairing_load() == {"devices": [], "pending": []}
+
+
+def test_kv_default_deepcopy_not_shared(tmp_path):
+    """默认值深拷贝：调用方改动 load 结果不污染默认值（等价 JsonStore 语义）"""
+    items = db.vocab_load()
+    items.append({"id": "vw_x", "word": "x", "addedAt": 1})
+    assert db.vocab_load() == []  # 默认值未被污染
+    pairing = db.pairing_load()
+    pairing["devices"].append({"device_id": "d1"})
+    assert db.pairing_load() == {"devices": [], "pending": []}
+
+
+def test_kv_corrupt_value_falls_back_default(tmp_path, caplog):
+    """KV 值损坏（非法 JSON）→ 回默认值 + warning，原值保留（下次 save 覆盖）"""
+    db.queue_order_save(["/a.mp3"])
+    conn = sqlite3.connect(tmp_path / "qqplayer_test.db")
+    try:
+        conn.execute("UPDATE kv_store SET value='{bad json' WHERE key='queue_order'")
+        conn.commit()
+    finally:
+        conn.close()
+    with caplog.at_level("WARNING"):
+        assert db.queue_order_load() == []
+    assert any("queue_order" in r.message for r in caplog.records)
+    # 原值仍保留在库里（保守不删），save 后可恢复
+    db.queue_order_save(["/b.mp3"])
+    assert db.queue_order_load() == ["/b.mp3"]
+
+
+def test_migrate_kv_queue_order_network_songs(tmp_path, monkeypatch):
+    """queue_order.json / network_songs.json → kv_store；旧文件改名"""
+    q = tmp_path / "queue_order.json"
+    q.write_text(json.dumps(["/a.mp3", "stream:1"]), encoding="utf-8")
+    n = tmp_path / "network_songs.json"
+    n.write_text(
+        json.dumps([{"id": "1", "provider": "netease", "title": "T", "addedAt": "2026-01-01"}]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(state, "QUEUE_ORDER_FILE", q)
+    monkeypatch.setattr(state, "NETWORK_SONGS_FILE", n)
+    assert db.queue_order_load() == ["/a.mp3", "stream:1"]
+    assert db.network_songs_load()[0]["title"] == "T"
+    assert not q.exists() and (tmp_path / "queue_order.json.migrated.bak").exists()
+    assert not n.exists() and (tmp_path / "network_songs.json.migrated.bak").exists()
+
+
+def test_migrate_kv_annotations_vocab_pairing(tmp_path, monkeypatch):
+    """annotations.json / vocab.json / pairing.json → kv_store；旧文件改名"""
+    a = tmp_path / "annotations.json"
+    a.write_text(
+        json.dumps(
+            {"b1": {"highlights": [{"id": "hl_1", "createdAt": 1}], "bookmarks": [], "notes": []}}
+        ),
+        encoding="utf-8",
+    )
+    v = tmp_path / "vocab.json"
+    v.write_text(json.dumps([{"id": "vw_1", "word": "hello", "addedAt": 2}]), encoding="utf-8")
+    p = tmp_path / "pairing.json"
+    p.write_text(json.dumps({"devices": [{"device_id": "d1"}], "pending": []}), encoding="utf-8")
+    monkeypatch.setattr(state, "ANNOTATIONS_FILE", a)
+    monkeypatch.setattr(state, "VOCAB_FILE", v)
+    monkeypatch.setattr(state, "PAIRING_FILE", p)
+    assert db.annotations_load()["b1"]["highlights"][0]["id"] == "hl_1"
+    assert db.vocab_load()[0]["word"] == "hello"
+    assert db.pairing_load()["devices"][0]["device_id"] == "d1"
+    for name in ("annotations.json", "vocab.json", "pairing.json"):
+        assert not (tmp_path / name).exists()
+        assert (tmp_path / f"{name}.migrated.bak").exists()
+
+
+def test_migrate_kv_idempotent_key_not_empty(tmp_path, monkeypatch):
+    """幂等：key 已有数据 → 跳过导入，旧文件不动"""
+    src = tmp_path / "queue_order.json"
+    monkeypatch.setattr(state, "QUEUE_ORDER_FILE", src)
+    db.queue_order_save(["/already.mp3"])  # 先有数据（JSON 尚不存在，不会触发导入）
+    src.write_text(json.dumps(["/z.mp3"]), encoding="utf-8")
+    db.reset()  # 模拟重启：key 非空 → 跳过导入
+    assert db.queue_order_load() == ["/already.mp3"]  # 不被 JSON 覆盖
+    assert src.exists()  # 文件未被改名
+
+
+def test_migrate_kv_invalid_json_does_not_block(tmp_path, monkeypatch, caplog):
+    """迁移失败不阻断：损坏 JSON → 回默认 + warning + 文件保留（下次再试）"""
+    src = tmp_path / "pairing.json"
+    src.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(state, "PAIRING_FILE", src)
+    with caplog.at_level("WARNING"):
+        assert db.pairing_load() == {"devices": [], "pending": []}
+    assert src.exists()  # 未改名，下次启动可重试
+    assert any("pairing.json" in r.message for r in caplog.records)
+
+
+def test_migrate_kv_wrong_shape_skipped(tmp_path, monkeypatch, caplog):
+    """结构异常（JSON 合法但与默认值类型不符）→ 跳过导入，文件保留"""
+    src = tmp_path / "vocab.json"
+    src.write_text(json.dumps({"not": "a list"}), encoding="utf-8")  # vocab 应为数组
+    monkeypatch.setattr(state, "VOCAB_FILE", src)
+    with caplog.at_level("WARNING"):
+        assert db.vocab_load() == []
+    assert src.exists()
+    assert not (tmp_path / "vocab.json.migrated.bak").exists()

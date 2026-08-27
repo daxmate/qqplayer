@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import app.routers.books as books_router  # noqa: E402
 import backend  # noqa: E402
-from app import state  # noqa: E402
+from app import db, state  # noqa: E402
 
 client = TestClient(backend.app)
 
@@ -302,10 +302,10 @@ def test_list_desc_order(tmp_path):
     build_epub(epub)
     a = import_epub(epub).json()
     b = import_epub(epub).json()
-    books = state.books_store.load()  # 直接改时间戳保证顺序可断言
+    books = db.books_load()  # 直接改时间戳保证顺序可断言
     for book in books:
         book["addedAt"] = 2000 if book["id"] == b["id"] else 1000
-    state.books_store.save(books)
+    db.books_save(books)
     lst = client.get("/api/books").json()
     assert [x["id"] for x in lst] == [b["id"], a["id"]]
 

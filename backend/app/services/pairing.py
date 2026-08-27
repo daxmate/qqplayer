@@ -24,7 +24,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
-from app import state
+from app import db, state
 
 # 已决请求内存态：request_id -> {"status": "approved"|"rejected"|"expired", "token": str|None}
 # 只存内存不落盘（token 明文仅此一次返回给发起方；重启后丢失 → 客户端重配对即可）
@@ -57,12 +57,12 @@ def get_server_id() -> str:
     多桌面配对按 (server_id, device_id) 维度区分 token 归属。UUID 在首次启动生成后不再变，
     不用 mDNS hostname（主机名会变，同一台机器改主机名后配对关系会错乱）。
     """
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     sid = data.get("server_id")
     if not sid:
         sid = uuid.uuid4().hex
         data["server_id"] = sid
-        state.pairing_store.save(data)
+        db.pairing_save(data)
     return sid
 
 
@@ -74,19 +74,19 @@ def _server_id_of(entry: dict) -> str:
 
 def load_pending() -> list[dict]:
     """待确认请求列表（惰性清理过期项并落盘）。"""
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     pending = data.setdefault("pending", [])
     cutoff = datetime.now() - timedelta(seconds=state.PAIRING_TTL_SECONDS)
     fresh = [p for p in pending if _parse_iso(p.get("created_at", "")) >= cutoff]
     if len(fresh) != len(pending):
         data["pending"] = fresh
-        state.pairing_store.save(data)
+        db.pairing_save(data)
     return fresh
 
 
 def find_pending(request_id: str) -> dict | None:
     """按 request_id 查找未过期 pending 请求；过期项直接清理。"""
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     pending = data.setdefault("pending", [])
     cutoff = datetime.now() - timedelta(seconds=state.PAIRING_TTL_SECONDS)
     fresh = []
@@ -100,7 +100,7 @@ def find_pending(request_id: str) -> dict | None:
             found = None  # 已过期：等价于不存在，且从队列清掉
     if len(fresh) != len(pending):
         data["pending"] = fresh
-        state.pairing_store.save(data)
+        db.pairing_save(data)
     return found
 
 
@@ -112,7 +112,7 @@ def create_request(device_id: str, device_name: str, device_type: str) -> str:
     if not _rate_limit_ok(device_id):
         raise RateLimited()
     request_id = uuid.uuid4().hex
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     pending = data.setdefault("pending", [])
     pending.append(
         {
@@ -123,7 +123,7 @@ def create_request(device_id: str, device_name: str, device_type: str) -> str:
             "created_at": _now_iso(),
         }
     )
-    state.pairing_store.save(data)
+    db.pairing_save(data)
     return request_id
 
 
@@ -175,7 +175,7 @@ def approve(request_id: str) -> dict:
     device_id = req["device_id"]
     server_id = get_server_id()
     now = _now_iso()
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     devices = data.setdefault("devices", [])
     existing = next(
         (d for d in devices if d.get("device_id") == device_id and _server_id_of(d) == server_id),
@@ -216,7 +216,7 @@ def approve(request_id: str) -> dict:
         existing["token_hash"] = token_hash
         existing["last_seen_at"] = now
     data["pending"] = [p for p in data.get("pending", []) if p.get("request_id") != request_id]
-    state.pairing_store.save(data)
+    db.pairing_save(data)
     with _RESOLVED_LOCK:
         _RESOLVED[request_id] = {
             "status": "approved",
@@ -228,11 +228,11 @@ def approve(request_id: str) -> dict:
 
 def reject(request_id: str) -> dict:
     """拒绝配对：从 pending 清理，status 记录为 rejected（幂等，重复拒绝仍 200）。"""
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     before = len(data.get("pending", []))
     data["pending"] = [p for p in data.get("pending", []) if p.get("request_id") != request_id]
     if len(data["pending"]) != before:
-        state.pairing_store.save(data)
+        db.pairing_save(data)
     with _RESOLVED_LOCK:
         _RESOLVED[request_id] = {
             "status": "rejected",
@@ -259,7 +259,7 @@ def status(request_id: str) -> dict:
                 return result
             return {"status": entry["status"]}
     # 2) pending 队列（含超时判定）
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     pending = data.setdefault("pending", [])
     cutoff = datetime.now() - timedelta(seconds=state.PAIRING_TTL_SECONDS)
     fresh = []
@@ -275,18 +275,18 @@ def status(request_id: str) -> dict:
                     "expires": time.monotonic() + _RESOLVED_TTL_SECONDS,
                 }
             data["pending"] = [q for q in pending if q.get("request_id") != request_id]
-            state.pairing_store.save(data)
+            db.pairing_save(data)
             return {"status": "expired"}
         fresh.append(p)
     if len(fresh) != len(pending):
         data["pending"] = fresh
-        state.pairing_store.save(data)
+        db.pairing_save(data)
     raise KeyError(request_id)
 
 
 def list_devices() -> list[dict]:
     """已配对设备列表（不含 token_hash）；每条含 server_id（iOS 端区分"哪台桌面"）与 note（用户备注）"""
-    devices = state.pairing_store.load().get("devices", [])
+    devices = db.pairing_load().get("devices", [])
     return [
         {
             "server_id": _server_id_of(d),
@@ -308,12 +308,12 @@ def update_note(server_id: str, device_id: str, note: str) -> dict | None:
     找不到匹配条目返回 None。note 清洗：strip 去首尾空白，超 50 字符截断（前端同限）。
     """
     clean = note.strip()[:50]
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     devices = data.get("devices", [])
     for d in devices:
         if d.get("device_id") == device_id and _server_id_of(d) == server_id:
             d["note"] = clean
-            state.pairing_store.save(data)
+            db.pairing_save(data)
             return {
                 "server_id": _server_id_of(d),
                 "device_id": d.get("device_id", ""),
@@ -332,7 +332,7 @@ def revoke(device_id: str, server_id: str | None = None) -> dict:
     server_id 指定 → 只撤销该设备在该桌面实例的配对（DELETE /devices/{server_id}/{device_id}）；
     server_id 省略 → 撤销该设备在所有实例的配对（旧单参 DELETE /devices/{device_id} 兼容）。
     """
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     devices = data.get("devices", [])
     if server_id:
         kept = [
@@ -344,7 +344,7 @@ def revoke(device_id: str, server_id: str | None = None) -> dict:
         kept = [d for d in devices if d.get("device_id") != device_id]
     if len(kept) != len(devices):
         data["devices"] = kept
-        state.pairing_store.save(data)
+        db.pairing_save(data)
     return {"status": "revoked", "device_id": device_id, "server_id": server_id or "*"}
 
 
@@ -354,13 +354,13 @@ def verify_token(token: str) -> bool:
     token 本身已绑定 (server_id, device_id)，哈希命中即通过（不额外校验 server_id——
     本实例的 pairing.json 里所有条目都是本实例发的 token）。"""
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     devices = data.get("devices", [])
     now = _now_iso()
     for d in devices:
         if d.get("token_hash") == token_hash:
             if d.get("last_seen_at") != now:
                 d["last_seen_at"] = now
-                state.pairing_store.save(data)
+                db.pairing_save(data)
             return True
     return False

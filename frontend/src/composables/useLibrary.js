@@ -61,7 +61,7 @@ export async function toggleFavorite(path) {
   }
 }
 
-// ============ 歌单（后端持久化 ~/Library/Application Support/qqplayer/playlists.json）============
+// ============ 歌单（后端持久化 SQLite playlists 表）============
 export async function loadPlaylists() {
   try {
     // 歌单元数据：60s + 离线兜底；增删改成功后失效

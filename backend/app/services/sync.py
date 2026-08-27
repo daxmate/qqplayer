@@ -31,7 +31,14 @@ except ImportError:
     MP4 = None
 
 # 合法实体（与 ops 表 entity 列对应；未知实体整批拒绝）
-_ENTITIES = {"favorites", "playlists", "reading_progress", "playback_events"}
+_ENTITIES = {
+    "favorites",
+    "playlists",
+    "reading_progress",
+    "playback_events",
+    "annotations",
+    "vocab",
+}
 
 # manifest 中 dicts 下载用扩展名（DICTS_DIR 下按需下载的目标）
 _DICT_EXTS = {".mdx", ".mdd"}
@@ -260,7 +267,7 @@ def _manifest_books() -> list[dict]:
     """书架清单：books.json 元数据 + reading_progress 表进度合并"""
     progs = db.progress_all()
     out: list[dict] = []
-    for b in state.books_store.load():
+    for b in db.books_load():
         bid = b.get("id")
         if not bid:
             continue
@@ -323,6 +330,52 @@ def _manifest_dicts() -> list[dict]:
     return out
 
 
+def _annotations_version(book: dict) -> int:
+    """书标注的最新改动时间（ms）：该书全部条目 createdAt/updatedAt 的最大值。
+
+    作为该书在 manifest / ops LWW 中的版本依据（存储结构无整书 ts，用条目最大 ts 近似）。
+    """
+    ts = 0
+    for kind in ("highlights", "bookmarks", "notes"):
+        for item in book.get(kind) or []:
+            if not isinstance(item, dict):
+                continue
+            for f in ("createdAt", "updatedAt"):
+                v = item.get(f)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    ts = max(ts, int(v))
+    return ts
+
+
+def _manifest_annotations() -> list[dict]:
+    """标注清单：按书全量，顶层独立条目（不并入 books）。
+
+    选型理由：books 条目是「书架元数据 + 阅读进度」的轻量清单（iOS 书架展示/下载用），
+    标注体积大且变更频率独立——并入 books 会让书架清单膨胀、进度与标注耦合。
+    独立条目带 per-book version（该书标注最新 ts），前端按书 LWW 覆盖。
+    """
+    data = db.annotations_load()
+    out: list[dict] = []
+    for book_id, book in data.items():
+        if not isinstance(book, dict):
+            continue
+        out.append(
+            {
+                "bookId": book_id,
+                "version": _annotations_version(book),
+                "highlights": list(book.get("highlights") or []),
+                "bookmarks": list(book.get("bookmarks") or []),
+                "notes": list(book.get("notes") or []),
+            }
+        )
+    return out
+
+
+def _manifest_vocab() -> list[dict]:
+    """生词清单：全量（版本依据 = 最新 addedAt，manifest 版本串里体现）"""
+    return [dict(v) for v in db.vocab_load()]
+
+
 def _ops_max_id() -> int:
     """ops 表最新游标（manifest 版本号变化依据：同步写入会推进它）"""
     db._ensure_ready()
@@ -331,10 +384,15 @@ def _ops_max_id() -> int:
     return int(row["m"])
 
 
-def _manifest_version(songs: list[dict], dicts: list[dict]) -> str:
-    """版本串：日期 + 各变更依据拼接（歌曲/词典 mtime、books.json mtime、ops 游标、重扫版本）。
+def _manifest_version(
+    songs: list[dict], dicts: list[dict], annotations: list[dict], vocab: list[dict]
+) -> str:
+    """版本串：日期 + 各变更依据拼接（歌曲/词典 mtime、books.json mtime、标注/生词最新 ts、
+    ops 游标、重扫版本）。
 
     简单实现：任一数据源有变 → 版本串变化 → 客户端据此刷新 manifest。
+    注：books.json 迁 SQLite 后可能已改名 .migrated.bak（文件 mtime 不再变化），
+    书架变更信号由 kv_store 的写入覆盖；标注/生词以各自最新条目 ts 为变更依据。
     """
     max_mtime = 0
     for s in songs:
@@ -343,6 +401,10 @@ def _manifest_version(songs: list[dict], dicts: list[dict]) -> str:
         max_mtime = max(max_mtime, int(x.get("mtime") or 0))
     with contextlib.suppress(OSError):
         max_mtime = max(max_mtime, int(Path(state.BOOKS_FILE).stat().st_mtime * 1000))
+    for a in annotations:
+        max_mtime = max(max_mtime, int(a.get("version") or 0))
+    for v in vocab:
+        max_mtime = max(max_mtime, int(v.get("addedAt") or 0))
     ops_id = _ops_max_id()
     scan_ver = int(getattr(state, "_scan_version", 0))
     return f"{datetime.now():%Y%m%d}-{max_mtime}-ops{ops_id}-scan{scan_ver}"
@@ -352,13 +414,17 @@ def build_manifest() -> dict:
     """全量元数据清单（GET /api/sync/manifest 响应体）"""
     songs = _manifest_songs()
     dicts = _manifest_dicts()
+    annotations = _manifest_annotations()
+    vocab = _manifest_vocab()
     return {
-        "version": _manifest_version(songs, dicts),
+        "version": _manifest_version(songs, dicts, annotations, vocab),
         "generated_at": _now_iso(),
         "songs": songs,
         "playlists": _manifest_playlists(),
         "favorites": _manifest_favorites({s["path"]: s for s in songs}),
         "books": _manifest_books(),
+        "annotations": annotations,
+        "vocab": vocab,
         "dicts": dicts,
         # 客户端拼 URL 下载：音频/封面走现有接口；词典文件走本路由的下载端点
         "media_url_template": "/api/audio?path={path}",
@@ -425,6 +491,36 @@ def validate_ops(ops) -> None:
                 raise ValueError(f"ops[{i}].op 不合法: {op_name!r}（playback_events 支持 append）")
             if not str(payload.get("path") or "").strip():
                 raise ValueError(f"ops[{i}]: playback_events 缺少 path")
+        elif entity == "annotations":
+            if op_name != "save":
+                raise ValueError(f"ops[{i}].op 不合法: {op_name!r}（annotations 支持 save）")
+            bid = str(payload.get("bookId") or op.get("entity_id") or "")
+            if not bid.strip():
+                raise ValueError(f"ops[{i}]: annotations 缺少 bookId")
+            ann = payload.get("annotations")
+            if not isinstance(ann, dict):
+                raise ValueError(f"ops[{i}]: annotations 缺少 annotations 对象")
+            for kind in ("highlights", "bookmarks", "notes"):
+                arr = ann.get(kind)
+                if arr is not None and (
+                    not isinstance(arr, list) or not all(isinstance(x, dict) for x in arr)
+                ):
+                    raise ValueError(f"ops[{i}]: annotations {kind} 必须是对象数组")
+            upd = payload.get("updatedAt")
+            if not isinstance(upd, (int, float)) or isinstance(upd, bool):
+                raise ValueError(f"ops[{i}]: annotations updatedAt 必须是数字时间戳")
+        elif entity == "vocab":
+            if op_name not in ("add", "remove"):
+                raise ValueError(f"ops[{i}].op 不合法: {op_name!r}（vocab 支持 add/remove）")
+            vid = str(payload.get("id") or op.get("entity_id") or "")
+            if not vid.strip():
+                raise ValueError(f"ops[{i}]: vocab 缺少 id")
+            if op_name == "add":
+                if not str(payload.get("word") or "").strip():
+                    raise ValueError(f"ops[{i}]: vocab add 缺少 word")
+                added = payload.get("addedAt")
+                if not isinstance(added, (int, float)) or isinstance(added, bool):
+                    raise ValueError(f"ops[{i}]: vocab add 的 addedAt 必须是数字时间戳")
 
 
 # ============ ops 应用（last-write-wins） ============
@@ -564,6 +660,75 @@ def _playback_apply(op: dict) -> None:
     )
 
 
+def _annotations_apply(op: dict) -> bool:
+    """annotations：save 按书 LWW 覆盖（updatedAt 大者胜，缺省用 op.ts）。
+
+    语义：payload 携带该书完整标注 + updatedAt（该书最新改动 ts）；现有书版本
+    （条目最大 ts）比本次新 → 跳过；否则整书替换。"""
+    payload = op.get("payload") or {}
+    book_id = str(payload.get("bookId") or op.get("entity_id") or "").strip()
+    if not book_id:
+        return False
+    ann = payload.get("annotations")
+    if not isinstance(ann, dict):
+        return False
+    op_ts = _ts_ms(payload.get("updatedAt"))
+    if op_ts <= 0:
+        op_ts = _ts_ms(op.get("ts"))
+    data = db.annotations_load()
+    existing = data.get(book_id)
+    if existing is not None and _annotations_version(existing) > op_ts:
+        return False  # 现有标注更新 → 跳过（LWW）
+    data[book_id] = {
+        "highlights": [dict(x) for x in (ann.get("highlights") or [])],
+        "bookmarks": [dict(x) for x in (ann.get("bookmarks") or [])],
+        "notes": [dict(x) for x in (ann.get("notes") or [])],
+    }
+    db.annotations_save(data)
+    return True
+
+
+def _vocab_apply(op: dict) -> bool:
+    """vocab：add upsert / remove，按 addedAt（或 op ts）大者胜。"""
+    payload = op.get("payload") or {}
+    vid = str(payload.get("id") or op.get("entity_id") or "").strip()
+    if not vid:
+        return False
+    op_name = str(op.get("op") or "")
+    items = db.vocab_load()
+    existing = next((it for it in items if it.get("id") == vid), None)
+    if op_name == "add":
+        op_ts = _ts_ms(payload.get("addedAt"))
+        if op_ts <= 0:
+            op_ts = _ts_ms(op.get("ts"))
+        if existing is not None and _ts_ms(existing.get("addedAt")) > op_ts:
+            return False  # 现有生词更新 → 跳过（LWW）
+        entry = {
+            "id": vid,
+            "word": str(payload.get("word") or ""),
+            "context": str(payload.get("context") or ""),
+            "bookId": str(payload.get("bookId") or ""),
+            "bookTitle": str(payload.get("bookTitle") or ""),
+            "cfi": str(payload.get("cfi") or ""),
+            "addedAt": int(op_ts),
+        }
+        if existing is not None:
+            items[items.index(existing)] = entry
+        else:
+            items.append(entry)
+        db.vocab_save(items)
+        return True
+    if op_name == "remove":
+        if existing is None:
+            return False
+        op_ts = _ts_ms(op.get("ts"))
+        if _ts_ms(existing.get("addedAt")) > op_ts:
+            return False  # 现有生词比 remove 更新 → 保留（LWW）
+        db.vocab_save([it for it in items if it.get("id") != vid])
+        return True
+    return False
+
+
 def apply_ops(ops: list[dict]) -> tuple[int, int]:
     """应用一批 ops（调用前须 validate_ops 通过）：逐条应用 + 追加 ops 日志。
 
@@ -585,6 +750,10 @@ def apply_ops(ops: list[dict]) -> tuple[int, int]:
             _progress_apply(op)
         elif entity == "playback_events":
             _playback_apply(op)
+        elif entity == "annotations":
+            _annotations_apply(op)
+        elif entity == "vocab":
+            _vocab_apply(op)
         cursor = db.ops_append(entity, entity_id, op_name, payload, str(op.get("ts") or ""))
         applied += 1
     return applied, cursor

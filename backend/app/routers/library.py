@@ -46,9 +46,7 @@ def _network_song_entry(e: dict) -> dict:
 @router.get("/api/songs")
 def api_songs():
     """本地扫描歌曲 + 网络曲库条目（本地歌在前保持原结构，网络歌 type=stream 追加在末尾）"""
-    return library_scan.scan_library() + [
-        _network_song_entry(e) for e in state.network_songs_store.load()
-    ]
+    return library_scan.scan_library() + [_network_song_entry(e) for e in db.network_songs_load()]
 
 
 @router.get("/api/library")

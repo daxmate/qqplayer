@@ -1,6 +1,6 @@
-"""阅读器 V2 生词本路由：全局跨书生词（vocab.json 持久化）。
+"""阅读器 V2 生词本路由：全局跨书生词（SQLite kv_store[vocab] 持久化）。
 
-存储结构（vocab_store，JsonStore 延迟解析路径）：
+存储结构（db.vocab_load/save）：
 [{"id": "vw_<hex>", "word": "hello", "context": "原句上下文（书里选中时的句子）",
   "bookId": "", "bookTitle": "", "cfi": "", "addedAt": 1710000000000}]
 
@@ -13,7 +13,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Response
 
-from app import state
+from app import db
 
 router = APIRouter()
 
@@ -23,7 +23,7 @@ _EXPORT_FIELDS = ("word", "bookTitle", "context")
 
 def _load_sorted() -> list[dict]:
     """全部生词，按 addedAt 倒序（最新在前）"""
-    items = state.vocab_store.load()
+    items = db.vocab_load()
     return sorted(items, key=lambda it: it.get("addedAt", 0), reverse=True)
 
 
@@ -54,21 +54,21 @@ def api_vocab_create(body: dict):
         "cfi": _opt_str(body.get("cfi")),
         "addedAt": int(time.time() * 1000),
     }
-    items = state.vocab_store.load()
+    items = db.vocab_load()
     items.append(item)
-    state.vocab_store.save(items)
+    db.vocab_save(items)
     return {"id": item["id"]}
 
 
 @router.delete("/api/vocab/{vid}")
 def api_vocab_delete(vid: str):
     """删除生词 → 204；不存在 → 404"""
-    items = state.vocab_store.load()
+    items = db.vocab_load()
     before = len(items)
     items = [it for it in items if it.get("id") != vid]
     if len(items) == before:
         raise HTTPException(404, "word not found")
-    state.vocab_store.save(items)
+    db.vocab_save(items)
     return Response(status_code=204)
 
 

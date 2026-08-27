@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 import backend
-from app import state
+from app import db, state
 from app.services import pairing as pairing_service
 
 client = TestClient(backend.app)
@@ -64,9 +64,9 @@ def _pair_device(device_id="iphone-01", name="iPhone 15", dtype="ios") -> tuple[
 
 def _switch_server_id(server_id: str) -> None:
     """模拟"换了一台桌面实例"：改写 pairing.json 里的 server_id（get_server_id 返回新值）"""
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     data["server_id"] = server_id
-    state.pairing_store.save(data)
+    db.pairing_save(data)
 
 
 # ============ 配对流程 ============
@@ -97,7 +97,7 @@ def test_approve_generates_token_hash_only():
     request_id, token = _pair_device()
     assert len(token) == 64  # secrets.token_urlsafe(48)
     # 落盘只存 SHA-256 哈希，绝不存明文
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     device = next(d for d in data["devices"] if d["device_id"] == "iphone-01")
     assert device["token_hash"] == hashlib.sha256(token.encode("utf-8")).hexdigest()
     raw = json.dumps(data)
@@ -232,7 +232,7 @@ def test_repair_replaces_token():
     _, token1 = _pair_device()
     _, token2 = _pair_device()
     assert token1 != token2
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     assert len(data["devices"]) == 1  # 不重复建设备
     assert data["devices"][0]["token_hash"] == hashlib.sha256(token2.encode()).hexdigest()
 
@@ -242,9 +242,9 @@ def test_last_seen_refreshed_on_auth(monkeypatch):
     monkeypatch.setattr(state, "AUTH_ENABLED", True)
     _, token = _pair_device()
     # 手动把 last_seen_at 拨回过去
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     data["devices"][0]["last_seen_at"] = "2020-01-01T00:00:00"
-    state.pairing_store.save(data)
+    db.pairing_save(data)
     # 远端带 token 访问一次受保护端点
     code, _ = _remote("GET", "/api/library", headers={"Authorization": f"Bearer {token}"})
     assert code == 200
@@ -338,7 +338,7 @@ def test_same_device_two_servers_two_tokens(monkeypatch):
     code, _ = _remote("GET", "/api/library", headers={"Authorization": f"Bearer {token2}"})
     assert code == 200
     # 落盘两个独立条目，server_id + device_id 联合唯一，token 哈希各不相同
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     assert len(data["devices"]) == 2
     assert {d["server_id"] for d in data["devices"]} == {server_a, "server-B"}
     hashes = {d["token_hash"] for d in data["devices"]}
@@ -366,7 +366,7 @@ def test_same_server_repair_replaces_token_only_that_instance():
     assert not pairing_service.verify_token(token1)  # A 的旧 token 立即失效
     assert pairing_service.verify_token(token2)
     assert pairing_service.verify_token(token_b)  # B 桌面的 token 仍有效
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     assert len(data["devices"]) == 2  # 两台桌面各一条，不合并
     by_server = {d["server_id"]: d for d in data["devices"]}
     assert by_server[server_a]["token_hash"] == hashlib.sha256(token2.encode()).hexdigest()
@@ -412,9 +412,9 @@ def test_list_devices_includes_note_default_empty():
     devices = client.get("/api/pairing/devices").json()["devices"]
     assert devices[0]["note"] == ""
     # 老数据兼容：手工去掉 note 字段后列表仍返回空串
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     data["devices"][0].pop("note")
-    state.pairing_store.save(data)
+    db.pairing_save(data)
     devices = client.get("/api/pairing/devices").json()["devices"]
     assert devices[0]["note"] == ""
 
@@ -493,10 +493,10 @@ def test_patch_note_persisted():
         ).status_code
         == 200
     )
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     assert data["devices"][0]["note"] == "公司工位"
     # 再次 load（模拟重启后从文件读）仍有
-    assert state.pairing_store.load()["devices"][0]["note"] == "公司工位"
+    assert db.pairing_load()["devices"][0]["note"] == "公司工位"
 
 
 def test_patch_note_scoped_by_server_id():
@@ -511,7 +511,7 @@ def test_patch_note_scoped_by_server_id():
         ).status_code
         == 200
     )
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     by_server = {d["server_id"]: d for d in data["devices"]}
     assert by_server[server_a]["note"] == "家里"
     assert by_server["server-B"]["note"] == ""

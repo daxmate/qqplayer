@@ -93,6 +93,14 @@ export default {
       syncAllDesc:
         "One-tap: download missing music (audio + covers), books and dicts; refresh stale lyrics; apply updates when auto-update is on",
       syncAllDone: "Sync done, downloading {n} files",
+      // Reader annotations + vocab
+      readerData: "Annotations & Vocabulary",
+      readerDataLabel: "Highlights / Bookmarks / Notes & Vocabulary",
+      readerDataDesc:
+        "Synced automatically with the manifest (merged per-book / per-word, local additions kept); no file downloads",
+      readerDataGo: "Sync Now",
+      readerDataSynced: "{books} books annotated · {vocab} words",
+      readerDataEmpty: "No annotations or vocabulary yet",
       // Dicts
       dicts: "Dictionaries",
       dictsDesc:

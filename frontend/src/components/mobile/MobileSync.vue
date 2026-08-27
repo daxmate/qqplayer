@@ -162,6 +162,27 @@
         </div>
       </section>
 
+      <!-- ✒️ 阅读标注 + 生词（manifest annotations/vocab：随同步自动拉取，非文件下载） -->
+      <section class="msc-group">
+        <h2 class="msc-group-title">
+          <PenLine :size="14" />
+          {{ t("mobile.syncCenter.readerData") }}
+        </h2>
+        <div class="msc-item">
+          <div class="msc-label">{{ t("mobile.syncCenter.readerDataLabel") }}</div>
+          <div class="msc-desc">{{ t("mobile.syncCenter.readerDataDesc") }}</div>
+          <button class="msc-btn primary" :disabled="syncBusy" @click="refreshReaderData(true)">
+            {{ t("mobile.syncCenter.readerDataGo") }}
+          </button>
+        </div>
+        <div v-if="readerDataSummary" class="msc-item">
+          <div class="msc-desc">{{ readerDataSummary }}</div>
+        </div>
+        <div v-else class="msc-item">
+          <div class="msc-desc">{{ t("mobile.syncCenter.readerDataEmpty") }}</div>
+        </div>
+      </section>
+
       <!-- 📚 词典（manifest dicts） -->
       <section class="msc-group">
         <h2 class="msc-group-title">
@@ -372,6 +393,7 @@ import {
   Music2,
   BookOpen,
   BookMarked,
+  PenLine,
   Download,
   Database,
   Trash2,
@@ -663,6 +685,33 @@ function dictStatus(item) {
   return e ? e.status : "";
 }
 
+// ---------- 阅读标注 + 生词（manifest annotations/vocab：数据随同步拉取，非文件下载） ----------
+const readerData = ref({ books: 0, vocab: 0 }); // 有标注的书数 / 生词数
+
+/** 汇总文案：有数据时展示「N 本书标注 · M 个生词」；都空时返回空串（UI 显空态文案） */
+const readerDataSummary = computed(() => {
+  const { books, vocab } = readerData.value;
+  if (!books && !vocab) return "";
+  return t("mobile.syncCenter.readerDataSynced", { books, vocab });
+});
+
+/** 刷新标注/生词状态；reSync=true 时先拉最新 manifest（annotations/vocab 自动合并进缓存） */
+async function refreshReaderData(reSync = false) {
+  if (reSync && !syncBusy.value) {
+    syncBusy.value = true;
+    try {
+      await syncNow();
+    } finally {
+      syncBusy.value = false;
+    }
+  }
+  const [ann, voc] = await Promise.all([getCache("sync:annotations"), getCache("sync:vocab")]);
+  readerData.value = {
+    books: Array.isArray(ann) ? ann.length : 0,
+    vocab: Array.isArray(voc) ? voc.length : 0,
+  };
+}
+
 async function downloadAllDicts() {
   if (syncBusy.value) return;
   const items = dictItems.value.filter(
@@ -855,6 +904,7 @@ onMounted(() => {
   refreshOverview();
   refreshStorage();
   refreshDicts();
+  refreshReaderData();
 });
 
 // 供测试/调试：强制刷新总览（断言徽标数据）

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import gequhai_provider
 import netease_provider
 import quark_provider
-from app import state
+from app import db, state
 from app.services import download
 from app.services import settings as settings_service
 
@@ -228,7 +228,7 @@ def _find_network_song(entries: list[dict], provider: str, sid: str) -> bool:
 @router.get("/api/network-songs")
 def api_network_songs_list():
     """全部网络曲库条目（按添加顺序）"""
-    return state.network_songs_store.load()
+    return db.network_songs_load()
 
 
 @router.post("/api/network-songs")
@@ -240,7 +240,7 @@ def api_network_songs_add(body: dict):
     if not sid or not title or not artist:
         raise HTTPException(400, "id/title/artist 必填")
     provider = str(body.get("provider") or "netease").strip() or "netease"
-    entries = state.network_songs_store.load()
+    entries = db.network_songs_load()
     if not _find_network_song(entries, provider, sid):
         entries.append(
             {
@@ -254,7 +254,7 @@ def api_network_songs_add(body: dict):
                 "addedAt": datetime.now(timezone.utc).isoformat(),
             }
         )
-        state.network_songs_store.save(entries)
+        db.network_songs_save(entries)
         with state._scan_lock:
             state._scan_version += 1  # 前端 3s 轮询 /api/library/version 自动刷新曲库
     return entries
@@ -267,11 +267,11 @@ def api_network_songs_delete(provider: str = "netease", id: str = ""):
     if not sid:
         raise HTTPException(400, "缺少 id")
     provider = str(provider or "netease").strip() or "netease"
-    entries = state.network_songs_store.load()
+    entries = db.network_songs_load()
     before = len(entries)
     entries = [
         e for e in entries if not (e.get("provider") == provider and str(e.get("id")) == sid)
     ]
     if len(entries) != before:
-        state.network_songs_store.save(entries)
+        db.network_songs_save(entries)
     return entries

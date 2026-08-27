@@ -260,7 +260,7 @@ def test_manifest_favorites_enriched(local_library):
 
 def test_manifest_books_merge_progress():
     """books：books.json 书架 + reading_progress 表进度合并"""
-    state.books_store.save([{"id": "b1", "title": "测试书", "author": "某作者", "addedAt": 123}])
+    db.books_save([{"id": "b1", "title": "测试书", "author": "某作者", "addedAt": 123}])
     db.progress_set("b1", {"cfi": "epubcfi(/6/2)", "updatedAt": 100})
     db.progress_set("b2", {"cfi": "epubcfi(/6/3)", "updatedAt": 200, "location": 3})  # 无书架元数据
     m = client.get("/api/sync/manifest").json()
@@ -616,7 +616,7 @@ def test_ops_pull_echoes_pushed_op_fields():
 def _pair_token(device_id="iphone-01"):
     """直接落盘一个已配对设备（token 只存哈希）→ 返回明文 token"""
     token = "test-sync-token-abc"
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     data.setdefault("devices", []).append(
         {
             "device_id": device_id,
@@ -626,7 +626,7 @@ def _pair_token(device_id="iphone-01"):
             "paired_at": "2026-08-22T00:00:00+00:00",
         }
     )
-    state.pairing_store.save(data)
+    db.pairing_save(data)
     return token
 
 
@@ -740,3 +740,321 @@ def test_dicts_file_download(tmp_path):
         assert client.get("/api/sync/dicts/file", params={"path": bad}).status_code == 400, bad
     # 不存在 → 404
     assert client.get("/api/sync/dicts/file", params={"path": "nope.mdx"}).status_code == 404
+
+
+# ============ P2-B：annotations / vocab 接入 manifest + ops ============
+def test_manifest_annotations_per_book():
+    """annotations：顶层独立条目，按书全量 + version（该书条目最新 ts）"""
+    db.annotations_save(
+        {
+            "b1": {
+                "highlights": [
+                    {"id": "hl_1", "cfi": "c", "text": "x", "color": "yellow", "createdAt": 100},
+                    {"id": "hl_2", "cfi": "c2", "text": "y", "createdAt": 300},
+                ],
+                "bookmarks": [{"id": "bm_1", "cfi": "c", "createdAt": 200}],
+                "notes": [
+                    {"id": "nt_1", "cfi": "c", "text": "n", "createdAt": 250, "updatedAt": 400}
+                ],
+            },
+            "b2": {"highlights": [], "bookmarks": [], "notes": []},
+        }
+    )
+    m = client.get("/api/sync/manifest").json()
+    by_book = {a["bookId"]: a for a in m["annotations"]}
+    assert set(by_book) == {"b1", "b2"}
+    assert by_book["b1"]["version"] == 400  # 全部条目 ts 最大值
+    assert len(by_book["b1"]["highlights"]) == 2
+    assert len(by_book["b1"]["bookmarks"]) == 1
+    assert len(by_book["b1"]["notes"]) == 1
+    assert by_book["b2"]["version"] == 0  # 无条目 → 0
+    # books 条目保持轻量：不携带 annotations
+    books = {b["id"]: b for b in m["books"]}
+    assert "annotations" not in books.get("b1", {})
+
+
+def test_manifest_vocab_full():
+    """vocab：全量列表（含 addedAt，版本依据）"""
+    db.vocab_save(
+        [
+            {
+                "id": "vw_1",
+                "word": "hello",
+                "context": "",
+                "bookId": "b1",
+                "bookTitle": "书",
+                "cfi": "",
+                "addedAt": 100,
+            },
+            {
+                "id": "vw_2",
+                "word": "world",
+                "context": "",
+                "bookId": "",
+                "bookTitle": "",
+                "cfi": "",
+                "addedAt": 200,
+            },
+        ]
+    )
+    m = client.get("/api/sync/manifest").json()
+    assert len(m["vocab"]) == 2
+    assert {v["id"] for v in m["vocab"]} == {"vw_1", "vw_2"}
+    assert all("addedAt" in v for v in m["vocab"])
+
+
+def test_manifest_version_changes_on_annotations_vocab():
+    """annotations/vocab 变化 → manifest 版本串变化（客户端据此刷新缓存）"""
+    db.annotations_save(
+        {
+            "b1": {
+                "highlights": [{"id": "hl_1", "cfi": "c", "text": "x", "createdAt": 100}],
+                "bookmarks": [],
+                "notes": [],
+            }
+        }
+    )
+    v1 = client.get("/api/sync/manifest").json()["version"]
+    db.annotations_save(
+        {
+            "b1": {
+                "highlights": [{"id": "hl_1", "cfi": "c", "text": "x", "createdAt": 99999}],
+                "bookmarks": [],
+                "notes": [],
+            }
+        }
+    )
+    v2 = client.get("/api/sync/manifest").json()["version"]
+    assert v2 != v1
+    db.vocab_save([{"id": "vw_1", "word": "hello", "addedAt": 100000}])  # 大于标注的 99999
+    v3 = client.get("/api/sync/manifest").json()["version"]
+    assert v3 != v2
+
+
+def test_push_annotations_save_lww():
+    """annotations save：按书 LWW 覆盖（updatedAt 大者胜）"""
+    _push(
+        [
+            {
+                "entity": "annotations",
+                "entity_id": "b1",
+                "op": "save",
+                "payload": {
+                    "bookId": "b1",
+                    "updatedAt": 1000,
+                    "annotations": {
+                        "highlights": [{"id": "hl_a", "cfi": "c", "text": "A", "createdAt": 1000}],
+                        "bookmarks": [],
+                        "notes": [],
+                    },
+                },
+            }
+        ]
+    )
+    assert db.annotations_load()["b1"]["highlights"][0]["id"] == "hl_a"
+    # 更旧的 save → 跳过（现有版本 1000 > 500）
+    _push(
+        [
+            {
+                "entity": "annotations",
+                "entity_id": "b1",
+                "op": "save",
+                "payload": {
+                    "bookId": "b1",
+                    "updatedAt": 500,
+                    "annotations": {
+                        "highlights": [
+                            {"id": "hl_old", "cfi": "c", "text": "OLD", "createdAt": 500}
+                        ],
+                        "bookmarks": [],
+                        "notes": [],
+                    },
+                },
+            }
+        ]
+    )
+    assert db.annotations_load()["b1"]["highlights"][0]["id"] == "hl_a"
+    # 更新的 save → 整书替换
+    _push(
+        [
+            {
+                "entity": "annotations",
+                "entity_id": "b1",
+                "op": "save",
+                "payload": {
+                    "bookId": "b1",
+                    "updatedAt": 2000,
+                    "annotations": {
+                        "highlights": [],
+                        "bookmarks": [{"id": "bm_new", "cfi": "c", "createdAt": 2000}],
+                        "notes": [],
+                    },
+                },
+            }
+        ]
+    )
+    book = db.annotations_load()["b1"]
+    assert book["highlights"] == [] and book["bookmarks"][0]["id"] == "bm_new"
+    # 桌面端 API 读得到（同源数据）
+    assert client.get("/api/books/b1/annotations").json()["bookmarks"][0]["id"] == "bm_new"
+
+
+def test_push_vocab_add_remove_lww():
+    """vocab add/remove：按 id，addedAt 大者胜"""
+    # add 新词
+    _push(
+        [
+            {
+                "entity": "vocab",
+                "entity_id": "vw_1",
+                "op": "add",
+                "payload": {
+                    "id": "vw_1",
+                    "word": "hello",
+                    "context": "Hello world.",
+                    "bookId": "b1",
+                    "bookTitle": "书",
+                    "cfi": "c",
+                    "addedAt": 1000,
+                },
+            }
+        ]
+    )
+    assert [v["word"] for v in db.vocab_load()] == ["hello"]
+    # 更旧 add（同 id）→ 跳过
+    _push(
+        [
+            {
+                "entity": "vocab",
+                "entity_id": "vw_1",
+                "op": "add",
+                "payload": {"id": "vw_1", "word": "OLD", "addedAt": 500},
+            }
+        ]
+    )
+    assert [v["word"] for v in db.vocab_load()] == ["hello"]
+    # 更新 add → 覆盖字段
+    _push(
+        [
+            {
+                "entity": "vocab",
+                "entity_id": "vw_1",
+                "op": "add",
+                "payload": {"id": "vw_1", "word": "hello!", "bookTitle": "新书", "addedAt": 2000},
+            }
+        ]
+    )
+    v = next(v for v in db.vocab_load() if v["id"] == "vw_1")
+    assert v["word"] == "hello!" and v["bookTitle"] == "新书" and v["addedAt"] == 2000
+    # 更旧 remove → 保留（addedAt 2000 > ts 1500）
+    _push(
+        [
+            {
+                "entity": "vocab",
+                "entity_id": "vw_1",
+                "op": "remove",
+                "payload": {"id": "vw_1"},
+                "ts": 1500,
+            }
+        ]
+    )
+    assert any(v["id"] == "vw_1" for v in db.vocab_load())
+    # 更新 remove → 删除
+    _push(
+        [
+            {
+                "entity": "vocab",
+                "entity_id": "vw_1",
+                "op": "remove",
+                "payload": {"id": "vw_1"},
+                "ts": 2500,
+            }
+        ]
+    )
+    assert not any(v["id"] == "vw_1" for v in db.vocab_load())
+    # 删除不存在的 id → 幂等不报错
+    _push(
+        [
+            {
+                "entity": "vocab",
+                "entity_id": "vw_nope",
+                "op": "remove",
+                "payload": {"id": "vw_nope"},
+                "ts": 1,
+            }
+        ]
+    )
+
+
+def test_invalid_annotations_vocab_ops_400():
+    """annotations/vocab 非法 ops → 整批拒绝 400"""
+    cases = [
+        # annotations：缺 bookId / op 非法 / annotations 非对象 / 子数组非对象数组 / updatedAt 非数字
+        {"ops": [{"entity": "annotations", "op": "save", "payload": {"updatedAt": 1}}]},
+        {
+            "ops": [
+                {
+                    "entity": "annotations",
+                    "op": "delete",
+                    "payload": {"bookId": "b1", "updatedAt": 1},
+                }
+            ]
+        },
+        {
+            "ops": [
+                {
+                    "entity": "annotations",
+                    "op": "save",
+                    "payload": {"bookId": "b1", "updatedAt": 1, "annotations": "nope"},
+                }
+            ]
+        },
+        {
+            "ops": [
+                {
+                    "entity": "annotations",
+                    "op": "save",
+                    "payload": {
+                        "bookId": "b1",
+                        "updatedAt": 1,
+                        "annotations": {"highlights": ["not-a-dict"], "bookmarks": [], "notes": []},
+                    },
+                }
+            ]
+        },
+        {
+            "ops": [
+                {
+                    "entity": "annotations",
+                    "op": "save",
+                    "payload": {
+                        "bookId": "b1",
+                        "annotations": {"highlights": [], "bookmarks": [], "notes": []},
+                    },
+                }
+            ]
+        },  # 缺 updatedAt
+        # vocab：缺 id / op 非法 / add 缺 word / add addedAt 非数字
+        {"ops": [{"entity": "vocab", "op": "add", "payload": {"word": "x", "addedAt": 1}}]},
+        {"ops": [{"entity": "vocab", "op": "update", "payload": {"id": "v1", "addedAt": 1}}]},
+        {
+            "ops": [{"entity": "vocab", "op": "add", "payload": {"id": "v1", "addedAt": 1}}]
+        },  # 缺 word
+        {
+            "ops": [
+                {
+                    "entity": "vocab",
+                    "op": "add",
+                    "payload": {"id": "v1", "word": "x", "addedAt": "now"},
+                }
+            ]
+        },
+        {"ops": [{"entity": "vocab", "op": "remove", "payload": {}}]},  # 缺 id
+    ]
+    for body in cases:
+        r = client.post("/api/sync/ops", json=body)
+        assert r.status_code == 400, (body, r.status_code)
+        assert r.json()["detail"]
+    # 整批不落盘
+    assert db.vocab_load() == []
+    assert db.annotations_load() == {}

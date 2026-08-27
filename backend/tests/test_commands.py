@@ -61,7 +61,7 @@ def _set_picked_at(cmd_id: int, dt: datetime) -> None:
 
 def _pair_device(device_id="iphone-01", name="iPhone 15", server_id="srv-1") -> None:
     """直接落盘一个已配对设备（token 只存哈希）"""
-    data = state.pairing_store.load()
+    data = db.pairing_load()
     data.setdefault("devices", []).append(
         {
             "server_id": server_id,
@@ -73,7 +73,7 @@ def _pair_device(device_id="iphone-01", name="iPhone 15", server_id="srv-1") -> 
             "last_seen_at": "2026-08-26T08:00:00+00:00",
         }
     )
-    state.pairing_store.save(data)
+    db.pairing_save(data)
 
 
 # ============ 1. 创建指令 ============
