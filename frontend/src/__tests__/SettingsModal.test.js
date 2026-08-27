@@ -27,7 +27,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const SettingsModal = (await import("../components/SettingsModal.vue")).default;
 const { playbackSettings, uiSettings, lyricSettings } = await import("../composables/usePlayer.js");
-const { VISUALIZER_STYLES } = await import("../composables/playerCore.js");
+const { VISUALIZER_STYLES } = await import("../composables/usePlayer.js");
 const zhCN = (await import("../locales/zh-CN/index.js")).default;
 
 // 从聚合语言包解析 settings.xxx.yyy 点路径

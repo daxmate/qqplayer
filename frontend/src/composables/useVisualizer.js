@@ -5,7 +5,7 @@
 // createMediaElementSource 一个 audio 元素只能接管一次 → 图常驻，这里只在图内插一个只读节点。
 // 降级：无 AudioContext / 图未建 / 创建失败 → 返回 null，调用方画平线，不抛错。
 // 测试钩子 _resetVisualizer 与 playerCore 的 _resetEqGraph 配套使用（用例隔离）。
-import { getEqGraph } from "./playerCore.js";
+import { getEqGraph } from "./audioEngine.ts";
 
 export const FFT_SIZE = 256; // frequencyBinCount = 128（低频分辨率足够，成本低）
 export const SMOOTHING = 0.8; // 时间平滑：频谱跳动更柔和

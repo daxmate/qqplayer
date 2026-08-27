@@ -184,7 +184,7 @@ vi.mock("../utils/coverDataURL.js", () => ({
   coverToDataURL: coverToDataURLMock,
 }));
 
-const playerMod = await import("../composables/playerCore.js");
+const playerMod = await import("../composables/usePlayer.js");
 const { state, selectSong } = playerMod;
 
 const SONGS = [

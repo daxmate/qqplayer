@@ -85,7 +85,7 @@
     {
       "name": "setQueue",
       "domain": "playback",
-      "sender": "playerCore.js",
+      "sender": "queueEngine.ts",
       "status": "active",
       "payload": {
         "songs": "array<{url: string（绝对 URL；stream 歌为 \"\"，原生跳过）, title: string, artist: string, album: string}>",
@@ -104,7 +104,7 @@
     {
       "name": "nativeReady",
       "domain": "lifecycle",
-      "sender": "playerCore.js",
+      "sender": "mediaSession.ts",
       "status": "active",
       "payload": {},
       "note": "适配层就绪上报：壳收到后才开始推播放事件（webReady + flushPendingEvents）"

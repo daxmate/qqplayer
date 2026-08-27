@@ -54,7 +54,7 @@ const localStorageStub = {
 };
 
 const { state, playbackSettings, selectSong, PLAYBACK_SETTINGS_KEY } =
-  await import("../composables/playerCore.js");
+  await import("../composables/usePlayer.js");
 const {
   sleepTimer,
   sleepTimerText,

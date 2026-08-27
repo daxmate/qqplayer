@@ -71,7 +71,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
   onNativeEvent: vi.fn(),
 }));
 
-const playerMod = await import("../composables/playerCore.js");
+const playerMod = await import("../composables/usePlayer.js");
 const { songChangedTargetIndex } = playerMod;
 
 describe("songChangedTargetIndex：songChanged 对齐索引（原生切歌跟随）", () => {

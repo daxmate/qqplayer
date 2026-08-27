@@ -337,7 +337,7 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     // 动态导入 useLyric（playerCore 有模块加载期副作用，隔离测试）；
     // 复用当前 sync（真实）——歌词文件写读走 nativeMetaSave/Load 桥（mock post/emit）。
     lyricModule = await import("../composables/useLyric.js");
-    const { state } = await import("../composables/playerCore.js");
+    const { state } = await import("../composables/usePlayer.js");
     lyricState = state;
     lyricState.songs = [{ path: "/Music/a.mp3", name: "A", artist: "X" }];
     lyricState.currentIndex = 0;

@@ -1,10 +1,18 @@
-import { playbackSettings, applyEqToGraph } from "./playerCore.js";
+import { playbackSettings } from "./playerState.ts";
 
 // ============ 均衡器（Web Audio API）============
 // 10 段经典频点（foobar2000/网易云同款），±12dB
 // 技术要点：createMediaElementSource 一个 audio 元素只能接管一次，
 // 所以音频图常驻（首次播放懒创建），开关关闭 = 增益全 0（0dB peaking 近似直通），不做动态路由切换。
-// 音频图生命周期（ensureAudioGraph/applyEqToGraph/eqFilters）在 playerCore.js（audio 强耦合）。
+// 音频图生命周期（ensureAudioGraph/applyEqToGraph/eqFilters）在 audioEngine.ts（audio 强耦合）。
+
+// 音频图即时应用回调（P1-2 批次2：由 audioEngine 在模块求值期注入 applyEqToGraph，
+// 避免 useEq ↔ audioEngine 循环 import；注册前调用为空转，与图未创建时一致）
+let eqGraphApplier = null;
+
+export function registerEqGraphApplier(fn) {
+  eqGraphApplier = fn;
+}
 export const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
 export const EQ_PRESETS = {
@@ -24,7 +32,7 @@ export function setEqPreset(key) {
   if (!preset) return;
   playbackSettings.eqPreset = key;
   if (preset.gains) playbackSettings.eqGains = [...preset.gains];
-  applyEqToGraph(); // 同步应用（watch 兜底开关路径，这里保证即时生效）
+  eqGraphApplier?.(); // 同步应用（watch 兜底开关路径，这里保证即时生效）
 }
 
 // 调整自定义增益（拖滑杆）：自动切到自定义预设
@@ -33,10 +41,10 @@ export function setEqGain(index, v) {
   const g = Math.min(12, Math.max(-12, Number(v) || 0));
   playbackSettings.eqGains[index] = g;
   playbackSettings.eqPreset = "custom";
-  applyEqToGraph(); // 同步应用（拖滑杆实时生效）
+  eqGraphApplier?.(); // 同步应用（拖滑杆实时生效）
 }
 
-// eqPreset 非法值回落 flat（由 playerCore 在播放设置加载后调用；EQ_PRESETS 定义后执行）
+// eqPreset 非法值回落 flat（由 playerState 在播放设置加载后调用；EQ_PRESETS 定义后执行）
 export function _normalizeEqPreset() {
   if (!(playbackSettings.eqPreset in EQ_PRESETS)) playbackSettings.eqPreset = "flat";
 }

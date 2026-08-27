@@ -4,7 +4,8 @@
 // 到点暂停：只读调用 playerCore 的 audio/state（audio.pause() 后由 playerCore 的
 // pause 事件监听同步 state.isPlaying，与手动暂停完全一致），不修改 playerCore.js。
 import { reactive, computed } from "vue";
-import { audio, state, playbackSettings, loadPlaybackSettings } from "./playerCore.js";
+import { audio } from "./audioEngine.ts";
+import { state, playbackSettings, loadPlaybackSettings } from "./playerState.ts";
 import i18n from "../locales/i18n.js";
 
 // 时长选项（分钟，chip 单选）

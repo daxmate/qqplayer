@@ -54,7 +54,7 @@ const {
   _resetPlayMode,
   startKaraokeTicker,
   stopKaraokeTicker,
-} = await import("../composables/playerCore.js");
+} = await import("../composables/usePlayer.js");
 const { playLine, _resetKaraokeAnchor, _resetKaraokeJump, karaokeState } =
   await import("../composables/useLyric.js");
 const { enterAbLoop, setAbEnd, exitAbLoop, clickLine, _getAbLoopCount, resetAbLoopCount } =

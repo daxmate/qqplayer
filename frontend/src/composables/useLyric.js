@@ -1,5 +1,6 @@
 import { computed, watch } from "vue";
-import { audio, state } from "./playerCore.js";
+import { audio } from "./audioEngine.ts";
+import { state } from "./playerState.ts";
 import { lyricSettings } from "./useSettings.js";
 import { parseLrcText, mergeTranslationLines } from "../utils/parseLrc.js";
 import { apiGet, apiPost, apiPut, apiDelete, invalidate } from "../utils/apiClient.js";

@@ -200,7 +200,7 @@ vi.mock("../utils/coverDataURL.js", () => ({
 }));
 
 // ---------- 被测模块（动态导入：须在 Audio stub 之后） ----------
-const playerMod = await import("../composables/playerCore.js");
+const playerMod = await import("../composables/usePlayer.js");
 const sync = await import("../utils/sync.js");
 
 const { state, maybePrefetchAsset, resolveCoverForMetadata } = playerMod;

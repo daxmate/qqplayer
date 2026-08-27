@@ -1,5 +1,7 @@
 import { computed } from "vue";
-import { state, audio, selectSong, _resetPlayMode } from "./playerCore.js";
+import { state } from "./playerState.ts";
+import { audio } from "./audioEngine.ts";
+import { selectSong, _resetPlayMode } from "./queueEngine.ts";
 import { showToast, toastError } from "./useToast.js";
 import { apiGet, apiPost, apiDelete, invalidate, writeLocal } from "../utils/apiClient.js";
 import { nativeMetaSave } from "../utils/sync.js";

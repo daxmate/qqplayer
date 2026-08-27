@@ -1,4 +1,5 @@
-import { state, audio, playbackSettings } from "./playerCore.js";
+import { state, playbackSettings } from "./playerState.ts";
+import { audio, registerAudioEventHooks } from "./audioEngine.ts";
 import {
   currentLineIndex,
   playLine,
@@ -184,3 +185,7 @@ export function handleKaraokeTick(t) {
     }
   }
 }
+
+// 跟唱句末处理注入 audioEngine 音频事件（timeupdate 回调；P1-2 批次2：
+// 避免 useAbLoop ↔ audioEngine 循环 import——audioEngine 事件经 hooks 回调本模块）
+registerAudioEventHooks({ karaokeTick: handleKaraokeTick });

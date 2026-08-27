@@ -2792,12 +2792,13 @@ describe("播放设置 playbackSettings", () => {
   it("播放模式持久化：模块加载时从 localStorage 恢复", async () => {
     // 重新加载模块验证启动恢复（重置模块缓存）
     // 拆分后 usePlayer.js 是 barrel 聚合层（export * 的底层模块已被缓存，查询参数无法强制重载），
-    // 播放设置的加载逻辑在 playerCore.js，直接重载它验证等价行为
+    // 播放设置的加载逻辑在 playerState.ts（playbackSettings 与 loadPlaybackSettings 同模块），
+    // 直接重载它验证等价行为
     localStorage.setItem(
       PLAYBACK_SETTINGS_KEY,
       JSON.stringify({ playMode: "shuffle", resumeLast: false, rememberVolume: false, fadeSec: 1 }),
     );
-    const mod = await import("../composables/playerCore.js?restore-test=" + Date.now());
+    const mod = await import("../composables/playerState.ts?restore-test=" + Date.now());
     expect(mod.state.playMode).toBe("shuffle");
     expect(mod.playbackSettings.fadeSec).toBe(1);
   });
