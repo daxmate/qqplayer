@@ -274,6 +274,7 @@ export function useSelectionToolbar(options: {
   }
 
   function onToolbarNote(_text: string) {
+    void _text; // 事件 payload 兼容（SelectionToolbar 统一发 text）；创建笔记不需要文本
     options.openNoteCreate();
   }
 
