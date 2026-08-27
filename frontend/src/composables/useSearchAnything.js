@@ -8,7 +8,7 @@ import { isSearchOpen } from "./searchState.js";
 import { history, loadHistory, addHistory, removeHistory, clearHistory } from "./searchHistory.js";
 import { matchScore, kindRank } from "../utils/score.js";
 import { apiGet } from "../utils/apiClient.js";
-import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex.js";
+import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex";
 import i18n from "../locales/i18n.js";
 
 const DEBOUNCE_MS = 250;

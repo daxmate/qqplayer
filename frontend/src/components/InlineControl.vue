@@ -1,6 +1,6 @@
 <!-- 设置项内联控件（search anything · 结果行直接操作）
   按 entry.type 渲染：toggle → 开关 / slider → 滑杆+数值 / select → chips 单选 / text → 输入框（Enter/blur 提交）。
-  变更直接调 entry.set(v)（settingsSync watch 自动持久化，见 settingsIndex.js 顶部说明）。
+  变更直接调 entry.set(v)（settingsSync watch 自动持久化，见 settingsIndex.ts 顶部说明）。
   样式沿用 SettingsModal 的控件视觉（--accent/--bg2/--border 等 CSS 变量）。 -->
 <template>
   <div class="inline-control" :class="`ic-${entry.type}`">

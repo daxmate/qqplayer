@@ -98,7 +98,7 @@
                             max="12"
                             step="1"
                             :value="playbackSettings.eqGains[i]"
-                            @input="setEqGain(i, $event.target.value)"
+                            @input="setEqGain(i, ($event.target as HTMLInputElement).value)"
                           />
                           <span class="eq-band">{{ fmtBand(f) }}</span>
                         </div>
@@ -754,7 +754,7 @@
                       class="amll-info-btn"
                       :class="{ on: amllPerfHintOpen }"
                       :title="t('settings.amllPerfHint')"
-                      :aria-expanded="String(amllPerfHintOpen)"
+                      :aria-expanded="amllPerfHintOpen ? 'true' : 'false'"
                       @click="amllPerfHintOpen = !amllPerfHintOpen"
                     >
                       <Info :size="13" />
@@ -1177,7 +1177,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { useShellBridge } from "../composables/useShellBridge.js";
@@ -1267,7 +1267,7 @@ import QuarkLoginModal from "./QuarkLoginModal.vue";
 import PairingSettings from "./PairingSettings.vue";
 import ScrapeResultModal from "./ScrapeResultModal.vue";
 import SettingRow from "./SettingRow.vue";
-import { entriesByCategory } from "../settingsIndex.js";
+import { entriesByCategory, type SettingEntry } from "../settingsIndex";
 import {
   scrapingSettings,
   SCRAPING_FIELDS,
@@ -1294,10 +1294,10 @@ const version = pkg.version;
 // ---- 关于页彩蛋：连点版本号 5 次 → 🐘 ----
 const eggVisible = ref(false);
 let eggClicks = 0;
-let eggTimer = null;
+let eggTimer: number | null = null;
 function onVersionClick() {
   eggClicks++;
-  clearTimeout(eggTimer);
+  clearTimeout(eggTimer ?? undefined);
   eggTimer = setTimeout(() => (eggClicks = 0), 1500);
   if (eggClicks >= 5) {
     eggClicks = 0;
@@ -1319,7 +1319,7 @@ const saving = ref(false);
 const error = ref("");
 
 // 夸克账号状态（下载分类展示）：null=未加载 | {logged_in, nickname?}
-const quarkState = ref(null);
+const quarkState = ref<{ logged_in: boolean; nickname?: string } | null>(null);
 const quarkBusy = ref(false);
 const quarkLoginOpen = ref(false);
 
@@ -1357,13 +1357,13 @@ function onQuarkLoginSuccess() {
 
 // ============ 设备管理面板（sync tab · 桌面端管理端） ============
 // 设备指令队列（写指令让 iOS 推送下载/远程删除）+ 可见 iOS 资产清单。
-const syncDevices = ref([]);
-const syncCommands = ref([]);
+const syncDevices = ref<any[]>([]);
+const syncCommands = ref<any[]>([]);
 const syncPanelLoading = ref(true);
 const syncPanelError = ref("");
-const expandedDeviceIds = ref([]); // 已展开资产列表的设备 id
-const assetSelection = ref({}); // { [device_id]: { [path]: true } }
-const deleteConfirm = ref(null); // {device, paths} | null（确认弹窗目标）
+const expandedDeviceIds = ref<string[]>([]); // 已展开资产列表的设备 id
+const assetSelection = ref<Record<string, Record<string, boolean>>>({}); // { [device_id]: { [path]: true } }
+const deleteConfirm = ref<{ device: any; paths: string[] } | null>(null); // {device, paths} | null（确认弹窗目标）
 const syncDeleting = ref(false);
 
 // 进入 sync tab / 刷新：并行拉设备清单 + 指令历史（失败兑底文案，不阻塞其他 tab）
@@ -1385,37 +1385,37 @@ async function loadDevicePanel() {
 }
 
 // 展示名：device_name 非空用设备名，空则取 device_id 前 8 位
-function deviceName(d) {
+function deviceName(d: any) {
   if (d && d.device_name && String(d.device_name).trim()) return String(d.device_name).trim();
   return d && d.device_id ? String(d.device_id).slice(0, 8) : t("settings.noDevices");
 }
 
-function assetList(d) {
+function assetList(d: any) {
   return Array.isArray(d && d.assets) ? d.assets : [];
 }
 
-function assetCount(d) {
+function assetCount(d: any) {
   if (d && typeof d.assets_count === "number") return d.assets_count;
   return assetList(d).length;
 }
 
 // byType 细分（音频/封面/图书/词典）：按已知键顺序展示，未知键忽略
 const TYPE_ORDER = ["audio", "cover", "books", "dicts"];
-function byTypeEntries(d) {
+function byTypeEntries(d: any) {
   const by = (d && d.byType) || {};
-  const out = {};
+  const out: Record<string, unknown> = {};
   for (const k of TYPE_ORDER) {
     if (Number(by[k]) > 0) out[k] = by[k];
   }
   return out;
 }
 
-function deviceExpanded(d) {
+function deviceExpanded(d: any) {
   return expandedDeviceIds.value.includes(d.device_id);
 }
 
 // 展开/收起资产列表（懒渲染：仅展开时挂 DOM；收起时清空勾选）
-function toggleDeviceAssets(d) {
+function toggleDeviceAssets(d: any) {
   const id = d.device_id;
   const i = expandedDeviceIds.value.indexOf(id);
   if (i >= 0) {
@@ -1428,11 +1428,11 @@ function toggleDeviceAssets(d) {
   }
 }
 
-function assetSelected(deviceId, path) {
+function assetSelected(deviceId: string, path: string) {
   return !!(assetSelection.value[deviceId] && assetSelection.value[deviceId][path]);
 }
 
-function toggleAsset(deviceId, path) {
+function toggleAsset(deviceId: string, path: string) {
   const sel = assetSelection.value[deviceId] || {};
   const next = { ...sel };
   if (next[path]) delete next[path];
@@ -1440,12 +1440,12 @@ function toggleAsset(deviceId, path) {
   assetSelection.value = { ...assetSelection.value, [deviceId]: next };
 }
 
-function selectedAssetCount(deviceId) {
+function selectedAssetCount(deviceId: string) {
   const sel = assetSelection.value[deviceId];
   return sel ? Object.keys(sel).length : 0;
 }
 
-function askDeleteAssets(d) {
+function askDeleteAssets(d: any) {
   const sel = assetSelection.value[d.device_id] || {};
   const paths = Object.keys(sel);
   if (!paths.length) return;
@@ -1474,7 +1474,7 @@ async function confirmDeleteAssets() {
 }
 
 // 最后在线人性化（x 分钟前/日期，文案走 i18n）
-function fmtLastSeen(iso) {
+function fmtLastSeen(iso: string) {
   return formatLastSeen(iso, {
     justNow: t("settings.deviceJustNow"),
     minutesAgo: (n) => t("settings.deviceMinutesAgo", { n }),
@@ -1483,7 +1483,7 @@ function fmtLastSeen(iso) {
 }
 
 // 时间：今天 → HH:mm；跨天 → MM-DD HH:mm；解析失败原样
-function fmtTime(iso) {
+function fmtTime(iso: string) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
@@ -1493,26 +1493,26 @@ function fmtTime(iso) {
 }
 
 // 指令类型/状态 → i18n label（未知值原样兑底）
-function commandTypeLabel(type) {
+function commandTypeLabel(type: string) {
   const key = `settings.commandType.${type}`;
   return t(key) !== key ? t(key) : String(type || "-");
 }
 
-function commandStatusLabel(status) {
+function commandStatusLabel(status: string) {
   const key = `settings.commandStatus.${status}`;
   return t(key) !== key ? t(key) : String(status || "-");
 }
 
 // 原生壳环境（Swift 主窗口 WKWebView 注入 window.qqplayerNative）：切库走 NSOpenPanel 桥
 // （WKWebView 沙箱不支持 <input webkitdirectory>，浏览按钮只在桌面版显示）
-const isNative = typeof window !== "undefined" && !!window.qqplayerNative;
+const isNative = typeof window !== "undefined" && !!(window as any).qqplayerNative;
 
 function browseLibrary() {
   useShellBridge().pickLibrary();
 }
 
 // 原生壳切库完成 → 同步输入框与当前库路径（Swift POST /api/library 后派发 CustomEvent）
-function onNativeLibrary(e) {
+function onNativeLibrary(e: any) {
   const p = e?.detail?.path;
   if (!p) return;
   libInput.value = p;
@@ -1520,18 +1520,18 @@ function onNativeLibrary(e) {
 }
 
 // 频点显示：1000 及以上缩写为 K（31/62/125/250/500/1K/2K/4K/8K/16K）
-function fmtBand(f) {
+function fmtBand(f: number) {
   return f >= 1000 ? `${f / 1000}K` : String(f);
 }
 
 // 音乐库设置（后端持久化）：模板里用 computed 解包，null=还没加载
-const librarySettings = computed(() => state.librarySettings);
+const librarySettings = computed<any>(() => state.librarySettings);
 const audioExtOptions = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"];
 // 保存防抖：连续点开关/格式时合并成一次请求（patch 累积不丢）
-let libSaveTimer = null;
+let libSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let libPatch = {};
 
-function saveLib(patch) {
+function saveLib(patch: Record<string, unknown>) {
   error.value = "";
   Object.assign(libPatch, patch);
   if (libSaveTimer) clearTimeout(libSaveTimer);
@@ -1541,15 +1541,15 @@ function saveLib(patch) {
     try {
       await saveLibrarySettings(p);
     } catch (e) {
-      error.value = e.message;
+      error.value = (e as Error).message;
     }
   }, 300);
 }
 
-function toggleExt(ext) {
+function toggleExt(ext: string) {
   if (!librarySettings.value) return;
   const cur = librarySettings.value.audioExts;
-  const next = cur.includes(ext) ? cur.filter((e) => e !== ext) : [...cur, ext];
+  const next = cur.includes(ext) ? cur.filter((e: string) => e !== ext) : [...cur, ext];
   if (!next.length) return; // 至少保留一种格式，防止扫不出任何歌
   saveLib({ audioExts: next });
 }
@@ -1557,7 +1557,7 @@ function toggleExt(ext) {
 // ============ 刮削设置（scraping · /api/library/settings 持久化） ============
 // 保存防抖：与 saveLib 同款（连续改动合并成一次 PUT）；GET 完成前由 useScrapingSettings 门闩拦截
 const scrapeError = ref("");
-let scrapeSaveTimer = null;
+let scrapeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleScrapeSave() {
   scrapeError.value = "";
@@ -1575,7 +1575,7 @@ const scrapeFieldOptions = SCRAPING_FIELDS.map((key) => ({
   labelKey: `settings.scrapeField.${key}`,
 }));
 
-function toggleScrapeField(key) {
+function toggleScrapeField(key: string) {
   const cur = scrapingSettings.enabled_fields;
   scrapingSettings.enabled_fields = cur.includes(key)
     ? cur.filter((k) => k !== key)
@@ -1589,7 +1589,7 @@ function toggleBatchEnabled() {
 }
 
 // 源优先级：上下移（简单实现，不引拖拽库）
-function moveSource(key, dir) {
+function moveSource(key: string, dir: number) {
   const cur = [...scrapingSettings.source_order];
   const i = cur.indexOf(key);
   const j = i + dir;
@@ -1602,7 +1602,7 @@ function moveSource(key, dir) {
 // 重命名模板实时预览：取曲库第一首有 artist+title 的歌渲染；无示例/渲染为空显示 "—"
 const renamePreview = computed(() => {
   const song = state.songs.find(
-    (s) => s && String(s.artist || "").trim() && String(s.name || "").trim(),
+    (s: any) => s && String(s.artist || "").trim() && String(s.name || "").trim(),
   );
   if (!song) return "—";
   const out = renderRenamePreview(scrapingSettings.rename_template, song);
@@ -1611,7 +1611,7 @@ const renamePreview = computed(() => {
 
 // 一键整库：两段式确认（WKWebView 不支持 window.confirm，沿用内联确认模式）
 const batchArmed = ref(false);
-let batchArmTimer = null;
+let batchArmTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onBatchLibrary() {
   if (!scrapingSettings.batch_enabled) return;
@@ -1632,7 +1632,7 @@ const categories = computed(() => getSettingsCategories());
 // ============ 注册表驱动渲染（P0-2）：普通设置 tab 的项来自 settingsIndex 注册表 ============
 // 分组保留手写结构，组内按注册表顺序渲染：纯简单项走 SettingRow，特殊交互项按 id 分发手写块
 // （render 标记的非宿主项（如 eqPreset/ambientEnabled 等块内成员）自然落空不渲染）。
-const pickIds = (arr, ids) => arr.filter((e) => ids.includes(e.id));
+const pickIds = (arr: SettingEntry[], ids: string[]) => arr.filter((e) => ids.includes(e.id));
 const playbackEntries = entriesByCategory("playback");
 const playbackMain = pickIds(playbackEntries, [
   "playMode",
@@ -1711,23 +1711,23 @@ const coverSizeSlider = computed({
   },
 });
 // 快捷键 tab：配置表驱动（SHORTCUTS/SHORTCUT_CATEGORIES 来自 playerCore；全部行可录制）
-const recording = ref(null); // 正在录制的快捷键 id（null = 未录制）
+const recording = ref<string | null>(null); // 正在录制的快捷键 id（null = 未录制）
 
-function startRecord(id) {
+function startRecord(id: string) {
   recording.value = id;
 }
 
 // 当前组合显示（录制值 → 展示文本；⌘ 组合显示 ⌘← 等）
-function fmtSetting(s) {
-  return fmtShortcutKey(playbackSettings[s.settingKey] || s.defaultCode);
+function fmtSetting(s: any) {
+  return fmtShortcutKey((playbackSettings as any)[s.settingKey] || s.defaultCode);
 }
 
-function shortcutsOf(catKey) {
+function shortcutsOf(catKey: string) {
   return SHORTCUTS.filter((s) => s.category === catKey);
 }
 
 // capture 阶段拦截：录制时按键不触发播放快捷键（stopImmediatePropagation 挡住 bubble 阶段的 SHORTCUT_HANDLER）
-function onRecordKeydown(e) {
+function onRecordKeydown(e: KeyboardEvent) {
   if (!recording.value) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1746,19 +1746,19 @@ function onRecordKeydown(e) {
   // 冲突检测：组合已绑定其他快捷键 → toast 拒绝保存（“Meta+K”与“Meta+KeyK”视作同一组合）
   const conflict = SHORTCUTS.find((s) => {
     if (s.id === target.id) return false;
-    return comboEq(combo, playbackSettings[s.settingKey] || s.defaultCode);
+    return comboEq(combo, (playbackSettings as any)[s.settingKey] || s.defaultCode);
   });
   if (conflict) {
     showToast(t("settings.shortcutConflict", { name: t(conflict.labelKey) }), { type: "error" });
     recording.value = null;
     return;
   }
-  playbackSettings[target.settingKey] = combo;
+  (playbackSettings as any)[target.settingKey] = combo;
   recording.value = null;
 }
 
 // 组合等价比较（parseShortcutCombo 归一化，兼容历史 "Meta+K" 格式）
-function comboEq(a, b) {
+function comboEq(a: string, b: string) {
   const pa = parseShortcutCombo(a);
   const pb = parseShortcutCombo(b);
   if (!pa || !pb) return a === b;
@@ -1769,7 +1769,7 @@ function toggleFade() {
   playbackSettings.fadeSec = playbackSettings.fadeSec > 0 ? 0 : 1.5;
 }
 // AB 循环次数步进（范围 1-20 钳制）
-function stepAbMax(delta) {
+function stepAbMax(delta: number) {
   const cur = Math.floor(Number(playbackSettings.abLoopMaxCount));
   playbackSettings.abLoopMaxCount = Math.min(
     20,
@@ -1792,7 +1792,7 @@ function resetAll() {
 }
 
 // 桌面歌词：应用配色方案（'theme' 跟随主题 → 清空自定义颜色）；一键恢复默认
-function applyScheme(sc) {
+function applyScheme(sc: any) {
   desktopLyricSettings.colorScheme = sc.key;
   if (sc.key === "theme") {
     desktopLyricSettings.jpColor = "";
@@ -1804,7 +1804,7 @@ function applyScheme(sc) {
 }
 
 // APP 歌词：应用配色方案（'theme' 跟随主题 → 清空自定义颜色）
-function applyLyricScheme(sc) {
+function applyLyricScheme(sc: any) {
   lyricSettings.colorScheme = sc.key;
   if (sc.key === "theme") {
     lyricSettings.jpColor = "";
@@ -1833,7 +1833,7 @@ watch(
     }
   },
 );
-function runTabLoaders(v) {
+function runTabLoaders(v: string) {
   if (v === "download") refreshQuarkState();
   if (v === "scrape") loadScrapingSettings(); // 进入刮削 tab 拉取最新设置（与 library tab 同款）
   if (v === "sync") loadDevicePanel(); // 进入同步 tab 拉取设备面板
@@ -1850,7 +1850,7 @@ async function save() {
     await setLibrary(p);
     emit("close");
   } catch (e) {
-    error.value = e.message;
+    error.value = (e as Error).message;
   } finally {
     saving.value = false;
   }
@@ -1865,7 +1865,7 @@ function onMaskClick() {
   if (!props.embedded) close();
 }
 
-function onKey(e) {
+function onKey(e: KeyboardEvent) {
   if (e.key === "Escape") close();
 }
 onMounted(() => {
@@ -1877,7 +1877,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
   window.removeEventListener("qqplayer:nativelibrary", onNativeLibrary);
   window.removeEventListener("keydown", onRecordKeydown, true);
-  clearTimeout(eggTimer);
+  clearTimeout(eggTimer ?? undefined);
 });
 </script>
 

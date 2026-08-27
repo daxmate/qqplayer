@@ -52,7 +52,7 @@ const localStorageStub = {
 };
 
 // settingsIndex mock：beforeEach 重建为 BASE_SETTINGS（上限/别名测试可自行增删）
-vi.mock("../settingsIndex.js", () => ({
+vi.mock("../settingsIndex", () => ({
   settingsIndex: [],
   SETTING_CATEGORIES: [
     { key: "playback", labelKey: "settings.category.playback" },
@@ -88,7 +88,7 @@ const BASE_SETTINGS = [
 const DEBOUNCE_MS = 250;
 
 const { state } = await import("../composables/usePlayer.js");
-const settingsModule = await import("../settingsIndex.js");
+const settingsModule = await import("../settingsIndex");
 const { useSearchAnything } = await import("../composables/useSearchAnything.js");
 
 const { query, results, loading, isSearchOpen, clear, onlineSource, setOnlineSource } =

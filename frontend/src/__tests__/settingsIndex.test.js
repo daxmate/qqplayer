@@ -26,7 +26,7 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 installMatchMedia();
 
-const { SETTING_CATEGORIES, CATEGORY_KEYS, settingsIndex } = await import("../settingsIndex.js");
+const { SETTING_CATEGORIES, CATEGORY_KEYS, settingsIndex } = await import("../settingsIndex");
 const zhCN = (await import("../locales/zh-CN/index.js")).default;
 const {
   state,

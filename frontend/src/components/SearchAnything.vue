@@ -252,7 +252,7 @@ import { downloadSettings } from "../composables/useSettings.js";
 import { useSearchAnything } from "../composables/useSearchAnything.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { apiPost } from "../utils/apiClient.js";
-import { settingsIndex } from "../settingsIndex.js";
+import { settingsIndex } from "../settingsIndex";
 import InlineControl from "./InlineControl.vue";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 

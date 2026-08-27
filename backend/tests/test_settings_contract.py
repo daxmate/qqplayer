@@ -1,7 +1,7 @@
-"""跨层契约测试：设置注册表（frontend settingsIndex.js）↔ 前端默认值 ↔ 后端白名单三方一致性。
+"""跨层契约测试：设置注册表（frontend settingsIndex.ts）↔ 前端默认值 ↔ 后端白名单三方一致性。
 
 安全网：任何一方改动漏同步 → 立即红。只读校验，不修改产品代码。
-- 前端注册表：frontend/src/settingsIndex.js（64 个 SettingEntry，id/category/subTab）
+- 前端注册表：frontend/src/settingsIndex.ts（64 个 SettingEntry，id/category/subTab）
 - 前端默认值：frontend/src/composables/{playerCore,useSettings}.js 的 *_SETTINGS_DEFAULTS 常量
 - 后端白名单：app/services/settings.py _SETTINGS_SPEC（11 namespace）+ app/state.py LIBRARY_SETTINGS_DEFAULTS
 
@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 from app import state  # noqa: E402
 from app.services.settings import _SETTINGS_SPEC  # noqa: E402
 
-FRONTEND_INDEX = REPO / "frontend" / "src" / "settingsIndex.js"
+FRONTEND_INDEX = REPO / "frontend" / "src" / "settingsIndex.ts"
 PLAYER_CORE = REPO / "frontend" / "src" / "composables" / "playerCore.js"
 USE_SETTINGS = REPO / "frontend" / "src" / "composables" / "useSettings.js"
 
@@ -51,7 +51,7 @@ _DESKTOP_PREFIX = "desktop"
 
 
 def _map_field(eid: str, category: str) -> str:
-    """注册表 id → 后端字段名推导（与 settingsIndex.js 的 get() 引用对象一致）：
+    """注册表 id → 后端字段名推导（与 settingsIndex.ts 的 get() 引用对象一致）：
     downloadEngine → engine；desktop* → 去前缀首字母小写（desktopShowZh → showZh）。"""
     if category == "download" and eid == "downloadEngine":
         return "engine"
@@ -61,7 +61,7 @@ def _map_field(eid: str, category: str) -> str:
     return eid
 
 
-# 每个 entry：id 后跟 category，再后跟 subTab（结构固定，见 settingsIndex.js）
+# 每个 entry：id 后跟 category，再后跟 subTab（结构固定，见 settingsIndex.ts）
 _ENTRY_RE = re.compile(
     r'id:\s*"([^"]+)"\s*,\s*'
     r'category:\s*"([^"]+)"\s*,\s*'

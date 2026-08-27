@@ -1,12 +1,12 @@
 <!-- 通用设置行（SettingsModal 普通设置 tab 注册表驱动渲染）
-  entry 来自 settingsIndex.js 注册表；控件按 entry.type 分发，DOM 结构/类名与改造前
+  entry 来自 settingsIndex.ts 注册表；控件按 entry.type 分发，DOM 结构/类名与改造前
   SettingsModal 手写模板保持一致（compactCss 契约 + SettingsModal.*.test.js 依赖）：
     toggle → .toggle-row + .switch（整行可点切换）
     select → .seg/.seg-btn（entry.chips==='ext' 时 .ext-grid/.ext-chip；opt.css 字体预览）
     slider → .slider 滑杆（valueSuffix 值徽标内嵌 label 或 label 后独立 div）
     text/custom → .setting-control > input.lib-input（inputType:"number" 时数字提交）
   样式不重复定义：由 SettingsModal 的 scoped 样式 :deep 穿透继承（本组件无 style 块）。
-  可选展示字段（注册表，见 settingsIndex.js 顶部注释）：render/descKey/descAfter/marginTop/
+  可选展示字段（注册表，见 settingsIndex.ts 顶部注释）：render/descKey/descAfter/marginTop/
   chips/valueSuffix/badge/mobileOnly/inputType/min/max/step/placeholder。 -->
 <template>
   <div v-if="!entry.mobileOnly || mobile" class="setting-item">
@@ -83,17 +83,18 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import type { SettingEntry } from "../settingsIndex";
 
-const props = defineProps({
-  entry: { type: Object, required: true },
+const props = defineProps<{
+  entry: SettingEntry;
   // 说明文案语言包 key（可选覆盖；缺省取 entry.descKey，再回落 settings.<id>Desc）
-  descKey: { type: String, default: "" },
+  descKey?: string;
   // 移动端标记：entry.mobileOnly 时桌面端不渲染（毛玻璃封面等仅移动端设置）
-  mobile: { type: Boolean, default: false },
-});
+  mobile?: boolean;
+}>();
 
 const { t, te } = useI18n();
 

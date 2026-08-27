@@ -34,7 +34,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const SearchAnything = (await import("../components/SearchAnything.vue")).default;
 const { useSearchAnything } = await import("../composables/useSearchAnything.js");
-const { settingsIndex } = await import("../settingsIndex.js");
+const { settingsIndex } = await import("../settingsIndex");
 const { clearHistory } = await import("../composables/searchHistory.js");
 const { state, playbackSettings, setupKeyboardShortcuts } =
   await import("../composables/usePlayer.js");

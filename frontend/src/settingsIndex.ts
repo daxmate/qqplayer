@@ -33,13 +33,13 @@
 //   - sleepTimerOn：开关语义与 SettingsModal 一致——开启 = 启动倒计时（toggleSleepTimer），
 //     关闭 = 取消（cancelSleepTimer），仅赋字段不会真正计时。
 import {
-  state,
-  playbackSettings,
-  lyricSettings,
-  uiSettings,
-  desktopLyricSettings,
-  downloadSettings,
-  videoSettings,
+  state as playerState,
+  playbackSettings as playerPlaybackSettings,
+  lyricSettings as playerLyricSettings,
+  uiSettings as playerUiSettings,
+  desktopLyricSettings as playerDesktopLyricSettings,
+  downloadSettings as playerDownloadSettings,
+  videoSettings as playerVideoSettings,
   saveLibrarySettings,
   EQ_PRESETS,
   LYRIC_SCHEMES,
@@ -51,6 +51,51 @@ import {
   VISUALIZER_STYLES,
 } from "./composables/usePlayer.js";
 import { sleepTimer, toggleSleepTimer, cancelSleepTimer } from "./composables/useSleepTimer.js";
+
+// usePlayer.js 由初始值推断出强类型（playMode: string、eqGains: number[] 等），而注册表契约
+// get(): unknown / set(v: unknown) 是宽松边界（设置值跨 JS/TS 边界，可能被手写块写入任意形态）：
+// 这里按宽松键值视图取用，字段级类型校验交给 70 个 entry 的 satisfies SettingEntry[]。
+const state = playerState as unknown as Record<string, unknown>;
+const playbackSettings = playerPlaybackSettings as unknown as Record<string, unknown>;
+const lyricSettings = playerLyricSettings as unknown as Record<string, unknown>;
+const uiSettings = playerUiSettings as unknown as Record<string, unknown>;
+const desktopLyricSettings = playerDesktopLyricSettings as unknown as Record<string, unknown>;
+const downloadSettings = playerDownloadSettings as unknown as Record<string, unknown>;
+const videoSettings = playerVideoSettings as unknown as Record<string, unknown>;
+
+// ============ 类型定义（TS 化：70 个 entry satisfies 校验字段完整/拼写）============
+export type SettingType = "toggle" | "slider" | "select" | "text" | "custom";
+
+export interface SettingOption {
+  value: string | number;
+  labelKey: string;
+  css?: string;
+}
+
+export interface SettingEntry {
+  id: string;
+  category: string;
+  subTab: string | null;
+  labelKey: string;
+  descKey?: string;
+  keywords: string[];
+  type: SettingType;
+  render?: string;
+  get: () => unknown;
+  set: (v: unknown) => void;
+  options?: SettingOption[];
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+  chips?: string;
+  valueSuffix?: string;
+  badge?: string;
+  mobileOnly?: boolean;
+  descAfter?: boolean;
+  inputType?: string;
+  marginTop?: number;
+}
 
 // ============ 设置分类 ============
 export const SETTING_CATEGORIES = [
@@ -132,13 +177,17 @@ const accentOptions = ACCENT_OPTIONS.map((a) => ({
 
 // ============ 音乐库设置（后端 /api/library/settings，非 settingsSync）============
 // 字段默认值对齐 SettingsModal resetAll 与后端契约；state.librarySettings 未加载时兜底
-const LIB_DEFAULTS = { ignoreHidden: true, autoRefresh: true, autoScanOnStart: true };
+const LIB_DEFAULTS: Record<string, boolean> = {
+  ignoreHidden: true,
+  autoRefresh: true,
+  autoScanOnStart: true,
+};
 
-function libGet(key) {
-  return state.librarySettings?.[key] ?? LIB_DEFAULTS[key];
+function libGet(key: string) {
+  return (state.librarySettings as Record<string, unknown> | null)?.[key] ?? LIB_DEFAULTS[key];
 }
 
-function libSet(key, v) {
+function libSet(key: string, v: unknown) {
   // 与 SettingsModal 相同的持久化路径（PUT /api/library/settings，成功后回写 state）
   saveLibrarySettings({ [key]: v }).catch(() => {});
 }
@@ -146,11 +195,11 @@ function libSet(key, v) {
 // audioExts（多选数组）注册表语义：get 返回逗号拼接字符串（契约要求原始类型），
 // set 拆分回数组走 saveLibrarySettings 持久化；设置弹窗内由 render:"audioExts" 手写 chips 块消费。
 function audioExtsGet() {
-  const arr = state.librarySettings?.audioExts;
+  const arr = (state.librarySettings as Record<string, unknown> | null)?.audioExts;
   return Array.isArray(arr) ? arr.join(",") : "";
 }
 
-function audioExtsSet(v) {
+function audioExtsSet(v: unknown) {
   const parts = String(v ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -165,7 +214,7 @@ function eqGainsGet() {
   return Array.isArray(arr) ? arr.join(",") : "";
 }
 
-function eqGainsSet(v) {
+function eqGainsSet(v: unknown) {
   if (typeof v !== "string") {
     playbackSettings.eqGains = Array.isArray(v) ? v : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     return;
@@ -180,7 +229,7 @@ function eqGainsSet(v) {
 }
 
 // ============ 睡眠定时器开关（保持与 SettingsModal 一致的计时语义）============
-function setSleepTimerOn(v) {
+function setSleepTimerOn(v: unknown) {
   if (v) {
     if (!playbackSettings.sleepTimerOn && !sleepTimer.active) toggleSleepTimer();
   } else {
@@ -1198,19 +1247,19 @@ export const settingsIndex = [
       uiSettings.karaokeShowNum = v;
     },
   },
-];
+] satisfies SettingEntry[];
 
 // ============ 查询辅助（供搜索层复用）============
 // 分类 → 子 tab 校验：非 lyric 分类 subTab 恒为 null
-export function isLyricEntry(entry) {
+export function isLyricEntry(entry: SettingEntry) {
   return entry.category === "lyric";
 }
 
-export function categoryByKey(key) {
+export function categoryByKey(key: string) {
   return SETTING_CATEGORIES.find((c) => c.key === key) || null;
 }
 
-export function entriesByCategory(category) {
+export function entriesByCategory(category: string) {
   return settingsIndex.filter((e) => e.category === category);
 }
 
