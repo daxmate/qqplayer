@@ -36,6 +36,12 @@ const {
   desktopLyricSettings,
   downloadSettings,
   videoSettings,
+  PLAYBACK_SETTINGS_DEFAULTS,
+  LYRIC_SETTINGS_DEFAULTS,
+  UI_SETTINGS_DEFAULTS,
+  DESKTOP_LYRIC_DEFAULTS,
+  DOWNLOAD_SETTINGS_DEFAULTS,
+  VIDEO_SETTINGS_DEFAULTS,
 } = await import("../composables/usePlayer.js");
 
 const VALID_TYPES = ["toggle", "slider", "select", "text"];
@@ -270,5 +276,108 @@ describe("settingsIndex 行为（get/set 往返）", () => {
     expect(uiSettings.accent).toBe("orange");
     expect(downloadSettings.downloadDir).toBe("");
     expect(desktopLyricSettings.fontSize).toBe(26);
+  });
+});
+
+describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
+  // 注册表 id → 实际字段名推导（与 get() 引用对象一致；id≠字段名的特判集中在这里）
+  //   downloadEngine → downloadSettings.engine（注册表 id 与字段名不同）
+  //   desktop* → desktopLyricSettings 去前缀首字母小写（desktopShowZh → showZh）
+  function resolveField(e) {
+    if (e.category === "download" && e.id === "downloadEngine") return "engine";
+    if (e.category === "lyric" && e.subTab === "desktop") {
+      const rest = e.id.slice("desktop".length); // desktopShowZh → ShowZh
+      return rest.charAt(0).toLowerCase() + rest.slice(1); // → showZh
+    }
+    return e.id;
+  }
+
+  // 分类(+子 tab) → 命名空间映射（与后端 _SETTINGS_SPEC 归属一致，字段级校验在 pytest）
+  const NAMESPACE_OF = {
+    playback: { reactive: playbackSettings, defaults: PLAYBACK_SETTINGS_DEFAULTS },
+    library: { reactive: null, defaults: null }, // 特判：state.librarySettings（后端 LIBRARY_SETTINGS_DEFAULTS 单一来源）
+    video: { reactive: videoSettings, defaults: VIDEO_SETTINGS_DEFAULTS },
+    download: { reactive: downloadSettings, defaults: DOWNLOAD_SETTINGS_DEFAULTS },
+    "lyric:app": { reactive: lyricSettings, defaults: LYRIC_SETTINGS_DEFAULTS },
+    "lyric:desktop": { reactive: desktopLyricSettings, defaults: DESKTOP_LYRIC_DEFAULTS },
+    ui: { reactive: uiSettings, defaults: UI_SETTINGS_DEFAULTS },
+  };
+
+  function nsKeyOf(e) {
+    return e.category === "lyric" ? `lyric:${e.subTab}` : e.category;
+  }
+
+  // 音乐库字段契约（独立 /api/library/settings API，字段在 state.librarySettings）
+  const LIB_FIELDS = new Set(["ignoreHidden", "autoRefresh", "autoScanOnStart"]);
+
+  it("每个 entry.id 落在前端默认值命名空间 keys 并集（library/sleepTimer/别名特判）", () => {
+    const union = new Set([
+      ...Object.keys(PLAYBACK_SETTINGS_DEFAULTS),
+      ...Object.keys(LYRIC_SETTINGS_DEFAULTS),
+      ...Object.keys(UI_SETTINGS_DEFAULTS),
+      ...Object.keys(DESKTOP_LYRIC_DEFAULTS),
+      ...Object.keys(DOWNLOAD_SETTINGS_DEFAULTS),
+      ...Object.keys(VIDEO_SETTINGS_DEFAULTS),
+    ]);
+    for (const e of settingsIndex) {
+      if (e.category === "library") {
+        expect(LIB_FIELDS.has(e.id), `${e.id} 不在音乐库字段契约 {${[...LIB_FIELDS]}}`).toBe(true);
+        continue;
+      }
+      const field = resolveField(e);
+      expect(union.has(field), `${e.id} 字段 ${field} 不在任何前端默认值命名空间`).toBe(true);
+    }
+  });
+
+  it("每个 entry 引用的字段存在于对应命名空间默认值（字段名拼错/get() undefined 即红）", () => {
+    for (const e of settingsIndex) {
+      const key = nsKeyOf(e);
+      const ns = NAMESPACE_OF[key];
+      expect(ns, `${e.id} 分类 ${key} 无契约命名空间映射`).toBeTruthy();
+      const field = resolveField(e);
+      if (e.category === "library") {
+        expect(state.librarySettings, `${e.id} state.librarySettings 未初始化`).toBeTruthy();
+        expect(
+          field in state.librarySettings,
+          `${e.id} 字段 ${field} 不在 state.librarySettings`,
+        ).toBe(true);
+      } else {
+        expect(field in ns.defaults, `${e.id} 字段 ${field} 不在 ${key} 默认值常量`).toBe(true);
+        expect(field in ns.reactive, `${e.id} 字段 ${field} 不在 ${key} reactive`).toBe(true);
+      }
+      expect(typeof e.get(), `${e.id} get() 返回 undefined（字段拼错）`).not.toBe("undefined");
+    }
+  });
+
+  it("category 与后端命名空间归属一致（playback→playback/player；lyric:desktop→desktopLyric；…）", () => {
+    // 与 backend/app/services/settings.py _SETTINGS_SPEC 的 namespace 对齐（字段级校验在后端 pytest）
+    const CATEGORY_BACKEND_NS = {
+      playback: ["playback", "player"],
+      library: ["library"],
+      video: ["video"],
+      download: ["download"],
+      lyric: ["lyric", "desktopLyric"],
+      ui: ["ui"],
+      shortcuts: [], // 快捷键无独立后端 namespace（字段在 playback），注册表不收
+      about: [], // 关于分类无设置字段
+    };
+    for (const e of settingsIndex) {
+      expect(CATEGORY_BACKEND_NS, `${e.id} 分类 ${e.category} 缺后端映射`).toHaveProperty(
+        e.category,
+      );
+      expect(
+        CATEGORY_BACKEND_NS[e.category].length > 0,
+        `${e.id} 分类 ${e.category} 后端无对应 namespace（不应有注册表项）`,
+      ).toBe(true);
+    }
+  });
+
+  it("sleepTimer 两条目归属 playbackSettings（与 useSleepTimer 持久化域一致）", () => {
+    for (const id of ["sleepTimerOn", "sleepTimerMinutes"]) {
+      const e = settingsIndex.find((x) => x.id === id);
+      expect(e, `${id} 应存在`).toBeTruthy();
+      expect(e.category).toBe("playback");
+      expect(id in PLAYBACK_SETTINGS_DEFAULTS, `${id} 不在 PLAYBACK_SETTINGS_DEFAULTS`).toBe(true);
+    }
   });
 });
