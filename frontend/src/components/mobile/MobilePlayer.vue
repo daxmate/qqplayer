@@ -3,8 +3,8 @@
     <!-- 背景层：渐变常驻（无封面/关闭毛玻璃时直接可见） -->
     <div class="mp-gradient" aria-hidden="true"></div>
     <!-- 背景层：封面毛玻璃（uiSettings.glassCover 契约字段，默认开启；无封面/加载失败回退渐变） -->
-    <div v-if="glassOn && bgCoverUrl && !bgError" class="mp-glass" aria-hidden="true">
-      <img :src="bgCoverUrl" class="mp-glass-img" alt="" @error="bgError = true" />
+    <div v-if="glassOn && bgCoverUrl && !bgFailed" class="mp-glass" aria-hidden="true">
+      <img :src="bgCoverUrl" class="mp-glass-img" alt="" @error="onBgError" />
       <div class="mp-glass-scrim"></div>
     </div>
 
@@ -28,11 +28,11 @@
                歌词区 flex:1 自动上移占满，布局自洽。 -->
           <div v-if="coverVisible('large')" class="mp-cover-box">
             <img
-              v-if="coverUrl && !coverError"
+              v-if="coverUrl && !coverFailed"
               :src="coverUrl"
               class="mp-cover-img"
               :alt="state.currentSong?.name || ''"
-              @error="coverError = true"
+              @error="onCoverError"
             />
             <div v-else class="mp-cover-fallback">
               <Music :size="42" />
@@ -278,8 +278,8 @@
       >
         <!-- 背景与主播放页一致：渐变常驻 + 封面毛玻璃（同款 mp-glass 逻辑） -->
         <div class="mp-gradient" aria-hidden="true"></div>
-        <div v-if="glassOn && bgCoverUrl && !bgError" class="mp-glass" aria-hidden="true">
-          <img :src="bgCoverUrl" class="mp-glass-img" alt="" @error="bgError = true" />
+        <div v-if="glassOn && bgCoverUrl && !bgFailed" class="mp-glass" aria-hidden="true">
+          <img :src="bgCoverUrl" class="mp-glass-img" alt="" @error="onBgError" />
           <div class="mp-glass-scrim"></div>
         </div>
         <div class="mp-fl-content">
@@ -364,7 +364,7 @@ import {
   toggleSleepTimer,
 } from "../../composables/useSleepTimer.js";
 import { showToast, toastError } from "../../composables/useToast.js";
-import { resolveServerUrl } from "../../utils/apiClient.js";
+import { useCoverURL } from "../../composables/useCoverURL.js";
 import { coverVisible } from "../../composables/useCoverGuard.ts";
 import KaraokePanel from "../KaraokePanel.vue";
 import ControlBar from "../ControlBar.vue";
@@ -375,34 +375,73 @@ const emit = defineEmits(["back", "open-list"]);
 
 const { t } = useI18n();
 
-// ---------- 毛玻璃背景（uiSettings.glassCover 契约：另一任务在 useSettings 定义，默认 true；未定义时兼容为开启） ----------
+// ---------- 封面 URL（契约 2026-08-27：useCoverURL 唯一入口） ----------
+// 播放页大封面 + 毛玻璃背景共用同一 URL 来源：本地歌曲走 useCoverURL（本地 covers 缓存 →
+// 内嵌 APIC（断网）→ 远程 /api/cover；@error → markCoverError 兑底），iOS 壳自动本地优先；
+// 流媒体歌（stream/试听/URL）网络图直用，不走 /api/cover。恢复在线时对当前歌曲重新 resolve
+// （断网期间解析为空/失败标记的封面自动补上，不等切歌）。
 const glassOn = computed(() => uiSettings.glassCover !== false);
-const bgCoverUrl = ref("");
-const bgError = ref(false);
-const coverUrl = ref("");
-const coverError = ref(false);
+const coverPath = ref(""); // 当前本地歌曲 path（空 = 流媒体直用或无可解析键）
+const coverDirect = ref(""); // 流媒体歌直用 URL（song.coverUrl && !song.path）
+const coverError = ref(false); // 流媒体直用图加载失败（本地歌失败走 coverOk 标记）
+const bgError = ref(false); // 毛玻璃背景直用图加载失败（本地歌同 coverOk 标记）
+
+const {
+  coverSrc,
+  coverOk,
+  markCoverError,
+  resolveCover,
+  dispose: disposeCoverURL,
+} = useCoverURL({
+  onOnlineRefresh: refreshCover,
+});
+
+const bgCoverUrl = computed(() => coverDirect.value || coverSrc(coverPath.value));
+const coverUrl = computed(() => coverDirect.value || coverSrc(coverPath.value));
+const coverFailed = computed(() =>
+  coverPath.value ? !coverOk(coverPath.value) : coverError.value,
+);
+const bgFailed = computed(() => (coverPath.value ? !coverOk(coverPath.value) : bgError.value));
+
+function refreshCover() {
+  const s = state.currentSong;
+  const key = s ? s.path || s.coverUrl || "" : "";
+  coverError.value = false;
+  bgError.value = false;
+  if (!key) {
+    coverDirect.value = "";
+    coverPath.value = "";
+    return;
+  }
+  // 流媒体歌（stream/试听/URL）：网络图直用，不走 /api/cover
+  const direct = s.coverUrl && !s.path ? s.coverUrl : "";
+  coverDirect.value = direct;
+  if (direct) {
+    coverPath.value = "";
+    return;
+  }
+  coverPath.value = s.path;
+  resolveCover(s.path, { download: true });
+}
 
 watch(
   () => {
     const s = state.currentSong;
     return s ? s.path || s.coverUrl || "" : "";
   },
-  (key) => {
-    bgError.value = false;
-    coverError.value = false;
-    if (!key) {
-      bgCoverUrl.value = "";
-      coverUrl.value = "";
-      return;
-    }
-    // 流媒体歌（stream/试听/URL）：网络图直用，不走 /api/cover
-    const direct =
-      state.currentSong?.coverUrl && !state.currentSong?.path ? state.currentSong.coverUrl : "";
-    bgCoverUrl.value = direct || resolveServerUrl("/api/cover?path=" + encodeURIComponent(key));
-    coverUrl.value = bgCoverUrl.value;
-  },
+  refreshCover,
   { immediate: true },
 );
+
+function onCoverError() {
+  if (coverPath.value) markCoverError(coverPath.value);
+  else coverError.value = true; // 流媒体直用图失败：简单错误标记
+}
+
+function onBgError() {
+  if (coverPath.value) markCoverError(coverPath.value);
+  else bgError.value = true; // 流媒体直用图失败：简单错误标记
+}
 
 // ---------- 封面区统一手势（下拉返回 + 横向切歌，方向仲裁共存） ----------
 // 下拉常量与行为保持原样：PULL_THRESHOLD / PULL_MAX / PULL_MIN_VELOCITY /
@@ -633,6 +672,7 @@ onBeforeUnmount(() => {
   window.__qqpPlayerOpen = false;
   clearChoreoTimers();
   if (fullLyricCloseTimer) clearTimeout(fullLyricCloseTimer);
+  disposeCoverURL(); // 取消恢复在线订阅（契约：组件卸载清理）
 });
 
 // ---------- 歌名行 ----------

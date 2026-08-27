@@ -26,7 +26,8 @@ import {
   nativePost,
   type LockScreenSong,
 } from "./nativeAudioBridge.js";
-import { cachedCoverURL, cacheCover } from "../utils/sync.js";
+import { cachedCoverURL, cacheCover, assetForSong, getEmbeddedCover } from "../utils/sync.js";
+import { isOffline } from "../utils/apiClient.js";
 import { coverToDataURL } from "../utils/coverDataURL.js";
 import i18n from "../locales/i18n.js";
 
@@ -118,6 +119,15 @@ export async function resolveCoverForMetadata(
     const cover = await coverToDataURL(local).catch(() => local); // 失败兑底原始本地 URL
     if (!isSongStillCurrent(song, isCurrent)) return null;
     return cover;
+  }
+  // 断网 + 本地封面未缓存：内嵌 APIC 兑底（契约 2026-08-27）——覆盖
+  // 「断网 + 封面未缓存 + 歌已下载」的锁屏空白场景；不请求主机（对齐 useCoverURL 兑底顺序）。
+  if (isOffline()) {
+    const audioItem = await assetForSong({ path: song.path ?? undefined }).catch(() => null);
+    if (!isSongStillCurrent(song, isCurrent)) return null;
+    const embedded = audioItem ? await getEmbeddedCover(audioItem.path).catch(() => null) : null;
+    if (!isSongStillCurrent(song, isCurrent)) return null;
+    return embedded || ""; // data URL 直返；无内嵌 → 无封面
   }
   cacheCover(song.path); // fire-and-forget 保持现状
   const remote = resolveCoverURL(song as unknown as LockScreenSong);

@@ -160,6 +160,15 @@ final class MetadataManager {
             await MainActor.run {
                 guard self.currentItem?() === item else { return } // 已切歌：丢弃
                 self.embeddedArtwork = art
+                // 回补锁屏（契约 2026-08-27）：setMetadata 先到、内嵌后读完的时序竞争——
+                // 此时锁屏若还没有 artwork（无旧封面兑底、异步拉取未成功），用内嵌图直接写入；
+                // 已有 artwork 不覆盖（异步拉取可能已完成，保留更佳图）。
+                if MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
+                    self.nowPlayingArtwork = art
+                    var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                    info[MPMediaItemPropertyArtwork] = art
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                }
             }
         }
     }

@@ -115,11 +115,11 @@
         <template v-else>
           <span v-if="coverVisible('list')" class="gr-cover">
             <img
-              v-if="g.coverUrl"
-              :src="g.coverUrl"
+              v-if="g.coverPath && coverSrc(g.coverPath) && coverOk(g.coverPath)"
+              :src="coverSrc(g.coverPath)"
               alt=""
               loading="lazy"
-              @error="g.coverUrl = ''"
+              @error="markCoverError(g.coverPath)"
             />
             <Music v-else :size="20" />
           </span>
@@ -495,7 +495,7 @@ import { scrapingSettings } from "../composables/useScrapingSettings.js";
 import { scrapeBatchState, runScrapeBatch } from "../composables/useScrapeBatch.js";
 import ScrapeResultModal from "./ScrapeResultModal.vue";
 import { normalizeQuery, normalizeText } from "../utils/searchNormalize.js";
-import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
+import { apiPost } from "../utils/apiClient.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { inNativeShell, setupShellRowDrag } from "../composables/useShellDrag.js";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../composables/useCoverURL.js";
@@ -573,7 +573,8 @@ const artistGroups = computed(() => {
     .sort((a, b) => a.name.localeCompare(b.name, "zh"));
 });
 
-// 专辑分组聚合（按专辑名，歌手去重显示，取代表歌封面）
+// 专辑分组聚合（按专辑名，歌手去重显示，取代表歌封面——封面 URL 经 useCoverURL 统一解析，
+// 契约 2026-08-27：不手写 path→/api/cover 映射；桌面直出行为零变化）
 const albumGroups = computed(() => {
   const m = new Map();
   for (const s of state.songs) {
@@ -588,7 +589,7 @@ const albumGroups = computed(() => {
         album,
         artists: new Set([artist]),
         count: 1,
-        coverUrl: resolveServerUrl(`/api/cover?path=${encodeURIComponent(s.path)}`),
+        coverPath: s.path, // 代表歌 path；渲染时 coverSrc(coverPath) 取 URL
       });
     }
   }
@@ -699,6 +700,15 @@ watch(
   () => state.currentSong?.path,
   (p) => {
     if (p) resolveCover(p, { download: true });
+  },
+  { immediate: true },
+);
+
+// 专辑分组代表歌封面：useCoverURL 统一解析（resolveCover 幂等；只查不下载，专辑数远小于行数）
+watch(
+  () => albumGroups.value.map((g) => g.coverPath).filter(Boolean),
+  (paths) => {
+    for (const p of paths) resolveCover(p);
   },
   { immediate: true },
 );

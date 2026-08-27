@@ -19,7 +19,7 @@
 //   - 同一 path 幂等：已解析出 URL 后直接跳过（查询/下载不重复）
 
 import { ref } from "vue";
-import { resolveServerUrl, isOffline } from "../utils/apiClient.js";
+import { resolveServerUrl, isOffline, onOfflineChange } from "../utils/apiClient.js";
 import {
   syncEnabled,
   cachedCoverURL,
@@ -33,9 +33,13 @@ export const COVER_CACHE_FIRST_N = 30;
 
 /**
  * 封面 URL 解析状态（每组件实例一份；coverErrors 语义同原组件内实现）。
- * @returns {{coverSrc:function, coverOk:function, markCoverError:function, resolveCover:function}}
+ * @param {{onOnlineRefresh?:function}} [opts] onOnlineRefresh：恢复在线（offline→online）时
+ *   清空本实例已解析结果/错误标记后触发——调用方传入「对当前歌曲/可见行重新 resolveCover」
+ *   的逻辑（2026-08-27 契约：断网期间解析为空/失败标记的封面恢复后自动补齐，不等切歌）。
+ * @returns {{coverSrc:function, coverOk:function, markCoverError:function, resolveCover:function,
+ *   dispose:function}}
  */
-export function useCoverURL() {
+export function useCoverURL({ onOnlineRefresh } = {}) {
   const coverErrors = ref(new Set());
   const urlMap = new Map(); // path → ref(url)；ref 在模板渲染期被读取 → 异步填充后自动重渲染
 
@@ -137,5 +141,16 @@ export function useCoverURL() {
       });
   }
 
-  return { coverSrc, coverOk, markCoverError, resolveCover };
+  // 恢复在线重试（契约 2026-08-27）：offline→online 时清空本实例解析结果 + 错误标记，
+  // 并通知调用方重新解析（当前歌曲/可见行）。断网时解析为空（无缓存且无内嵌）的 path
+  // 保持空且无标记（见 resolveCover 断网分支），必须由本回调重新 resolve 才能补上。
+  // 桌面/非壳：resolveCover 同步远程直出，重解析结果 URL 相同，行为零变化。
+  const dispose = onOfflineChange((offline) => {
+    if (offline) return; // 只处理「恢复在线」方向
+    urlMap.clear();
+    coverErrors.value.clear();
+    onOnlineRefresh?.();
+  });
+
+  return { coverSrc, coverOk, markCoverError, resolveCover, dispose };
 }

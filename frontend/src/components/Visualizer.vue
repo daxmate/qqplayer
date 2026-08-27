@@ -12,6 +12,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { state, playbackSettings, VISUALIZER_STYLES } from "../composables/usePlayer.js";
+import { useCoverURL } from "../composables/useCoverURL.js";
 import {
   ensureAnalyser,
   getAnalyser,
@@ -92,6 +93,9 @@ function accentColors() {
 // 封面主色（缓存由 extractCoverColor 内部 Map 负责；取色失败 → null → 降级主题色）
 const coverColor = ref(null);
 
+// 封面 URL 统一入口（契约 2026-08-27）：本地歌经 useCoverURL 取同源 URL 供 canvas 读像素
+const { coverSrc, resolveCover, dispose: disposeCoverURL } = useCoverURL();
+
 function paint() {
   const cv = canvasEl.value;
   if (!cv) return;
@@ -171,8 +175,16 @@ watch(
     coverColor.value = null; // 切歌先清（新色未到前用主题色）
     if (!key) return; // 无封面（SSR/无歌）不取色
     const s = state.currentSong;
-    // 流媒体歌：网络图 URL 直用；本地歌：同源 /api/cover
-    const src = s?.coverUrl && !s?.path ? s.coverUrl : "/api/cover?path=" + encodeURIComponent(key);
+    // 流媒体歌：网络图 URL 直用；本地歌：useCoverURL 唯一入口（契约 2026-08-27：不手写
+    // path→URL 映射）。桌面直出 = 同源 /api/cover，canvas 同源读像素不受影响；
+    // 壳内异步解析中（coverSrc 为空）本次跳过取色（Visualizer 仅桌面使用，行为零变化）。
+    const direct = s?.coverUrl && !s?.path ? s.coverUrl : "";
+    let src = direct;
+    if (!direct && s?.path) {
+      resolveCover(s.path);
+      src = coverSrc(s.path);
+    }
+    if (!src) return;
     const c = await extractCoverColor(src);
     if (
       c &&
@@ -216,6 +228,7 @@ onBeforeUnmount(() => {
   running = false;
   cancelAnimationFrame(rafId);
   if (ro) ro.disconnect();
+  disposeCoverURL(); // 契约：组件卸载取消恢复在线订阅
 });
 </script>
 

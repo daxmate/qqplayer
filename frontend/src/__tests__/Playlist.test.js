@@ -309,10 +309,16 @@ describe("Playlist", () => {
 
   // ============ 分组浏览（歌手/专辑） ============
   const SAMPLE = [
-    { id: "a", name: "ヤキモチ", artist: "高橋優", album: "開往明天的旅行" },
-    { id: "b", name: "知足", artist: "五月天", album: "知足" },
-    { id: "c", name: "溫柔", artist: "五月天", album: "知足" },
-    { id: "d", name: "无歌手歌", artist: "", album: "知足" },
+    {
+      id: "a",
+      path: "/Music/yakimochi.mp3",
+      name: "ヤキモチ",
+      artist: "高橋優",
+      album: "開往明天的旅行",
+    },
+    { id: "b", path: "/Music/zhizu.mp3", name: "知足", artist: "五月天", album: "知足" },
+    { id: "c", path: "/Music/wenrou.mp3", name: "溫柔", artist: "五月天", album: "知足" },
+    { id: "d", path: "/Music/wugeshou.mp3", name: "无歌手歌", artist: "", album: "知足" },
   ];
 
   it("歌手 tab：聚合歌手卡片（计数 + 排序）", async () => {

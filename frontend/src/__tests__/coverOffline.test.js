@@ -50,6 +50,8 @@ const apiMock = vi.hoisted(() => ({
   resolveServerUrl: vi.fn((p) =>
     /^https?:\/\//i.test(p) ? p : "http://192.168.1.50:17627" + (p.startsWith("/") ? p : "/" + p),
   ),
+  // 恢复在线订阅（契约 2026-08-27）：useCoverURL 订阅离线切换，mock 返回取消函数即可
+  onOfflineChange: vi.fn(() => () => {}),
 }));
 
 vi.mock("../utils/apiClient.js", () => apiMock);

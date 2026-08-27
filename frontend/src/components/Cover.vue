@@ -2,7 +2,7 @@
   <div class="cover-wrap" :class="{ small, 'no-cover': !showCover }">
     <div class="cover-box" :style="boxStyle">
       <img
-        v-if="coverUrl"
+        v-if="coverUrl && !coverFailed"
         :src="coverUrl"
         class="cover-img"
         :class="{ spinning: state.isPlaying && !small }"
@@ -17,12 +17,12 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onBeforeUnmount } from "vue";
 import { Music } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { state } from "../composables/usePlayer.js";
 import { coverVisible } from "../composables/useCoverGuard.ts";
-import { resolveServerUrl } from "../utils/apiClient.js";
+import { useCoverURL } from "../composables/useCoverURL.js";
 
 const { t } = useI18n();
 
@@ -31,13 +31,28 @@ const { t } = useI18n();
 // 用户明确要「歌词区自动扩充封面区」。Cover 当前仅两处使用（桌面主区 / 移动端全屏播放器），
 // 均无固定高度容器依赖，display:none 不破坏其他布局（small 变体为预留，暂无调用方）。
 //
-// 封面解析策略（M1 审计结论）：保留组件内直出，不迁移 useCoverURL composable——
-// ① 本组件实际唯一调用方是 App.vue 桌面主区（移动端播放页用 MobilePlayer 自带封面，不经过 Cover）；
-//    桌面/非壳环境下 useCoverURL 也只是同步远程直出，迁移后行为零差异；
-// ② 本组件同时处理流媒体歌（song.coverUrl 直用、不走 /api/cover），useCoverURL 仅支持
-//    path 型 /api/cover 解析，强行迁移需特判流媒体分支，复杂度不成比例；
-// ③ 已有 path→URL 缓存 + 错误回退缓存，与 useCoverURL 的覆盖需求相同。
+// 封面解析策略（契约 2026-08-27 更新，推翻旧「保留组件内直出」决策）：接入 useCoverURL 唯一入口——
+// 桌面/非壳环境 resolveCover 同步远程直出（行为零变化）；iOS 壳环境自动本地优先
+// （covers 缓存 → 内嵌 APIC（断网）→ 远程 /api/cover；@error → markCoverError 兑底）。
+// 流媒体歌（song.coverUrl && !song.path）仍直用网络图 URL，不走 /api/cover。
 const showCover = computed(() => coverVisible("large"));
+const { coverSrc, coverOk, markCoverError, resolveCover, dispose } = useCoverURL();
+
+const streamFailed = ref(false); // 流媒体直用图加载失败 → 占位（与旧 onCoverError 缓存空串同语义）
+
+const coverUrl = computed(() => {
+  const s = props.song;
+  if (!s || streamFailed.value) return "";
+  if (s.coverUrl && !s.path) return s.coverUrl; // 流媒体歌（stream/试听/URL）：网络图直用
+  return coverSrc(s.path || "");
+});
+
+const coverFailed = computed(() => {
+  const s = props.song;
+  if (!s) return false;
+  if (s.coverUrl && !s.path) return streamFailed.value;
+  return s.path ? !coverOk(s.path) : false;
+});
 
 const props = defineProps({
   song: { type: Object, default: null },
@@ -50,40 +65,27 @@ const props = defineProps({
 // 封面方形：只设宽，aspect-ratio:1 带出高
 const boxStyle = computed(() => (props.size > 0 ? { width: `${props.size}px` } : null));
 
-const coverUrl = ref("");
-const cache = new Map(); // path -> url
-
 watch(
   () => {
     const s = props.song;
     return s ? s.path || s.coverUrl || "" : "";
   },
   (key) => {
-    if (!key) {
-      coverUrl.value = "";
-      return;
-    }
-    if (cache.has(key)) {
-      coverUrl.value = cache.get(key);
-      return;
-    }
-    if (props.song?.coverUrl && !props.song?.path) {
-      // 流媒体歌（stream / 试听 / URL）：网络图 URL 直用，不走 /api/cover
-      coverUrl.value = props.song.coverUrl;
-      cache.set(key, props.song.coverUrl);
-      return;
-    }
-    coverUrl.value = resolveServerUrl("/api/cover?path=" + encodeURIComponent(key));
+    streamFailed.value = false;
+    if (key && props.song?.path) resolveCover(props.song.path, { download: true });
   },
   { immediate: true },
 );
 
 function onCoverError() {
-  // 404/加载失败：回退占位并缓存，避免反复请求
-  const p = props.song?.path;
-  if (p) cache.set(p, "");
-  coverUrl.value = "";
+  if (props.song?.coverUrl && !props.song?.path) {
+    streamFailed.value = true; // 流媒体直用图失败：占位（与旧行为一致）
+    return;
+  }
+  if (props.song?.path) markCoverError(props.song.path);
 }
+
+onBeforeUnmount(() => dispose()); // 契约：组件卸载取消恢复在线订阅
 </script>
 
 <style scoped>

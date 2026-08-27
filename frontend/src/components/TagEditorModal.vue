@@ -17,10 +17,10 @@
           <div class="tag-main">
             <div class="cover-preview" data-testid="cover-preview">
               <img
-                v-if="previewUrl"
+                v-if="previewUrl && !previewFailed"
                 :src="previewUrl"
                 :alt="t('tags.coverAlt')"
-                @error="previewBroken = true"
+                @error="onPreviewError"
               />
               <Music v-else :size="42" />
             </div>
@@ -206,7 +206,8 @@ import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from "vue"
 import { useI18n } from "vue-i18n";
 import { Loader2, Music, Sparkles, Tags, X } from "@lucide/vue";
 import { state, loadSongs } from "../composables/usePlayer.js";
-import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
+import { apiPost } from "../utils/apiClient.js";
+import { useCoverURL } from "../composables/useCoverURL.js";
 import { loadEnabledFields, getEnabledFields } from "../composables/tagEditorSettings.js";
 import { showToast, toastError } from "../composables/useToast.js";
 
@@ -248,15 +249,38 @@ const songName = computed(() =>
   song.value ? song.value.name + (song.value.artist ? " · " + song.value.artist : "") : "",
 );
 
-// 封面预览：点选候选后优先显示远端封面；未选封面（cover_url=null）则显示本地 /api/cover
-// （跟随 currentSong.path，改名后自动指向新路径的封面）
+// 封面预览（契约 2026-08-27）：useCoverURL 唯一入口——点选候选后优先显示远端封面；
+// 未选封面（cover_url=null）时本地歌封面走 useCoverURL（本地 covers 缓存 → 内嵌 APIC（断网）
+// → 远程 /api/cover，对齐列表/播放页兑底顺序；跟随 song.path，改名后自动指向新路径封面）。
+// 弹窗一次性场景不传 download（只查不后台缓存）。
+const { coverSrc, coverOk, markCoverError, resolveCover, dispose } = useCoverURL();
+
 const previewUrl = computed(() => {
   if (previewBroken.value) return "";
   if (remoteCover.value) return remoteCover.value;
-  return song.value
-    ? resolveServerUrl("/api/cover?path=" + encodeURIComponent(song.value.path))
-    : "";
+  return song.value?.path ? coverSrc(song.value.path) : "";
 });
+const previewFailed = computed(() => {
+  if (previewBroken.value) return true;
+  if (remoteCover.value) return false;
+  return song.value?.path ? !coverOk(song.value.path) : false;
+});
+
+watch(
+  () => song.value?.path || "",
+  (p) => {
+    if (p) resolveCover(p);
+  },
+  { immediate: true },
+);
+
+function onPreviewError() {
+  if (remoteCover.value) {
+    previewBroken.value = true;
+    return;
+  }
+  if (song.value?.path) markCoverError(song.value.path);
+}
 
 // 每次打开：从目标歌曲同步表单 + 清空上次刮削结果 + 拉一次字段选择设置（模块级缓存）
 // （immediate：直接以 open=true 挂载（测试/特殊场景）也能同步）
@@ -439,6 +463,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
+  dispose(); // 契约：组件卸载取消恢复在线订阅
 });
 </script>
 
