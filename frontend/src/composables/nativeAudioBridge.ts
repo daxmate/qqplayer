@@ -30,7 +30,7 @@ export function nativeBridge() {
 }
 
 /** Web → Native 消息（fire-and-forget，失败静默） */
-export function nativePost(msg) {
+export function nativePost(msg: Record<string, unknown>) {
   const b = nativeBridge();
   if (!b || typeof b.postMessage !== "function") return;
   try {
@@ -41,7 +41,12 @@ export function nativePost(msg) {
 }
 
 // ---------- 原生状态镜像（事件推送驱动，供代理同步读取） ----------
-const nativeState = {
+const nativeState: {
+  currentTime: number;
+  duration: number;
+  isPlaying: boolean;
+  ended: boolean;
+} = {
   currentTime: 0,
   duration: 0,
   isPlaying: false,
@@ -53,24 +58,30 @@ const nativeState = {
 // 播放事件（timeupdate/playing/…）走上面的 listeners，其余事件（syncAssetProgress /
 // syncAssetDone / assetStatus / appState 等）经 onNativeEvent 分发给订阅者——
 // 订阅方无需关心事件入口的归属，也不会出现多个模块争相覆盖入口的双处理问题。
-const nativeEventHandlers = new Map(); // name → Set<fn(payload)>
+// 订阅回调参数用 never：任意「payload 具体形状」的订阅函数都能注册（contravariance：
+// never 可赋给任何类型），派发时以 Record<string, unknown> 实参调用（内部单点收窄）。
+// 订阅方的参数类型不会被收窄，保持各自的事件契约不变。
+type NativeEventHandler = (payload: never) => void;
+
+const nativeEventHandlers = new Map<string, Set<NativeEventHandler>>(); // name → Set<fn(payload)>
 
 /** 订阅某类原生事件（syncAssetProgress/syncAssetDone/assetStatus/appState…）；返回取消订阅函数 */
-export function onNativeEvent(name, fn) {
+export function onNativeEvent(name: string, fn: NativeEventHandler) {
   if (typeof fn !== "function") return () => {};
   if (!nativeEventHandlers.has(name)) nativeEventHandlers.set(name, new Set());
-  nativeEventHandlers.get(name).add(fn);
+  nativeEventHandlers.get(name)!.add(fn);
   return () => {
     nativeEventHandlers.get(name)?.delete(fn);
   };
 }
 
-function dispatchNativeEvent(name, payload) {
+function dispatchNativeEvent(name: string, payload: Record<string, unknown>) {
   const set = nativeEventHandlers.get(name);
   if (!set || !set.size) return;
   for (const fn of [...set]) {
     try {
-      fn(payload);
+      // 派发实参为 Record<string, unknown>（订阅方各自收窄自己的 payload 形状）
+      (fn as (payload: Record<string, unknown>) => void)(payload);
     } catch {
       /* 单个订阅者异常不拖垮派发 */
     }
@@ -78,15 +89,29 @@ function dispatchNativeEvent(name, payload) {
 }
 
 // ---------- 事件派发（模拟 DOM EventTarget，playerCore bindAudioEvents 直接挂） ----------
-const listeners = new Map();
+/** 代理上派发的 DOM 风格事件对象（{type, target, ...payload}，对齐 Audio 事件语义） */
+export interface NativeAudioEvent {
+  type: string;
+  target: NativeAudioProxy;
+  [key: string]: unknown;
+}
+
+const listeners = new Map<string, Set<(event: NativeAudioEvent) => void>>();
 // {once:true} 包装映射：原始 fn → 包装 fn。模拟 DOM 的 once 语义（触发即自移除），
 // 且 removeEventListener 传原始 fn 也能移除包装后的监听器（2026-08-26：此前 once 选项
 // 被直接丢弃，监听器挂上即永久存活——loadedmetadata 泄漏劫持新歌的帮凶之一）。
-const onceWrappers = new Map();
+const onceWrappers = new Map<
+  (event: NativeAudioEvent) => void,
+  (event: NativeAudioEvent) => void
+>();
 
-function addListener(type, fn, options) {
+function addListener(
+  type: string,
+  fn: (event: NativeAudioEvent) => void,
+  options?: { once?: boolean },
+) {
   if (!listeners.has(type)) listeners.set(type, new Set());
-  let entry = fn;
+  let entry: (event: NativeAudioEvent) => void = fn;
   if (options && options.once) {
     entry = (event) => {
       removeListener(type, entry);
@@ -94,19 +119,20 @@ function addListener(type, fn, options) {
     };
     onceWrappers.set(fn, entry);
   }
-  listeners.get(type).add(entry);
+  listeners.get(type)!.add(entry);
 }
 
-function removeListener(type, fn) {
+function removeListener(type: string, fn: (event: NativeAudioEvent) => void) {
   const actual = onceWrappers.get(fn) || fn;
   onceWrappers.delete(fn);
   listeners.get(type)?.delete(actual);
 }
 
-function emit(type, payload = {}) {
+function emit(type: string, payload: Record<string, unknown> = {}) {
   const set = listeners.get(type);
   if (!set) return;
-  const event = { type, target: proxy, ...payload };
+  // 有监听器必然已 createNativeAudioProxy（监听器只经代理挂载），target 非空
+  const event: NativeAudioEvent = { type, target: proxy!, ...payload };
   for (const fn of [...set]) {
     try {
       fn(event);
@@ -141,7 +167,7 @@ function authToken() {
   }
 }
 
-export function resolveNativeUrl(url) {
+export function resolveNativeUrl(url: string): string {
   if (!url || typeof url !== "string") return url;
   // http(s) 与 file（本地资产）都是绝对 URL，原样传给原生播放（第三方直链不加 token）
   if (/^(https?|file):\/\//i.test(url)) return url;
@@ -168,11 +194,32 @@ export function resolveNativeUrl(url) {
 }
 
 // ---------- Audio 代理（对 playerCore 呈现原生 Audio 元素语义） ----------
-let proxy = null;
+let proxy: NativeAudioProxy | null = null;
 
-export function createNativeAudioProxy() {
+export interface NativeAudioProxy {
+  src: string;
+  currentTime: number;
+  duration: number;
+  paused: boolean;
+  ended: boolean;
+  volume: number;
+  muted: boolean;
+  playbackRate: number;
+  play(): Promise<void>;
+  pause(): void;
+  load(): void;
+  addEventListener(
+    type: string,
+    fn: (event: NativeAudioEvent) => void,
+    options?: { once?: boolean },
+  ): void;
+  removeEventListener(type: string, fn: (event: NativeAudioEvent) => void): void;
+  removeAttribute(attr: string): void;
+}
+
+export function createNativeAudioProxy(): NativeAudioProxy {
   if (proxy) return proxy;
-  const p = {};
+  const p = {} as NativeAudioProxy;
   let srcValue = "";
   let volumeValue = 1;
   let rateValue = 1;
@@ -181,7 +228,7 @@ export function createNativeAudioProxy() {
   Object.defineProperties(p, {
     src: {
       get: () => srcValue,
-      set: (v) => {
+      set: (v: string) => {
         srcValue = v ? String(v) : "";
         if (srcValue) {
           // 换源重置进度/时长镜像：模拟浏览器 <audio> 换 src 后 currentTime 归零。
@@ -197,7 +244,7 @@ export function createNativeAudioProxy() {
     },
     currentTime: {
       get: () => nativeState.currentTime,
-      set: (t) => {
+      set: (t: number) => {
         if (typeof t !== "number" || !Number.isFinite(t)) return;
         const v = Math.max(0, t);
         nativeState.currentTime = v;
@@ -215,21 +262,21 @@ export function createNativeAudioProxy() {
     },
     volume: {
       get: () => volumeValue,
-      set: (v) => {
+      set: (v: number) => {
         volumeValue = Math.min(1, Math.max(0, Number(v) || 0));
         nativePost({ cmd: "setVolume", v: volumeValue });
       },
     },
     muted: {
       get: () => mutedValue,
-      set: (v) => {
+      set: (v: boolean) => {
         mutedValue = !!v;
         nativePost({ cmd: "setVolume", v: mutedValue ? 0 : volumeValue });
       },
     },
     playbackRate: {
       get: () => rateValue,
-      set: (r) => {
+      set: (r: number) => {
         rateValue = Number(r) || 1;
         nativePost({ cmd: "setRate", r: rateValue });
       },
@@ -251,7 +298,7 @@ export function createNativeAudioProxy() {
   p.load = () => {};
   p.addEventListener = addListener;
   p.removeEventListener = removeListener;
-  p.removeAttribute = (attr) => {
+  p.removeAttribute = (attr: string) => {
     if (attr === "src") srcValue = "";
   };
 
@@ -323,13 +370,13 @@ export function installNativeEventSink() {
 // ---------- 远端命令（锁屏/耳机线控）→ playerCore 执行 ----------
 // 壳 MPRemoteCommandCenter 收到 play/pause/next/prev/seekto → 推 remoteCommand →
 // playerCore 注册处理器（与桌面 MediaSession 同一套动作，队列/切歌逻辑完全复用）
-let remoteCommandHandler = null;
+let remoteCommandHandler: ((cmd: string, t?: number) => void) | null = null;
 
-export function registerRemoteCommandHandler(fn) {
+export function registerRemoteCommandHandler(fn: (cmd: string, t?: number) => void) {
   remoteCommandHandler = fn;
 }
 
-function handleRemoteCommand(payload = {}) {
+function handleRemoteCommand(payload: Record<string, unknown> = {}) {
   if (!remoteCommandHandler) return;
   const cmd = payload.cmd;
   const t = typeof payload.t === "number" ? payload.t : undefined;
@@ -343,13 +390,13 @@ function handleRemoteCommand(payload = {}) {
 
 // ---------- 原生切歌事件（锁屏/线控后台切歌）→ playerCore 对齐状态 ----------
 // 壳 playQueueRelative 切歌成功后推 songChanged {index}（前端不重新 load，只对齐）。
-let nativeSongChangedHandler = null;
+let nativeSongChangedHandler: ((index: number) => void) | null = null;
 
-export function registerNativeSongChangedHandler(fn) {
+export function registerNativeSongChangedHandler(fn: (index: number) => void) {
   nativeSongChangedHandler = fn;
 }
 
-function handleSongChanged(payload = {}) {
+function handleSongChanged(payload: Record<string, unknown> = {}) {
   if (!nativeSongChangedHandler) return;
   const index = typeof payload.index === "number" ? payload.index : -1;
   if (index >= 0) nativeSongChangedHandler(index);
@@ -358,7 +405,15 @@ function handleSongChanged(payload = {}) {
 // ---------- 封面 URL 解析（单一真源） ----------
 // song.coverUrl 优先（流媒体网络图）；否则本地歌 path → 服务器 /api/cover 绝对 URL
 //（token 附加同 resolveNativeUrl）；都没有返回 ""。
-export function resolveCoverURL(song) {
+export interface LockScreenSong {
+  name?: string;
+  artist?: string;
+  album?: string;
+  coverUrl?: string;
+  path?: string;
+}
+
+export function resolveCoverURL(song: LockScreenSong | null | undefined) {
   if (!song) return "";
   if (song.coverUrl) return song.coverUrl;
   if (song.path) return resolveNativeUrl("/api/cover?path=" + encodeURIComponent(song.path));
@@ -368,7 +423,7 @@ export function resolveCoverURL(song) {
 // ---------- 锁屏元数据（currentSong 变化 → 原生 Now Playing） ----------
 // coverOverride（可选第二参数）：调用方已解析好的封面（data: URL / 本地缓存 URL），优先于
 // resolveCoverURL 的 song.coverUrl 与远程兜底；同步签名保持兼容（老调用只传 song）。
-export function nativeSendMetadata(song, coverOverride = "") {
+export function nativeSendMetadata(song: LockScreenSong | null | undefined, coverOverride = "") {
   if (!song) {
     nativePost({ cmd: "setMetadata", title: "", artist: "", album: "", coverUrl: "" });
     return;

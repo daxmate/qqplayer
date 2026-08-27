@@ -9,7 +9,7 @@
 //     才发 syncDownload 后台下载并 resolve(null)——默认关 = 只查不下载
 //   - nativeMetaSave / nativeMetaLoad：元数据文件持久化兜底桥（Documents/meta/
 //     {kind}.json；iOS 壳 IndexedDB 重启不可靠，播放列表/收藏落文件双写）
-//   - pollCommands()：指令轮询执行器（T2）——桌面写指令（pushDownload 推送下载 /
+//   - pollCommands()：指令轮询执行器（T2）——桌面写指令（pushDownload 远程推送 /
 //     remoteDelete 远程删除）→ iOS 轮询拉取执行 + 回执 ack；60s interval 随 appState
 //     启停；getDeviceId() 经原生桥取 Keychain 持久设备标识（超时回落 null）。
 //   - reportAssets()：资产清单上报（触发式）——assetIndex + assetsSize 回执 →
@@ -47,6 +47,206 @@ import { onNativeEvent, nativePost } from "../composables/nativeAudioBridge.js";
 import { apiGet, apiPost, resolveServerUrl } from "./apiClient.js";
 import { getCache, setCache } from "./cacheDb.js";
 
+// ---------- 类型（TS 化；宽松边界：原生回执/API 数据按 any 处理，行为零变化） ----------
+interface ApiResultLoose {
+  ok: boolean;
+  status?: unknown;
+  data?: Record<string, unknown>;
+  message?: string;
+  response?: unknown;
+}
+
+/** 下载项（沙盒相对路径 + 桌面绝对 URL + 内容哈希/大小） */
+interface DownloadItem {
+  url: string;
+  path: string;
+  sha256: string;
+  size: number;
+}
+
+interface EnsureAssetOpts {
+  download?: boolean;
+  skipAutoDownload?: boolean;
+}
+
+/** 同步管理页下载面板条目（done/failed 保留供重试/清除） */
+interface SyncDownloadEntry {
+  name: string;
+  status: "queued" | "downloading" | "done" | "failed";
+  received: number;
+  total: number;
+  error: string;
+  url: string;
+  sha256: string;
+  size: number;
+}
+
+/** 歌曲（manifest songs 条目宽松视图；字段来自桌面端，缺省容忍） */
+interface SongLike {
+  path?: string;
+  name?: string;
+  sha256?: string;
+  size?: number;
+  coverUrl?: string;
+  cover_source?: string;
+  cover_size?: number;
+  lyric_mtime?: unknown;
+}
+
+/** 图书（manifest books 条目宽松视图） */
+interface BookLike {
+  id?: string;
+  sha256?: string;
+  size?: number;
+}
+
+/** 词典（manifest dicts 条目宽松视图） */
+interface DictLike {
+  path?: string;
+  sha256?: string;
+  size?: number;
+}
+
+/** 原生资产注册表条目（assetIndex 回执） */
+interface AssetRecord {
+  path?: string;
+  sha256?: string;
+  size?: number;
+}
+
+/** 可更新项（computeUpdateList 产物） */
+interface UpdateItem {
+  path: string;
+  name: string;
+  kind: "audio" | "cover";
+  song: SongLike;
+  coverStale?: boolean;
+}
+
+interface MissingStats {
+  audio: number;
+  covers: number;
+  books: number;
+  dicts: number;
+}
+
+interface ManifestResult {
+  ok: boolean;
+  changed?: boolean;
+  version?: string;
+  manifest?: Record<string, unknown>;
+  counts?: Record<string, number>;
+  message?: string;
+  status?: unknown;
+}
+
+interface SyncNowResult {
+  ok: boolean;
+  enabled?: boolean;
+  changed?: boolean;
+  version?: string;
+  counts?: Record<string, number>;
+  message?: string;
+  status?: unknown;
+}
+
+interface SyncAllResult {
+  ok: boolean;
+  enabled?: boolean;
+  message?: string;
+  sent?: boolean;
+  missing?: MissingStats;
+  updateCount?: number;
+  status?: unknown;
+  manifest?: Record<string, unknown>;
+}
+
+interface SyncOverview {
+  ok: boolean;
+  enabled?: boolean;
+  message?: string;
+  missing?: MissingStats;
+  updateCount?: number;
+  orphans?: { path: string; size: number }[];
+  orphanSize?: number;
+  assets?: AssetRecord[];
+  songs?: SongLike[];
+  dicts?: unknown[];
+  manifest?: Record<string, unknown>;
+}
+
+interface AssetsSizeData {
+  total?: number;
+  byType?: Record<string, number>;
+}
+
+// ---------- 原生回执/远端指令的宽松视图（字段可选；取值侧自行收窄） ----------
+// 与 .js 版按 any 处理的宽松边界语义一致：声明具体字段类型仅为满足 TS 检查，
+// 运行时仍以 typeof/truthiness 判断兜底，字段缺失/类型不符不会抛错。
+
+/** syncAssetProgress 回执 {path, received, total} */
+interface AssetProgressPayload {
+  path?: string;
+  received?: number;
+  total?: number;
+}
+
+/** syncAssetDone 回执 {path, ok, error?, total?} */
+interface AssetDonePayload {
+  path?: string;
+  ok?: boolean;
+  error?: string;
+}
+
+/** appState 生命周期 {state: 'active'|'inactive'|'background'} */
+interface AppStatePayload {
+  state?: string;
+}
+
+/** getDeviceId 回执 {requestId, deviceId} */
+interface DeviceIdPayload {
+  requestId?: string;
+  deviceId?: unknown;
+}
+
+/** assetStatus 回执 {requestId, path, exists, localURL}（ensureAsset 挂起查询结算） */
+interface AssetStatusResult {
+  requestId?: string;
+  path?: string;
+  exists?: boolean;
+  localURL?: string;
+}
+
+/** metaLoaded 回执 {requestId, kind, json?}（nativeMetaLoad 挂起读取结算） */
+interface MetaLoadedPayload {
+  requestId?: string;
+  kind?: string;
+  json?: string;
+}
+
+/** assetIndex 回执 {assets}（资产注册表） */
+interface AssetIndexPayload {
+  assets?: AssetRecord[];
+}
+
+/** assetsDeleted 完成回推 {paths} */
+interface AssetsDeletedPayload {
+  paths?: string[];
+}
+
+/** 远端指令（pollCommands 拉取；pushDownload/remoteDelete 共用 payload 形状） */
+interface RemoteCommand {
+  id?: unknown;
+  type?: unknown;
+  payload?: RemoteCommandPayload;
+}
+
+/** pushDownload payload {items:[{path,...}]} / remoteDelete payload {paths} */
+interface RemoteCommandPayload {
+  items?: Array<{ path?: unknown }>;
+  paths?: unknown[];
+}
+
 // ---------- 环境判定 ----------
 
 /** 是否处于原生壳环境（iOS 壳注入 window.qqplayerNative=true；桌面浏览器没有） */
@@ -73,7 +273,7 @@ function iosBridgeAvailable() {
 
 // ---------- 同步状态（设置页 UI 读） ----------
 export const syncState = reactive({
-  lastSyncAt: null, // 上次成功同步时间戳（ms）
+  lastSyncAt: null as number | null, // 上次成功同步时间戳（ms）
   syncing: false, // 同步进行中（设置页按钮 loading 态）
   lastError: "", // 最近一次同步失败信息（成功清空）
   pendingCount: 0, // 进行中的下载数（syncAssetProgress/Done 聚合）
@@ -84,7 +284,7 @@ export const syncState = reactive({
  *  { [path]: {name, status:'queued'|'downloading'|'done'|'failed', received, total,
  *             error, url, sha256, size} }
  *  done/failed 条目保留（供重试 / 清除）；url/sha256/size 留存供 retryFailed 重建消息。 */
-export const syncDownloads = reactive({});
+export const syncDownloads = reactive<Record<string, SyncDownloadEntry>>({});
 
 /** 同步状态快照引用（设置页 UI 响应式读取；同 syncState） */
 export function getSyncState() {
@@ -101,8 +301,8 @@ let syncInFlight = false;
  * 拉取桌面 manifest 并缓存元数据集合（syncNow / syncAll 共用）。
  * @returns {Promise<{ok:boolean, changed?:boolean, version?:string, manifest?:object, message?:string}>}
  */
-async function fetchAndCacheManifest() {
-  const r = await apiGet(MANIFEST_URL);
+async function fetchAndCacheManifest(): Promise<ManifestResult> {
+  const r = (await apiGet(MANIFEST_URL)) as ApiResultLoose;
   if (!r.ok) {
     syncState.lastError = r.message || `HTTP ${r.status || 0}`;
     return { ok: false, message: syncState.lastError, status: r.status };
@@ -112,7 +312,7 @@ async function fetchAndCacheManifest() {
   const meta = await getCache("sync:meta");
   const changed = !meta || meta.version !== version;
   if (changed) {
-    const counts = {};
+    const counts: Record<string, number> = {};
     for (const key of COLLECTION_KEYS) {
       const list = Array.isArray(manifest[key]) ? manifest[key] : [];
       counts[key] = list.length;
@@ -134,7 +334,7 @@ async function fetchAndCacheManifest() {
  *   enabled=false → 桌面浏览器（未启用）；ok=false → 拉取失败（message 为原因）；
  *   成功 → {ok:true, changed, version, counts:{songs,playlists,favorites,books,dicts}}
  */
-export async function syncNow() {
+export async function syncNow(): Promise<SyncNowResult> {
   if (!syncEnabled()) return { enabled: false, ok: false };
   if (syncInFlight) return { ok: false, message: "sync in progress" };
   syncInFlight = true;
@@ -146,14 +346,15 @@ export async function syncNow() {
     }
     syncState.lastSyncAt = Date.now();
     syncState.lastError = "";
-    const counts = {};
+    const manifest = mr.manifest || {};
+    const counts: Record<string, number> = {};
     for (const key of COLLECTION_KEYS) {
-      counts[key] = Array.isArray(mr.manifest[key]) ? mr.manifest[key].length : 0;
+      counts[key] = Array.isArray(manifest[key]) ? manifest[key].length : 0;
     }
     // 自动更新（默认关）：同步成功后异步拉 assetIndex → 对比 sha256 → 应用可更新项
     // （fire-and-forget，不阻塞 syncNow 返回；失败静默，下次同步再试）
     if (autoUpdateEnabled()) {
-      runAutoUpdate(mr.manifest.songs).catch(() => {});
+      runAutoUpdate(manifest.songs).catch(() => {});
     }
     // T2：同步成功后顺带拉一次指令 + 上报资产清单（fire-and-forget，不阻塞）——
     // 覆盖负一屏同步中心手动同步「顺带拉指令」的语义
@@ -161,7 +362,7 @@ export async function syncNow() {
     reportAssets().catch(() => {});
     return { ok: true, changed: mr.changed, version: mr.version, counts };
   } catch (e) {
-    syncState.lastError = (e && e.message) || "同步失败";
+    syncState.lastError = (e as { message?: string } | null | undefined)?.message || "同步失败";
     return { ok: false, message: syncState.lastError };
   } finally {
     syncInFlight = false;
@@ -170,7 +371,7 @@ export async function syncNow() {
 }
 
 /** 自动更新：对比本地注册表 → 对 sha256 变化的资产应用更新（失败静默） */
-async function runAutoUpdate(songs) {
+async function runAutoUpdate(songs: unknown) {
   const local = await fetchAssetIndex();
   const updates = await computeUpdateList(Array.isArray(songs) ? songs : [], local);
   if (updates.length) await applyUpdates(updates);
@@ -179,7 +380,7 @@ async function runAutoUpdate(songs) {
 // ---------- 资产标识 → 沙盒路径（内容寻址） ----------
 
 /** 扩展名（含点，小写；无扩展名返回 ""） */
-function extOf(name) {
+function extOf(name: string) {
   const m = String(name || "").match(/\.([A-Za-z0-9]+)$/);
   return m ? "." + m[1].toLowerCase() : "";
 }
@@ -188,13 +389,15 @@ function extOf(name) {
  * 注意：WKWebView 个别场景 crypto.subtle.digest 的 Promise 可能永不 resolve（而非 reject），
  * 用 Promise.race 500ms 超时兜底，避免调用方（如批量下载 buildSongItems）永久挂起。
  * 导出供封面缓存（coverAssetKey）与歌词文件兜底（lyricKindKey）共用同一哈希函数。 */
-export async function stableHash(identity) {
+export async function stableHash(identity: unknown): Promise<string> {
   const input = String(identity || "");
   try {
     if (typeof crypto !== "undefined" && crypto.subtle && typeof TextEncoder !== "undefined") {
       const buf = await Promise.race([
         crypto.subtle.digest("SHA-256", new TextEncoder().encode(input)),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("digest timeout")), 500)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("digest timeout")), 500),
+        ),
       ]);
       return Array.from(new Uint8Array(buf))
         .map((b) => b.toString(16).padStart(2, "0"))
@@ -217,7 +420,7 @@ export async function stableHash(identity) {
  *  sha256 = manifest 条目自带的内容哈希（T1 契约：manifest songs[].sha256）；
  *  老清单/缺字段 → ""（原生侧空值跳过内容校验，文件名仍用资产标识哈希做内容寻址）。
  *  下载项同时是「资产注册表路径」的权威来源：本地注册表按此 path 与 manifest 对照。 */
-export async function assetForSong(song) {
+export async function assetForSong(song: SongLike): Promise<DownloadItem | null> {
   if (!song || !song.path) return null;
   const url = resolveServerUrl("/api/audio?path=" + encodeURIComponent(song.path));
   const hash = await stableHash(song.path);
@@ -230,7 +433,7 @@ export async function assetForSong(song) {
 }
 
 /** 词典 → 下载项（manifest dicts 条目：{name, path, size, mtime}）；sha256 暂为空（同上） */
-export async function assetForDict(dict) {
+export async function assetForDict(dict: DictLike): Promise<DownloadItem | null> {
   if (!dict || !dict.path) return null;
   const url = resolveServerUrl("/api/sync/dicts/file?path=" + encodeURIComponent(dict.path));
   const hash = await stableHash(dict.path);
@@ -243,7 +446,7 @@ export async function assetForDict(dict) {
 }
 
 /** 书 → 下载项（manifest books 条目：{id, title, progress}）；sha256 暂为空（同上） */
-export async function assetForBook(book) {
+export async function assetForBook(book: BookLike): Promise<DownloadItem | null> {
   if (!book || !book.id) return null;
   const url = resolveServerUrl("/api/books/" + encodeURIComponent(book.id) + "/file");
   const hash = await stableHash(book.id);
@@ -256,7 +459,7 @@ export async function assetForBook(book) {
 
 /** 封面资产沙盒路径：covers/<path 哈希>.jpg（前端不知封面实际格式，统一按 JPEG 命名；
  *  MiniHTTPServer 按扩展名回 Content-Type，WKWebView 图片解码器按魔数嗅探，PNG 内容也能显示） */
-export async function coverAssetKey(path) {
+export async function coverAssetKey(path: string): Promise<string | null> {
   if (!path) return null;
   const hash = await stableHash(path);
   return "covers/" + hash + ".jpg";
@@ -264,18 +467,18 @@ export async function coverAssetKey(path) {
 
 /** 封面下载项 {url, path, sha256, size}（url 为桌面 cover 端点；sha256 空 → 原生跳过内容校验）
  *  @param {number} [size] 可选：manifest 封面文件大小（cover_source=file 时原生 size 校验用） */
-export async function coverItemFor(path, size = 0) {
+export async function coverItemFor(path: string, size = 0): Promise<DownloadItem | null> {
   if (!path) return null;
   return {
     url: resolveServerUrl("/api/cover?path=" + encodeURIComponent(path)),
-    path: await coverAssetKey(path),
+    path: (await coverAssetKey(path))!,
     sha256: "",
     size: size || 0,
   };
 }
 
 /** 歌词文件兜底 kind：lyric:<path 哈希>（Documents/meta/lyric:<hash>.json） */
-export async function lyricKindKey(path) {
+export async function lyricKindKey(path: string): Promise<string | null> {
   if (!path) return null;
   const hash = await stableHash(path);
   return "lyric:" + hash;
@@ -283,7 +486,7 @@ export async function lyricKindKey(path) {
 
 // ---------- 资产查询与下载（ensureAsset） ----------
 let requestSeq = 0;
-const pendingQueries = new Map(); // requestId → resolve(localURL|null)
+const pendingQueries = new Map<string, (payload: AssetStatusResult) => void>(); // requestId → resolve(localURL|null)
 
 /** hasAsset 回执等待超时（ms）：原生无回执时不挂起调用方 */
 export const ASSET_QUERY_TIMEOUT_MS = 8000;
@@ -300,7 +503,10 @@ export const ASSET_QUERY_TIMEOUT_MS = 8000;
  * @returns {Promise<string|null>} 已存在 → resolve(localURL)；不存在 → resolve(null)
  *   （不阻塞、不等待下载完成；调用方保持远程播放即可）
  */
-export function ensureAsset({ path, url, sha256, size } = {}, opts = {}) {
+export function ensureAsset(
+  { path, url, sha256, size }: Partial<DownloadItem> = {},
+  opts: EnsureAssetOpts = {},
+): Promise<string | null> {
   if (!syncEnabled() || !iosBridgeAvailable() || !path || !url) {
     return Promise.resolve(null);
   }
@@ -352,7 +558,7 @@ export const LOCAL_SERVER_ORIGIN = "http://127.0.0.1:17888";
  *     → http://127.0.0.1:17888/native-assets/books/<hash>.epub
  * 解析失败返回 null（调用方回退远程加载）。
  */
-export function localAssetHTTPURL(localURL) {
+export function localAssetHTTPURL(localURL: string | null): string | null {
   if (!localURL || typeof localURL !== "string") return null;
   const m = String(localURL).match(/qqplayer-assets\/(.+)$/);
   if (!m) return null;
@@ -369,7 +575,7 @@ export function localAssetHTTPURL(localURL) {
  * 列表可见行全部查询时不能刷爆原生串行下载队列，下载由调用方 cacheCover 显式节流）。
  * 非 iOS 壳 / path 非法 → resolve(null)（静默 no-op）。
  */
-export async function cachedCoverURL(path) {
+export async function cachedCoverURL(path: string): Promise<string | null> {
   if (!path || !syncEnabled() || !iosBridgeAvailable()) return null; // 非 iOS 壳：静默 no-op
   const item = await coverItemFor(path);
   if (!item) return null;
@@ -383,7 +589,7 @@ export async function cachedCoverURL(path) {
  * 调用方负责节流（useCoverURL：播放中 + 列表前 N 行），避免几百首封面同时灌入下载队列。
  * 失败静默（下载失败不影响远程封面展示）。非 iOS 壳 no-op。
  */
-export function cacheCover(path) {
+export function cacheCover(path: string) {
   if (!path || !syncEnabled() || !iosBridgeAvailable()) return; // 非 iOS 壳：静默 no-op
   coverItemFor(path)
     .then((item) => {
@@ -395,10 +601,10 @@ export function cacheCover(path) {
 }
 
 // ---------- syncDownload 批量发送（微任务合并） ----------
-let downloadBatch = [];
-let downloadBatchTimer = null;
+let downloadBatch: DownloadItem[] = [];
+let downloadBatchTimer: Promise<void> | null = null;
 
-function queueDownload(item) {
+function queueDownload(item: DownloadItem) {
   downloadBatch.push(item);
   if (downloadBatchTimer) return;
   downloadBatchTimer = Promise.resolve()
@@ -415,9 +621,9 @@ function flushDownloads() {
 }
 
 // ---------- 下载进度聚合（Native→Web 事件驱动） ----------
-const activeDownloads = new Map(); // path → {received, total}
+const activeDownloads = new Map<string, { received: number; total: number }>(); // path → {received, total}
 
-function handleAssetProgress(payload) {
+function handleAssetProgress(payload: AssetProgressPayload) {
   const path = payload && payload.path;
   if (!path) return;
   const cur = activeDownloads.get(path) || { received: 0, total: 0 };
@@ -434,7 +640,7 @@ function handleAssetProgress(payload) {
   refreshSyncState();
 }
 
-function handleAssetDone(payload) {
+function handleAssetDone(payload: AssetDonePayload) {
   if (payload && payload.path) {
     activeDownloads.delete(payload.path);
     const entry = syncDownloads[payload.path];
@@ -448,7 +654,7 @@ function handleAssetDone(payload) {
 }
 
 // ---------- 资产占用回执（fetchAssetsSize / fetchAssetsSizeDetailed 共用 waiter） ----------
-let assetsSizeWaiters = new Set(); // Set<fn(payload|null)>；原生回执/超时先到先结算
+const assetsSizeWaiters = new Set<(data: AssetsSizeData | null) => void>(); // Set<fn(payload|null)>；原生回执/超时先到先结算
 
 function refreshSyncState() {
   syncState.pendingCount = activeDownloads.size;
@@ -468,7 +674,7 @@ function refreshSyncState() {
 // 首个非 active 事件到达即停止），保证前台启动第一轮指令不被漏掉。
 let appActive = true;
 
-function handleAppState(payload) {
+function handleAppState(payload: AppStatePayload) {
   const state = payload && payload.state;
   if (state === "active") {
     appActive = true;
@@ -491,12 +697,12 @@ function handleAppState(payload) {
 export const DEVICE_ID_TIMEOUT_MS = 3000;
 
 let deviceIdSeq = 0;
-let deviceIdPromise = null; // 结果缓存（Promise；null=未查询过）
-let deviceIdTimer = null; // 当前查询超时句柄（测试复位时取消，防挂起 promise 跨用例续跑）
-const deviceIdWaiters = new Map(); // requestId → resolve(deviceId|null)
+let deviceIdPromise: Promise<string | null> | null = null; // 结果缓存（Promise；null=未查询过）
+let deviceIdTimer: ReturnType<typeof setTimeout> | null = null; // 当前查询超时句柄（测试复位时取消，防挂起 promise 跨用例续跑）
+const deviceIdWaiters = new Map<string, (deviceId: unknown) => void>(); // requestId → resolve(deviceId|null)
 
 /** deviceId 回执分发：按 requestId 结算挂起的 getDeviceId 查询 */
-function handleDeviceId(payload) {
+function handleDeviceId(payload: DeviceIdPayload) {
   if (!payload || payload.requestId == null) return;
   const resolve = deviceIdWaiters.get(payload.requestId);
   if (!resolve) return; // 已超时/已消费的回执：忽略
@@ -508,12 +714,12 @@ function handleDeviceId(payload) {
  * 非原生环境 / 原生无回执（超时 3s）→ resolve(null)。
  * @returns {Promise<string|null>}
  */
-export function getDeviceId() {
+export function getDeviceId(): Promise<string | null> {
   if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
   if (deviceIdPromise) return deviceIdPromise;
   ensureSubscribed(); // 需要 deviceId 事件订阅
   const requestId = String(++deviceIdSeq); // 字符串：与 Swift 侧 as? String 解析对齐
-  deviceIdPromise = new Promise((resolve) => {
+  deviceIdPromise = new Promise<string | null>((resolve) => {
     deviceIdTimer = setTimeout(() => {
       if (deviceIdWaiters.has(requestId)) {
         deviceIdWaiters.delete(requestId);
@@ -521,7 +727,7 @@ export function getDeviceId() {
       }
     }, DEVICE_ID_TIMEOUT_MS);
     deviceIdWaiters.set(requestId, (deviceId) => {
-      clearTimeout(deviceIdTimer);
+      clearTimeout(deviceIdTimer ?? undefined);
       deviceIdTimer = null;
       deviceIdWaiters.delete(requestId);
       resolve(typeof deviceId === "string" && deviceId ? deviceId : null);
@@ -536,7 +742,7 @@ export function getDeviceId() {
 /** 指令轮询间隔（ms） */
 export const COMMAND_POLL_MS = 60000;
 
-let commandPollTimer = null; // setInterval 句柄（仅 appState active 时存在）
+let commandPollTimer: ReturnType<typeof setInterval> | null = null; // setInterval 句柄（仅 appState active 时存在）
 
 /** 启动指令轮询 interval（仅 active 时；已启动不重复；幂等） */
 export function ensureCommandPolling() {
@@ -565,19 +771,20 @@ export function stopCommandPolling() {
  * @returns {Promise<{ok:boolean, executed:number}>} executed=已处理指令数
  *   （含执行失败的——ok 细节在各自 ack 里；拉取失败 → {ok:false, executed:0} 静默）
  */
-export async function pollCommands() {
+export async function pollCommands(): Promise<{ ok: boolean; executed: number }> {
   if (!syncEnabled() || !iosBridgeAvailable()) return { ok: false, executed: 0 };
   const deviceId = await getDeviceId();
   const url =
     "/api/sync/commands/pending" + (deviceId ? "?device_id=" + encodeURIComponent(deviceId) : "");
-  let r;
+  let r: ApiResultLoose;
   try {
-    r = await apiGet(url);
+    r = (await apiGet(url)) as ApiResultLoose;
   } catch {
     return { ok: false, executed: 0 }; // 网络失败静默（下轮再试）
   }
   if (!r || !r.ok) return { ok: false, executed: 0 };
-  const commands = Array.isArray(r.data && r.data.commands) ? r.data.commands : [];
+  const data = r.data;
+  const commands = data && Array.isArray(data.commands) ? data.commands : [];
   if (!commands.length) return { ok: true, executed: 0 };
   let executed = 0;
   for (const cmd of commands) {
@@ -597,12 +804,12 @@ export async function pollCommands() {
  * 执行单条指令并回执 ack（pushDownload / remoteDelete / 未知类型）。
  * 回执网络失败静默（后端 executing 超时重拉兜底）。
  */
-async function executeCommand(cmd, deviceId) {
+async function executeCommand(cmd: RemoteCommand, deviceId: string | null) {
   const id = cmd && cmd.id;
   const type = cmd && cmd.type;
   let ok = true;
   let error = "";
-  let detail = null;
+  let detail: unknown = null;
   try {
     if (type === "pushDownload") {
       const res = await handlePushDownload(cmd.payload);
@@ -610,7 +817,8 @@ async function executeCommand(cmd, deviceId) {
       error = res.error || "";
       detail = res.detail || null;
     } else if (type === "remoteDelete") {
-      const paths = Array.isArray(cmd.payload && cmd.payload.paths) ? cmd.payload.paths : [];
+      const pld = cmd.payload;
+      const paths = pld && Array.isArray(pld.paths) ? pld.paths : [];
       nativePost({ cmd: "deleteAssets", paths }); // fire-and-forget：发出即视为提交
       detail = { deleted: paths.length };
     } else {
@@ -619,10 +827,10 @@ async function executeCommand(cmd, deviceId) {
     }
   } catch (e) {
     ok = false;
-    error = (e && e.message) || "command failed";
+    error = (e as { message?: string } | null | undefined)?.message || "command failed";
   }
   if (id != null) {
-    const body = { device_id: deviceId || "", ok: !!ok };
+    const body: Record<string, unknown> = { device_id: deviceId || "", ok: !!ok };
     if (error) body.error = error;
     if (detail) body.detail = detail;
     try {
@@ -640,8 +848,11 @@ async function executeCommand(cmd, deviceId) {
  * → syncAssets 登记并发出 syncDownload。未匹配的 path 记入 skipped，不阻塞整体。
  * @returns {Promise<{ok:boolean, error?:string, detail?:{skipped:string[]}}>}
  */
-async function handlePushDownload(payload) {
-  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+async function handlePushDownload(
+  payload: RemoteCommandPayload | undefined,
+): Promise<{ ok: boolean; error?: string; detail?: unknown }> {
+  const items: Array<{ path?: unknown }> =
+    payload && Array.isArray(payload.items) ? payload.items : [];
   const paths = items.map((i) => i && i.path).filter((p) => typeof p === "string" && p);
   if (!paths.length) return { ok: false, error: "no valid items" }; // items 空/全非法
   const cached = await getCache("sync:songs");
@@ -678,7 +889,7 @@ async function handlePushDownload(payload) {
  * POST /api/sync/device/assets。失败静默（下轮同步再报）。
  * @returns {Promise<boolean>} 是否成功上报
  */
-export async function reportAssets() {
+export async function reportAssets(): Promise<boolean> {
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   const deviceId = await getDeviceId();
   if (!deviceId) return false; // 拿不到设备标识：静默跳过上报
@@ -691,7 +902,7 @@ export async function reportAssets() {
     byType: sizeData && sizeData.byType ? sizeData.byType : {},
   };
   try {
-    const r = await apiPost("/api/sync/device/assets", body);
+    const r = (await apiPost("/api/sync/device/assets", body)) as ApiResultLoose;
     return !!(r && r.ok);
   } catch {
     return false; // 上报失败静默
@@ -701,7 +912,7 @@ export async function reportAssets() {
 // ---------- 安装（initSync / stopSync；事件订阅惰性幂等） ----------
 let initialized = false;
 let subscribed = false;
-let unsubs = [];
+let unsubs: Array<() => void> = [];
 
 /** 注册原生事件订阅（幂等；initSync 与 ensureAsset 共用，重复调用不叠加） */
 function ensureSubscribed() {
@@ -750,7 +961,7 @@ export function stopSync() {
 }
 
 // ---------- 内部：assetStatus 回执分发（ensureAsset 挂起的查询） ----------
-function handleAssetStatus(payload) {
+function handleAssetStatus(payload: AssetStatusResult) {
   if (!payload || payload.requestId == null) return;
   const resolve = pendingQueries.get(payload.requestId);
   if (!resolve) return; // 已超时/已消费的回执：忽略
@@ -758,7 +969,7 @@ function handleAssetStatus(payload) {
 }
 
 // ---------- 内部：metaLoaded 回执分发（nativeMetaLoad 挂起的读取） ----------
-function handleMetaLoaded(payload) {
+function handleMetaLoaded(payload: MetaLoadedPayload) {
   if (!payload || payload.requestId == null) return;
   const resolve = pendingMetaLoads.get(payload.requestId);
   if (!resolve) return; // 已超时/已消费的回执：忽略
@@ -768,10 +979,10 @@ function handleMetaLoaded(payload) {
 // ---------- 批量资产下载（同步管理页 · 阶段3） ----------
 
 /** 歌曲列表 → 下载项数组（批量复用 assetForSong；path 缺失的流媒体条目自动跳过） */
-export async function buildSongItems(songs) {
+export async function buildSongItems(songs: unknown): Promise<DownloadItem[]> {
   if (!Array.isArray(songs)) return [];
   const items = await Promise.all(songs.map((s) => assetForSong(s)));
-  return items.filter(Boolean);
+  return items.filter((x): x is DownloadItem => !!x);
 }
 
 /**
@@ -781,27 +992,27 @@ export async function buildSongItems(songs) {
  * 封面/歌词语义。返回拍平 items（音频+封面交错）；空/全跳过 → []。
  * 同步面板计数 items.length 自动含封面（面板文案为「N 个文件」，无需区分）。
  */
-export async function buildSongSyncItems(songs) {
+export async function buildSongSyncItems(songs: unknown): Promise<DownloadItem[]> {
   if (!Array.isArray(songs)) return [];
   const lists = await Promise.all(
     songs.map(async (s) => {
       if (!s || !s.path) return []; // 流媒体/缺 path：整首跳过
       const [audio, cover] = await Promise.all([assetForSong(s), coverItemFor(s.path)]);
-      return [audio, cover].filter(Boolean); // 防御：理论上两者均非空
+      return [audio, cover].filter((x): x is DownloadItem => !!x); // 防御：理论上两者均非空
     }),
   );
   return lists.flat();
 }
 
 /** 图书列表 → 下载项数组（批量复用 assetForBook；缺 id 条目自动跳过） */
-export async function buildBookItems(books) {
+export async function buildBookItems(books: unknown): Promise<DownloadItem[]> {
   if (!Array.isArray(books)) return [];
   const items = await Promise.all(books.map((b) => assetForBook(b)));
-  return items.filter(Boolean);
+  return items.filter((x): x is DownloadItem => !!x);
 }
 
 /** 下载项展示名：path 去类型前缀（audio/<hash>.m4a → <hash>.m4a；covers/ 同里去前缀） */
-function displayNameOf(path) {
+function displayNameOf(path: string) {
   return String(path || "").replace(/^(audio|books|dicts|covers)\/+/, "");
 }
 
@@ -810,11 +1021,11 @@ function displayNameOf(path) {
  * （原生串行队列 + 断点续传已有；条目先登记到 syncDownloads 供面板追踪）。
  * 返回是否已发出（非原生环境 / 空列表 → false，静默 no-op）。
  */
-export function syncAssets(items) {
+export function syncAssets(items: DownloadItem[]) {
   if (!Array.isArray(items) || !items.length) return false;
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   ensureSubscribed();
-  const valid = [];
+  const valid: DownloadItem[] = [];
   for (const item of items) {
     if (!item || !item.path || !item.url) continue;
     valid.push(item);
@@ -862,7 +1073,7 @@ export const LYRIC_SYNC_TOTAL_TIMEOUT_MS = 60000;
  *   - 非 iOS 壳（无桥）→ 不请求不写（与 syncAssets 同门控），返回 {ok:0, total:0}
  * @returns {Promise<{ok:number, total:number}>} ok=成功落文件数，total=尝试数（调用方可 toast）
  */
-export async function syncLyricsForSongs(songs) {
+export async function syncLyricsForSongs(songs: unknown): Promise<{ ok: number; total: number }> {
   const list = (Array.isArray(songs) ? songs : []).filter(
     (s) => s && typeof s.path === "string" && s.path,
   );
@@ -874,9 +1085,9 @@ export async function syncLyricsForSongs(songs) {
     while (next < list.length) {
       const song = list[next++];
       try {
-        const r = await apiGet(
+        const r = (await apiGet(
           "/api/lyric?path=" + encodeURIComponent(song.path) + "&prefer=local",
-        );
+        )) as ApiResultLoose;
         const data = r && r.ok ? r.data || {} : null;
         const lines = data && Array.isArray(data.lines) ? data.lines : [];
         if (!lines.length) continue; // 无歌词：跳过（不写文件、不报错）
@@ -887,8 +1098,8 @@ export async function syncLyricsForSongs(songs) {
           kind,
           JSON.stringify({
             lines,
-            format: typeof data.format === "string" ? data.format : null,
-            source: typeof data.source === "string" ? data.source : null,
+            format: data && typeof data.format === "string" ? data.format : null,
+            source: data && typeof data.source === "string" ? data.source : null,
           }),
         );
         ok += 1;
@@ -898,12 +1109,12 @@ export async function syncLyricsForSongs(songs) {
     }
   };
   const n = Math.min(LYRIC_SYNC_CONCURRENCY, list.length);
-  let timeoutId = null;
-  const timeout = new Promise((resolve) => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<void>((resolve) => {
     timeoutId = setTimeout(resolve, LYRIC_SYNC_TOTAL_TIMEOUT_MS);
   });
   await Promise.race([Promise.all(Array.from({ length: n }, () => worker())), timeout]);
-  clearTimeout(timeoutId); // worker 先跑完：及时清掉兜底定时器（超时分支已触发，clear 无害）
+  clearTimeout(timeoutId ?? undefined); // worker 先跑完：及时清掉兜底定时器（超时分支已触发，clear 无害）
   return { ok, total: list.length };
 }
 
@@ -916,7 +1127,7 @@ export function clearFinished() {
 }
 
 /** 重新下载失败项（条目内保留 url/sha256/size，直接重建消息；非失败态 no-op） */
-export function retryFailed(path) {
+export function retryFailed(path: string): boolean {
   const entry = syncDownloads[path];
   if (!entry || entry.status !== "failed") return false;
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
@@ -932,7 +1143,7 @@ export function retryFailed(path) {
 }
 
 /** 清理原生侧资产文件（scope: 'all'|'audio'|'books'|'dicts'；原生命令由 iOS 侧实现） */
-export function clearAssets(scope) {
+export function clearAssets(scope: string): boolean {
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   nativePost({ cmd: "deleteAssets", scope: scope || "all" });
   return true;
@@ -942,7 +1153,7 @@ export function clearAssets(scope) {
 export const ASSETS_SIZE_TIMEOUT_MS = 8000;
 
 /** 资产占用回执分发：waiter 统一收完整 payload（{total, byType}），由各查询函数取用 */
-function handleAssetsSize(payload) {
+function handleAssetsSize(payload: AssetsSizeData) {
   const data = payload && typeof payload === "object" ? payload : null;
   for (const resolve of [...assetsSizeWaiters]) {
     assetsSizeWaiters.delete(resolve);
@@ -951,15 +1162,15 @@ function handleAssetsSize(payload) {
 }
 
 /** 发起 assetsSize 查询（pending promise + 回执 + 超时）；非原生环境立即 resolve(null) */
-function requestAssetsSize() {
+function requestAssetsSize(): Promise<AssetsSizeData | null> {
   if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
   ensureSubscribed();
-  return new Promise((resolve) => {
+  return new Promise<AssetsSizeData | null>((resolve) => {
     const timer = setTimeout(() => {
       assetsSizeWaiters.delete(settle);
       settle(null);
     }, ASSETS_SIZE_TIMEOUT_MS);
-    const settle = (data) => {
+    const settle = (data: AssetsSizeData | null) => {
       clearTimeout(timer);
       resolve(data);
     };
@@ -981,7 +1192,7 @@ export async function fetchAssetsSize() {
  * 查询原生侧资产占用明细：resolve({total, byType:{audio,covers,lyric,books,dicts,meta,other}})
  * （T3 契约：assetsSize 回执扩展）；超时 / 非原生环境 / 旧壳无 byType → resolve(null)。
  */
-export async function fetchAssetsSizeDetailed() {
+export async function fetchAssetsSizeDetailed(): Promise<AssetsSizeData | null> {
   const data = await requestAssetsSize();
   if (!data || typeof data.total !== "number") return null;
   const byType = data.byType && typeof data.byType === "object" ? data.byType : null;
@@ -989,9 +1200,9 @@ export async function fetchAssetsSizeDetailed() {
 }
 
 // ---------- 资产注册表（T3：assetIndex）与存储细分 ----------
-let assetIndexWaiters = new Set(); // Set<fn(assets|null)>：原生回执/超时先到先结算
+const assetIndexWaiters = new Set<(assets: AssetRecord[]) => void>(); // Set<fn(assets|null)>：原生回执/超时先到先结算
 
-function handleAssetIndex(payload) {
+function handleAssetIndex(payload: AssetIndexPayload) {
   const assets = payload && Array.isArray(payload.assets) ? payload.assets : [];
   for (const cb of [...assetIndexWaiters]) {
     assetIndexWaiters.delete(cb);
@@ -1012,15 +1223,15 @@ export const ASSET_INDEX_TIMEOUT_MS = 8000;
  * 失败/超时/非原生环境 → resolve([])（空注册表 = 老版本升级场景，按「全部最新」处理，
  * 避免误报全量更新；缺失统计在空注册表下会全量补齐——一键拉全的语义）。
  */
-export function fetchAssetIndex() {
+export function fetchAssetIndex(): Promise<AssetRecord[]> {
   if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve([]);
   ensureSubscribed();
-  return new Promise((resolve) => {
+  return new Promise<AssetRecord[]>((resolve) => {
     const timer = setTimeout(() => {
       assetIndexWaiters.delete(settle);
       settle([]);
     }, ASSET_INDEX_TIMEOUT_MS);
-    const settle = (assets) => {
+    const settle = (assets: AssetRecord[]) => {
       clearTimeout(timer);
       resolve(assets);
     };
@@ -1038,14 +1249,17 @@ export function fetchAssetIndex() {
  * 不标记可更新（避免误报全量更新）；注册表存在后严格对比。
  * @returns {Promise<Array<{path:string, name:string, kind:'audio', song:object}>>}
  */
-export async function computeUpdateList(manifestSongs, localAssets) {
+export async function computeUpdateList(
+  manifestSongs: unknown,
+  localAssets: unknown,
+): Promise<UpdateItem[]> {
   const local = Array.isArray(localAssets) ? localAssets : [];
   if (!local.length) return []; // 首次升级/注册表为空：全部视为最新
   const byPath = new Map();
   for (const a of local) {
     if (a && a.path) byPath.set(a.path, a);
   }
-  const out = [];
+  const out: UpdateItem[] = [];
   for (const song of Array.isArray(manifestSongs) ? manifestSongs : []) {
     if (!song || !song.path) continue;
     // 音频更新：内容哈希变化（内嵌封面随音频一起更新）
@@ -1086,15 +1300,18 @@ export async function computeUpdateList(manifestSongs, localAssets) {
  * @returns {Promise<{orphans:Array<{path:string, size:number}>, totalSize:number}>}
  */
 export async function computeOrphanAssets(
-  manifestSongs,
-  manifestDicts,
-  manifestBooks,
-  localAssets,
-) {
+  manifestSongs: unknown,
+  manifestDicts: unknown,
+  manifestBooks: unknown,
+  localAssets: unknown,
+): Promise<{ orphans: { path: string; size: number }[]; totalSize: number }> {
   const local = Array.isArray(localAssets) ? localAssets : [];
   if (!local.length) return { orphans: [], totalSize: 0 };
-  const expected = new Set();
-  const addExpected = async (fn, arg) => {
+  const expected = new Set<string>();
+  // 泛型：fn/arg 同一类型参数（assetForSong(SongLike)/assetForBook(BookLike)/
+  // assetForDict(DictLike)/coverItemFor(string) 各不相同；调用点实参为宽松对象，
+  // 由 TS 按各自签名推断）
+  const addExpected = async <T>(fn: (arg: T) => Promise<DownloadItem | null>, arg: T) => {
     const item = await fn(arg);
     if (item && item.path) expected.add(item.path);
   };
@@ -1109,7 +1326,7 @@ export async function computeOrphanAssets(
   for (const d of Array.isArray(manifestDicts) ? manifestDicts : []) {
     await addExpected(assetForDict, d);
   }
-  const orphans = [];
+  const orphans: { path: string; size: number }[] = [];
   let totalSize = 0;
   for (const a of local) {
     if (!a || !a.path) continue;
@@ -1127,7 +1344,7 @@ export async function computeOrphanAssets(
  * （assetForSong 用 manifest 真实 sha256）→ syncAssets → 原生侧自动删旧重下。
  * @returns {Promise<boolean>} 是否发出了下载请求
  */
-export async function applyUpdates(list) {
+export async function applyUpdates(list: unknown): Promise<boolean> {
   const updates = (Array.isArray(list) ? list : []).filter((u) => u && u.song && u.song.path);
   if (!updates.length) return false;
   // 封面过期项：先删本地旧封面——不删则原生 hasAsset 命中旧文件直接 done，不会重下
@@ -1141,7 +1358,7 @@ export async function applyUpdates(list) {
       const audio = await assetForSong(u.song);
       // cover：仅过期项重建（带 manifest cover_size 供原生 size 校验）；未过期不重下
       const cover = u.coverStale ? await coverItemFor(u.song.path, u.song.cover_size) : null;
-      return [audio, cover].filter(Boolean);
+      return [audio, cover].filter((x): x is DownloadItem => !!x);
     }),
   );
   const items = lists.flat();
@@ -1158,7 +1375,7 @@ export async function applyUpdates(list) {
 export const SYNC_META_KEY = "syncMeta";
 
 /** 读取本地 syncMeta 记录（文件缺失/损坏 → {}） */
-async function loadSyncMeta() {
+async function loadSyncMeta(): Promise<Record<string, unknown>> {
   const json = await nativeMetaLoad(SYNC_META_KEY);
   if (!json) return {};
   try {
@@ -1174,7 +1391,7 @@ async function loadSyncMeta() {
  * 本地有记录且值不同 → 返回该歌曲（歌词文件缓存已过期）。
  * @returns {Promise<Array<object>>} 失效歌曲的 manifest 条目列表
  */
-export async function detectStaleLyrics(songs) {
+export async function detectStaleLyrics(songs: unknown): Promise<SongLike[]> {
   if (!syncEnabled() || !iosBridgeAvailable()) return [];
   const list = (Array.isArray(songs) ? songs : []).filter(
     (s) => s && typeof s.path === "string" && s.path && s.lyric_mtime != null,
@@ -1188,7 +1405,7 @@ export async function detectStaleLyrics(songs) {
 }
 
 /** 清除单首歌的歌词文件缓存（覆盖为 {} 哨兵；loadLyric 空数据视为无缓存） */
-export async function invalidateLyricForSong(song) {
+export async function invalidateLyricForSong(song: SongLike | null | undefined): Promise<boolean> {
   if (!syncEnabled() || !iosBridgeAvailable() || !song || !song.path) return false;
   const kind = await lyricKindKey(song.path);
   if (!kind) return false;
@@ -1197,7 +1414,7 @@ export async function invalidateLyricForSong(song) {
 }
 
 /** 批量清除失效歌词缓存（fire-and-forget；失败静默） */
-export async function invalidateStaleLyrics(songs) {
+export async function invalidateStaleLyrics(songs: unknown) {
   for (const s of Array.isArray(songs) ? songs : []) {
     try {
       await invalidateLyricForSong(s);
@@ -1208,7 +1425,7 @@ export async function invalidateStaleLyrics(songs) {
 }
 
 /** 记录当前歌词 mtime 到 syncMeta（与既有记录合并，只覆盖本次清单条目） */
-export async function recordLyricMtimes(songs) {
+export async function recordLyricMtimes(songs: unknown): Promise<boolean> {
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   const list = (Array.isArray(songs) ? songs : []).filter(
     (s) => s && typeof s.path === "string" && s.path && s.lyric_mtime != null,
@@ -1229,7 +1446,7 @@ export async function recordLyricMtimes(songs) {
  *   updateCount?:number, orphans?:Array, orphanSize?:number, songs?:Array, dicts?:Array,
  *   manifest?:object}>}
  */
-export async function computeSyncOverview() {
+export async function computeSyncOverview(): Promise<SyncOverview> {
   if (!syncEnabled()) return { ok: false, enabled: false };
   const [mr, assets] = await Promise.all([fetchAndCacheManifest(), fetchAssetIndex()]);
   if (!mr.ok) return { ok: false, message: mr.message };
@@ -1242,12 +1459,14 @@ export async function computeSyncOverview() {
   const [songItems, bookItems, dictItems] = await Promise.all([
     buildSongSyncItems(songs),
     buildBookItems(books),
-    Promise.all(dicts.map((d) => assetForDict(d))).then((l) => l.filter(Boolean)),
+    Promise.all(dicts.map((d) => assetForDict(d))).then((l) =>
+      l.filter((x): x is DownloadItem => !!x),
+    ),
   ]);
   const missing = [...songItems, ...bookItems, ...dictItems].filter(
     (it) => it && it.path && !localSet.has(it.path),
   );
-  const missingStats = { audio: 0, covers: 0, books: 0, dicts: 0 };
+  const missingStats: MissingStats = { audio: 0, covers: 0, books: 0, dicts: 0 };
   for (const it of missing) {
     if (it.path.startsWith("audio/")) missingStats.audio++;
     else if (it.path.startsWith("covers/")) missingStats.covers++;
@@ -1276,7 +1495,7 @@ export async function computeSyncOverview() {
  * @returns {Promise<{ok:boolean, enabled?:boolean, message?:string,
  *   sent?:boolean, missing?:{audio,covers,books,dicts}, updateCount?:number, manifest?:object}>}
  */
-export async function syncAll() {
+export async function syncAll(): Promise<SyncAllResult> {
   if (!syncEnabled()) return { enabled: false, ok: false };
   if (syncInFlight) return { ok: false, message: "sync in progress" };
   syncInFlight = true;
@@ -1297,12 +1516,14 @@ export async function syncAll() {
     const [songItems, bookItems, dictItems] = await Promise.all([
       buildSongSyncItems(songs),
       buildBookItems(books),
-      Promise.all(dicts.map((d) => assetForDict(d))).then((l) => l.filter(Boolean)),
+      Promise.all(dicts.map((d) => assetForDict(d))).then((l) =>
+        l.filter((x): x is DownloadItem => !!x),
+      ),
     ]);
     const missing = [...songItems, ...bookItems, ...dictItems].filter(
       (it) => it && it.path && !localSet.has(it.path),
     );
-    const missingStats = { audio: 0, covers: 0, books: 0, dicts: 0 };
+    const missingStats: MissingStats = { audio: 0, covers: 0, books: 0, dicts: 0 };
     for (const it of missing) {
       if (it.path.startsWith("audio/")) missingStats.audio++;
       else if (it.path.startsWith("covers/")) missingStats.covers++;
@@ -1337,7 +1558,7 @@ export async function syncAll() {
       manifest,
     };
   } catch (e) {
-    syncState.lastError = (e && e.message) || "同步失败";
+    syncState.lastError = (e as { message?: string } | null | undefined)?.message || "同步失败";
     return { ok: false, message: syncState.lastError };
   } finally {
     syncInFlight = false;
@@ -1348,7 +1569,7 @@ export async function syncAll() {
 // ---------- 精确删除（deleteAssets {paths}，T3 契约） ----------
 
 /** 类型前缀（assetIndex path 过滤；lyric 为 meta 文件 kind 前缀） */
-export const ASSET_TYPE_PREFIX = {
+export const ASSET_TYPE_PREFIX: Record<string, string> = {
   audio: "audio/",
   covers: "covers/",
   lyric: "lyric:",
@@ -1361,7 +1582,7 @@ export const ASSET_TYPE_PREFIX = {
  * 注册表未覆盖该类型（空列表）→ 回退旧 scope 删除（audio/books/dicts）。
  * @returns {number} 匹配并提交删除的路径数（0 = 无可清理，UI 提示）
  */
-export function clearAssetsByType(type, assets) {
+export function clearAssetsByType(type: string, assets: unknown): number {
   if (!syncEnabled() || !iosBridgeAvailable()) return 0;
   const prefix = ASSET_TYPE_PREFIX[type];
   const paths = (Array.isArray(assets) ? assets : [])
@@ -1378,7 +1599,7 @@ export function clearAssetsByType(type, assets) {
 }
 
 /** 清理未引用资产（computeOrphanAssets 产物）→ deleteAssets {paths}；返回是否发出 */
-export function deleteOrphanAssets(orphans) {
+export function deleteOrphanAssets(orphans: unknown): boolean {
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   const paths = (Array.isArray(orphans) ? orphans : []).map((o) => o.path).filter(Boolean);
   if (!paths.length) return false;
@@ -1387,9 +1608,9 @@ export function deleteOrphanAssets(orphans) {
 }
 
 // ---------- assetsDeleted 完成事件（删除后 UI 刷新用） ----------
-let deletionWaiters = new Set(); // Set<fn(paths)>：原生完成回推后结算
+const deletionWaiters = new Set<(paths: string[]) => void>(); // Set<fn(paths)>：原生完成回推后结算
 
-function handleAssetsDeleted(payload) {
+function handleAssetsDeleted(payload: AssetsDeletedPayload) {
   const paths = payload && Array.isArray(payload.paths) ? payload.paths : [];
   for (const cb of [...deletionWaiters]) {
     deletionWaiters.delete(cb);
@@ -1405,15 +1626,15 @@ function handleAssetsDeleted(payload) {
  * 等待一次资产删除完成回推（deleteAssets 后调用方刷新存储/孤儿统计）。
  * 旧壳不回推 → 超时 resolve([])（调用方照常刷新，不阻塞）。
  */
-export function waitAssetsDeleted(timeout = ASSET_INDEX_TIMEOUT_MS) {
+export function waitAssetsDeleted(timeout: number = ASSET_INDEX_TIMEOUT_MS): Promise<string[]> {
   if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve([]);
   ensureSubscribed(); // 需要 assetsDeleted 事件订阅
-  return new Promise((resolve) => {
+  return new Promise<string[]>((resolve) => {
     const timer = setTimeout(() => {
       deletionWaiters.delete(settle);
       settle([]);
     }, timeout);
-    const settle = (paths) => {
+    const settle = (paths: string[]) => {
       clearTimeout(timer);
       resolve(paths);
     };
@@ -1438,7 +1659,7 @@ export function wifiOnlyEnabled() {
  * 设置仅 Wi-Fi 开关：持久化 localStorage + 通知原生（setWifiOnly fire-and-forget）；
  * syncAssets 的下载项会携带当前值（wifiOnly: Bool，原生侧蜂窝下挂起）。
  */
-export function setWifiOnly(on) {
+export function setWifiOnly(on: boolean) {
   try {
     localStorage.setItem(WIFI_ONLY_KEY, on ? "on" : "off");
   } catch {
@@ -1460,7 +1681,7 @@ export function autoUpdateEnabled() {
 }
 
 /** 设置自动更新开关（localStorage 持久化；返回生效值） */
-export function setAutoUpdate(on) {
+export function setAutoUpdate(on: boolean) {
   try {
     if (on) localStorage.setItem(AUTO_UPDATE_KEY, "on");
     else localStorage.removeItem(AUTO_UPDATE_KEY);
@@ -1474,7 +1695,7 @@ export function setAutoUpdate(on) {
 // 对齐 pairing「Keychain+文件双写」先例：歌曲/收藏/歌单元数据在原生侧落 JSON 文件，
 // 启动时读回填；网络成功覆盖、失败保留文件数据（IndexedDB 丢了也能离线看列表）。
 let metaSeq = 0;
-const pendingMetaLoads = new Map(); // requestId → resolve(json|null)
+const pendingMetaLoads = new Map<string, (payload: MetaLoadedPayload) => void>(); // requestId → resolve(json|null)
 
 /** metaLoad 回执等待超时（ms）：原生无回执时不挂起启动流程 */
 export const META_LOAD_TIMEOUT_MS = 8000;
@@ -1485,7 +1706,7 @@ export const META_LOAD_TIMEOUT_MS = 8000;
  * @param {"songs"|"favorites"|"playlists"} kind 文件种类
  * @param {string} json 序列化后的元数据 JSON 字符串
  */
-export function nativeMetaSave(kind, json) {
+export function nativeMetaSave(kind: string, json: string): boolean {
   if (!syncEnabled() || !iosBridgeAvailable()) return false;
   if (typeof kind !== "string" || !kind || typeof json !== "string" || !json) return false;
   nativePost({ cmd: "metaSave", kind, json });
@@ -1496,11 +1717,11 @@ export function nativeMetaSave(kind, json) {
  * 元数据读文件（Promise 化）：{cmd:"metaLoad", kind, requestId} → 原生回推
  * metaLoaded {requestId, kind, json?} → resolve(json)；文件缺失/损坏/超时 → resolve(null)。
  */
-export function nativeMetaLoad(kind) {
+export function nativeMetaLoad(kind: string): Promise<string | null> {
   if (!syncEnabled() || !iosBridgeAvailable()) return Promise.resolve(null);
   ensureSubscribed(); // 需要 metaLoaded 事件订阅
   const requestId = String(++metaSeq);
-  return new Promise((resolve) => {
+  return new Promise<string | null>((resolve) => {
     const timer = setTimeout(() => {
       if (pendingMetaLoads.has(requestId)) {
         pendingMetaLoads.delete(requestId);
@@ -1529,7 +1750,7 @@ export function autoPrefetchEnabled() {
 }
 
 /** 设置自动预取开关（持久化 localStorage；返回生效值） */
-export function setAutoPrefetch(on) {
+export function setAutoPrefetch(on: boolean) {
   try {
     if (on) localStorage.setItem(AUTO_PREFETCH_KEY, "on");
     else localStorage.removeItem(AUTO_PREFETCH_KEY);
