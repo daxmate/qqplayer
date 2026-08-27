@@ -27,6 +27,7 @@ import {
   DOWNLOAD_SETTINGS_KEY,
   VIDEO_SETTINGS_KEY,
 } from "./useSettings.js";
+import { uiState } from "./uiState.ts";
 
 const SAVE_DEBOUNCE_MS = 300;
 
@@ -46,8 +47,8 @@ export function registerPlayerBridge(bridge) {
     watch(
       [
         () => bridge.state.volume,
-        () => bridge.state.musicLibOpen,
-        () => bridge.state.controlsHidden,
+        () => uiState.musicLibOpen,
+        () => uiState.controlsHidden,
         () => bridge.state.mode,
         bridge.lastPlayedState,
       ],
@@ -94,8 +95,8 @@ function buildPayload() {
     const { state, playbackSettings, lastPlayedState } = playerBridge;
     payload.playback = { ...playbackSettings };
     const player = {
-      panel: state.musicLibOpen, // 即原 PANEL_KEY 的 musicLib 字段
-      controls: state.controlsHidden, // 即原 CONTROLS_KEY
+      panel: uiState.musicLibOpen, // 即原 PANEL_KEY 的 musicLib 字段
+      controls: uiState.controlsHidden, // 即原 CONTROLS_KEY
       mode: state.mode, // 模式记忆：始终上传（不受 rememberVolume/resumeLast 开关影响）
     };
     // 开关语义：rememberVolume=false 不 PUT volume；resumeLast=false 不 PUT lastPlayed
@@ -209,8 +210,8 @@ function applyPlayer(p) {
     state.volume = 1.0;
     audio.volume = state.muted ? 0 : state.volume;
   }
-  if (typeof p.panel === "boolean") state.musicLibOpen = p.panel;
-  if (typeof p.controls === "boolean") state.controlsHidden = p.controls;
+  if (typeof p.panel === "boolean") uiState.musicLibOpen = p.panel;
+  if (typeof p.controls === "boolean") uiState.controlsHidden = p.controls;
   if (MODE_VALUES.includes(p.mode)) state.mode = p.mode;
   if (p.lastPlayed && typeof p.lastPlayed === "object" && p.lastPlayed.path) {
     Object.assign(lastPlayedState, {
@@ -234,8 +235,7 @@ function captureLocalSnapshots() {
     entries.push(
       ["playback", playerBridge.keys.PLAYBACK_SETTINGS_KEY],
       ["volume", playerBridge.keys.VOLUME_KEY],
-      ["panel", playerBridge.keys.PANEL_KEY],
-      ["controls", playerBridge.keys.CONTROLS_KEY],
+      ["panel", playerBridge.keys.UI_STATE_KEY], // 统一 key：含 musicLib/playlist/controlsHidden
       ["lastPlayed", playerBridge.keys.LAST_PLAYED_KEY],
       ["mode", playerBridge.keys.MODE_KEY],
     );
@@ -308,18 +308,22 @@ function collectPlayerDirty(sp, snaps) {
     const v = parseFloat(snaps.volume);
     if (!Number.isNaN(v) && v >= 0 && v <= 1 && sp.volume !== v) fields.volume = v;
   }
-  if (snaps.panel != null && "panel" in sp) {
+  if (snaps.panel != null && ("panel" in sp || "controls" in sp)) {
     try {
-      const panel = JSON.parse(snaps.panel);
-      if (typeof panel.musicLib === "boolean" && sp.panel !== panel.musicLib) {
-        fields.panel = panel.musicLib;
+      const ui = JSON.parse(snaps.panel);
+      if (typeof ui.musicLib === "boolean" && "panel" in sp && sp.panel !== ui.musicLib) {
+        fields.panel = ui.musicLib;
+      }
+      if (
+        typeof ui.controlsHidden === "boolean" &&
+        "controls" in sp &&
+        sp.controls !== ui.controlsHidden
+      ) {
+        fields.controls = ui.controlsHidden;
       }
     } catch {
       /* 损坏缓存 */
     }
-  }
-  if (snaps.controls != null && "controls" in sp) {
-    if (sp.controls !== (snaps.controls === "1")) fields.controls = snaps.controls === "1";
   }
   if (playbackSettings.resumeLast && snaps.lastPlayed != null && "lastPlayed" in sp) {
     try {
@@ -362,8 +366,8 @@ function applyDirty(dirty) {
         state.volume = Math.min(1, Math.max(0, fields.volume));
         audio.volume = state.muted ? 0 : state.volume;
       }
-      if (typeof fields.panel === "boolean") state.musicLibOpen = fields.panel;
-      if (typeof fields.controls === "boolean") state.controlsHidden = fields.controls;
+      if (typeof fields.panel === "boolean") uiState.musicLibOpen = fields.panel;
+      if (typeof fields.controls === "boolean") uiState.controlsHidden = fields.controls;
       if (MODE_VALUES.includes(fields.mode)) state.mode = fields.mode;
       if (fields.lastPlayed && fields.lastPlayed.path)
         Object.assign(lastPlayedState, fields.lastPlayed);

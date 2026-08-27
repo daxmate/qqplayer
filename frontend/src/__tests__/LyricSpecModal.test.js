@@ -34,7 +34,7 @@ vi.mock("../composables/usePlayer.js", async (importOriginal) => {
 });
 
 const LyricSpecModal = (await import("../components/LyricSpecModal.vue")).default;
-const { state, alignLyric } = await import("../composables/usePlayer.js");
+const { state, uiState, alignLyric } = await import("../composables/usePlayer.js");
 const { useToast, clearToasts } = await import("../composables/useToast.js");
 
 const SONG = {
@@ -97,7 +97,7 @@ async function openModal() {
     attachTo: document.body,
     global: { stubs: { teleport: true } },
   });
-  state.specLyricOpen = true; // mount 后触发 watch（非 immediate）
+  uiState.specLyricOpen = true; // mount 后触发 watch（非 immediate）
   await nextTick();
   await tick(); // 等 fetchManualLyric 完成
   await nextTick();
@@ -105,13 +105,13 @@ async function openModal() {
 }
 
 beforeEach(() => {
-  state.specLyricOpen = false;
+  uiState.specLyricOpen = false;
   state.currentSong = { ...SONG };
   alignLyric.mockReset();
 });
 
 afterEach(() => {
-  state.specLyricOpen = false;
+  uiState.specLyricOpen = false;
   state.currentSong = null;
   clearToasts();
   vi.unstubAllGlobals();
@@ -227,7 +227,7 @@ describe("LyricSpecModal 在线搜索", () => {
     const body = JSON.parse(putCall[1].body);
     expect(body.text).toContain("沈む");
     expect(body.source).toContain("网易云");
-    expect(state.specLyricOpen).toBe(false); // 保存后关闭
+    expect(uiState.specLyricOpen).toBe(false); // 保存后关闭
     w.unmount();
   });
 });

@@ -9,6 +9,7 @@
 // 保留本文件作为聚合出口：现有组件与测试的 import 路径不变；
 // 后续新任务直接 import 具体模块（如 AB 循环改 useAbLoop.js）。
 export * from "./playerCore.js";
+export * from "./uiState.ts";
 export * from "./useSettings.js";
 export * from "./useEq.js";
 export * from "./useLyric.js";

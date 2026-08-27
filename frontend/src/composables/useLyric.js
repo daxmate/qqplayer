@@ -137,13 +137,7 @@ watch(
 );
 
 // ============ 手动指定歌词 ============
-export function openLyricSpec() {
-  state.specLyricOpen = true;
-}
-
-export function closeLyricSpec() {
-  state.specLyricOpen = false;
-}
+// openLyricSpec/closeLyricSpec 已随 specLyricOpen 迁至 uiState.ts（经 usePlayer barrel 导出）
 
 // 查询歌曲是否有手动指定歌词
 export async function fetchManualLyric(path) {

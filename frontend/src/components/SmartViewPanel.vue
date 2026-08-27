@@ -141,6 +141,7 @@ import {
 } from "@lucide/vue";
 import {
   state,
+  uiState,
   selectSong,
   play,
   loadSongs,
@@ -624,8 +625,8 @@ function onKeydown(e) {
   close();
 }
 
-watch(() => state.musicLibOpen, remeasure);
-watch(() => state.controlsHidden, remeasure);
+watch(() => uiState.musicLibOpen, remeasure);
+watch(() => uiState.controlsHidden, remeasure);
 // 面板浮层渲染后才存在 .sv-list → panelStyle 变化时（重）挂壳内拖拽（含初次渲染）
 watch(panelStyle, () => nextTick(setupShellDrag), { immediate: true });
 watch(

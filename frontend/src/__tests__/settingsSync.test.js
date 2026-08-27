@@ -56,8 +56,7 @@ const {
   LYRIC_SETTINGS_KEY,
   PLAYBACK_SETTINGS_KEY,
   VOLUME_KEY,
-  PANEL_KEY,
-  CONTROLS_KEY,
+  UI_STATE_KEY,
   LAST_PLAYED_KEY,
   MODE_KEY,
 } = await import("../composables/usePlayer.js");
@@ -138,8 +137,8 @@ describe("统一 Settings 层：GET 分发（load）", () => {
     expect(m.state.playMode).toBe("shuffle"); // 播放模式随设置恢复（现有 sync watch）
     // player namespace
     expect(m.state.volume).toBe(0.6);
-    expect(m.state.musicLibOpen).toBe(false);
-    expect(m.state.controlsHidden).toBe(true);
+    expect(m.uiState.musicLibOpen).toBe(false);
+    expect(m.uiState.controlsHidden).toBe(true);
     expect(m.lastPlayedState.path).toBe("/a.mp3");
     expect(m.lastPlayedState.position).toBe(12);
   });
@@ -260,8 +259,8 @@ describe("统一 Settings 层：防抖保存（save）", () => {
     // 写透缓存（同步）
     expect(JSON.parse(lsStore[UI_SETTINGS_KEY]).theme).toBe("light");
     expect(lsStore[VOLUME_KEY]).toBe("0.4");
-    expect(JSON.parse(lsStore[PANEL_KEY]).musicLib).toBe(false);
-    expect(lsStore[CONTROLS_KEY]).toBe("1");
+    expect(JSON.parse(lsStore[UI_STATE_KEY]).musicLib).toBe(false);
+    expect(JSON.parse(lsStore[UI_STATE_KEY]).controlsHidden).toBe(true);
     vi.useRealTimers();
   });
 
@@ -397,8 +396,11 @@ describe("统一 Settings 层：一次性导入（字段级 diff）", () => {
 
   it("player 脏数据导入：volume/panel/controls 按开关上传并胜出", async () => {
     lsStore[VOLUME_KEY] = "0.5";
-    lsStore[PANEL_KEY] = JSON.stringify({ musicLib: false, playlist: true });
-    lsStore[CONTROLS_KEY] = "1";
+    lsStore[UI_STATE_KEY] = JSON.stringify({
+      musicLib: false,
+      playlist: true,
+      controlsHidden: true,
+    });
     getResponder = {
       "/api/settings": defaultSettings({
         playback: { rememberVolume: true },
@@ -413,8 +415,8 @@ describe("统一 Settings 层：一次性导入（字段级 diff）", () => {
     expect(putBodies.length).toBe(1);
     expect(putBodies[0].body).toEqual({ player: { volume: 0.5, panel: false, controls: true } });
     expect(m.state.volume).toBe(0.5);
-    expect(m.state.musicLibOpen).toBe(false);
-    expect(m.state.controlsHidden).toBe(true);
+    expect(m.uiState.musicLibOpen).toBe(false);
+    expect(m.uiState.controlsHidden).toBe(true);
   });
 
   it("mode 脏数据导入：本地缓存合法且 ≠ 后端 → 上传并胜出；后端未返回 mode 不参与", async () => {
@@ -481,8 +483,8 @@ describe("统一 Settings 层：开关语义", () => {
     await sync.settingsLoadPromise;
     vi.clearAllTimers();
     expect(m.state.volume).toBe(1.0); // rememberVolume=false：启动忽略后端 volume（默认 1.0）
-    expect(m.state.musicLibOpen).toBe(false); // panel 不受开关影响
-    expect(m.state.controlsHidden).toBe(true);
+    expect(m.uiState.musicLibOpen).toBe(false); // panel 不受开关影响
+    expect(m.uiState.controlsHidden).toBe(true);
     expect(m.lastPlayedState.path).toBe("/x.mp3"); // 数据仍应用（恢复动作由 restoreLastPlayed 门控）
     m.setVolume(0.5);
     m.toggleMusicLib();

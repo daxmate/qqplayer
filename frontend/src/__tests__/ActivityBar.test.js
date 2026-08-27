@@ -3,7 +3,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import ActivityBar from "../components/ActivityBar.vue";
-import { state } from "../composables/usePlayer.js";
+import { uiState } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
@@ -30,7 +30,7 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 beforeEach(() => {
-  Object.assign(state, {
+  Object.assign(uiState, {
     musicLibOpen: false,
     playlistOpen: false,
   });
@@ -82,14 +82,14 @@ describe("ActivityBar 按钮图标+文字", () => {
     await libBtn.trigger("click");
     await flushPromises();
 
-    expect(state.musicLibOpen).toBe(true);
+    expect(uiState.musicLibOpen).toBe(true);
     expect(libBtn.classes()).toContain("on");
     expect(libBtn.attributes("title")).toBe("收起音乐库");
 
     await libBtn.trigger("click");
     await flushPromises();
 
-    expect(state.musicLibOpen).toBe(false);
+    expect(uiState.musicLibOpen).toBe(false);
     expect(libBtn.classes()).not.toContain("on");
     expect(libBtn.attributes("title")).toBe("展开音乐库");
 
@@ -107,7 +107,7 @@ describe("ActivityBar 按钮图标+文字", () => {
     await plBtn.trigger("click");
     await flushPromises();
 
-    expect(state.playlistOpen).toBe(true);
+    expect(uiState.playlistOpen).toBe(true);
     expect(plBtn.classes()).toContain("on");
     expect(plBtn.attributes("title")).toBe("收起播放列表");
 

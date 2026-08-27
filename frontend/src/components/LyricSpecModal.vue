@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="state.specLyricOpen" class="modal-mask" @click.self="close">
+    <div v-if="uiState.specLyricOpen" class="modal-mask" @click.self="close">
       <div class="modal">
         <div class="modal-head">
           <FileMusic :size="16" />
@@ -186,6 +186,8 @@ import {
   saveManualLyric,
   searchLyricCandidates,
   state,
+  uiState,
+  closeLyricSpec,
 } from "../composables/usePlayer.js";
 import { toastError, showToast } from "../composables/useToast.js";
 
@@ -317,7 +319,7 @@ async function doAlign() {
   try {
     const data = await alignLyric({ path: song.value.path, text });
     // 对齐耗时较长，期间用户可能已关弹窗/切歌：结果只在弹窗仍打开时填入
-    if (!state.specLyricOpen || !song.value) return;
+    if (!uiState.specLyricOpen || !song.value) return;
     pasteText.value = data.lrc; // 填入后 detectFormat 自动识别为 lrc，canSave 通过
     tab.value = "paste"; // 切回粘贴 tab 展示结果（用户可能停在别的 tab）
     showToast(t("spec.alignDone"));
@@ -419,7 +421,7 @@ async function afterSaved() {
 }
 
 function close() {
-  state.specLyricOpen = false;
+  closeLyricSpec();
 }
 
 function detectFormat(text) {
@@ -440,7 +442,7 @@ function detectFormat(text) {
 }
 
 watch(
-  () => state.specLyricOpen,
+  () => uiState.specLyricOpen,
   async (open) => {
     if (open && song.value) {
       tab.value = "upload";

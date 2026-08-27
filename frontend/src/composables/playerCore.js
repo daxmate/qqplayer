@@ -13,6 +13,7 @@ import {
 import { handleKaraokeTick, resetAbLoopCount, setAbPointA, setAbPointB } from "./useAbLoop.js";
 import { toggleFavorite } from "./useLibrary.js";
 import { registerPlayerBridge, settingsLoadPromise } from "./settingsSync.js";
+import { UI_STATE_KEY } from "./uiState.ts";
 import { isSearchOpen } from "./searchState.js";
 import { isSettingsOpen } from "./settingsState.js";
 import { showToast } from "./useToast.js";
@@ -90,11 +91,7 @@ export const state = reactive({
   playlists: [], // 歌单列表（后端持久化）
   activePlaylistId: null, // 当前浏览的歌单 id；null = 全部歌曲
   libraryVersion: null, // 歌曲库变动版本号（轮询对比，变化则自动刷新列表）
-  musicLibOpen: true, // 音乐库面板开关（左侧 tab 栏控制，localStorage 持久化）
-  playlistOpen: true, // 播放列表面板开关
-  controlsHidden: false, // 播放控制区收起（向下隐藏，localStorage 持久化）（左侧 tab 栏控制，localStorage 持久化）
   lastSource: "manual", // 最近一次选歌来源：manual | auto | media（播放统计用）
-  specLyricOpen: false, // 手动指定歌词弹窗开关
 });
 
 // ============ 播放设置（localStorage 持久化）============
@@ -1215,59 +1212,6 @@ export function _resetPlayMode() {
   playHistory = [];
 }
 
-// ============ 侧栏面板开关（左侧 tab 栏，localStorage 持久化）============
-export const PANEL_KEY = "qqplay…p.v1";
-export const CONTROLS_KEY = "qqplayer.controls.v1";
-
-function loadPanels() {
-  try {
-    const raw = localStorage.getItem(PANEL_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      if (typeof saved.musicLib === "boolean") state.musicLibOpen = saved.musicLib;
-      if (typeof saved.playlist === "boolean") state.playlistOpen = saved.playlist;
-    }
-  } catch {
-    /* 忽略损坏的缓存 */
-  }
-  try {
-    state.controlsHidden = localStorage.getItem(CONTROLS_KEY) === "1";
-  } catch {
-    /* 忽略 */
-  }
-}
-loadPanels();
-
-function persistPanels() {
-  try {
-    localStorage.setItem(
-      PANEL_KEY,
-      JSON.stringify({ musicLib: state.musicLibOpen, playlist: state.playlistOpen }),
-    );
-  } catch {
-    /* 忽略 */
-  }
-}
-
-export function toggleMusicLib() {
-  state.musicLibOpen = !state.musicLibOpen;
-  persistPanels();
-}
-
-export function togglePlaylist() {
-  state.playlistOpen = !state.playlistOpen;
-  persistPanels();
-}
-
-export function toggleControls() {
-  state.controlsHidden = !state.controlsHidden;
-  try {
-    localStorage.setItem(CONTROLS_KEY, state.controlsHidden ? "1" : "0");
-  } catch {
-    /* 忽略 */
-  }
-}
-
 // ============ 歌曲列表 ============
 export async function loadLibrary() {
   try {
@@ -2198,7 +2142,7 @@ export async function restoreLastPlayed() {
   await selectSong(idx, { record: false, resumeAt: saved.position });
 }
 
-// 统一 Settings 层写透 player 侧缓存（playbackSettings + volume/panel/controls/lastPlayed）
+// 统一 Settings 层写透 player 侧缓存（playbackSettings + volume/lastPlayed；UI 开关由 uiState 自管）
 export function persistPlayerCache() {
   try {
     localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify(playbackSettings));
@@ -2206,11 +2150,7 @@ export function persistPlayerCache() {
     if (playbackSettings.rememberVolume) {
       localStorage.setItem(VOLUME_KEY, String(state.volume));
     }
-    localStorage.setItem(
-      PANEL_KEY,
-      JSON.stringify({ musicLib: state.musicLibOpen, playlist: state.playlistOpen }),
-    );
-    localStorage.setItem(CONTROLS_KEY, state.controlsHidden ? "1" : "0");
+    // UI 开关（panel/controls）由 uiState 模块自己持久化（toggle 同步写 + watch 兜底）
     // 模式记忆：始终写透（不受 rememberVolume/resumeLast 开关影响）
     localStorage.setItem(MODE_KEY, state.mode);
     // 从未播放过（path 为空）时不写，避免用空记录覆盖有效缓存
@@ -2231,8 +2171,7 @@ registerPlayerBridge({
   keys: {
     PLAYBACK_SETTINGS_KEY,
     VOLUME_KEY,
-    PANEL_KEY,
-    CONTROLS_KEY,
+    UI_STATE_KEY,
     LAST_PLAYED_KEY,
     MODE_KEY,
   },

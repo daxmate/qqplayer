@@ -161,6 +161,7 @@ import {
 import { useI18n } from "vue-i18n";
 import {
   state,
+  uiState,
   selectSong,
   play,
   createPlaylist,
@@ -203,7 +204,7 @@ function decadeLabel(b) {
 function activate(pid) {
   if (smartViewState.active) closeSmartViewPanel(); // 切回常规视图时关闭智能视图
   state.activePlaylistId = pid;
-  state.playlistOpen = true; // 点击曲库条目时自动打开播放列表面板
+  uiState.playlistOpen = true; // 点击曲库条目时自动打开播放列表面板
 }
 
 // ============ 智能视图 ============
@@ -215,8 +216,8 @@ function openSmartView(kind, decade) {
     closeSmartViewPanel();
     return;
   }
-  smartViewState.prevPlaylistOpen = state.playlistOpen; // 记住进入前的面板开关，退出时恢复
-  state.playlistOpen = true; // 挂载 Playlist 作为智能视图定位锚点（面板覆盖其上）
+  smartViewState.prevPlaylistOpen = uiState.playlistOpen; // 记住进入前的面板开关，退出时恢复
+  uiState.playlistOpen = true; // 挂载 Playlist 作为智能视图定位锚点（面板覆盖其上）
   if (kind === "decades") smartViewState.decade = decade;
   loadSmartView(kind);
 }
@@ -224,7 +225,7 @@ function openSmartView(kind, decade) {
 function closeSmartViewPanel() {
   const prev = smartViewState.prevPlaylistOpen;
   closeSmartView();
-  if (typeof prev === "boolean") state.playlistOpen = prev;
+  if (typeof prev === "boolean") uiState.playlistOpen = prev;
   smartViewState.prevPlaylistOpen = null;
 }
 
@@ -235,7 +236,7 @@ onBeforeUnmount(() => {
   if (smartViewState.active) {
     const prev = smartViewState.prevPlaylistOpen;
     closeSmartView();
-    if (typeof prev === "boolean") state.playlistOpen = prev;
+    if (typeof prev === "boolean") uiState.playlistOpen = prev;
     smartViewState.prevPlaylistOpen = null;
   }
 });

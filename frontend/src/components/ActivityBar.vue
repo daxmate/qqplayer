@@ -2,9 +2,9 @@
   <nav class="activity-bar" :aria-label="t('app.activityBar.label')">
     <button
       class="ab-btn"
-      :class="{ on: state.musicLibOpen }"
+      :class="{ on: uiState.musicLibOpen }"
       :title="
-        state.musicLibOpen
+        uiState.musicLibOpen
           ? t('app.activityBar.collapseMusicLib')
           : t('app.activityBar.expandMusicLib')
       "
@@ -15,9 +15,9 @@
     </button>
     <button
       class="ab-btn"
-      :class="{ on: state.playlistOpen }"
+      :class="{ on: uiState.playlistOpen }"
       :title="
-        state.playlistOpen
+        uiState.playlistOpen
           ? t('app.activityBar.collapsePlaylist')
           : t('app.activityBar.expandPlaylist')
       "
@@ -32,7 +32,7 @@
 <script setup>
 import { Music2, ListMusic } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { state, toggleMusicLib, togglePlaylist } from "../composables/usePlayer.js";
+import { uiState, toggleMusicLib, togglePlaylist } from "../composables/usePlayer.js";
 
 const { t } = useI18n();
 </script>

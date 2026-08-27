@@ -86,11 +86,11 @@
         >
           <PanelLeftOpen :size="16" />
         </button>
-        <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
-        <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
+        <Sidebar v-if="uiState.musicLibOpen" class="panel sidebar" />
+        <Playlist v-if="uiState.playlistOpen" ref="playlistRef" class="panel playlist" />
         <!-- 列表面板宽度拖拽条（桌面）：位于 playlist 与 center 之间的 grid gap 上，绝对定位不占网格 -->
         <div
-          v-if="state.playlistOpen"
+          v-if="uiState.playlistOpen"
           class="pl-width-handle"
           :class="{ dragging: plWidthDragging }"
           :title="t('app.playlistWidthHint')"
@@ -118,9 +118,9 @@
             </button>
           </div>
         </section>
-        <ControlBar v-show="!state.controlsHidden" class="panel controls" />
+        <ControlBar v-show="!uiState.controlsHidden" class="panel controls" />
         <button
-          v-if="state.controlsHidden"
+          v-if="uiState.controlsHidden"
           class="expand-controls-btn"
           :title="t('app.expandControls')"
           @click="toggleControls()"
@@ -132,11 +132,11 @@
       <!-- 主体：跟唱模式 -->
       <main v-else-if="state.mode === 'karaoke'" class="main karaoke" :class="panelClass">
         <ActivityBar v-if="panelsActive" class="activity-bar" />
-        <Sidebar v-if="state.musicLibOpen" class="panel sidebar" />
-        <Playlist v-if="state.playlistOpen" ref="playlistRef" class="panel playlist" />
+        <Sidebar v-if="uiState.musicLibOpen" class="panel sidebar" />
+        <Playlist v-if="uiState.playlistOpen" ref="playlistRef" class="panel playlist" />
         <!-- 列表面板宽度拖拽条（桌面）：位置推导与上方 grid 列宽一致（见样式注释） -->
         <div
-          v-if="state.playlistOpen"
+          v-if="uiState.playlistOpen"
           class="pl-width-handle"
           :class="{ dragging: plWidthDragging }"
           :title="t('app.playlistWidthHint')"
@@ -148,9 +148,9 @@
           :current="currentLineIndex"
           :expand-btn="!panelsActive"
         />
-        <ControlBar v-show="!state.controlsHidden" class="panel controls" karaoke />
+        <ControlBar v-show="!uiState.controlsHidden" class="panel controls" karaoke />
         <button
-          v-if="state.controlsHidden"
+          v-if="uiState.controlsHidden"
           class="expand-controls-btn"
           :title="t('app.expandControls')"
           @click="toggleControls()"
@@ -162,9 +162,9 @@
       <!-- 主体：视频模式（视频库/播放器；ControlBar 保留，背景音乐可继续播） -->
       <main v-else-if="state.mode === 'videos'" class="main videos">
         <VideosView class="videos-area" />
-        <ControlBar v-show="!state.controlsHidden" class="panel controls" />
+        <ControlBar v-show="!uiState.controlsHidden" class="panel controls" />
         <button
-          v-if="state.controlsHidden"
+          v-if="uiState.controlsHidden"
           class="expand-controls-btn"
           :title="t('app.expandControls')"
           @click="toggleControls()"
@@ -176,9 +176,9 @@
       <!-- 主体：图书模式（书架/阅读器；ControlBar 保留，背景音乐可继续播） -->
       <main v-else class="main books">
         <BooksView class="books-area" />
-        <ControlBar v-show="!state.controlsHidden" class="panel controls" />
+        <ControlBar v-show="!uiState.controlsHidden" class="panel controls" />
         <button
-          v-if="state.controlsHidden"
+          v-if="uiState.controlsHidden"
           class="expand-controls-btn"
           :title="t('app.expandControls')"
           @click="toggleControls()"
@@ -284,6 +284,7 @@ import {
 import { startPlWidthDrag, dragging as plWidthDragging } from "./composables/usePlaylistWidth.js";
 import {
   state,
+  uiState,
   loadSongs,
   loadFavorites,
   loadPlaylists,
@@ -347,13 +348,13 @@ const blurCoverUrl = computed(() => {
 });
 
 // 面板组合 class：控制 grid 列数/区域（4 种状态）
-const panelsActive = computed(() => state.musicLibOpen || state.playlistOpen);
+const panelsActive = computed(() => uiState.musicLibOpen || uiState.playlistOpen);
 const panelClass = computed(() => {
   const c = [];
   if (panelsActive.value) c.push("has-tabbar");
-  if (state.musicLibOpen) c.push("has-music");
-  if (state.playlistOpen) c.push("has-playlist");
-  if (state.controlsHidden) c.push("no-controls");
+  if (uiState.musicLibOpen) c.push("has-music");
+  if (uiState.playlistOpen) c.push("has-playlist");
+  if (uiState.controlsHidden) c.push("no-controls");
   return c;
 });
 
@@ -434,7 +435,7 @@ function openMiniPlayer() {
 // search anything：歌手/专辑结果 → 打开 Playlist 分组浏览（@pick 由 App 根部实例触发）
 const playlistRef = ref(null);
 function onSearchPick(item) {
-  if (!state.playlistOpen) togglePlaylist();
+  if (!uiState.playlistOpen) togglePlaylist();
   nextTick(() => {
     const type = item.kind === "artist" ? "artists" : "albums";
     const value = item.kind === "artist" ? item.payload.artist : item.payload.album;
@@ -447,7 +448,7 @@ function onSearchPick(item) {
 function onOpenBrowse(e) {
   const { type, value } = e.detail || {};
   if (!type || !value) return;
-  if (!state.playlistOpen) togglePlaylist();
+  if (!uiState.playlistOpen) togglePlaylist();
   nextTick(() => {
     playlistRef.value?.openBrowse(type === "artist" ? "artists" : "albums", value);
   });

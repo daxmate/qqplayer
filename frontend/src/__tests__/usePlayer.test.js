@@ -139,8 +139,9 @@ const {
   setPlaylistOrder,
   isInPlaylist,
 } = await import("../composables/usePlayer.js");
-const { toggleMusicLib, togglePlaylist, PANEL_KEY } = await import("../composables/usePlayer.js");
-const { toggleControls, CONTROLS_KEY } = await import("../composables/usePlayer.js");
+const { toggleMusicLib, togglePlaylist, uiState, UI_STATE_KEY } =
+  await import("../composables/usePlayer.js");
+const { toggleControls } = await import("../composables/usePlayer.js");
 const { loadLyric } = await import("../composables/usePlayer.js");
 const { useToast, clearToasts } = await import("../composables/useToast.js");
 
@@ -171,8 +172,6 @@ const RESET = {
   playlists: [],
   activePlaylistId: null,
   libraryVersion: null,
-  musicLibOpen: true,
-  playlistOpen: true,
   lastSource: "manual",
 };
 
@@ -193,6 +192,13 @@ beforeEach(() => {
   _resetPlayMode();
   _resetPlaybackSession();
   _resetQueueOrder();
+  // UI 开关（uiState 独立模块，RESET 不再覆盖；此处显式复位防用例间残留）
+  Object.assign(uiState, {
+    musicLibOpen: true,
+    playlistOpen: true,
+    controlsHidden: false,
+    specLyricOpen: false,
+  });
   vi.restoreAllMocks();
   vi.stubGlobal("localStorage", localStorageStub);
   for (const k of Object.keys(lsStore)) delete lsStore[k];
@@ -2583,51 +2589,69 @@ describe("歌单", () => {
 });
 
 describe("侧栏面板开关", () => {
-  it("toggleMusicLib / togglePlaylist 切换并持久化 localStorage", () => {
-    expect(state.musicLibOpen).toBe(true);
-    expect(state.playlistOpen).toBe(true);
+  it("toggleMusicLib / togglePlaylist 切换并持久化 localStorage（统一 key qqplayer.ui.v1）", () => {
+    expect(uiState.musicLibOpen).toBe(true);
+    expect(uiState.playlistOpen).toBe(true);
     toggleMusicLib();
     togglePlaylist();
-    expect(state.musicLibOpen).toBe(false);
-    expect(state.playlistOpen).toBe(false);
-    expect(lsStore[PANEL_KEY]).toBe(JSON.stringify({ musicLib: false, playlist: false }));
+    expect(uiState.musicLibOpen).toBe(false);
+    expect(uiState.playlistOpen).toBe(false);
+    expect(lsStore[UI_STATE_KEY]).toBe(
+      JSON.stringify({ musicLib: false, playlist: false, controlsHidden: false }),
+    );
     toggleMusicLib();
-    expect(state.musicLibOpen).toBe(true);
-    expect(state.playlistOpen).toBe(false);
+    expect(uiState.musicLibOpen).toBe(true);
+    expect(uiState.playlistOpen).toBe(false);
   });
 
   it("两个面板独立开关，互不影响", () => {
     toggleMusicLib();
-    expect(state.musicLibOpen).toBe(false);
-    expect(state.playlistOpen).toBe(true);
+    expect(uiState.musicLibOpen).toBe(false);
+    expect(uiState.playlistOpen).toBe(true);
     togglePlaylist();
-    expect(state.musicLibOpen).toBe(false);
-    expect(state.playlistOpen).toBe(false);
+    expect(uiState.musicLibOpen).toBe(false);
+    expect(uiState.playlistOpen).toBe(false);
   });
 
   it("加载时从 localStorage 恢复面板状态", async () => {
-    lsStore[PANEL_KEY] = JSON.stringify({ musicLib: false, playlist: true });
+    lsStore[UI_STATE_KEY] = JSON.stringify({ musicLib: false, playlist: true });
     vi.resetModules();
     const mod = await import("../composables/usePlayer.js");
-    expect(mod.state.musicLibOpen).toBe(false);
-    expect(mod.state.playlistOpen).toBe(true);
+    expect(mod.uiState.musicLibOpen).toBe(false);
+    expect(mod.uiState.playlistOpen).toBe(true);
+  });
+
+  it("旧 key（PANEL_KEY/CONTROLS_KEY）首次读取时迁移到统一 key，行为不变", async () => {
+    lsStore["qqplay…p.v1"] = JSON.stringify({ musicLib: false, playlist: true });
+    lsStore["qqplayer.controls.v1"] = "1";
+    vi.resetModules();
+    const mod = await import("../composables/usePlayer.js");
+    expect(mod.uiState.musicLibOpen).toBe(false);
+    expect(mod.uiState.playlistOpen).toBe(true);
+    expect(mod.uiState.controlsHidden).toBe(true);
+    // 迁移后写透新 key；后续启动走新 key（旧 key 保留不删）
+    expect(JSON.parse(lsStore[UI_STATE_KEY])).toEqual({
+      musicLib: false,
+      playlist: true,
+      controlsHidden: true,
+    });
   });
 
   it("toggleControls 收起/展开控制区并持久化 localStorage", () => {
-    expect(state.controlsHidden).toBe(false);
+    expect(uiState.controlsHidden).toBe(false);
     toggleControls();
-    expect(state.controlsHidden).toBe(true);
-    expect(lsStore[CONTROLS_KEY]).toBe("1");
+    expect(uiState.controlsHidden).toBe(true);
+    expect(JSON.parse(lsStore[UI_STATE_KEY]).controlsHidden).toBe(true);
     toggleControls();
-    expect(state.controlsHidden).toBe(false);
-    expect(lsStore[CONTROLS_KEY]).toBe("0");
+    expect(uiState.controlsHidden).toBe(false);
+    expect(JSON.parse(lsStore[UI_STATE_KEY]).controlsHidden).toBe(false);
   });
 
   it("加载时从 localStorage 恢复控制区收起状态", async () => {
-    lsStore[CONTROLS_KEY] = "1";
+    lsStore[UI_STATE_KEY] = JSON.stringify({ controlsHidden: true });
     vi.resetModules();
     const mod = await import("../composables/usePlayer.js");
-    expect(mod.state.controlsHidden).toBe(true);
+    expect(mod.uiState.controlsHidden).toBe(true);
   });
 });
 
