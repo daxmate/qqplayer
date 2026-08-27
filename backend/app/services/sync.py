@@ -275,11 +275,32 @@ def _manifest_books() -> list[dict]:
 
 
 def _manifest_dicts() -> list[dict]:
-    """dicts 目录下 MDX/MDD 文件（含新格式 <uuid>/ 子目录，按需下载用）"""
+    """dicts 目录下 MDX/MDD 文件（含新格式 <uuid>/ 子目录，按需下载用）
+
+    title：词典配置里的真实名（settings dict namespace，用户添加/上传时可见名）；
+    旧格式散装 <uuid>.mdx 或新格式 <uuid>/ 子目录的文件名 uuid 与配置 id（d_<uuid>）
+    对应，据此映射；未匹配配置（孤儿/散装文件）回退空串，前端回退 name。
+    2026-08-27：同步中心显示 hash 文件名对用户无意义，补 title 供前端展示真名。
+    """
     out: list[dict] = []
     d = state.DICTS_DIR
     if not d.is_dir():
         return out
+    # 配置 id（d_<uuid>）→ 真实名（去掉 d_ 前缀按 uuid 匹配）
+    title_by_uuid: dict[str, str] = {}
+    try:
+        from app.services import settings as settings_service  # 延迟 import（避免循环）
+
+        dictionaries = (
+            settings_service.load_all_settings().get("dict", {}).get("dictionaries") or []
+        )
+        for item in dictionaries:
+            did = str(item.get("id") or "")
+            name = str(item.get("name") or "").strip()
+            if did.startswith("d_") and name:
+                title_by_uuid[did[2:]] = name
+    except Exception:
+        title_by_uuid = {}
     for f in sorted(d.rglob("*")):
         if not f.is_file() or f.suffix.lower() not in _DICT_EXTS:
             continue
@@ -288,9 +309,12 @@ def _manifest_dicts() -> list[dict]:
             size, mtime = st.st_size, int(st.st_mtime * 1000)
         except OSError:
             size, mtime = 0, 0
+        # uuid 定位：新格式 <uuid>/file → 父目录名；旧格式 <uuid>.mdx → 文件名干
+        uuid_part = f.parent.name if f.parent != d else f.stem
         out.append(
             {
                 "name": f.name,
+                "title": title_by_uuid.get(uuid_part, ""),
                 "path": str(f.relative_to(d)),
                 "size": size,
                 "mtime": mtime,

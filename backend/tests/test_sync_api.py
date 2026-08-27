@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 import backend  # noqa: E402
 from app import db, state  # noqa: E402
+from app.services import settings as settings_service  # noqa: E402
 from app.services import sync as sync_service  # noqa: E402
 
 client = TestClient(backend.app)
@@ -273,7 +274,7 @@ def test_manifest_books_merge_progress():
 
 
 def test_manifest_dicts_scan(tmp_path):
-    """dicts：DICTS_DIR 下 MDX/MDD（含子目录），name/size/mtime/path"""
+    """dicts：DICTS_DIR 下 MDX/MDD（含子目录），name/size/mtime/path；title 映射配置真实名"""
     (tmp_path / "dicts").mkdir()
     f1 = tmp_path / "dicts" / "oxford.mdx"
     f1.write_bytes(b"mdx-content")
@@ -281,12 +282,24 @@ def test_manifest_dicts_scan(tmp_path):
     sub.mkdir()
     f2 = sub / "coca.mdd"
     f2.write_bytes(b"mdd-content")
+    # 配置里 abc123 对应真实词典名（上传场景：配置 id = d_<uuid>，文件名 uuid 与之一致；
+    # _norm_dict_list 要求 id/name/path 非空，缺 path 的配置会被丢弃）
+    settings_service.save_all_settings(
+        {
+            "dict": {
+                "dictionaries": [{"id": "d_abc123", "name": "测试词典", "path": "abc123/coca.mdd"}]
+            }
+        }
+    )
     m = client.get("/api/sync/manifest").json()
     by_name = {d["name"]: d for d in m["dicts"]}
     assert by_name["oxford.mdx"]["size"] == 11
     assert by_name["oxford.mdx"]["path"] == "oxford.mdx"
     assert by_name["coca.mdd"]["path"] == "abc123/coca.mdd"
     assert by_name["coca.mdd"]["mtime"] == int(f2.stat().st_mtime * 1000)
+    # title：配置匹配（子目录 uuid = abc123）→ 真实词典名；未匹配（散装 oxford）→ 空串
+    assert by_name["coca.mdd"]["title"] == "测试词典"
+    assert by_name["oxford.mdx"]["title"] == ""
     assert m["dicts_url_template"] == "/api/sync/dicts/file?path={path}"
 
 

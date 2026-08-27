@@ -182,7 +182,7 @@
           <div v-for="row in dictRows" :key="row.item.path" class="msc-dict-row">
             <div class="msc-dict-info">
               <span class="sync-dl-name" :title="row.item.path">{{
-                row.dict.name || row.item.path
+                row.dict.title || row.dict.name || row.item.path
               }}</span>
               <span
                 v-if="dictStatus(row.item)"

@@ -62,6 +62,8 @@ interface DownloadItem {
   path: string;
   sha256: string;
   size: number;
+  /** 展示名（同步面板显示用）：歌曲「歌手 - 歌名」/ 词典真实名 / 书名；缺省回退 path */
+  name?: string;
 }
 
 interface EnsureAssetOpts {
@@ -85,6 +87,7 @@ interface SyncDownloadEntry {
 interface SongLike {
   path?: string;
   name?: string;
+  artist?: string;
   sha256?: string;
   size?: number;
   coverUrl?: string;
@@ -96,6 +99,7 @@ interface SongLike {
 /** 图书（manifest books 条目宽松视图） */
 interface BookLike {
   id?: string;
+  title?: string;
   sha256?: string;
   size?: number;
 }
@@ -103,6 +107,9 @@ interface BookLike {
 /** 词典（manifest dicts 条目宽松视图） */
 interface DictLike {
   path?: string;
+  name?: string;
+  /** 真实词典名（后端 manifest title：配置里用户添加/上传时的名字；hash 文件名场景必需） */
+  title?: string;
   sha256?: string;
   size?: number;
 }
@@ -416,6 +423,27 @@ export async function stableHash(identity: unknown): Promise<string> {
   return h.toString(16).padStart(16, "0");
 }
 
+/** 歌曲展示名：歌手 - 歌名 → 歌名 → 真实文件名（去扩展名）→ path 原文 */
+function songDisplayName(song: SongLike): string {
+  const name = String(song?.name || "").trim();
+  const artist = String(song?.artist || "").trim();
+  if (name && artist) return `${artist} - ${name}`;
+  if (name) return name;
+  const p = String(song?.path || "");
+  const base = String(p.split("/").pop() || p);
+  const stem = base.replace(/\.[A-Za-z0-9]+$/, "");
+  return stem || p;
+}
+
+/** 文件路径的展示名：末段文件名（同步面板对非歌曲资产（词典/图书）的回退显示名） */
+function fileDisplayName(path: string): string {
+  const base =
+    String(path || "")
+      .split("/")
+      .pop() || String(path || "");
+  return base.replace(/\.[A-Za-z0-9]+$/, "") || base;
+}
+
 /** 歌曲 → 下载项 {url, path, sha256, size}（url 为桌面服务器绝对 URL）
  *  sha256 = manifest 条目自带的内容哈希（T1 契约：manifest songs[].sha256）；
  *  老清单/缺字段 → ""（原生侧空值跳过内容校验，文件名仍用资产标识哈希做内容寻址）。
@@ -429,6 +457,7 @@ export async function assetForSong(song: SongLike): Promise<DownloadItem | null>
     path: "audio/" + hash + (extOf(song.path) || ".m4a"),
     sha256: song.sha256 || "",
     size: song.size || 0,
+    name: songDisplayName(song),
   };
 }
 
@@ -442,6 +471,8 @@ export async function assetForDict(dict: DictLike): Promise<DownloadItem | null>
     path: "dicts/" + hash + (extOf(dict.path) || ".mdx"),
     sha256: dict.sha256 || "",
     size: dict.size || 0,
+    // 真实词典名优先（后端 manifest title：配置里用户添加/上传时的名字）；回退文件名（去扩展名）
+    name: String(dict.title || "").trim() || fileDisplayName(String(dict.name || dict.path || "")),
   };
 }
 
@@ -450,7 +481,13 @@ export async function assetForBook(book: BookLike): Promise<DownloadItem | null>
   if (!book || !book.id) return null;
   const url = resolveServerUrl("/api/books/" + encodeURIComponent(book.id) + "/file");
   const hash = await stableHash(book.id);
-  return { url, path: "books/" + hash + ".epub", sha256: book.sha256 || "", size: book.size || 0 };
+  return {
+    url,
+    path: "books/" + hash + ".epub",
+    sha256: book.sha256 || "",
+    size: book.size || 0,
+    name: String(book.title || "").trim() || fileDisplayName(String(book.id || "")),
+  };
 }
 
 // ---------- 封面/歌词缓存 key（阶段 F1/F2：封面离线缓存 + 歌词文件兜底） ----------
@@ -466,14 +503,20 @@ export async function coverAssetKey(path: string): Promise<string | null> {
 }
 
 /** 封面下载项 {url, path, sha256, size}（url 为桌面 cover 端点；sha256 空 → 原生跳过内容校验）
- *  @param {number} [size] 可选：manifest 封面文件大小（cover_source=file 时原生 size 校验用） */
-export async function coverItemFor(path: string, size = 0): Promise<DownloadItem | null> {
+ *  @param {number} [size] 可选：manifest 封面文件大小（cover_source=file 时原生 size 校验用）
+ *  @param {string} [name] 可选：对应歌曲展示名（同步面板区分封面条目） */
+export async function coverItemFor(
+  path: string,
+  size = 0,
+  name = "",
+): Promise<DownloadItem | null> {
   if (!path) return null;
   return {
     url: resolveServerUrl("/api/cover?path=" + encodeURIComponent(path)),
     path: (await coverAssetKey(path))!,
     sha256: "",
     size: size || 0,
+    name: name || undefined,
   };
 }
 
@@ -997,7 +1040,11 @@ export async function buildSongSyncItems(songs: unknown): Promise<DownloadItem[]
   const lists = await Promise.all(
     songs.map(async (s) => {
       if (!s || !s.path) return []; // 流媒体/缺 path：整首跳过
-      const [audio, cover] = await Promise.all([assetForSong(s), coverItemFor(s.path)]);
+      const display = songDisplayName(s);
+      const [audio, cover] = await Promise.all([
+        assetForSong(s),
+        coverItemFor(s.path, Number(s.cover_size) || 0, display),
+      ]);
       return [audio, cover].filter((x): x is DownloadItem => !!x); // 防御：理论上两者均非空
     }),
   );
@@ -1030,7 +1077,7 @@ export function syncAssets(items: DownloadItem[]) {
     if (!item || !item.path || !item.url) continue;
     valid.push(item);
     syncDownloads[item.path] = {
-      name: displayNameOf(item.path),
+      name: item.name || displayNameOf(item.path),
       status: "queued",
       received: 0,
       total: item.size || 0,

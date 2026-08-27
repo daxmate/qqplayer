@@ -417,24 +417,45 @@ describe("assetForSong / assetForDict / assetForBook：沙盒路径内容寻址"
     expect(item.size).toBe(100);
   });
 
-  it("assetForDict：dicts/ 子目录，扩展名保留", async () => {
+  it("assetForSong：name = 歌手 - 歌名（同步面板展示用，不显示 hash）", async () => {
+    expect(
+      (await sync.assetForSong({ path: "/Music/foo.mp3", name: "星星点灯", artist: "郑智化" }))
+        .name,
+    ).toBe("郑智化 - 星星点灯");
+    expect((await sync.assetForSong({ path: "/Music/foo.mp3", name: "星星点灯" })).name).toBe(
+      "星星点灯",
+    );
+    expect((await sync.assetForSong({ path: "/Music/郑智化 - 星星点灯.mp3" })).name).toBe(
+      "郑智化 - 星星点灯",
+    );
+  });
+
+  it("assetForDict：dicts/ 子目录，扩展名保留；name = title（真实词典名）优先", async () => {
     const item = await sync.assetForDict({
-      name: "oxford.mdx",
-      path: "abc123/oxford.mdx",
+      name: "f37e654b0b56489eabc2af427c48a82a.mdx",
+      title: "LDOCE6++ En-Cn V2-19",
+      path: "f37e654b0b56489eabc2af427c48a82a.mdx",
       size: 11,
     });
     expect(item.url).toBe(
       "http://192.168.1.50:17627/api/sync/dicts/file?path=" +
-        encodeURIComponent("abc123/oxford.mdx"),
+        encodeURIComponent("f37e654b0b56489eabc2af427c48a82a.mdx"),
     );
     expect(item.path).toMatch(/^dicts\/[0-9a-f]{64}\.mdx$/);
     expect(item.size).toBe(11);
+    expect(item.name).toBe("LDOCE6++ En-Cn V2-19");
   });
 
-  it("assetForBook：books/ 子目录 .epub", async () => {
+  it("assetForDict：无 title 时回退 name（真实文件名）", async () => {
+    const item = await sync.assetForDict({ name: "oxford.mdx", path: "abc123/oxford.mdx" });
+    expect(item.name).toBe("oxford");
+  });
+
+  it("assetForBook：books/ 子目录 .epub；name = 书名", async () => {
     const item = await sync.assetForBook({ id: "b1", title: "测试书" });
     expect(item.url).toBe("http://192.168.1.50:17627/api/books/b1/file");
     expect(item.path).toMatch(/^books\/[0-9a-f]{64}\.epub$/);
+    expect(item.name).toBe("测试书");
   });
 
   it("缺 path/id：返回 null", async () => {
