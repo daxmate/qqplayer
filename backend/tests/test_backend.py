@@ -977,17 +977,21 @@ def test_api_settings_put_validation():
     assert s["player"]["panel"] is True
     assert s["player"]["lastPlayed"] is None  # 非法结构回落 null
 
-    # sleepTimer：合法值保留、非法值回落默认
+    # sleepTimer：契约 5-120 任意分钟生效（滑块 step 5，纯前端倒计时）；越界/非数字回落默认
     r = client.put(
         "/api/settings", json={"playback": {"sleepTimerOn": True, "sleepTimerMinutes": 45}}
     )
     assert r.json()["settings"]["playback"]["sleepTimerOn"] is True
     assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 45
     r = client.put(
-        "/api/settings", json={"playback": {"sleepTimerOn": "x", "sleepTimerMinutes": 20}}
+        "/api/settings", json={"playback": {"sleepTimerOn": "x", "sleepTimerMinutes": 55}}
     )
     assert r.json()["settings"]["playback"]["sleepTimerOn"] is False
-    assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 30  # 不在选项内回落 30
+    assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 55  # 5-120 内生效
+    r = client.put("/api/settings", json={"playback": {"sleepTimerMinutes": 3}})
+    assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 5  # 越界 clamp 到下限
+    r = client.put("/api/settings", json={"playback": {"sleepTimerMinutes": 200}})
+    assert r.json()["settings"]["playback"]["sleepTimerMinutes"] == 120  # 越界 clamp 到上限
 
     # eqGains 长度不对 / 含非数字 → 全 0；负值 clamp 到 -12
     r = client.put("/api/settings", json={"playback": {"eqGains": [1, 2]}})

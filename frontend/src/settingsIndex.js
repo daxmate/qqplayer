@@ -342,6 +342,8 @@ export const settingsIndex = [
     subTab: null,
     labelKey: "settings.duration",
     keywords: ["睡眠时长", "定时分钟", "sleep minutes", "时长", "定时"],
+    // 契约：5-120（step 5）任意分钟都生效——后端 settings.py 同步接受 5-120 范围
+    // （消费为纯前端倒计时）；桌面/移动端 chip 快捷值仍为 15/30/45/60/90。
     type: "slider",
     min: 5,
     max: 120,

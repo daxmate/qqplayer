@@ -18,8 +18,6 @@ const NAME_WEIGHT = 20; // 歌曲字段权重：歌名 > 歌手 > 专辑
 const ARTIST_WEIGHT = 10;
 const ALBUM_WEIGHT = 0;
 const ALIAS_BONUS = 10; // 设置项别名命中加成
-const UNKNOWN_ARTIST = "未知歌手";
-const UNKNOWN_ALBUM = "未知专辑";
 
 const query = ref("");
 const results = ref([]);
@@ -51,7 +49,7 @@ function collectSongs(q) {
       id: song.path || song.id,
       title: song.name,
       subtitle: [song.artist, song.album].filter(Boolean).join(" · "),
-      badge: "本地",
+      badge: i18n.global.t("search.badge.song"),
       score: best,
       payload: song, // state.songs 条目原样透传（A 任务按 path/name 消费）
     });
@@ -80,7 +78,10 @@ async function fetchOnline(q, seq) {
         id: "online-" + item.id,
         title: item.title ?? "",
         subtitle: [item.artist, item.album].filter(Boolean).join(" · "),
-        badge: src === "gequhai" ? "歌曲海" : "在线",
+        badge:
+          src === "gequhai"
+            ? i18n.global.t("search.badge.gequhai")
+            : i18n.global.t("search.badge.online"),
         // 歌名/歌手/专辑三字段取最高（2026-08-25：搜歌手名、专辑名也能出网络歌曲）
         score: Math.max(
           matchScore(q, item.title || ""),
@@ -108,7 +109,8 @@ function collectArtists(q) {
   const countMap = new Map(); // artist → count
   for (const song of state.songs) {
     if (!song) continue;
-    const artist = (song.artist && String(song.artist).trim()) || UNKNOWN_ARTIST;
+    const artist =
+      (song.artist && String(song.artist).trim()) || i18n.global.t("search.unknownArtist");
     countMap.set(artist, (countMap.get(artist) || 0) + 1);
   }
   const scored = [];
@@ -123,8 +125,8 @@ function collectArtists(q) {
     kind: "artist",
     id: "artist-" + artist,
     title: artist,
-    subtitle: `${count} 首`,
-    badge: "歌手",
+    subtitle: i18n.global.t("search.songCount", { n: count }),
+    badge: i18n.global.t("search.badge.artist"),
     score,
     payload: { artist, count },
   }));
@@ -133,7 +135,9 @@ function collectArtists(q) {
 // 专辑 artists 串：去重 >2 显示 "A / B 等"
 function formatArtists(list) {
   const uniq = [...new Set(list.filter(Boolean))];
-  if (uniq.length > 2) return `${uniq[0]} / ${uniq[1]} 等`;
+  if (uniq.length > 2) {
+    return i18n.global.t("search.albumMore", { a: uniq[0], b: uniq[1] });
+  }
   return uniq.join(" / ");
 }
 
@@ -142,7 +146,7 @@ function collectAlbums(q) {
   const map = new Map(); // album → { album, artists:Set, count }
   for (const song of state.songs) {
     if (!song) continue;
-    const album = (song.album && String(song.album).trim()) || UNKNOWN_ALBUM;
+    const album = (song.album && String(song.album).trim()) || i18n.global.t("search.unknownAlbum");
     let rec = map.get(album);
     if (!rec) {
       rec = { album, artists: new Set(), count: 0 };
@@ -168,7 +172,7 @@ function collectAlbums(q) {
     id: "album-" + rec.album,
     title: rec.album,
     subtitle: formatArtists([...rec.artists]),
-    badge: "专辑",
+    badge: i18n.global.t("search.badge.album"),
     score,
     payload: { album: rec.album, artists: [...rec.artists], count: rec.count },
   }));
@@ -197,7 +201,7 @@ function collectSettings(q) {
       id: entry.key || entry.labelKey,
       title,
       subtitle: settingsCategoryLabel(entry.category),
-      badge: "设置",
+      badge: i18n.global.t("search.badge.setting"),
       score,
       payload: entry, // SettingEntry 原样透传
     });

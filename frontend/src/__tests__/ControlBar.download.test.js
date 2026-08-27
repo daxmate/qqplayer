@@ -72,7 +72,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   clearToasts();
-  document.body.querySelectorAll(".modal-mask, .tag-toast, .url-mask").forEach((n) => n.remove());
+  document.body.querySelectorAll(".modal-mask, .url-mask").forEach((n) => n.remove());
 });
 
 describe("ControlBar 下载当前网络歌", () => {

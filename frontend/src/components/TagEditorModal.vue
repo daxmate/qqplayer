@@ -198,13 +198,6 @@
         </div>
       </div>
     </div>
-
-    <!-- toast 独立于弹窗（Teleport body）：保存成功后弹窗先关，toast 仍可见 -->
-    <Transition name="tag-toast">
-      <div v-if="toast" class="tag-toast" :class="{ err: toastErr }" data-testid="tag-toast">
-        {{ toast }}
-      </div>
-    </Transition>
   </Teleport>
 </template>
 
@@ -215,6 +208,7 @@ import { Loader2, Music, Sparkles, Tags, X } from "@lucide/vue";
 import { state, loadSongs } from "../composables/usePlayer.js";
 import { apiPost, resolveServerUrl } from "../utils/apiClient.js";
 import { loadEnabledFields, getEnabledFields } from "../composables/tagEditorSettings.js";
+import { showToast, toastError } from "../composables/useToast.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -248,10 +242,6 @@ const scrapeError = ref("");
 const netease = ref([]);
 const musicbrainz = ref([]);
 const saving = ref(false);
-const toast = ref("");
-const toastErr = ref(false);
-
-let toastTimer = null;
 
 const song = computed(() => props.song || state.currentSong);
 const songName = computed(() =>
@@ -384,7 +374,7 @@ async function save() {
   const artist = form.artist.trim();
   const album = form.album.trim();
   if (!title && !artist && !album) {
-    showToast(t("tags.saveFailed", { msg: t("tags.emptyAll") }), true);
+    toastError(t("tags.saveFailed", { msg: t("tags.emptyAll") }));
     return;
   }
   saving.value = true;
@@ -428,22 +418,13 @@ async function save() {
       if (data.album_artist !== undefined) cur.album_artist = data.album_artist;
     }
     await loadSongs({ force: true }); // 刷新列表（loadSongs 按 path 保持当前选中/播放）
-    showToast(t("tags.saveSuccess"), false);
+    showToast(t("tags.saveSuccess"));
     emit("close");
   } catch (e) {
-    showToast(e.message || t("tags.saveFailed", { msg: "" }), true); // 错误：toast 提示，弹窗不关
+    toastError(e.message || t("tags.saveFailed", { msg: "" })); // 错误：toast 提示，弹窗不关
   } finally {
     saving.value = false;
   }
-}
-
-function showToast(msg, isErr) {
-  toast.value = msg;
-  toastErr.value = isErr;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.value = "";
-  }, 3200);
 }
 
 function close() {
@@ -458,7 +439,6 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
-  clearTimeout(toastTimer);
 });
 </script>
 
@@ -798,41 +778,6 @@ onBeforeUnmount(() => {
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-/* ============ toast（独立 Teleport，弹窗关闭后仍可见） ============ */
-.tag-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 84px;
-  transform: translateX(-50%);
-  z-index: 300;
-  background: rgba(38, 41, 55, 0.95);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 18px;
-  border-radius: 12px;
-  font-size: 12.5px;
-  box-shadow: 0 10px 32px var(--shadow-strong);
-  white-space: nowrap;
-  max-width: calc(100vw - 32px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tag-toast.err {
-  border-color: rgba(255, 107, 107, 0.5);
-  color: #ffb3b3;
-}
-.tag-toast-enter-active,
-.tag-toast-leave-active {
-  transition:
-    opacity 0.25s,
-    transform 0.25s;
-}
-.tag-toast-enter-from,
-.tag-toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
 }
 
 /* ============ 移动端适配（<1024px）：表单堆叠 + 候选列表限高滚动 ============

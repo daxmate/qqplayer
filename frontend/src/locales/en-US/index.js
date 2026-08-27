@@ -10,6 +10,7 @@ import playlist from "./playlist.js";
 import tags from "./tags.js";
 import scrape from "./scrape.js";
 import mobile from "./mobile.js";
+import search from "./search.js";
 
 export default {
   ...books,
@@ -22,4 +23,5 @@ export default {
   ...tags,
   ...scrape,
   ...mobile,
+  ...search,
 };

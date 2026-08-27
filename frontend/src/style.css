@@ -184,7 +184,14 @@ html:not([data-blur="true"]) .sv-panel {
 }
 
 /* ============ 紧凑模式（html[data-compact="true"]）============
-   集中覆盖关键间距/尺寸，提高信息密度。用 !important 压过组件 scoped 样式。 */
+   集中覆盖关键间距/尺寸，提高信息密度。
+   选择器均已按当前实际类名核对（2026-08-27）：桌面列表行 .pl-item/.pl-list、
+   侧边栏 .sb-item/.sb-list、网格卡片 .gr-card/.pl-grid、顶栏 .topbar、
+   播放器控制区 .controls、歌词 .lyric-scroll/.kp-scroll/.kline。
+   旧类名（.song-row/.artist-grid/.playlist-header/.nav-item 等）已随组件改名失效，勿回退。
+   选择器带 html[data-compact] 属性前缀 → 特异性高于组件 scoped 样式（.x[data-v-*]）。 */
+
+/* 顶栏（App.vue） */
 html[data-compact="true"] .topbar {
   padding: 6px 14px;
   gap: 12px;
@@ -192,44 +199,83 @@ html[data-compact="true"] .topbar {
 html[data-compact="true"] .topbar .logo {
   font-size: 15px;
 }
+html[data-compact="true"] .topbar .logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
 html[data-compact="true"] .topbar .gear-btn,
 html[data-compact="true"] .topbar .mode-tabs .tab {
   padding: 5px 12px;
 }
-html[data-compact="true"] .panel {
-  padding: 8px 10px;
-}
-html[data-compact="true"] .song-row {
-  padding: 6px 10px;
-}
-html[data-compact="true"] .song-row .song-cover,
-html[data-compact="true"] .song-row .row-cover {
-  width: 28px;
-  height: 28px;
-}
-html[data-compact="true"] .playlist-header {
-  padding: 6px 10px 0;
-}
-html[data-compact="true"] .group-header {
-  padding: 6px 10px;
-}
-html[data-compact="true"] .sidebar .nav-item {
-  padding: 5px 10px;
+
+/* 播放器控制区（ControlBar.vue） */
+html[data-compact="true"] .controls {
+  padding: 18px 14px 8px;
 }
 html[data-compact="true"] .controls .btn-row .btn {
   min-width: 0;
 }
-html[data-compact="true"] .controls {
-  padding: 18px 14px 8px;
+
+/* 播放列表（Playlist.vue）：头部 / 工具条 / 列头 / 行密度 */
+html[data-compact="true"] .pl-head {
+  padding: 8px 10px;
 }
+html[data-compact="true"] .pl-tools {
+  padding: 6px 10px;
+}
+html[data-compact="true"] .pl-browse {
+  padding: 6px 10px 0;
+}
+html[data-compact="true"] .pl-cols {
+  padding: 4px 10px 4px 14px;
+}
+html[data-compact="true"] .pl-list {
+  padding: 4px;
+}
+html[data-compact="true"] .pl-item {
+  padding: 5px 8px;
+  gap: 8px;
+}
+html[data-compact="true"] .pl-item .pl-cover {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+/* 网格浏览（歌手/专辑卡片） */
+html[data-compact="true"] .pl-grid {
+  gap: 6px;
+  padding: 8px 10px;
+}
+html[data-compact="true"] .gr-card {
+  padding: 8px 4px;
+  gap: 5px;
+}
+html[data-compact="true"] .gr-card .gr-avatar,
+html[data-compact="true"] .gr-card.album .gr-cover {
+  width: 36px;
+  height: 36px;
+}
+
+/* 侧边栏（Sidebar.vue） */
+html[data-compact="true"] .sidebar .sb-head {
+  padding: 8px 10px;
+}
+html[data-compact="true"] .sidebar .sb-list {
+  padding: 4px;
+}
+html[data-compact="true"] .sidebar .sb-item {
+  padding: 5px 8px;
+}
+
+/* 封面（Cover.vue；size>0 时组件内联样式优先，此处仅兜底默认尺寸） */
 html[data-compact="true"] .cover-box {
   width: 200px;
   height: 200px;
 }
-html[data-compact="true"] .cover-box.small {
-  width: 150px;
-  height: 150px;
-}
+
+/* 歌词/跟唱 */
 html[data-compact="true"] .kline {
   padding: 7px 0;
 }
@@ -240,15 +286,8 @@ html[data-compact="true"] .lyric-scroll,
 html[data-compact="true"] .kp-scroll {
   padding: 6px 0;
 }
-html[data-compact="true"] .artist-grid,
-html[data-compact="true"] .album-grid {
-  gap: 10px;
-  padding: 10px;
-}
-html[data-compact="true"] .artist-card,
-html[data-compact="true"] .album-card {
-  padding: 8px;
-}
+
+/* 设置面板 */
 html[data-compact="true"] .settings-scroll .setting-item {
   padding: 8px 0;
 }

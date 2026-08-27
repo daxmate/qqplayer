@@ -210,7 +210,7 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "visualizerStyle": "bars",  # 视觉化样式：bars/radial/wave/pulse/mirror/particle
     "streamStats": False,  # 流媒体播放计入播放统计
     "sleepTimerOn": False,  # 睡眠定时器开关（运行中的倒计时不持久化，刷新即取消）
-    "sleepTimerMinutes": 30,  # 睡眠定时器时长（分钟，chip 单选 15/30/45/60/90）
+    "sleepTimerMinutes": 30,  # 睡眠定时器时长（分钟，契约 5-120；chip 快捷值 15/30/45/60/90）
 }
 # desktopLyric：现有 DESKTOP_LYRIC_DEFAULTS 11 字段（不动）
 DESKTOP_LYRIC_DEFAULTS = {

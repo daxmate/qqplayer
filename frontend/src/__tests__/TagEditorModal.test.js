@@ -26,8 +26,11 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const TagEditorModal = (await import("../components/TagEditorModal.vue")).default;
+const ToastContainer = (await import("../components/ToastContainer.vue")).default;
 const { state, audio } = await import("../composables/usePlayer.js");
 const { resetTagEditorSettings } = await import("../composables/tagEditorSettings.js");
+const { clearToasts, useToast } = await import("../composables/useToast.js");
+const toastItems = useToast().items; // 全局 toast 单例状态（reactive）
 
 const SONG = { path: "/music/安静.mp3", name: "安静", artist: "周杰伦", album: "范特西" };
 
@@ -128,7 +131,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  document.body.querySelectorAll(".modal-mask, .tag-toast").forEach((n) => n.remove());
+  clearToasts(); // 全局 toast 单例清理（ToastContainer 共享同一份 items）
+  document.body.querySelectorAll(".modal-mask").forEach((n) => n.remove());
 });
 
 describe("TagEditorModal 渲染", () => {
@@ -303,8 +307,8 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
       true,
     );
     expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
-    // 无错误 toast（静默失败）
-    expect(document.body.querySelector('[data-testid="tag-toast"]')).toBeFalsy();
+    // 无错误 toast（静默失败；全局 toast 单例为空）
+    expect(toastItems.length).toBe(0);
     w.unmount();
   });
 
@@ -314,7 +318,8 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
     await nextTick();
     const root = await clickNetease(document.body.querySelector(".modal"));
     expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
-    expect(document.body.querySelector('[data-testid="tag-toast"]')).toBeFalsy();
+    // 无 toast（静默失败）
+    expect(toastItems.length).toBe(0);
     w.unmount();
   });
 
@@ -433,11 +438,12 @@ describe("TagEditorModal 保存", () => {
     // loadSongs 刷新列表（GET /api/songs），并保留当前选中
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/songs"))).toBe(true);
     expect(state.currentIndex).toBe(0);
-    // 成功 toast
-    const toast = document.body.querySelector('[data-testid="tag-toast"]');
-    expect(toast).toBeTruthy();
-    expect(toast.textContent).toBe("歌曲信息已保存");
-    expect(toast.classList.contains("err")).toBe(false);
+    // 成功 toast（全局 ToastContainer，与其它组件统一）
+    const toasts = mount(ToastContainer, { global: { stubs: { teleport: true } } });
+    const toast = toasts.find(".toast-item");
+    expect(toast.exists()).toBe(true);
+    expect(toast.text()).toBe("歌曲信息已保存");
+    expect(toast.classes()).toContain("toast-success");
     // 关闭弹窗
     expect(w.emitted("close")).toBeTruthy();
     w.unmount();
@@ -453,10 +459,12 @@ describe("TagEditorModal 保存", () => {
     const root = document.body.querySelector(".modal");
     root.querySelector('[data-testid="save-btn"]').click();
     await tick();
-    const toast = document.body.querySelector('[data-testid="tag-toast"]');
-    expect(toast).toBeTruthy();
-    expect(toast.classList.contains("err")).toBe(true);
-    expect(toast.textContent).toContain("参数错误");
+    // 错误 toast（全局 ToastContainer）
+    const toasts = mount(ToastContainer, { global: { stubs: { teleport: true } } });
+    const toast = toasts.find(".toast-item");
+    expect(toast.exists()).toBe(true);
+    expect(toast.classes()).toContain("toast-error");
+    expect(toast.text()).toContain("参数错误");
     // 弹窗未关闭、状态未动
     expect(w.emitted("close")).toBeFalsy();
     expect(document.body.querySelector(".modal")).toBeTruthy();

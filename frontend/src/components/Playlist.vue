@@ -1,5 +1,5 @@
 <template>
-  <div class="playlist" :class="{ compact, 'sv-hidden': smartViewState.active }">
+  <div class="playlist" :class="{ 'sv-hidden': smartViewState.active }">
     <div class="pl-head">
       <Music :size="13" />
       {{ viewTitle }}
@@ -499,9 +499,7 @@ import TagEditorModal from "./TagEditorModal.vue";
 import DevicePickerModal from "./DevicePickerModal.vue";
 import { fetchDevices, pushSongsToDevice } from "../utils/deviceCommands.js";
 
-defineProps({
-  compact: { type: Boolean, default: false },
-});
+// 注：曾有过 compact prop（class 绑定），无任何调用方且与全局 html[data-compact] 机制重复，已移除。
 
 const { t } = useI18n();
 

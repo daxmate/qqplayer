@@ -255,7 +255,9 @@ _SETTINGS_SPEC = {
         ),
         "streamStats": (False, _norm_bool),
         "sleepTimerOn": (False, _norm_bool),
-        "sleepTimerMinutes": (30, lambda v, d: v if v in {15, 30, 45, 60, 90} else d),
+        # 契约：前端 settingsIndex.js 滑块 5-120（step 5）任意分钟生效；
+        # 消费为纯前端倒计时（useSleepTimer.js setTimeout），无需白名单。
+        "sleepTimerMinutes": (30, lambda v, d: _norm_num(v, d, lo=5, hi=120, integer=True)),
     },
     "desktopLyric": {
         "enabled": (False, _norm_bool),

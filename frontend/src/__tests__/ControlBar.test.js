@@ -50,7 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  document.body.querySelectorAll(".modal-mask, .tag-toast").forEach((n) => n.remove());
+  document.body.querySelectorAll(".modal-mask").forEach((n) => n.remove());
 });
 
 describe("ControlBar 迷你频谱条（任务 C）", () => {
