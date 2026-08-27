@@ -216,7 +216,7 @@ export async function probeHost() {
       // 任何合法 Response（ok boolean / status number）都算主机在线
       ok = !!res && (typeof res.ok === "boolean" || typeof res.status === "number");
     } catch {
-      ok = false; // 网络错误 / 超时 → 主机不可达
+      // 网络错误 / 超时 → 保持 ok=false（主机不可达）；catch 进入时 ok 必为初始 false
     }
     hostReachable = ok ? "online" : "offline";
     if (ok) setOffline(false);
