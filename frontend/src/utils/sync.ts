@@ -302,6 +302,13 @@ export function getSyncState() {
 const MANIFEST_URL = "/api/sync/manifest";
 const COLLECTION_KEYS = ["songs", "playlists", "favorites", "books", "dicts"];
 
+/** 同步缓存结构版本：manifest 缓存（sync:meta / sync:* 集合）的 schema 变更时 +1，
+ *  强制旧缓存失效重拉——manifest version 只随数据变化（mtime/ops/scan），
+ *  后端给字段加结构（如 dicts.title 真实词典名）时 version 不变，旧缓存永远不刷新
+ *  （2026-08-27：词典区显示 hash 文件名根因）。
+ *  历史：v1 无该字段（首版）；v2 = dicts 条目含 title。 */
+const CACHE_SCHEMA_VERSION = 2;
+
 let syncInFlight = false;
 
 /**
@@ -317,7 +324,7 @@ async function fetchAndCacheManifest(): Promise<ManifestResult> {
   const manifest = r.data || {};
   const version = String(manifest.version || "");
   const meta = await getCache("sync:meta");
-  const changed = !meta || meta.version !== version;
+  const changed = !meta || meta.version !== version || meta.schemaVersion !== CACHE_SCHEMA_VERSION;
   if (changed) {
     const counts: Record<string, number> = {};
     for (const key of COLLECTION_KEYS) {
@@ -327,6 +334,7 @@ async function fetchAndCacheManifest(): Promise<ManifestResult> {
     }
     await setCache("sync:meta", {
       version,
+      schemaVersion: CACHE_SCHEMA_VERSION,
       generatedAt: manifest.generated_at || "",
       syncedAt: Date.now(),
     });

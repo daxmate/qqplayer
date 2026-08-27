@@ -53,7 +53,7 @@ const apiMock = vi.hoisted(() => ({
 vi.mock("../utils/apiClient.js", () => apiMock);
 
 // ---------- 被测模块（静态导入；_resetSyncForTests 保证用例隔离） ----------
-import { getCache } from "../utils/cacheDb.js";
+import { getCache, setCache } from "../utils/cacheDb.js";
 import * as sync from "../utils/sync.js";
 
 const manifestV1 = {
@@ -158,6 +158,21 @@ describe("syncNow：manifest 拉取 + version 对比 + 集合写入", () => {
     expect(r.counts.songs).toBe(2);
     expect(await getCache("sync:songs")).toEqual(manifestV2.songs);
     expect((await getCache("sync:meta")).version).toBe(manifestV2.version);
+  });
+
+  it("缓存结构升级（schemaVersion）：version 未变也强制刷新——dicts.title 场景", async () => {
+    await setNativeEnv();
+    apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifestV1 });
+    await sync.syncNow();
+    expect((await getCache("sync:meta")).schemaVersion).toBe(2);
+    // 手写旧结构缓存（无 schemaVersion）模拟升级前：version 相同但缓存必须刷新
+    const oldMeta = { version: manifestV1.version, generatedAt: "", syncedAt: 0 };
+    await setCache("sync:meta", oldMeta);
+    await setCache("sync:dicts", [{ name: "f37e...mdx", path: "f37e...mdx" }]); // 旧结构：无 title
+    const r = await sync.syncNow();
+    expect(r.changed).toBe(true);
+    expect((await getCache("sync:meta")).schemaVersion).toBe(2);
+    expect(await getCache("sync:dicts")).toEqual(manifestV1.dicts); // 缓存已按新结构重写
   });
 
   it("拉取失败：返回 {ok:false, message}，lastError 记录", async () => {
