@@ -184,18 +184,23 @@ final class DownloadManagerTests: XCTestCase {
         for (rel, size) in files {
             try writeAsset(rel, data: Data(repeating: 0, count: size))
         }
+        // 歌词/元数据文件在 Documents/meta/（MetaStore）：lyric:* 归歌词，其余归 meta
+        let metaDir = registryURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: metaDir, withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 7).write(to: metaDir.appendingPathComponent("lyric:abc123.json"))
+        try Data(repeating: 0, count: 3).write(to: metaDir.appendingPathComponent("other.json"))
 
         let manager = makeManager(pathProvider: MockPathProvider(isWifi: true))
         defer { manager.shutdown() }
 
         let info = manager.assetsSizeByType()
-        XCTAssertEqual(info.total, 430)
+        XCTAssertEqual(info.total, 430 + 10)
         XCTAssertEqual(info.byType["audio"], 100)
         XCTAssertEqual(info.byType["covers"], 50)
-        XCTAssertEqual(info.byType["lyric"], 20)
+        XCTAssertEqual(info.byType["lyric"], 20 + 7, "meta/lyric:* 文件计入歌词占用（2026-08-27 歌词恒 0 回归）")
         XCTAssertEqual(info.byType["books"], 200)
         XCTAssertEqual(info.byType["dicts"], 30)
-        XCTAssertEqual(info.byType["meta"], 10)
+        XCTAssertEqual(info.byType["meta"], 10 + 3)
         XCTAssertEqual(info.byType["other"], 20)
         // 旧 total 接口保持一致（兼容旧前端只读 total）
         XCTAssertEqual(manager.assetsSize(), 430)

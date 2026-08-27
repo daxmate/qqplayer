@@ -320,6 +320,23 @@ final class DownloadManager: NSObject, URLSessionDataDelegate {
             let bucket = knownTypes.contains(type) ? type : "other"
             byType[bucket, default: 0] += Int64(size)
         }
+        // 歌词/元数据文件在 Documents/meta/（MetaStore 落盘，不在 storageRoot 下）：
+        // lyric:<hash>.json 归「歌词」，其余归「元数据」——否则存储管理歌词恒 0
+        // （2026-08-27 用户反馈"同步的歌词去哪儿了"根因之一）
+        let metaDir = registryURL.deletingLastPathComponent()
+        if let metaEnum = FileManager.default.enumerator(
+            at: metaDir, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let url as URL in metaEnum {
+                guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                      values.isRegularFile == true,
+                      let size = values.fileSize else { continue }
+                total += Int64(size)
+                let bucket = url.lastPathComponent.hasPrefix("lyric:") ? "lyric" : "meta"
+                byType[bucket, default: 0] += Int64(size)
+            }
+        }
         return (total, byType)
     }
 
