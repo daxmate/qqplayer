@@ -20,7 +20,8 @@
 import { ref, watch, computed } from "vue";
 import { Music } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { state, uiSettings } from "../composables/usePlayer.js";
+import { state } from "../composables/usePlayer.js";
+import { coverVisible } from "../composables/useCoverGuard.ts";
 import { resolveServerUrl } from "../utils/apiClient.js";
 
 const { t } = useI18n();
@@ -36,7 +37,7 @@ const { t } = useI18n();
 // ② 本组件同时处理流媒体歌（song.coverUrl 直用、不走 /api/cover），useCoverURL 仅支持
 //    path 型 /api/cover 解析，强行迁移需特判流媒体分支，复杂度不成比例；
 // ③ 已有 path→URL 缓存 + 错误回退缓存，与 useCoverURL 的覆盖需求相同。
-const showCover = computed(() => !!uiSettings.showCover);
+const showCover = computed(() => coverVisible("large"));
 
 const props = defineProps({
   song: { type: Object, default: null },

@@ -962,7 +962,7 @@
                   <SettingRow v-if="!e.render" :entry="e" :mobile="isMobile" />
                   <!-- 封面区域大小：自适应（0）或手动固定值（140~420）；滑块联动 + 恢复默认回自适应 -->
                   <div
-                    v-else-if="e.id === 'coverSize' && uiSettings.showCover && !isMobile"
+                    v-else-if="e.id === 'coverSize' && coverVisible('large') && !isMobile"
                     class="setting-item"
                   >
                     <div class="setting-label">
@@ -1252,6 +1252,7 @@ import {
 } from "../utils/deviceCommands.js";
 import { apiGet, apiPost } from "../utils/apiClient.js";
 import { isMobile } from "../composables/useMobileViewport.js";
+import { coverVisible } from "../composables/useCoverGuard.ts";
 import {
   COVER_MIN,
   COVER_MAX,

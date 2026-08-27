@@ -26,7 +26,7 @@
           <!-- showCover 关：只隐藏封面图（mp-cover-box），保留 mp-cover-area 手势区——
                该区域承载下拉返回 + 横向切歌手势，整区隐藏会失去返回/切歌能力（无其他入口）；
                歌词区 flex:1 自动上移占满，布局自洽。 -->
-          <div v-if="uiSettings.showCover" class="mp-cover-box">
+          <div v-if="coverVisible('large')" class="mp-cover-box">
             <img
               v-if="coverUrl && !coverError"
               :src="coverUrl"
@@ -365,6 +365,7 @@ import {
 } from "../../composables/useSleepTimer.js";
 import { showToast, toastError } from "../../composables/useToast.js";
 import { resolveServerUrl } from "../../utils/apiClient.js";
+import { coverVisible } from "../../composables/useCoverGuard.ts";
 import KaraokePanel from "../KaraokePanel.vue";
 import ControlBar from "../ControlBar.vue";
 import MobileControlsRow from "./MobileControlsRow.vue";

@@ -113,7 +113,7 @@
           </span>
         </template>
         <template v-else>
-          <span v-if="uiSettings.showListCover" class="gr-cover">
+          <span v-if="coverVisible('list')" class="gr-cover">
             <img
               v-if="g.coverUrl"
               :src="g.coverUrl"
@@ -259,7 +259,7 @@
           >
             <GripVertical :size="14" />
           </span>
-          <span v-if="uiSettings.showListCover" class="pl-cover">
+          <span v-if="coverVisible('list')" class="pl-cover">
             <img
               v-if="coverSrc(song.path) && coverOk(song.path)"
               :src="coverSrc(song.path)"
@@ -488,8 +488,8 @@ import {
   _resetPlayMode,
   isStreamSong,
   downloadSettings,
-  uiSettings,
 } from "../composables/usePlayer.js";
+import { coverVisible } from "../composables/useCoverGuard.ts";
 import { deleteLibrarySongs, removeSongsFromQueue } from "../composables/useLibrary.js";
 import { scrapingSettings } from "../composables/useScrapingSettings.js";
 import { scrapeBatchState, runScrapeBatch } from "../composables/useScrapeBatch.js";

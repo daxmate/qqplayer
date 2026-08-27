@@ -17,6 +17,7 @@
 // 松手（pointerup）才提交 uiSettings.coverSize → settingsSync watch 持久化。
 import { ref, computed } from "vue";
 import { uiSettings } from "./useSettings.js";
+import { coverVisible } from "./useCoverGuard.ts";
 
 export const COVER_MIN = 140; // 拖拽/滑块范围下限（px）
 export const COVER_MAX = 420; // 拖拽/滑块范围上限（px）
@@ -74,7 +75,7 @@ function endDrag() {
 }
 
 export function startCoverDrag(e) {
-  if (!uiSettings.showCover || dragging.value) return;
+  if (!coverVisible("large") || dragging.value) return;
   dragging.value = true;
   dragStartY = e.clientY;
   dragStartSize = coverSizePx.value; // 从当前有效尺寸起步（自适应值或已 clamp 的手动值）

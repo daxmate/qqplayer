@@ -1,7 +1,7 @@
 <template>
   <div class="mini-player" @click="$emit('open-player')">
     <!-- 封面（showListCover 关：整个容器不渲染，信息与控制区占满） -->
-    <div v-if="uiSettings.showListCover" class="mp-cover">
+    <div v-if="coverVisible('list')" class="mp-cover">
       <img
         v-if="coverSrc(coverPath) && coverOk(coverPath)"
         :src="coverSrc(coverPath)"
@@ -44,7 +44,7 @@ import { computed, watch } from "vue";
 import { Music2, Play, Pause, SkipForward } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { state, togglePlay, nextSong } from "../../composables/usePlayer.js";
-import { uiSettings } from "../../composables/useSettings.js";
+import { coverVisible } from "../../composables/useCoverGuard.ts";
 import { useCoverURL } from "../../composables/useCoverURL.js";
 
 const { t } = useI18n();

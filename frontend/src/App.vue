@@ -99,10 +99,10 @@
         <section ref="centerRef" class="center">
           <!-- 氛围背景层（封面取色光晕，absolute 铺满 center；Cover/LyricPanel 在其上） -->
           <Visualizer class="ambient-layer" />
-          <Cover v-if="uiSettings.showCover" :song="state.currentSong" :size="coverSizePx" />
+          <Cover v-if="coverVisible('large')" :song="state.currentSong" :size="coverSizePx" />
           <!-- 拖拽分隔条（桌面 + 封面开启时）：上下调整封面/歌词区大小，松手记忆 -->
           <div
-            v-if="uiSettings.showCover && !isMobile"
+            v-if="coverVisible('large') && !isMobile"
             class="cover-divider"
             :class="{ dragging }"
             :title="t('app.coverDragHint')"
@@ -307,6 +307,7 @@ import {
   refreshMiniStatus,
   playerToast,
 } from "./composables/usePlayer.js";
+import { coverVisible } from "./composables/useCoverGuard.ts";
 
 const { t } = useI18n();
 

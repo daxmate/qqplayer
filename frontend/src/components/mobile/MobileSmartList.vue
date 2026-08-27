@@ -51,7 +51,7 @@
             @click="onRowClick(row)"
           >
             <!-- showListCover 关：整个封面容器不渲染（含回退图标），行信息占满 -->
-            <div v-if="uiSettings.showListCover" class="msv-cover">
+            <div v-if="coverVisible('list')" class="msv-cover">
               <img
                 v-if="coverSrc(row.song.path) && coverOk(row.song.path)"
                 :src="coverSrc(row.song.path)"
@@ -98,7 +98,7 @@ import {
 } from "../../composables/usePlayer.js";
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
-import { uiSettings } from "../../composables/useSettings.js";
+import { coverVisible } from "../../composables/useCoverGuard.ts";
 import {
   SMART_VIEWS,
   smartViewState,

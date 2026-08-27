@@ -80,7 +80,7 @@
               <GripVertical :size="15" />
             </span>
             <!-- showListCover 关（设置→界面→列表封面）：整个封面容器不渲染（含回退图标），行信息占满 -->
-            <div v-if="uiSettings.showListCover" class="ml-row-cover">
+            <div v-if="coverVisible('list')" class="ml-row-cover">
               <img
                 v-if="coverSrc(song.path) && coverOk(song.path)"
                 :src="coverSrc(song.path)"
@@ -133,7 +133,7 @@
       <template v-else>
         <div v-for="g in filteredGroups" :key="g.key" class="ml-item ml-group" @click="onGroup(g)">
           <!-- 分组行封面容器同样遵守 showListCover（隐藏后艺术家首字色块/图标一并隐藏） -->
-          <div v-if="uiSettings.showListCover" class="ml-row-cover">
+          <div v-if="coverVisible('list')" class="ml-row-cover">
             <img
               v-if="g.coverPath && coverSrc(g.coverPath) && coverOk(g.coverKey)"
               :src="coverSrc(g.coverPath)"
@@ -216,7 +216,7 @@ import {
 import { showToast, toastError } from "../../composables/useToast.js";
 import { useSwipeReveal } from "../../composables/useSwipe.js";
 import { deleteSongs } from "../../composables/useDeleteSong.js";
-import { uiSettings } from "../../composables/useSettings.js";
+import { coverVisible } from "../../composables/useCoverGuard.ts";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../../composables/useCoverURL.js";
 
 const props = defineProps({
