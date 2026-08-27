@@ -46,3 +46,6 @@ desktop/Windows/node_modules/
 desktop/Windows/src-tauri/gen/
 desktop/Windows/src-tauri/resources/backend/*
 !desktop/Windows/src-tauri/resources/backend/README.txt
+
+# git worktree 工作区（临时并行开发，用完即清）
+.worktrees/
