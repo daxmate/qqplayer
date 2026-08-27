@@ -611,12 +611,21 @@ extension WebShellView.Coordinator {
             if let requestId = body["requestId"] as? String {
                 pushToWeb(event: "deviceId", payload: ["requestId": requestId, "deviceId": KeychainStore.deviceId()])
             }
-        default:
-            // assetsSize：本地资产占用 → 回推 assetsSize {total, byType}（字节，Int64 → JS number）
+        case "assetsSize":
+            // 本地资产占用 → 回推 assetsSize {total, byType}（字节，Int64 → JS number）
             let info = downloadManager.assetsSizeByType()
+            // 排故日志（2026-08-27 存储管理全 0 排查）：命令到达 + 统计值；
+            // 真机同步中心显示 0 时先看这里——total=0 说明本地确实无资产（未下载），
+            // total>0 而前端仍 0 则问题在回执链路
+            WebShellView.appendNativeLog(
+                "[Download] assetsSize total=\(info.total) byType=\(info.byType) root=\(downloadManager.storageRootPath)"
+            )
             var payload: [String: Any] = ["total": info.total]
             payload["byType"] = info.byType
             pushToWeb(event: "assetsSize", payload: payload)
+        default:
+            // 未知同步命令静默忽略
+            break
         }
     }
 }

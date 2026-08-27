@@ -364,7 +364,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   ChevronLeft,
@@ -827,6 +827,26 @@ function toggleAutoUpdate() {
 function togglePrefetch() {
   autoPrefetchOn.value = setAutoPrefetch(!autoPrefetchOn.value);
 }
+
+// ---------- 下载完成 → 自动刷新存储占用 ----------
+// 存储区在进入页面/手动刷新时取值；下载中的 .part 不计入（完成才显示）。
+// 监听状态变化：有条目 done/failed（终态）→ 防抖刷新存储区，下载完用户立即可见占用。
+let storageRefreshTimer = null;
+watch(
+  () =>
+    Object.values(syncDownloads)
+      .map((d) => d.status)
+      .join(","),
+  (statuses) => {
+    if (statuses.includes("done") || statuses.includes("failed")) {
+      if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
+      storageRefreshTimer = setTimeout(() => {
+        storageRefreshTimer = null;
+        refreshStorage();
+      }, 800);
+    }
+  },
+);
 
 // ---------- 挂载：拉歌单 + 元数据（含词典缓存）+ 总览/存储/词典 ----------
 onMounted(() => {
