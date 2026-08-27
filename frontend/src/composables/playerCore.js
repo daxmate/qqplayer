@@ -210,6 +210,10 @@ watch(
 let audioCtx = null; // AudioContext 实例（懒初始化，常驻）
 let eqFilters = []; // 10 个 BiquadFilter（peaking），与 EQ_BANDS 对齐
 let eqGraphFailed = false; // 创建失败标记（降级为直通，不再重试）
+// 音量主控 GainNode（2026-08-27 新增）：macOS WKWebView 中 createMediaElementSource
+// 接管后元素 volume 失效（实测 volume=0 输出 RMS 不变）→ 图接管路径的音量改由 masterGain
+// 控制，audioEq.volume 固定 1；未接管路径（audioBare 变速 / 图未建 / iOS 原生）仍走元素音量。
+let masterGain = null;
 
 // 变速切换中标志：抑制 pause 回调的播放会话 flush（避免变速产生断裂的播放记录）
 let swappingAudio = false;
@@ -230,12 +234,14 @@ function swapAudioElement(next) {
   cur.pause();
   if (src) {
     next.src = src; // 同源（本地/代理 URL）浏览器缓存秒开
-    next.volume = cur.volume;
-    next.muted = cur.muted;
+    // 音量不直接复制元素值：图接管时 audioEq.volume 恒 1（音量在 masterGain），
+    // 目标元素音量由下面 applyVolume 按状态重设（audioBare 未接管 → 元素音量 = 当前音量）
+    next.muted = false;
     next.playbackRate = state.speed;
     if (t > 0) next.currentTime = t; // src 未就绪时设 currentTime：浏览器排队到可 seek 后生效
   }
   audio = next;
+  applyVolume(); // 切换后按目标元素类型重设音量（图元素→masterGain；裸元素→元素音量）
   swappingAudio = false;
   if (wasPlaying && src) next.play().catch(() => {});
 }
@@ -244,6 +250,23 @@ function swapAudioElement(next) {
 function applySpeed() {
   swapAudioElement(state.speed === 1.0 ? audioEq : audioBare);
   audio.playbackRate = state.speed;
+}
+
+// 音量应用统一入口（2026-08-27 WKWebKit 接管失效修复）：
+// - 图已创建且活动元素是 audioEq → 音量走 masterGain（WebKit 中元素 volume 接管后失效）
+// - 其余（图未建 / audioBare 变速走原生管线 / iOS 原生代理）→ 元素 volume（未接管，元素音量有效）
+export function applyVolumeTo(targetVol) {
+  const v = Math.min(1, Math.max(0, Number(targetVol) || 0));
+  if (audioCtx && masterGain && audio === audioEq) {
+    masterGain.gain.value = v;
+    audioEq.volume = 1;
+  } else {
+    audio.volume = v;
+  }
+}
+
+function applyVolume() {
+  applyVolumeTo(state.muted ? 0 : state.volume);
 }
 
 // 确保音频图就绪（首次播放/用户手势时创建并 resume）。
@@ -256,7 +279,14 @@ function ensureAudioGraph() {
   try {
     const ctx = new AC();
     const src = ctx.createMediaElementSource(audioEq);
-    let node = src;
+    // 音量主控节点：置于滤波器链前（WebKit 接管后元素 volume 失效 → 音量由 gain 承担）。
+    // 放 filters 前 → useVisualizer 的 analyser 插在 filters 后，看到的信号已含音量（与原行为一致）。
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = state.muted ? 0 : state.volume;
+    src.connect(gainNode);
+    masterGain = gainNode;
+    let node = gainNode;
+    audioEq.volume = 1; // 接管后元素音量归一（音量由 masterGain 控制）
     for (const f of EQ_BANDS) {
       const filter = ctx.createBiquadFilter();
       filter.type = "peaking";
@@ -275,6 +305,7 @@ function ensureAudioGraph() {
     // 创建失败：清空半成品，标记降级（浏览器不支持等情况）
     audioCtx = null;
     eqFilters = [];
+    masterGain = null;
     eqGraphFailed = true;
     return Promise.resolve();
   }
@@ -286,6 +317,24 @@ function ensureAudioGraph() {
 // 故只暴露只读引用，连接拓扑的改动由 useVisualizer 在拿到引用后完成。
 export function getEqGraph() {
   return { audioCtx, eqFilters };
+}
+
+// 音量/图调试钩子（2026-08-27 WKWebKit 音量排故用：验证图接管后音量链路）
+export function getVolumeDebugInfo() {
+  return {
+    hasGraph: !!audioCtx,
+    masterGain: masterGain ? masterGain.gain.value : null,
+    audioEqVolume: audioEq.volume,
+    audioVolume: audio.volume,
+    stateVolume: state.volume,
+    stateMuted: state.muted,
+    audioIsEq: audio === audioEq,
+    isNative: isNativePlayback(),
+  };
+}
+// 验收/自动化钩子：window.__qqVolDebug()（壳内或 Playwright 验证音量链路）
+if (typeof window !== "undefined") {
+  window.__qqVolDebug = getVolumeDebugInfo;
 }
 
 // 把当前均衡器设置应用到音频图（图未创建时无操作，创建时统一应用）
@@ -305,6 +354,7 @@ export function applyEqToGraph() {
 export function _resetEqGraph() {
   audioCtx = null;
   eqFilters = [];
+  masterGain = null;
   eqGraphFailed = false;
   swappingAudio = false;
   audio = audioEq; // 活动元素复位（测试用例隔离）
@@ -344,7 +394,7 @@ function loadVolume() {
     const v = parseFloat(localStorage.getItem(VOLUME_KEY));
     if (!isNaN(v) && v >= 0 && v <= 1) {
       state.volume = v;
-      audio.volume = v;
+      applyVolume();
     }
   } catch {
     /* 忽略损坏的缓存 */
@@ -364,13 +414,13 @@ function persistVolume() {
 export function setVolume(v) {
   state.volume = Math.min(1, Math.max(0, v));
   state.muted = false; // 手动调音量自动取消静音
-  audio.volume = state.volume;
+  applyVolume();
   persistVolume();
 }
 
 export function toggleMute() {
   state.muted = !state.muted;
-  audio.volume = state.muted ? 0 : state.volume;
+  applyVolume();
 }
 
 // ============ 播放器级 toast（流媒体直链失败等播放错误）============
@@ -1451,7 +1501,8 @@ let fadeSeq = 0; // 切歌序列号：快速连切时旧淡出让位（旧切换
 // 注意：每个淡出用独立 timer——若共用全局 timer，新切歌清掉旧 timer 会让旧 promise 永不 resolve
 function fadeOut(sec, seq) {
   return new Promise((resolve) => {
-    const base = audio.volume;
+    // 基准音量读状态而非元素：图接管时 audioEq.volume 恒 1，元素值不能反映实际音量
+    const base = state.muted ? 0 : state.volume;
     if (!(sec > 0) || base <= 0) {
       resolve(true);
       return;
@@ -1466,10 +1517,10 @@ function fadeOut(sec, seq) {
         return;
       }
       i += 1;
-      audio.volume = Math.max(0, base + step * i);
+      applyVolumeTo(Math.max(0, base + step * i));
       if (i >= steps) {
         clearInterval(timer);
-        audio.volume = 0;
+        applyVolumeTo(0);
         resolve(true);
       }
     }, 50);
@@ -1486,10 +1537,10 @@ function fadeIn(sec) {
   let i = 0;
   const timer = setInterval(() => {
     i += 1;
-    audio.volume = Math.min(target, step * i);
+    applyVolumeTo(Math.min(target, step * i));
     if (i >= steps) {
       clearInterval(timer);
-      audio.volume = target;
+      applyVolumeTo(target);
     }
   }, 50);
 }
@@ -1601,7 +1652,7 @@ export async function playPreview(desc, opts = {}) {
   state.isPlaying = false;
   audio.src = streamProxyUrl(src);
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
-  audio.volume = state.muted ? 0 : state.volume;
+  applyVolume();
   state.currentTime = 0;
   state.duration = 0;
   state.lyric = [];
@@ -1778,7 +1829,7 @@ export async function selectSong(index, opts = {}) {
   // iOS 同步：本地歌资产本地优先（不阻塞远程播放；已下载时回执后切本地播放）
   maybePrefetchAsset(state.currentSong, { resumeAt: opts.resumeAt });
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
-  audio.volume = state.muted ? 0 : state.volume;
+  applyVolume();
   state.currentTime = 0;
   state.duration = 0;
   state.lyric = [];
@@ -1829,7 +1880,7 @@ export async function maybePrefetchAsset(song, opts = {}) {
     audio.removeAttribute("src");
     audio.src = localURL; // 本地文件秒开（原生 load → AVPlayer 本地播放）
     dbgLog("prefetch.local", { localURL });
-    audio.volume = state.muted ? 0 : state.volume;
+    applyVolume();
     if (wasPlaying) audio.play().catch(() => {});
     // 保留进度：loadedmetadata 后再 seek（原生 load 未就绪时 seek 可能被丢弃）
     // 监听器清理 + 同歌校验：切歌后旧 onMeta 不得在新歌的 loadedmetadata 上触发

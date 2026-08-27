@@ -86,6 +86,11 @@ class FakeAudioContext {
     this.source = { connect: vi.fn() };
     return this.source;
   }
+  createGain() {
+    const g = { gain: { value: 1 }, connect: vi.fn() };
+    this.masterGain = g;
+    return g;
+  }
   createBiquadFilter() {
     const f = {
       type: "",

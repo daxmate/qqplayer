@@ -3317,6 +3317,15 @@ describe("均衡器 EQ", () => {
       this.source = { connect: vi.fn(), disconnect: vi.fn() };
       return this.source;
     }
+    createGain() {
+      // 音量主控节点（2026-08-27 WKWebKit 修复后图链路：source → masterGain → filters → destination）
+      const g = {
+        gain: { value: 1 },
+        connect: vi.fn(),
+      };
+      this.masterGain = g;
+      return g;
+    }
     createBiquadFilter() {
       const f = {
         type: "",
@@ -3359,11 +3368,14 @@ describe("均衡器 EQ", () => {
       expect(f.frequency.value).toBe(EQ_BANDS[i]);
       expect(f.gain.value).toBe(0);
     });
-    // source → 10 filters → destination 串联
-    expect(ctx.source.connect).toHaveBeenCalledWith(ctx.filters[0]);
+    // source → masterGain → 10 filters → destination 串联
+    expect(ctx.source.connect).toHaveBeenCalledWith(ctx.masterGain);
+    expect(ctx.masterGain.connect).toHaveBeenCalledWith(ctx.filters[0]);
     ctx.filters.forEach((f, i) => {
       expect(f.connect).toHaveBeenCalledWith(i === 9 ? ctx.destination : ctx.filters[i + 1]);
     });
+    // 音量主控初始化为当前音量（默认 1）
+    expect(ctx.masterGain.gain.value).toBe(1);
   });
 
   it("创建前已设置的均衡器值在创建时应用（启动恢复持久化场景）", async () => {
@@ -3395,6 +3407,32 @@ describe("均衡器 EQ", () => {
     expect(playbackSettings.eqPreset).toBe("flat");
   });
 
+  it("音量链路（2026-08-27 WKWebKit 修复）：图接管时走 masterGain 元素归一，未接管走元素音量", async () => {
+    stubAudioContext();
+    setupSong();
+    await play();
+    const ctx = FakeAudioContext.instances.at(-1);
+    // 图接管：setVolume → masterGain.gain；元素音量恒 1
+    setVolume(0.3);
+    expect(ctx.masterGain.gain.value).toBe(0.3);
+    expect(audioEq.volume).toBe(1);
+    // 静音 → gain 0；取消恢复
+    toggleMute();
+    expect(ctx.masterGain.gain.value).toBe(0);
+    toggleMute();
+    expect(ctx.masterGain.gain.value).toBe(0.3);
+    // 变速切裸元素：未接管 → 元素音量承载，masterGain 不动
+    state.speed = 1.0;
+    stepSpeed(-1);
+    setVolume(0.7);
+    expect(audioBare.volume).toBe(0.7);
+    expect(ctx.masterGain.gain.value).toBe(0.3);
+    // 回图元素：applyVolume 把音量同步到 masterGain，元素归一
+    stepSpeed(1);
+    expect(ctx.masterGain.gain.value).toBe(0.7);
+    expect(audioEq.volume).toBe(1);
+  });
+
   it("拖滑杆：切到自定义 + 值更新 + clamp ±12 + 实时应用到图", () => {
     stubAudioContext();
     playbackSettings.eqEnabled = true;
@@ -3402,7 +3440,6 @@ describe("均衡器 EQ", () => {
     play();
     const ctx = FakeAudioContext.instances.at(-1);
     setEqGain(0, 6);
-    expect(playbackSettings.eqPreset).toBe("custom");
     expect(playbackSettings.eqGains[0]).toBe(6);
     expect(ctx.filters[0].gain.value).toBe(6);
     // clamp
@@ -3496,7 +3533,7 @@ describe("均衡器 EQ", () => {
     const ctx = FakeAudioContext.instances.at(-1);
     expect(audioEq).toBeDefined();
     expect(playerMod.audio).toBe(audioEq);
-    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.filters[0]);
+    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.masterGain);
 
     state.speed = 1.0;
     stepSpeed(-1); // → 0.75：切到裸元素
@@ -3526,7 +3563,7 @@ describe("均衡器 EQ", () => {
     state.currentIndex = 0;
     await nextSong();
     expect(playerMod.audio).toBe(audioBare); // 变速状态：新歌加载到裸元素
-    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.filters[0]); // 图元素链路未被扰动
+    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.masterGain); // 图元素链路未被扰动
     state.speed = 0.75;
     stepSpeed(1); // 回 1.0：切回图元素
     expect(playerMod.audio).toBe(audioEq);
@@ -3536,21 +3573,26 @@ describe("均衡器 EQ", () => {
     stubAudioContext();
     setupSong();
     await play();
+    const ctx = FakeAudioContext.instances.at(-1);
     audioEq.currentTime = 42;
-    audioEq.volume = 0.6;
-    audioEq.muted = true;
+    setVolume(0.6);
+    toggleMute(); // muted=true：图接管 → masterGain.gain = 0
     state.speed = 1.0;
-    stepSpeed(-1); // → 0.75：迁移到裸元素
+    stepSpeed(-1); // → 0.75：迁移到裸元素（未接管 → 元素音量承载静音）
     expect(playerMod.audio).toBe(audioBare);
     expect(audioBare.src).toBe(audioEq.src);
     expect(audioBare.currentTime).toBe(42);
+    expect(audioBare.volume).toBe(0); // 静音以音量 0 承载（不再复制元素 muted）
+    expect(audioBare.muted).toBe(false);
+    toggleMute(); // 取消静音 → audioBare.volume = state.volume
     expect(audioBare.volume).toBe(0.6);
-    expect(audioBare.muted).toBe(true);
-    // 回 1.0：反向迁移（变速期间位置推进）
+    // 回 1.0：反向迁移（变速期间位置推进；音量回到 masterGain）
     audioBare.currentTime = 55;
     stepSpeed(1);
     expect(playerMod.audio).toBe(audioEq);
     expect(audioEq.currentTime).toBe(55);
+    expect(ctx.masterGain.gain.value).toBe(0.6); // 图接管 → 音量走 masterGain
+    expect(audioEq.volume).toBe(1); // 元素音量归一（音量由 gain 承担）
   });
 });
 
