@@ -870,7 +870,7 @@ def test_api_settings_get_all_namespaces():
     }
     assert s["library"]["path"] == ""
     assert s["library"]["audioExts"] == backend.DEFAULT_AUDIO_EXTS
-    # ui 11 字段（含任务 D searchHistory、任务：showListCover 列表封面）
+    # ui 13 字段（含任务 D searchHistory、任务：showListCover 列表封面、P0-3 glassCover/coverSize）
     assert set(s["ui"]) == {
         "showSongInfo",
         "karaokeShowTime",
@@ -879,24 +879,29 @@ def test_api_settings_get_all_namespaces():
         "miniTheme",
         "accent",
         "coverBlur",
+        "glassCover",
         "compact",
         "showCover",
         "showListCover",
+        "coverSize",
         "searchHistory",
     }
     assert s["ui"]["theme"] == "dark" and s["ui"]["accent"] == "orange"
     assert s["ui"]["showCover"] is True
     assert s["ui"]["showListCover"] is True
+    assert s["ui"]["glassCover"] is True  # P0-3：毛玻璃封面默认开（与前端默认 true 对齐）
+    assert s["ui"]["coverSize"] == 0  # P0-3：封面尺寸默认自适应
     assert s["ui"]["searchHistory"] == []
     # lyric 15 字段（与前端 LYRIC_SETTINGS_DEFAULTS 一致）
     assert set(s["lyric"]) == set(backend.LYRIC_SETTINGS_DEFAULTS)
     assert (
         s["lyric"]["fontSize"] == 20 and s["lyric"]["focusPos"] == 0.5 and s["lyric"]["offset"] == 0
     )
-    # playback 15 字段（含睡眠定时器，与前端 PLAYBACK_SETTINGS_DEFAULTS 一致）
+    # playback 37 字段（含睡眠定时器、P0-3 shortcutOpenSettings，与前端 PLAYBACK_SETTINGS_DEFAULTS 一致）
     assert set(s["playback"]) == set(backend.PLAYBACK_SETTINGS_DEFAULTS)
     assert s["playback"]["playMode"] == "order" and s["playback"]["eqGains"] == [0] * 10
     assert s["playback"]["sleepTimerOn"] is False and s["playback"]["sleepTimerMinutes"] == 30
+    assert s["playback"]["shortcutOpenSettings"] == "Meta+Comma"  # P0-3：⌘, 打开设置
     # 任务 K：visualizerStyle 默认 'bars'，与前端 PLAYBACK_SETTINGS_DEFAULTS 一致
     assert s["playback"]["visualizerStyle"] == "bars"
     # desktopLyric 11 字段

@@ -8,8 +8,7 @@
 已知缺口清单（禁止静默新增；修复后同步更新下方两个常量）：
   ambientEnabled / miniSpectrumEnabled —— playerCore.js 注释明确的「前端本地持久化」字段（白名单故意不收）
   amllBlur / amllSpring / amllScale    —— AMLL 三特效（环境差异化默认），后端无字段，仅 localStorage 写透
-  coverSize / glassCover               —— useSettings.js 注释明确的「后端白名单未收录」UI 字段
-  shortcutOpenSettings                 —— ⌘, 打开设置快捷键：前端默认值有、后端 playback 白名单缺（真实缺口，待补）
+  （glassCover / coverSize / shortcutOpenSettings 已于 P0-3 补入白名单，从清单移除）
 
 运行：cd backend && python -m pytest tests/test_settings_contract.py -q
 """
@@ -38,14 +37,9 @@ FRONTEND_LOCAL_REGISTRY = {
     "amllBlur",
     "amllSpring",
     "amllScale",
-    "glassCover",
-    "coverSize",
 }
-FRONTEND_LOCAL_DEFAULTS = FRONTEND_LOCAL_REGISTRY | {
-    "coverSize",
-    "glassCover",
-    "shortcutOpenSettings",
-}
+# 前端默认值缺口 = 注册表缺口（glassCover/coverSize/shortcutOpenSettings 已入白名单，P0-3）
+FRONTEND_LOCAL_DEFAULTS = FRONTEND_LOCAL_REGISTRY
 
 _DESKTOP_PREFIX = "desktop"
 

@@ -55,7 +55,7 @@ export const UI_SETTINGS_DEFAULTS = {
   showCover: true, // 显示封面（大封面：播放器主区/移动端播放页/桌面歌词悬浮窗；关闭后隐藏封面图片，不占位——任务 E 起歌词区自动扩充）
   showListCover: true, // 列表封面（列表行/卡片缩略图；与 showCover 独立，默认开 = 现状零变化）
   // 封面区域大小：0 = 自适应（min(46vh,340px,center高度-220-间距)，保底歌词 ≥220px）；140~420 = 手动固定值（拖拽分隔条/设置滑块写入）
-  // 后端 settings 白名单未收录该字段（PUT 被丢弃、GET 不返回）→ 仅前端本地持久化（localStorage 写透缓存），跨设备不同步
+  // 后端 settings 白名单已收录（P0-3）→ settingsSync 统一持久化（localStorage 写透缓存）+ 跨设备同步
   coverSize: 0,
   compact: false, // 紧凑模式（减小间距与尺寸，提高信息密度）
   // 搜索历史（任务 D）：字符串数组，最新在前，最多 10 条；存后端统一设置（settings.json 跨引擎同步），
@@ -282,4 +282,4 @@ function loadLyricSettings() {
 }
 loadLyricSettings();
 // 注：lyricSettings 持久化由统一 Settings 层负责（settingsSync.js：防抖 PUT + 写透缓存）
-// 注：coverSize 复用同一通道持久化（settingsSync 写透 localStorage；后端白名单无此字段，PUT 丢弃不报错）
+// 注：coverSize 复用同一通道持久化（settingsSync 写透 localStorage；后端白名单已收录，跨设备同步）

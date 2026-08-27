@@ -142,7 +142,8 @@ LIBRARY_SETTINGS_DEFAULTS = {
     "autoRefresh": True,  # watchdog 自动刷新（库变动自动重扫）
     "autoScanOnStart": True,  # 启动时自动扫描歌曲库
 }
-# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 全部 10 字段（只读拷贝）
+# ui：前端 frontend/src/composables/useSettings.js UI_SETTINGS_DEFAULTS 的 12 个持久化字段
+# （只读拷贝；searchHistory 默认 [] 由 spec 内联字面量）
 UI_SETTINGS_DEFAULTS = {
     "showSongInfo": False,  # 跟唱模式歌词面板顶部显示当前歌曲信息
     "karaokeShowTime": False,  # 跟唱模式每句显示起止时间戳
@@ -151,9 +152,11 @@ UI_SETTINGS_DEFAULTS = {
     "miniTheme": "theme",  # 迷你窗外观：'theme' 跟随主窗口 | 'dark' 深色 | 'light' 浅色
     "accent": "orange",  # 强调色预设 key
     "coverBlur": False,  # 封面模糊背景
-    "compact": False,  # 紧凑模式
+    "glassCover": True,  # 移动端播放页毛玻璃封面背景（默认开；仅移动端生效，桌面端不用）
     "showCover": True,  # 显示封面（大封面：播放器主区/移动端播放页/桌面歌词悬浮窗；关闭后隐藏封面图片，保留占位）
     "showListCover": True,  # 列表封面（列表行/卡片缩略图；与 showCover 独立，默认开 = 现状零变化）
+    "coverSize": 0,  # 封面区域大小：0 = 自适应；140~420 = 手动固定值（px）
+    "compact": False,  # 紧凑模式
 }
 # lyric：前端 useSettings.js LYRIC_SETTINGS_DEFAULTS 全部 15 字段
 LYRIC_SETTINGS_DEFAULTS = {
@@ -173,7 +176,8 @@ LYRIC_SETTINGS_DEFAULTS = {
     "jpColor": "",  # 主行文字颜色（自定义）
     "zhColor": "",  # 翻译行文字颜色（自定义）
 }
-# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 全部 35 字段
+# playback：前端 frontend/src/composables/playerCore.js PLAYBACK_SETTINGS_DEFAULTS 的 37 个持久化字段
+# （只读拷贝；ambientEnabled/miniSpectrumEnabled 前端本地持久化，不入白名单）
 PLAYBACK_SETTINGS_DEFAULTS = {
     "playMode": "order",  # 'order' 列表循环 | 'shuffle' 随机 | 'repeatOne' 单曲循环
     "resumeLast": True,  # 启动时恢复上次播放的歌曲与进度
@@ -201,6 +205,7 @@ PLAYBACK_SETTINGS_DEFAULTS = {
     "shortcutFaster": "BracketRight",  # 变速 +
     "shortcutVolStepUp": "Meta+ArrowUp",  # 音量 +20%（⌘↑）
     "shortcutVolStepDown": "Meta+ArrowDown",  # 音量 -20%（⌘↓）
+    "shortcutOpenSettings": "Meta+Comma",  # 打开设置（⌘，）
     "eqEnabled": False,  # 均衡器开关
     "eqPreset": "flat",  # 均衡器预设 key（'custom' = 用户自定义）
     "eqGains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 自定义增益（dB，-12~12，10 段）

@@ -177,9 +177,15 @@ _SETTINGS_SPEC = {
             ),
         ),
         "coverBlur": (state.UI_SETTINGS_DEFAULTS["coverBlur"], _norm_bool),
+        "glassCover": (state.UI_SETTINGS_DEFAULTS["glassCover"], _norm_bool),
         "compact": (state.UI_SETTINGS_DEFAULTS["compact"], _norm_bool),
         "showCover": (state.UI_SETTINGS_DEFAULTS["showCover"], _norm_bool),
         "showListCover": (state.UI_SETTINGS_DEFAULTS["showListCover"], _norm_bool),
+        # 封面区域大小：0 = 自适应；140~420 = 手动固定值（px；前端 slider 契约 0~420 step 10）
+        "coverSize": (
+            state.UI_SETTINGS_DEFAULTS["coverSize"],
+            lambda v, d: _norm_num(v, d, lo=0, hi=420, integer=True),
+        ),
         # 任务 D：搜索历史（字符串数组，最新在前，最多 10 条）——后端统一设置存储，跨引擎同步
         "searchHistory": ([], lambda v, d: _norm_search_history(v, d)),
     },
@@ -214,7 +220,7 @@ _SETTINGS_SPEC = {
         "karaokeNextKey": ("KeyN", _norm_str),
         "karaokePrevKey": ("KeyP", _norm_str),
         "searchKey": ("Meta+K", _norm_str),
-        # 任务 G：18 个新快捷键字段（全量可录制，字符串归一化）
+        # 任务 G：19 个新快捷键字段（全量可录制，字符串归一化；P0-3 补 shortcutOpenSettings）
         "shortcutPlayPause": ("Space", _norm_str),
         "shortcutRewind": ("ArrowLeft", _norm_str),
         "shortcutForward": ("ArrowRight", _norm_str),
@@ -233,6 +239,8 @@ _SETTINGS_SPEC = {
         "shortcutFaster": ("BracketRight", _norm_str),
         "shortcutVolStepUp": ("Meta+ArrowUp", _norm_str),
         "shortcutVolStepDown": ("Meta+ArrowDown", _norm_str),
+        # P0-3：⌘, 打开设置快捷键（前端默认 "Meta+Comma"；此前后端缺 → 录制后仅本地生效）
+        "shortcutOpenSettings": ("Meta+Comma", _norm_str),
         "eqEnabled": (False, _norm_bool),
         "eqPreset": (
             "flat",
@@ -497,12 +505,12 @@ def save_settings(patch: dict) -> dict:
 
 
 def load_ui_settings() -> dict:
-    """读取界面设置（ui namespace：前端 8 字段；主窗口与迷你窗跨引擎共享）"""
+    """读取界面设置（ui namespace：前端 13 字段；主窗口与迷你窗跨引擎共享）"""
     return dict(load_all_settings()["ui"])
 
 
 def save_ui_settings(patch: dict) -> dict:
-    """合并保存界面设置到统一存储（PUT 现在可接受全部 8 个 ui 字段）"""
+    """合并保存界面设置到统一存储（PUT 现在可接受全部 13 个 ui 字段）"""
     return dict(save_all_settings({"ui": patch})["ui"])
 
 
