@@ -14,6 +14,18 @@ final class PairingStore: ObservableObject {
     /// 本机设备 UUID（配对上报 device_id）
     let deviceId: String
 
+    /// 最近配对成功时间（serverId → Date）：401 清配对时保护刚配好的记录。
+    /// 场景：重新配对（同 serverId）后，旧 token 的滞后 401 响应可能晚到并触发清配对——
+    /// 宽限期内忽略，避免新配的 token 刚注入就被删（2026-08-27 配对反复失效配套修复）。
+    static let pairingGracePeriod: TimeInterval = 10
+    private var lastPairedAt: [String: Date] = [:]
+
+    /// 是否处于配对宽限期（宽限期内的 401 视为旧 token 滞后响应，不清理配对）
+    func isWithinPairingGrace(_ serverId: String) -> Bool {
+        guard let t = lastPairedAt[serverId] else { return false }
+        return Date().timeIntervalSince(t) < Self.pairingGracePeriod
+    }
+
     private init() {
         deviceId = KeychainStore.deviceId()
         servers = KeychainStore.loadServers().sorted { $0.lastConnectedAt > $1.lastConnectedAt }
@@ -80,6 +92,7 @@ final class PairingStore: ObservableObject {
 
     /// 保存新配对结果（桌面 approve 后）
     func savePairing(server: PairingRecord) {
+        lastPairedAt[server.serverId] = Date()
         connect(server)
     }
 

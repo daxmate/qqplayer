@@ -16,6 +16,9 @@ struct RootView: View {
                 // currentServer 变 nil → 主界面自动切"未连接"模式（不踢回发现页）
                 let serverId = (note.userInfo?["serverId"] as? String) ?? pairingStore.currentServer?.serverId ?? ""
                 guard !serverId.isEmpty else { return }
+                // 配对宽限期内的滞后 401（旧 token 响应晚到，新 token 刚注入）不视为失效——
+                // 否则刚配好的记录会被旧响应清掉（2026-08-27 配对反复失效根因配套）
+                if pairingStore.isWithinPairingGrace(serverId) { return }
                 invalidServerName = pairingStore.currentServer?.serverName ?? ""
                 pairingStore.disconnect(serverId)
             }

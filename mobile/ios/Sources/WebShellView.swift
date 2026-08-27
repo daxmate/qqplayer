@@ -52,6 +52,20 @@ struct WebShellView: UIViewRepresentable {
             context.coordinator.server = server // 同步当前记录（reinjectServer/reportNativeCmd/401 用当前值，避免用旧记录重注入）
             context.coordinator.injectServer(server)
             context.coordinator.loadFrontend()
+            return
+        }
+        // 同一台服务器重新配对：serverId 不变但 token 已更换（桌面端 approve 生成新 token，
+        // 覆盖旧 token）——必须把新 token 重注入前端，否则前端 localStorage/桥对象仍是旧 token，
+        // 所有请求 401 → 清配对 → 半残（2026-08-27 配对反复失效根因）。
+        // 只 reinject 不 reload：保留页面状态（正在播的歌/滚动位置不丢）。
+        let token = server?.token ?? ""
+        if context.coordinator.loadedToken != token {
+            context.coordinator.loadedToken = token
+            context.coordinator.server = server
+            // injectServer 更新 documentStart user script（下次加载生效）
+            context.coordinator.injectServer(server)
+            // reinjectServer 立即改写当前页面 localStorage + 桥对象（本次会话立即生效）
+            context.coordinator.reinjectServer()
         }
     }
 
@@ -65,6 +79,8 @@ struct WebShellView: UIViewRepresentable {
         let playerBridge = AVPlayerBridge()
         let downloadManager = DownloadManager()
         var loadedServerId: String
+        /// 已注入前端的 token（updateUIView 据此判断「同一服务器重新配对」→ 只重注入不 reload）
+        var loadedToken: String
         var webView: WKWebView?
         private var webReady = false
 
@@ -84,6 +100,7 @@ struct WebShellView: UIViewRepresentable {
             self.server = server
             // nil（未连接）：loadedServerId 用哨兵 ""，authToken 置空（不设 AVPlayer 拉流鉴权）
             self.loadedServerId = server?.serverId ?? ""
+            self.loadedToken = server?.token ?? ""
             playerBridge.authToken = server?.token ?? ""  // AVPlayer 拉流鉴权（真机 401 修复）
             userContentController = WKUserContentController()
             super.init()
