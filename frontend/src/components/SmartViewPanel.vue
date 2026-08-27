@@ -27,7 +27,7 @@
             <span class="sv-drag" :title="t('playlist.dragOut')">
               <GripVertical :size="14" />
             </span>
-            <span class="sv-cover">
+            <span v-if="uiSettings.showCover" class="sv-cover">
               <img
                 v-if="coverOk(row.song.path)"
                 :src="coverUrl(row.song.path)"
@@ -152,6 +152,7 @@ import {
   _resetPlayMode,
   findSongIndex,
 } from "../composables/usePlayer.js";
+import { uiSettings } from "../composables/useSettings.js";
 import {
   deleteLibrarySongs,
   removeSongsFromQueue,
