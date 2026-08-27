@@ -10,6 +10,11 @@ import XCTest
 /// ④ wifiOnly：蜂窝挂起不启动、切 Wi-Fi 自动启动、普通项不被阻塞、落回管理器开关
 /// 全部走临时目录注入 + URLProtocol mock，不碰真实 Documents 沙盒、不发真实网络请求。
 final class DownloadManagerTests: XCTestCase {
+    // CI 模拟器慢：删除/下载链（文件+注册表+主线程回调）偶发 >5s，5s 超时导致同型 flaky
+    // （testDeleteAssetsPathsRemovesFilesAndRegistry / testDeleteAssetsInvalidPathsAreIgnored 连续 3 次超时）。
+    // 统一放宽到 15s，避免再次误报。
+    private let waitTimeout: TimeInterval = 15
+
     /// 可控网络路径提供者：isWifi 由测试设置，onPathChange 手动触发（模拟 NWPathMonitor 回调）
     private final class MockPathProvider: NetworkPathProviding {
         private(set) var isWifi: Bool
@@ -113,7 +118,7 @@ final class DownloadManagerTests: XCTestCase {
         let url = URL(string: "http://mock.local/audio/abc.m4a")!
         manager.enqueue([.init(url: url, path: "audio/abc.m4a", sha256: sha, size: 128, wifiOnly: false)])
 
-        wait(for: [done], timeout: 5)
+        wait(for: [done], timeout: waitTimeout)
 
         // 注册表文件已原子落盘：{path: {sha256, size}}
         let data = try Data(contentsOf: registryURL)
@@ -148,7 +153,7 @@ final class DownloadManagerTests: XCTestCase {
         let url = URL(string: "http://mock.local/audio/exists.m4a")!
         manager.enqueue([.init(url: url, path: "audio/exists.m4a", sha256: sha, size: 256, wifiOnly: false)])
 
-        wait(for: [done], timeout: 5)
+        wait(for: [done], timeout: waitTimeout)
 
         let index = manager.assetIndex()
         XCTAssertEqual(index.count, 1)
@@ -228,7 +233,7 @@ final class DownloadManagerTests: XCTestCase {
         manager.deleteAssets(paths: ["books/orphan.epub"]) {
             deleted.fulfill()
         }
-        wait(for: [deleted], timeout: 5)
+        wait(for: [deleted], timeout: waitTimeout)
 
         // 指定文件删除、未指定保留
         XCTAssertFalse(FileManager.default.fileExists(atPath: assetsRoot.appendingPathComponent("books/orphan.epub").path))
@@ -251,7 +256,7 @@ final class DownloadManagerTests: XCTestCase {
 
         let deleted = expectation(description: "scope-deleted")
         manager.deleteAssets(scope: "audio") { deleted.fulfill() }
-        wait(for: [deleted], timeout: 5)
+        wait(for: [deleted], timeout: waitTimeout)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: assetsRoot.appendingPathComponent("audio").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: assetsRoot.appendingPathComponent("books/b.epub").path))
@@ -270,7 +275,7 @@ final class DownloadManagerTests: XCTestCase {
         // 路径穿越/非法路径 → 安全忽略，不删任何文件
         let deleted = expectation(description: "deleted")
         manager.deleteAssets(paths: ["../evil.m4a", "/abs.m4a", "audio/../escape.m4a"]) { deleted.fulfill() }
-        wait(for: [deleted], timeout: 5)
+        wait(for: [deleted], timeout: waitTimeout)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: assetsRoot.appendingPathComponent("audio/safe.m4a").path))
         XCTAssertEqual(manager.assetIndex().count, 1)
@@ -302,7 +307,7 @@ final class DownloadManagerTests: XCTestCase {
 
         // 切 Wi-Fi → 自动启动并完成
         provider.setWifi(true)
-        wait(for: [started], timeout: 5)
+        wait(for: [started], timeout: waitTimeout)
         XCTAssertEqual(manager.queuedCount, 0)
         XCTAssertEqual(doneEvents, ["audio/wifi.m4a:true"])
     }
@@ -326,7 +331,7 @@ final class DownloadManagerTests: XCTestCase {
             .init(url: plainURL, path: "audio/plain.m4a", sha256: sha, size: 32, wifiOnly: false),
         ])
 
-        wait(for: [plainDone], timeout: 5)
+        wait(for: [plainDone], timeout: waitTimeout)
         // wifiOnly 项仍被挂起，普通项已完成并写入注册表
         XCTAssertEqual(manager.queuedCount, 1)
         let index = manager.assetIndex()
