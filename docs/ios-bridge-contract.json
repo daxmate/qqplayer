@@ -1,0 +1,408 @@
+{
+  "version": 1,
+  "description": "QQPlayer iOS 壳双端桥契约（Web ↔ Native）单一事实源。双端契约测试（frontend/src/__tests__/iosBridgeContract.test.js + mobile/ios/Tests/BridgeContractTests.swift）以本文件为准做双向覆盖校验；docs/ios-bridge-protocol.md 为可读说明，两者不一致时以本 JSON 为准。",
+  "channel": {
+    "webToNative": "window.qqplayerIosBridge.postMessage({cmd, ...payload})（documentStart 注入；WKScriptMessageHandler name=qqplayerIos）",
+    "nativeToWeb": "evaluateJavaScript 调 window.qqplayerOnNativeEvent(name, payload)（前端由 nativeAudioBridge.installNativeEventSink 独占安装；nativeReady 前事件排队，就绪后冲刷）"
+  },
+  "statusEnum": {
+    "active": "双端均有（前端发送方 + 壳处理分支）",
+    "legacy": "前端仍可能发送但壳不再处理（历史路径，契约记录防误删）",
+    "shellOnly": "壳处理但前端当前无发送方（壳预留能力）"
+  },
+  "webCmd": [
+    {
+      "name": "load",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": {
+        "url": "string（绝对 http/https/file URL；resolveNativeUrl 输出）"
+      },
+      "note": "Audio 代理 src setter → 壳 AVPlayerBridge load（makeItem + 内嵌封面预读 + loadedmetadata 推送）"
+    },
+    {
+      "name": "seek",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": { "t": "number（秒，>=0；原生兼容 Int）" },
+      "note": "currentTime setter；pendingSeek 串行化（seek 完成前到达的 play 延迟执行）"
+    },
+    {
+      "name": "setVolume",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": { "v": "number（0~1，原生夹取）" },
+      "note": "volume setter 与 muted setter（muted → v=0）共用"
+    },
+    {
+      "name": "setRate",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": { "r": "number（0.75/1.0/1.25）" },
+      "note": "playbackRate setter；播放中生效（defaultRate + 当前 rate）"
+    },
+    {
+      "name": "play",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": {},
+      "note": "Audio 代理 play()；seek 进行中 → 标记 playAfterSeek，seek 完成回调里续播"
+    },
+    {
+      "name": "pause",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": {},
+      "note": "Audio 代理 pause()"
+    },
+    {
+      "name": "setPlaying",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": { "playing": "boolean" },
+      "note": "锁屏播放态显式同步：playing/paused/ended 原生事件回执时前端回发，与原生状态机对齐"
+    },
+    {
+      "name": "setMetadata",
+      "domain": "playback",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": {
+        "title": "string",
+        "artist": "string",
+        "album": "string",
+        "coverUrl": "string"
+      },
+      "note": "锁屏 Now Playing（MetadataManager.applyMetadata；封面三策略）"
+    },
+    {
+      "name": "setQueue",
+      "domain": "playback",
+      "sender": "playerCore.js",
+      "status": "active",
+      "payload": {
+        "songs": "array<{url: string（绝对 URL；stream 歌为 \"\"，原生跳过）, title: string, artist: string, album: string}>",
+        "index": "number（当前歌在快照中的位置；shuffle 用洗牌队列顺序）"
+      },
+      "note": "播放顺序快照（nativeSyncQueue，selectSong 后同步）→ RemoteCommandManager 持有，锁屏/线控后台切歌用"
+    },
+    {
+      "name": "playAudio",
+      "domain": "playback",
+      "sender": "DictLookupModal.vue",
+      "status": "active",
+      "payload": { "url": "string（http/https）" },
+      "note": "词典发音短音频原生播放（独立 AVPlayer，不弹系统播放器 UI；iOS 26 HTMLAudioElement 会弹 UI）"
+    },
+    {
+      "name": "nativeReady",
+      "domain": "lifecycle",
+      "sender": "playerCore.js",
+      "status": "active",
+      "payload": {},
+      "note": "适配层就绪上报：壳收到后才开始推播放事件（webReady + flushPendingEvents）"
+    },
+    {
+      "name": "nativeLog",
+      "domain": "lifecycle",
+      "sender": null,
+      "status": "shellOnly",
+      "payload": { "line": "string" },
+      "note": "前端诊断日志转原生通道（nativecmd.log 追加）；当前前端无发送方（壳预留，与 dbgLog → metaSave 双通道互补）"
+    },
+    {
+      "name": "pullRevealStatusBar",
+      "domain": "lifecycle",
+      "sender": "usePullRevealStatusBar.js",
+      "status": "active",
+      "payload": {},
+      "note": "页面顶部下拉 → 召唤原生顶部状态条浮层（3s 自动收回）"
+    },
+    {
+      "name": "syncDownload",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {
+        "items": "array<{url: string（http/https，桌面服务器绝对 URL）, path: string（沙盒相对路径，如 audio/<sha256>.m4a）, sha256: string（期望内容哈希，可空串=跳过内容校验）, size?: number, wifiOnly?: boolean（T3 仅 Wi-Fi：前端每次请求带当前开关状态）}>"
+      },
+      "note": "批量下载（微任务合并 / syncAssets / retryFailed）；原生串行队列 + 断点续传；进度/完成回推 syncAssetProgress / syncAssetDone"
+    },
+    {
+      "name": "hasAsset",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {
+        "path": "string",
+        "requestId": "string（前端 String(++seq)）"
+      },
+      "note": "本地资产查询 → 回推 assetStatus {requestId, path, exists, localURL}"
+    },
+    {
+      "name": "cancelDownloads",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {},
+      "note": "取消全部下载"
+    },
+    {
+      "name": "deleteAssets",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {
+        "paths?": "array<string>（精确删除：孤儿清理/按类型前缀过滤/封面过期清理）",
+        "scope?": "string（\"all\"|\"audio\"|\"books\"|\"dicts\" 整类删除，旧壳回退路径）"
+      },
+      "note": "两者二选一；完成回推 assetsDeleted（paths/scope 原样回显）"
+    },
+    {
+      "name": "assetsSize",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {},
+      "note": "资产占用查询 → 回推 assetsSize {total, byType}（fetchAssetsSize / fetchAssetsSizeDetailed 共用）"
+    },
+    {
+      "name": "assetIndex",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {},
+      "note": "资产注册表全量 → 回推 assetIndex {assets: [{path, sha256, size}]}（更新检测/孤儿计算数据源）"
+    },
+    {
+      "name": "setWifiOnly",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": { "on": "boolean" },
+      "note": "仅 Wi-Fi 下载开关（fire-and-forget 无回执；DownloadManager 蜂窝下挂起）"
+    },
+    {
+      "name": "getDeviceId",
+      "domain": "sync",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": { "requestId": "string" },
+      "note": "设备标识查询（Keychain 持久）→ 回推 deviceId {requestId, deviceId}"
+    },
+    {
+      "name": "metaSave",
+      "domain": "meta",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": {
+        "kind": "string（songs|favorites|playlists|syncMeta|lyric:<hash> 等）",
+        "json": "string（序列化 JSON）"
+      },
+      "note": "元数据文件兜底写 Documents/meta/{kind}.json（fire-and-forget 无回执；IndexedDB 重启不可靠的双写）"
+    },
+    {
+      "name": "metaLoad",
+      "domain": "meta",
+      "sender": "sync.js",
+      "status": "active",
+      "payload": { "kind": "string", "requestId": "string" },
+      "note": "元数据文件读 → 回推 metaLoaded {requestId, kind, json?}（缺失/损坏无 json 字段，前端 8s 超时兜底）"
+    },
+    {
+      "name": "unauthorized",
+      "domain": "pairing",
+      "sender": "nativeAudioBridge.js",
+      "status": "active",
+      "payload": {},
+      "note": "401 到达 → 壳清 Keychain 配对 + 通知 RootView（qqplayerTokenInvalid）→ 前端'未连接'模式"
+    },
+    {
+      "name": "openPairing",
+      "domain": "pairing",
+      "sender": "NoConnectionView.vue",
+      "status": "active",
+      "payload": {},
+      "note": "'未连接'引导页'去配对'按钮 → 壳发 qqplayerOpenPairing 通知 → 主界面打开配对 sheet"
+    },
+    {
+      "name": "http",
+      "domain": "network",
+      "sender": "apiClient.js",
+      "status": "legacy",
+      "payload": {
+        "id": "number（回执路由 id）",
+        "url": "string",
+        "method": "string（GET/POST/...）",
+        "headers": "object",
+        "body": "string|null"
+      },
+      "note": "⚠️ 历史网络桥（file:// 页面禁 fetch http 的产物）：nativeHttpAvailable() 仅在 location.protocol==='file:' 时启用，2026-08-22 壳改本地 http server 加载后不再触发；iOS 壳也无 'http' 分发分支（落入 handlePlaybackCommand → 未知命令静默忽略）。契约保留记录（前端源码仍在发），双端测试按 legacy 跳过壳侧覆盖校验。"
+    }
+  ],
+  "nativeEvent": [
+    {
+      "name": "loadedmetadata",
+      "domain": "playback",
+      "emitter": "AVPlayerBridge",
+      "payload": { "duration": "number（秒）" },
+      "note": "item status readyToPlay；前端 sink 直接处理（设 duration + 断点恢复 seek），同时 emit DOM loadedmetadata"
+    },
+    {
+      "name": "playing",
+      "domain": "playback",
+      "emitter": "AVPlayerBridge",
+      "payload": { "t": "number（秒）" },
+      "note": "PushEvent.playing（rate 观察，非缓冲等待）+ 中断 ended 恢复；前端 sink → emit DOM play"
+    },
+    {
+      "name": "paused",
+      "domain": "playback",
+      "emitter": "AVPlayerBridge",
+      "payload": { "t": "number（秒）" },
+      "note": "PushEvent.paused（rate==0 且非 seek 且非缓冲等待 / seek 完成补推 / 中断开始）；前端 sink → emit DOM pause"
+    },
+    {
+      "name": "ended",
+      "domain": "playback",
+      "emitter": "AVPlayerBridge",
+      "payload": {},
+      "note": "PushEvent.ended（didPlayToEndTime）；前端 sink → emit DOM ended → playerCore 自动切歌/单曲循环"
+    },
+    {
+      "name": "timeupdate",
+      "domain": "playback",
+      "emitter": "AVPlayerBridge",
+      "payload": { "t": "number（秒）", "duration": "number（秒）" },
+      "note": "~250ms 周期（addPeriodicTimeObserver）；前端 sink 驱动进度/锁屏对齐"
+    },
+    {
+      "name": "error",
+      "domain": "playback",
+      "emitter": "AVPlayerBridge",
+      "payload": { "message": "string" },
+      "note": "⚠️ item load 失败（status==.failed）；前端当前无消费者（sink default 分支无人订阅即丢弃）——已知缺口"
+    },
+    {
+      "name": "songChanged",
+      "domain": "playback",
+      "emitter": "RemoteCommandManager",
+      "payload": { "index": "number（播放顺序快照中的新位置）" },
+      "note": "锁屏/线控后台切歌成功（playQueueRelative）；前端对齐状态不重新 load"
+    },
+    {
+      "name": "remoteCommand",
+      "domain": "playback",
+      "emitter": "WebShellView",
+      "payload": {
+        "cmd": "string（play|pause|toggle|next|prev|seekto）",
+        "t?": "number（仅 seekto）"
+      },
+      "note": "锁屏/耳机线控命令到达原生（AVPlayerBridge.onRemoteCommand → pushToWeb）；前端 handleRemoteCommand → playerCore 统一动作（与桌面 MediaSession 同一套）"
+    },
+    {
+      "name": "syncAssetProgress",
+      "domain": "sync",
+      "emitter": "WebShellView（DownloadManager.onProgress）",
+      "payload": {
+        "path": "string",
+        "received": "number",
+        "total": "number（未知为 0）"
+      },
+      "note": "单文件下载进度；sync.js handleAssetProgress 聚合"
+    },
+    {
+      "name": "syncAssetDone",
+      "domain": "sync",
+      "emitter": "WebShellView（DownloadManager.onDone）",
+      "payload": {
+        "path": "string",
+        "ok": "boolean",
+        "sha256": "string",
+        "localURL?": "string（file:// 全路径）",
+        "error?": "string"
+      },
+      "note": "下载完成/失败；sync.js handleAssetDone"
+    },
+    {
+      "name": "assetStatus",
+      "domain": "sync",
+      "emitter": "WebShellView（DownloadManager.onAssetStatus）",
+      "payload": {
+        "requestId": "string（hasAsset 回带）",
+        "path": "string",
+        "exists": "boolean",
+        "localURL?": "string"
+      },
+      "note": "hasAsset 回执；sync.js ensureAsset Promise 结算"
+    },
+    {
+      "name": "assetsSize",
+      "domain": "sync",
+      "emitter": "WebShellView（DownloadManager.assetsSizeByType）",
+      "payload": {
+        "total": "number（字节）",
+        "byType": "object<{audio: number, covers: number, lyric: number, books: number, dicts: number, meta: number, other: number}>"
+      },
+      "note": "assetsSize 回执（T3 扩展 byType；旧前端只读 total）"
+    },
+    {
+      "name": "assetIndex",
+      "domain": "sync",
+      "emitter": "WebShellView（DownloadManager.assetIndex）",
+      "payload": {
+        "assets": "array<{path: string, sha256: string, size: number}>（按 path 排序）"
+      },
+      "note": "assetIndex 回执（注册表缺失/损坏 → 空数组）"
+    },
+    {
+      "name": "assetsDeleted",
+      "domain": "sync",
+      "emitter": "WebShellView（DownloadManager.deleteAssets 完成回调）",
+      "payload": {
+        "paths?": "array<string>（精确删除回显）",
+        "scope?": "string（整类删除回显）"
+      },
+      "note": "deleteAssets 完成回执（paths/scope 原样回显便于对账）；旧壳不回推 → 前端超时兜底"
+    },
+    {
+      "name": "metaLoaded",
+      "domain": "meta",
+      "emitter": "WebShellView（MetaStore.load）",
+      "payload": {
+        "requestId": "string",
+        "kind": "string",
+        "json?": "string（文件缺失/损坏无此字段）"
+      },
+      "note": "metaLoad 回执"
+    },
+    {
+      "name": "deviceId",
+      "domain": "sync",
+      "emitter": "WebShellView（KeychainStore.deviceId）",
+      "payload": { "requestId": "string", "deviceId": "string" },
+      "note": "getDeviceId 回执（Keychain 持久设备标识）"
+    },
+    {
+      "name": "appState",
+      "domain": "lifecycle",
+      "emitter": "WebShellView（scenePhase → NotificationCenter）",
+      "payload": { "state": "string（active|inactive|background）" },
+      "note": "前后台切换；flushPendingEvents 时补发当前状态；前端 sync 模块随 active 启停轮询/恢复同步"
+    },
+    {
+      "name": "swipe",
+      "domain": "ui",
+      "emitter": "WebShellView（UIPanGestureRecognizer）",
+      "payload": { "dir": "string（left|right）" },
+      "note": "原生水平滑动手势 → Reader 翻页（垂直滚动留给 WebView）；Reader.vue onNativeEvent 订阅"
+    }
+  ]
+}
