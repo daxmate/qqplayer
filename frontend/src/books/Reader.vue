@@ -253,35 +253,10 @@ import {
 } from "@lucide/vue";
 import ePub from "epubjs";
 import type { Book, Rendition, Location, NavItem } from "epubjs";
-import type {
-  BookAnnotations,
-  BookView,
-  HighlightAnnotation,
-  HighlightColor,
-  HighlightStyle,
-  NoteAnnotation,
-  ReaderSelection,
-  ReaderSettings,
-  VocabEntry,
-} from "./types";
+import type { BookView, HighlightAnnotation, HighlightColor, HighlightStyle } from "./types";
 import { saveBookProgress } from "./api";
-import {
-  createBookmark,
-  createHighlight,
-  createNote,
-  deleteBookmark,
-  deleteHighlight,
-  deleteNote,
-  deleteVocab,
-  fetchAnnotations,
-  fetchVocab,
-  HIGHLIGHT_COLOR_STYLES,
-  isDarkBackground,
-  UNDERLINE_COLOR,
-  UNDERLINE_STYLE,
-  updateNote,
-} from "./annotations";
-import { showToast, toastError } from "../composables/useToast.js";
+import { HIGHLIGHT_COLOR_STYLES } from "./annotations";
+import { toastError } from "../composables/useToast.js";
 import { uiSettings } from "../composables/useSettings.js";
 import { useShellBridge } from "../composables/useShellBridge.js";
 import { api } from "../utils/apiClient.js";
@@ -290,25 +265,20 @@ import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
 import HighlightMenu from "./HighlightMenu.vue";
 import { isMobile } from "../composables/useMobileViewport.js";
-import { onNativeEvent } from "../composables/nativeAudioBridge.js";
 import SearchPanel from "./SearchPanel.vue";
-import {
-  applyTempMark,
-  ensureTempMarkStyle,
-  findSentenceRange,
-  removeTempMark,
-} from "./searchHighlight";
 import AnnotationPanel from "./AnnotationPanel.vue";
 import DictLookupModal from "./DictLookupModal.vue";
 import NoteEditorModal from "./NoteEditorModal.vue";
 import DictManagerModal from "./DictManagerModal.vue";
-import {
-  READER_SETTINGS_DEFAULTS,
-  getReaderSettings,
-  saveReaderSettings,
-  resolveReaderThemeColors,
-  readerFontCss,
-} from "./settings";
+import { READER_SETTINGS_DEFAULTS, readerFontCss, resolveReaderThemeColors } from "./settings";
+import { useReaderSettings } from "../composables/useReaderSettings";
+import { useAnnotations } from "../composables/useAnnotations";
+import { useSelectionToolbar } from "../composables/useSelectionToolbar";
+import { useDictLookup } from "../composables/useDictLookup";
+import { useReaderSearch } from "../composables/useReaderSearch";
+import { useNativeReaderBridge } from "../composables/useNativeReaderBridge";
+import { useReaderStyling } from "../composables/useReaderStyling";
+import { useReaderNavigation } from "../composables/useReaderNavigation";
 
 const props = defineProps<{ book: BookView }>();
 const emit = defineEmits<{ close: [] }>();
@@ -325,1174 +295,210 @@ const loading = ref(true);
 const errorMsg = ref("");
 const tocOpen = ref(false);
 
-// ============ 阅读设置（后端 /api/settings books namespace；localStorage 只读不写） ============
-// 旧字号 localStorage 键（V1 遗留，仅一次性迁移读取，迁移成功后清除）
-const LEGACY_FONT_KEY = "qqplayer.books.fontSize";
-const settingsOpen = ref(false);
-const readerSettings = reactive<ReaderSettings>({ ...READER_SETTINGS_DEFAULTS });
-
-/** 查词弹窗主题色（与阅读器当前生效主题一致；dark 驱动词典 CSS 覆盖层） */
-const dictThemeColors = computed(() => {
-  const { text, bg } = resolveReaderThemeColors(readerSettings);
-  const theme = readerSettings.theme;
-  const dark =
-    theme === "dark" ||
-    theme === "sepia" ||
-    (theme === "auto" &&
-      (uiSettings.theme === "dark" ||
-        (uiSettings.theme === "auto" &&
-          typeof document !== "undefined" &&
-          document.documentElement.dataset.theme !== "light")));
-  return { text, bg, dark };
-});
-let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
-
-/** 旧字号：localStorage 读取（70~200 合法才认），读不到返回 null */
-function readLegacyFontSize(): number | null {
-  try {
-    const saved = Number(localStorage.getItem(LEGACY_FONT_KEY));
-    return Number.isFinite(saved) && saved >= 70 && saved <= 200 ? saved : null;
-  } catch {
-    return null; // 隐私模式等场景 localStorage 不可用
-  }
-}
-
-/** 初始化：读后端设置；若后端 fontSize 仍是默认 100 且 localStorage 有旧值 → 一次性迁移（PUT + 清除） */
-async function loadReaderSettings() {
-  const saved = await getReaderSettings();
-  const legacy = readLegacyFontSize();
-  const migrated =
-    legacy !== null && saved.fontSize === READER_SETTINGS_DEFAULTS.fontSize
-      ? { ...saved, fontSize: legacy }
-      : saved;
-  Object.assign(readerSettings, migrated);
-  applyReaderSettings();
-  if (migrated.fontSize !== saved.fontSize) {
-    // 迁移：旧值写回后端，成功后清除 localStorage；失败保留旧值下次再迁
-    saveReaderSettings({ fontSize: migrated.fontSize }).then((ok) => {
-      if (ok) {
-        try {
-          localStorage.removeItem(LEGACY_FONT_KEY);
-        } catch {
-          /* 忽略清除失败 */
-        }
-      }
-    });
-  }
-}
-
-/** 用户改设置：合并进 reactive（watch 即时应用）+ 防抖 300ms 写回后端（深合并） */
-function onSettingsPatch(patch: Partial<ReaderSettings>) {
-  Object.assign(readerSettings, patch);
-  if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
-  settingsSaveTimer = setTimeout(() => {
-    settingsSaveTimer = null;
-    saveReaderSettings({ ...readerSettings });
-  }, 300);
-}
-
-/** 还原所有设置：全部字段回默认 → 即时应用（watch）→ 立即保存（取消未落地的防抖）→ 成功 toast */
-async function onResetSettings() {
-  if (settingsSaveTimer) {
-    clearTimeout(settingsSaveTimer);
-    settingsSaveTimer = null;
-  }
-  Object.assign(readerSettings, READER_SETTINGS_DEFAULTS);
-  const ok = await saveReaderSettings({ ...READER_SETTINGS_DEFAULTS });
-  if (ok) showToast(t("books.settingsResetDone"));
-}
-
-function toggleSettings() {
-  settingsOpen.value = !settingsOpen.value;
-  if (settingsOpen.value) {
-    tocOpen.value = false;
-    panelOpen.value = false;
-  }
-}
-
-function toggleToc() {
-  tocOpen.value = !tocOpen.value;
-  if (tocOpen.value) {
-    settingsOpen.value = false;
-    panelOpen.value = false;
-  }
-}
-
-function bumpFontSize(delta: number) {
-  const next = Math.min(200, Math.max(70, readerSettings.fontSize + delta));
-  if (next === readerSettings.fontSize) return;
-  onSettingsPatch({ fontSize: next });
-}
-
-// ============ 标注：高亮 / 书签 / 笔记 + 生词本 + 选中工具栏（V2） ============
-const annotations = ref<BookAnnotations>({ highlights: [], bookmarks: [], notes: [] });
-const vocabList = ref<VocabEntry[]>([]);
-const panelOpen = ref(false);
-const dictManagerOpen = ref(false);
-const curCfi = ref("");
-
-/** 选中工具栏位置（相对 .reader 根，px） */
-const toolbar = reactive({ x: 0, y: 0, visible: false });
-/** 工具栏锁定（iOS：弹出后自动收起选区隐藏手柄，期间选区收起不隐藏工具栏；操作后解除） */
-let toolbarLocked = false;
-/** 当前选中（工具栏操作的数据源；工具栏收起时保留到操作完成） */
-const currentSelection = ref<ReaderSelection | null>(null);
-
-/** 书内搜索请求（V4）：菜单"搜索"只写这个 ref；SearchPanel 由搜索子代理挂载并 watch（本文件不建面板） */
-const searchRequest = ref<string | null>(null);
-
-/** 选中 cfi 是否已有高亮（工具栏"移除"项显示条件；与 addHighlight 的重复判断同思路） */
-const toolbarHasHighlight = computed(() => {
-  const sel = currentSelection.value;
-  return sel ? annotations.value.highlights.some((h) => h.cfi === sel.cfi) : false;
-});
-
-/** 当前选区已有高亮（工具栏 active 态数据源：色点/U 亮起；宽松匹配，与壳上报/移除/换色同源） */
-const toolbarHighlight = computed(() => {
-  const sel = currentSelection.value;
-  return sel ? findHighlightForSelection() : null;
-});
-
-/** 工具栏色点激活色：选中已有底色高亮时传其颜色；下划线/无高亮 → null（red 只属于下划线） */
-const toolbarColor = computed<HighlightColor | null>(() => {
-  const h = toolbarHighlight.value;
-  return h && h.style === "highlight" && h.color !== "red" ? h.color : null;
-});
-
-/** 点击已有高亮弹菜单状态（位置 + 目标高亮 id；条目被删则菜单自动关闭） */
-const hlMenu = reactive({ x: 0, y: 0, visible: false, id: null as string | null });
-const hlMenuHighlight = computed(
-  () => annotations.value.highlights.find((h) => h.id === hlMenu.id) ?? null,
-);
-
-function closeHighlightMenu() {
-  hlMenu.visible = false;
-  hlMenu.id = null;
-}
-
-/** 查词弹窗状态 */
-const lookupState = reactive({
-  open: false,
-  word: "",
-  context: "",
-  cfi: "",
-});
-
-/** 笔记弹窗：create（选中新建）/ edit（面板编辑）共用 */
-const noteModal = reactive({
-  open: false,
-  mode: "create" as "create" | "edit",
-  excerpt: "",
-  note: null as NoteAnnotation | null,
-  saving: false,
-});
-
-/** 当前页是否已加书签（顶栏 active 态；按 cfi 路径前缀匹配，容忍滚动偏移） */
-const isCurrentBookmarked = computed(() => {
-  const cur = cfiPath(curCfi.value);
-  return annotations.value.bookmarks.some((b) => cfiPath(b.cfi) === cur);
-});
-
-/** cfi 去掉末尾 :offset（书签定位锚点比对用） */
-function cfiPath(cfi: string): string {
-  const i = cfi.lastIndexOf(":");
-  return i > 0 ? cfi.slice(0, i) : cfi;
-}
-
-function hideToolbar() {
-  toolbar.visible = false;
-  toolbarLocked = false;
-}
-
-/** 清空 iframe 选区 + 收起工具栏（工具栏操作后调用） */
-function clearSelection() {
-  hideToolbar();
-  try {
-    const contents = renditionRef.value?.getContents?.();
-    const list = contents ? (Array.isArray(contents) ? contents : [contents]) : [];
-    for (const c of list) {
-      c.window?.getSelection?.()?.removeAllRanges();
-    }
-  } catch {
-    /* 清选区失败不影响主流程 */
-  }
-  currentSelection.value = null;
-  postReaderState(true, ""); // 壳右键菜单：选区已清（去重：仅状态变化时发送）
-}
-
-/** 选区收起（selectionchange）→ 收起工具栏；同一函数引用重复 add 自动去重。
- * 工具栏锁定（选区已自动收起）时忽略，防收起动作本身把工具栏关掉。 */
-function onContentsSelectionChange(e: Event) {
-  if (toolbarLocked && toolbar.visible) return;
-  const doc = e.target as Document;
-  const sel = doc.defaultView?.getSelection?.();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) hideToolbar();
-}
-
-/** 选中句子提取：选区在全文中的前后句边界（查词/生词本 context 用） */
-function extractSentence(text: string, contents: unknown): string {
-  try {
-    const c = contents as { document?: { body?: { innerText?: string; textContent?: string } } };
-    const full = c.document?.body?.innerText ?? c.document?.body?.textContent ?? "";
-    const i = full.indexOf(text);
-    if (i < 0) return text.slice(0, 200);
-    let start = i;
-    while (start > 0 && !/[.!?。！？…\n]/.test(full[start - 1])) start--;
-    let end = i + text.length;
-    while (end < full.length && !/[.!?。！？…\n]/.test(full[end])) end++;
-    if (end < full.length) end++; // 带上结尾标点
-    return full.slice(start, end).trim().slice(0, 300);
-  } catch {
-    return text.slice(0, 200);
-  }
-}
-
-/**
- * WKWebView 兜底（终极方案）：事件链路在 WebKit 里全部不可靠（selectionchange
- * 不触发、iframe document 监听器收不到事件、跨 frame 冒泡捕获不到），改主动轮询：
- * 每 400ms 读一次 epub.js iframe 的选区，有选中文字就显示工具栏（走 onSelected），
- * 选区消失则收起。不依赖任何事件，只要选区存在就能工作。
- */
-let selPollTimer: number | null = null;
-/** 轮询稳定判断：拖选过程中选区持续变化，连续 N 次相同才视为拖选完成（鼠标已释放） */
-let selPollLastText = "";
-let selPollStableCount = 0;
-/** 需要连续几次轮询选区相同才弹工具条（400ms/次，2 次 ≈ 800ms） */
-const SEL_POLL_STABLE = 2;
-function stopSelPolling() {
-  if (selPollTimer !== null) {
-    clearInterval(selPollTimer);
-    selPollTimer = null;
-  }
-}
-
-function startSelPolling() {
-  stopSelPolling();
-  selPollTimer = window.setInterval(pollSelection, 400);
-}
-
-function pollSelection() {
-  const iframe = containerRef.value?.querySelector("iframe");
-  const iw = iframe?.contentWindow;
-  const sel = iw?.getSelection?.();
-  if (!sel) return;
-  const text = sel.toString().trim();
-  postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳右键菜单：选区状态变化时上报（去重：文本/高亮态没变不重复发）
-  if (sel.isCollapsed || sel.rangeCount === 0 || !text) {
-    // 无选区：重置稳定计数 + 收起工具栏（工具栏锁定期间保持，iOS 自动收起选区后不隐藏）
-    selPollLastText = "";
-    selPollStableCount = 0;
-    if (toolbar.visible && toolbarLocked) return;
-    if (toolbar.visible) hideToolbar();
-    return;
-  }
-  if (text !== selPollLastText) {
-    // 选区在变化（拖选中）→ 记录并等待稳定
-    selPollLastText = text;
-    selPollStableCount = 1;
-    return;
-  }
-  selPollStableCount++;
-  if (selPollStableCount < SEL_POLL_STABLE) return;
-  // 选区已稳定（鼠标释放）→ 同一选区已处理过则跳过
-  if (currentSelection.value?.text === text) return;
-  const contents = getCurrentContents();
-  if (!contents) return;
-  try {
-    const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
-      sel.getRangeAt(0),
-    );
-    if (cfi) onSelected(cfi, contents);
-  } catch {
-    /* 轮询 CFI 生成失败忽略 */
-  }
-}
-
-/** epub.js selected 事件（选区非空，250ms 防抖后触发）：定位工具栏 + 记录选中 */
-function onSelected(cfi: string, contents: unknown) {
-  const c = contents as { window?: Window };
-  const sel = c.window?.getSelection?.();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-  const text = sel.toString().trim();
-  if (!text) return;
-  const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
-  const iframe = containerRef.value?.querySelector("iframe");
-  const root = rootRef.value;
-  if (!iframe || !root) return;
-  const iframeRect = iframe.getBoundingClientRect();
-  const rootRect = root.getBoundingClientRect();
-  toolbar.x = iframeRect.left + rangeRect.left + rangeRect.width / 2 - rootRect.left;
-  // iOS 系统“拷贝链接”胶囊固定显示在选区上方（WebKit 无法禁用，见 bug 244149），
-  // 工具栏改挂选区下方避免被盖住（2026-08-23 阶段4）
-  toolbar.y = iframeRect.top + rangeRect.bottom - rootRect.top + 12;
-  toolbar.visible = true;
-  toolbarLocked = false;
-  closeHighlightMenu(); // 新选区优先：收起点击高亮菜单
-  currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
-  postReaderState(true, text, selectionHasHighlight(), selectionHighlightStyle()); // 壳：选区稳定后补发精确 hasHighlight/highlightStyle（轮询首拍可能滞后）
-  // 挂载选区收起监听（contents 每次新建都会触发 selected，函数引用去重）
-  (contents as { document?: Document }).document?.addEventListener(
-    "selectionchange",
-    onContentsSelectionChange,
-  );
-  // iOS 壳：选区手柄（原生蓝色圆点）会叠在工具栏上/旁（无 API 单独禁用），
-  // 工具栏弹出后立即收起选区隐藏手柄；先锁定工具栏防选区收起事件把它关掉（2026-08-23）
-  if (
-    typeof window !== "undefined" &&
-    (window as { qqplayerIosBridge?: unknown }).qqplayerIosBridge
-  ) {
-    toolbarLocked = true;
-    requestAnimationFrame(() => {
-      try {
-        (contents as { window?: Window }).window?.getSelection()?.removeAllRanges();
-      } catch {
-        /* 收起失败不影响 */
-      }
-    });
-  }
-}
-
-/** 高亮 SVG 样式：深色主题用 screen 混合（multiply 在深底几乎不可见） */
-function highlightStyles(color: HighlightColor): Record<string, string> {
-  const { bg } = resolveReaderThemeColors(readerSettings);
-  const base = HIGHLIGHT_COLOR_STYLES[color];
-  return isDarkBackground(bg) ? { ...base, "mix-blend-mode": "screen" } : base;
-}
-
-/** 单条高亮渲染到 epub.js（style=highlight 用底色 SVG，underline 用下划线 + UNDERLINE_STYLE） */
-function renderHighlight(h: HighlightAnnotation) {
-  const rendition = renditionRef.value;
-  if (!rendition?.annotations) return;
-  try {
-    if (h.style === "underline") {
-      rendition.annotations.add(
-        "underline",
-        h.cfi,
-        { id: h.id, text: h.text },
-        undefined,
-        "epubjs-ul",
-        UNDERLINE_STYLE,
-      );
-    } else {
-      const color: HighlightColor = h.color === "red" ? "yellow" : h.color;
-      rendition.annotations.add(
-        "highlight",
-        h.cfi,
-        { id: h.id, text: h.text, color: h.color },
-        undefined,
-        "epubjs-hl",
-        highlightStyles(color),
-      );
-    }
-  } catch {
-    /* 渲染失败不影响持久化 */
-  }
-}
-
-/** 标注重放：后端高亮逐条 add 到 epub.js（切章自动重放由 annotations hooks.render 负责） */
-function replayHighlights() {
-  const rendition = renditionRef.value;
-  if (!rendition?.annotations) return;
-  for (const h of annotations.value.highlights) {
-    try {
-      renderHighlight(h);
-    } catch {
-      /* 单条重放失败忽略（cfi 过期等） */
-    }
-  }
-}
-
-/** 读标注 + 重放高亮（书加载后调用一次；此后本地增量维护） */
-async function loadAnnotations() {
-  try {
-    annotations.value = await fetchAnnotations(props.book.id);
-  } catch {
-    annotations.value = { highlights: [], bookmarks: [], notes: [] };
-  }
-  replayHighlights();
-}
-
-async function refreshVocab() {
-  try {
-    vocabList.value = await fetchVocab();
-  } catch {
-    /* 生词本拉取失败不阻断阅读 */
-  }
-}
-
-// ---- 高亮 ----
-function addHighlight(color: HighlightColor, style: HighlightStyle = "highlight") {
-  const sel = currentSelection.value;
-  if (!sel) return;
-  if (annotations.value.highlights.some((h) => h.cfi === sel.cfi)) {
-    toastError(t("books.highlightExists"));
-    clearSelection();
-    return;
-  }
-  // 下划线固定红色落库（V4 契约）；底色高亮用用户选色
-  const payloadColor: HighlightColor | "red" = style === "underline" ? UNDERLINE_COLOR : color;
-  createHighlight(props.book.id, { cfi: sel.cfi, text: sel.text, color: payloadColor, style })
-    .then(({ id }) => {
-      const h: HighlightAnnotation = {
-        id,
-        cfi: sel.cfi,
-        text: sel.text,
-        color: payloadColor,
-        style,
-        createdAt: Date.now(),
-      };
-      annotations.value.highlights.push(h);
-      renderHighlight(h);
-      showToast(t(style === "underline" ? "books.underlineDone" : "books.highlightDone"));
-    })
-    .catch(() => toastError(t("books.loadError")))
-    .finally(() => clearSelection());
-}
-
-function removeHighlight(id: string) {
-  const h = annotations.value.highlights.find((x) => x.id === id);
-  deleteHighlight(props.book.id, id)
-    .then(() => {
-      if (h) {
-        try {
-          renditionRef.value?.annotations.remove(
-            h.cfi,
-            h.style === "underline" ? "underline" : "highlight",
-          );
-        } catch {
-          /* 本地移除失败忽略 */
-        }
-      }
-      annotations.value.highlights = annotations.value.highlights.filter((x) => x.id !== id);
-      if (hlMenu.id === id) closeHighlightMenu();
-      // 壳：删除后选区高亮态变化 → 补发（右键菜单「移除高亮」项隐藏）
-      if (inNativeShell()) {
-        postReaderState(
-          true,
-          currentSelection.value?.text ?? "",
-          selectionHasHighlight(),
-          selectionHighlightStyle(),
-        );
-      }
-      showToast(t("books.highlightDeleteDone"));
-    })
-    .catch(() => toastError(t("books.loadError")));
-}
-
-/**
- * 换色 / 样式切换：后端无 PATCH，删除重建（先删后建）。
- * 只在创建成功后才动本地列表 —— 删除成功但创建失败时本地原条目原样保留（含渲染），无数据丢失。
- */
-function replaceHighlight(
-  h: HighlightAnnotation,
-  next: { color: HighlightColor; style: HighlightStyle },
-) {
-  const payloadColor: HighlightColor | "red" =
-    next.style === "underline" ? UNDERLINE_COLOR : next.color;
-  deleteHighlight(props.book.id, h.id)
-    .then(() =>
-      createHighlight(props.book.id, {
-        cfi: h.cfi,
-        text: h.text,
-        color: payloadColor,
-        style: next.style,
-      }),
-    )
-    .then(({ id }) => {
-      const nh: HighlightAnnotation = {
-        id,
-        cfi: h.cfi,
-        text: h.text,
-        color: payloadColor,
-        style: next.style,
-        createdAt: Date.now(),
-      };
-      annotations.value.highlights = annotations.value.highlights.map((x) =>
-        x.id === h.id ? nh : x,
-      );
-      try {
-        renditionRef.value?.annotations.remove(
-          h.cfi,
-          h.style === "underline" ? "underline" : "highlight",
-        );
-      } catch {
-        /* 本地移除失败忽略 */
-      }
-      renderHighlight(nh);
-      if (hlMenu.id === h.id) hlMenu.id = nh.id; // 菜单目标 id 跟随新条目（保持菜单打开）
-      showToast(t("books.highlightDone"));
-    })
-    .catch(() => toastError(t("books.loadError")));
-}
-
-/** 换色：色点永远产出底色高亮（下划线条目点色点 → 转为该色高亮，iBooks 行为） */
-function changeHighlightColor(h: HighlightAnnotation, color: HighlightColor) {
-  replaceHighlight(h, { color, style: "highlight" });
-}
-
-/** U 切换：highlight ↔ underline 互转（下划线固定红色；转回底色时原色是 red 则回落 yellow） */
-function toggleHighlightStyle(h: HighlightAnnotation) {
-  const next: HighlightStyle = h.style === "underline" ? "highlight" : "underline";
-  const color: HighlightColor =
-    next === "highlight" ? (h.color === "red" ? "yellow" : (h.color as HighlightColor)) : "yellow";
-  replaceHighlight(h, { color, style: next });
-}
-
-/** 点击高亮菜单动作（内部取当前菜单目标，模板无需空值断言）；色点按行为矩阵：
- *  同色底色 → 移除（toggle off）；异色 → 换色；下划线 → 转底色 */
-function changeMenuColor(color: HighlightColor) {
-  const h = hlMenuHighlight.value;
-  if (!h) return;
-  if (h.style === "highlight" && h.color === color) removeHighlight(h.id);
-  else changeHighlightColor(h, color);
-}
-
-/** U 按行为矩阵：下划线条目点 U = 移除（toggle off）；底色条目点 U = 转下划线 */
-function toggleMenuStyle() {
-  const h = hlMenuHighlight.value;
-  if (!h) return;
-  if (h.style === "underline") removeHighlight(h.id);
-  else toggleHighlightStyle(h);
-}
-
-function removeMenuHighlight() {
-  const h = hlMenuHighlight.value;
-  if (h) removeHighlight(h.id);
-}
-
-function openMenuNote() {
-  const h = hlMenuHighlight.value;
-  if (h) openNoteForHighlight(h);
-}
-
-/** 从高亮条目建笔记：借 currentSelection 数据源（openNoteCreate/saveNote 共用读取），菜单先收起 */
-function openNoteForHighlight(h: HighlightAnnotation) {
-  closeHighlightMenu();
-  currentSelection.value = { cfi: h.cfi, text: h.text, context: h.text };
-  openNoteCreate();
-}
-
-// ---- 书签 ----
-function toggleBookmark() {
-  // epub.js 类型把 currentLocation() 标为 DisplayedLocation，运行时实为 {start,end}（Location 形状）
-  const loc = renditionRef.value?.currentLocation?.() as unknown as Location | undefined;
-  const cfi = loc?.start?.cfi;
-  if (!cfi) return;
-  const existing = annotations.value.bookmarks.find((b) => cfiPath(b.cfi) === cfiPath(cfi));
-  if (existing) {
-    removeBookmark(existing.id, true);
-    return;
-  }
-  const page =
-    typeof loc.start.location === "number" && loc.start.location >= 0 ? loc.start.location + 1 : 1;
-  const text = t("books.bookmarkLabel", { page });
-  createBookmark(props.book.id, { cfi, text })
-    .then(({ id }) => {
-      annotations.value.bookmarks.push({ id, cfi, text, createdAt: Date.now() });
-      showToast(t("books.bookmarkDone"));
-    })
-    .catch(() => toastError(t("books.loadError")));
-}
-
-function removeBookmark(id: string, fromToggle: boolean) {
-  deleteBookmark(props.book.id, id)
-    .then(() => {
-      annotations.value.bookmarks = annotations.value.bookmarks.filter((b) => b.id !== id);
-      showToast(t(fromToggle ? "books.bookmarkRemoved" : "books.bookmarkDeleteDone"));
-    })
-    .catch(() => toastError(t("books.loadError")));
-}
-
-// ---- 笔记 ----
-function openNoteCreate() {
-  const sel = currentSelection.value;
-  if (!sel) return;
-  noteModal.mode = "create";
-  noteModal.excerpt = sel.text;
-  noteModal.note = null;
-  noteModal.saving = false;
-  noteModal.open = true;
-}
-
-function openNoteEdit(note: NoteAnnotation) {
-  noteModal.mode = "edit";
-  noteModal.excerpt = note.excerpt;
-  noteModal.note = note;
-  noteModal.saving = false;
-  noteModal.open = true;
-}
-
-function onNoteCancel() {
-  const wasCreate = noteModal.mode === "create";
-  noteModal.open = false;
-  if (wasCreate) clearSelection();
-}
-
-function saveNote(text: string) {
-  if (noteModal.saving) return;
-  noteModal.saving = true;
-  if (noteModal.mode === "create") {
-    const sel = currentSelection.value;
-    if (!sel) {
-      noteModal.saving = false;
-      noteModal.open = false;
-      return;
-    }
-    createNote(props.book.id, { cfi: sel.cfi, excerpt: sel.text, text })
-      .then(({ id }) => {
-        const now = Date.now();
-        annotations.value.notes.push({
-          id,
-          cfi: sel.cfi,
-          excerpt: sel.text,
-          text,
-          createdAt: now,
-          updatedAt: now,
-        });
-        showToast(t("books.noteDone"));
-      })
-      .catch(() => toastError(t("books.loadError")))
-      .finally(() => {
-        noteModal.saving = false;
-        noteModal.open = false;
-        clearSelection();
-      });
-  } else {
-    const note = noteModal.note;
-    if (!note) {
-      noteModal.saving = false;
-      noteModal.open = false;
-      return;
-    }
-    updateNote(props.book.id, note.id, text)
-      .then((updated) => {
-        const i = annotations.value.notes.findIndex((n) => n.id === note.id);
-        if (i >= 0) annotations.value.notes[i] = updated;
-        showToast(t("books.noteDone"));
-      })
-      .catch(() => toastError(t("books.loadError")))
-      .finally(() => {
-        noteModal.saving = false;
-        noteModal.open = false;
-      });
-  }
-}
-
-function removeNote(id: string) {
-  deleteNote(props.book.id, id)
-    .then(() => {
-      annotations.value.notes = annotations.value.notes.filter((n) => n.id !== id);
-      showToast(t("books.noteDeleteDone"));
-    })
-    .catch(() => toastError(t("books.loadError")));
-}
-
-// ---- 生词本 ----
-function removeVocab(id: string) {
-  deleteVocab(id)
-    .then(() => {
-      vocabList.value = vocabList.value.filter((v) => v.id !== id);
-      showToast(t("books.vocabDeleteDone"));
-    })
-    .catch(() => toastError(t("books.loadError")));
-}
-
-// ---- 工具栏动作 ----
-function onToolbarLookup(text: string) {
-  const sel = currentSelection.value;
-  if (!sel) return;
-  lookupState.open = true;
-  lookupState.word = text.slice(0, 60);
-  lookupState.context = sel.context || text.slice(0, 200);
-  lookupState.cfi = sel.cfi;
-  clearSelection();
-}
-
-/**
- * 工具栏/壳菜单统一入口（行为矩阵，iBooks 契约）：
- * - 无已有标注 → 新建（色点 = 底色高亮，U = 下划线）
- * - 点 U：已有下划线 → 移除（toggle off）；已有底色 → 转下划线
- * - 点色点 C：已有同色底色 → 移除（toggle off）；已有异色 → 换色；已有下划线 → 转底色
- * 复用 findHighlightForSelection 宽松匹配，杜绝"已有标注仍新建"（原 bug 根因）。
- */
-function onToolbarHighlight(_text: string, color: HighlightColor, style?: HighlightStyle) {
-  const existing = findHighlightForSelection();
-  if (!existing) {
-    addHighlight(color, style ?? "highlight");
-    return;
-  }
-  if (style === "underline") {
-    // 点 U
-    if (existing.style === "underline") removeHighlight(existing.id);
-    else toggleHighlightStyle(existing);
-    return;
-  }
-  // 点色点
-  if (existing.style === "highlight" && existing.color === color) removeHighlight(existing.id);
-  else changeHighlightColor(existing, color);
-}
-
-/** 书内搜索：只写 searchRequest（SearchPanel 由搜索子代理挂载并 watch 该 ref） */
-function onToolbarSearch(text: string) {
-  searchRequest.value = text;
-}
-
-/** 移除：选中 cfi 已有高亮时删除该条（宽松匹配，hasHighlight 显示条件同源） */
-function onToolbarRemove() {
-  const h = findHighlightForSelection();
-  if (h) removeHighlight(h.id);
-}
-
-function onToolbarNote(_text: string) {
-  openNoteCreate();
-}
-
-// ============ 书内搜索（V4）：SearchPanel 面板 + 跳转定位 + 临时高亮 ============
-const searchOpen = ref(false);
-const searchInitial = ref<string | null>(null);
-/** 菜单「搜索」请求：SelectionToolbar 的「搜索」项赋值选中词，这里 watch 打开面板并预填（声明在状态区 400 行） */
-/** 当前临时高亮 <mark>（直接包在 iframe DOM 上，不进 annotations/重放链路） */
-let searchTempMark: HTMLElement | null = null;
-
-/** 打开搜索面板（initial 非空 → SearchPanel 挂载后自动预填并搜索） */
-function openSearch(initial: string | null) {
-  searchInitial.value = initial;
-  searchOpen.value = true;
-  tocOpen.value = false;
-  settingsOpen.value = false;
-  panelOpen.value = false;
-}
-
-/** 关闭面板：同时清理临时高亮（面板不再可见，书内标记应还原） */
-function closeSearch() {
-  searchOpen.value = false;
-  clearTempHighlight();
-}
-
-function toggleSearch() {
-  if (searchOpen.value) closeSearch();
-  else openSearch(null);
-}
-
-/** 消费菜单搜索请求：非空 → 打开面板预填该词，并置回 null 防重复触发 */
-watch(searchRequest, (v) => {
-  if (!v) return;
-  openSearch(v);
-  searchRequest.value = null;
-});
-
-/** 临时高亮还原：<mark> 解包回原文 DOM（翻页 relocated / 关面板 / 新跳转前调用） */
-function clearTempHighlight() {
-  if (!searchTempMark) return;
-  try {
-    removeTempMark(searchTempMark);
-  } catch {
-    /* 还原失败忽略（epubjs 重渲染时 mark 随文档消失） */
-  }
-  searchTempMark = null;
-}
-
-/** 当前 iframe document（views 优先，getContents 兜底；mock 缺 views 时返回 null） */
-function getSearchDoc(): Document | null {
-  let contents = getCurrentContents();
-  if (!contents) {
-    try {
-      const cs = renditionRef.value?.getContents?.();
-      contents = Array.isArray(cs) ? cs[0] : cs;
-    } catch {
-      contents = null;
-    }
-  }
-  return (contents as { document?: Document } | null)?.document ?? null;
-}
-
-/**
- * 搜索跳转：display(cfi) 定位 → 当前章节文档内找句子/命中词 → <mark> 临时高亮。
- * 临时高亮只操作 iframe DOM（见 searchHighlight.ts），不注册 annotations——
- * 否则会进 epub.js hooks.render 自动重放链路，翻页/重渲染后被反复重放成脏标记。
- */
-async function onSearchJump(cfi: string, matchStart: number, matchEnd: number, sentence: string) {
-  clearTempHighlight();
-  try {
-    await renditionRef.value?.display(cfi);
-  } catch {
-    toastError(t("books.searchJumpFailed"));
-    return;
-  }
-  const doc = getSearchDoc();
-  if (!doc) {
-    toastError(t("books.searchJumpFailed"));
-    return;
-  }
-  const hit = findSentenceRange(doc, sentence, matchStart, matchEnd);
-  if (!hit) {
-    toastError(t("books.searchJumpFailed"));
-    return;
-  }
-  ensureTempMarkStyle(doc);
-  searchTempMark = applyTempMark(hit.range);
-  try {
-    searchTempMark.scrollIntoView?.({ block: "center" });
-  } catch {
-    /* 滚动定位失败不影响高亮 */
-  }
-}
-
-// ============ Swift 壳桥接（window.qqplayerNative 注入时启用；浏览器内全部静默 no-op） ============
-/** 壳注入的全局对象：qqplayerNative 环境标记 + webkit 消息桥 + 菜单 API 挂载点 */
-const nativeShell = window as unknown as {
-  qqplayerNative?: boolean;
-  webkit?: { messageHandlers?: { native?: { postMessage?: (message: unknown) => void } } };
-  __qqReaderMenu?: {
-    lookup: () => void;
-    highlight: (color: HighlightColor) => void;
-    note: () => void;
-    recolor: (color: HighlightColor) => void;
-  };
-};
-
-/** 是否运行在 Swift 原生壳内（壳注入 window.qqplayerNative；浏览器没有）。
- * 桌面壳（macOS/Windows）有原生右键菜单 → 隐藏 Web 工具栏；
- * iOS 壳无原生选区菜单（系统菜单无法禁用，WebKit bug 244149），Web 工具栏必须保留。 */
-function inNativeShell(): boolean {
-  return (
-    typeof window !== "undefined" && !!nativeShell.qqplayerNative && !nativeShell.qqplayerIosBridge
-  );
-}
-
-/** 壳内隐藏悬浮工具条（浏览器保留）；选区轮询与 currentSelection 照常维护（壳右键菜单依赖 cfi/context） */
-const isNativeShell = computed(inNativeShell);
-
-/** iOS 壳标记（qqplayerIosBridge 由壳注入）：选区工具栏遮罩等 iOS 特有逻辑用 */
-const isIOSShell = computed(
-  () =>
-    typeof window !== "undefined" &&
-    !!(window as { qqplayerIosBridge?: unknown }).qqplayerIosBridge,
-);
-
-/** 已上报给壳的选区状态（去重：仅状态变化时发送，400ms 轮询不重复刷屏） */
-let reportedActive = false;
-let reportedText = "";
-let reportedHasHighlight = false;
-let reportedHighlightStyle: HighlightStyle | null = null;
-
-/** 当前选中 cfi 是否已有高亮（壳右键菜单「移除高亮」显示条件） */
-function selectionHasHighlight(): boolean {
-  return findHighlightForSelection() !== null;
-}
-
-/** 当前选区已有高亮的样式（壳右键菜单「下划线」勾选态；与 hasHighlight 同源宽松匹配） */
-function selectionHighlightStyle(): HighlightStyle | null {
-  return findHighlightForSelection()?.style ?? null;
-}
-
-/** 按当前选区找高亮条目（换色/移除用）：精确 cfi → 去 offset 的 cfiPath → 文本包含（右键自动选词
- *  选中的单词常落在整句高亮内，cfi 对不上但文本能命中）。无选区/无匹配返回 null。 */
-function findHighlightForSelection(): HighlightAnnotation | null {
-  const sel = currentSelection.value;
-  if (!sel) return null;
-  const hs = annotations.value.highlights;
-  return (
-    hs.find((h) => h.cfi === sel.cfi) ??
-    hs.find((h) => cfiPath(h.cfi) === cfiPath(sel.cfi)) ??
-    (sel.text
-      ? (hs.find((h) => h.text && (h.text.includes(sel.text) || sel.text.includes(h.text))) ?? null)
-      : null)
-  );
-}
-
-/** 上报选区状态给壳（统一壳桥：webkit 走 postMessage / tauri 走 invoke / 浏览器 noop）；状态没变化不发，非壳环境静默跳过 */
-function postReaderState(
-  active: boolean,
-  text: string,
-  hasHighlight = false,
-  highlightStyle: HighlightStyle | null = null,
-) {
-  if (!inNativeShell()) return;
-  if (
-    reportedActive === active &&
-    reportedText === text &&
-    reportedHasHighlight === hasHighlight &&
-    reportedHighlightStyle === highlightStyle
-  )
-    return;
-  reportedActive = active;
-  reportedText = text;
-  reportedHasHighlight = hasHighlight;
-  reportedHighlightStyle = highlightStyle;
-  try {
-    useShellBridge().report({
-      type: "readerState",
-      active,
-      hasSelection: text.length > 0,
-      text,
-      hasHighlight,
-      highlightStyle,
-    });
-  } catch {
-    /* 壳消息发送失败忽略（不影响阅读） */
-  }
-}
-
-/** 壳菜单动作兜底：currentSelection 为空时从 iframe 实时读选区（系统右键自动选词瞬间，
- *  400ms 轮询还没上报，currentSelection 尚未建立）。读到则填充 currentSelection（含 cfi/context），
- *  后续 addHighlight/onToolbarLookup 等以 currentSelection 为数据源的动作即可正常工作。 */
-function syncSelectionFromDom(): boolean {
-  if (currentSelection.value) return true;
-  const iframe = containerRef.value?.querySelector("iframe");
-  const iw = iframe?.contentWindow;
-  const sel = iw?.getSelection?.();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
-  const text = sel.toString().trim();
-  if (!text) return false;
-  const contents = getCurrentContents();
-  if (!contents) return false;
-  try {
-    const cfi = (contents as { cfiFromRange?: (r: Range) => string }).cfiFromRange?.(
-      sel.getRangeAt(0),
-    );
-    if (!cfi) return false;
-    currentSelection.value = { cfi, text, context: extractSentence(text, contents) };
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 挂载全局菜单 API（Swift 点击系统右键菜单项时经 evaluateJavaScript 调用）；卸载时清理 */
-function installNativeMenuApi() {
-  nativeShell.__qqReaderMenu = {
-    // 查词：复用 onToolbarLookup（currentSelection 为数据源）；无选中时安全 no-op
-    lookup: () => {
-      syncSelectionFromDom();
-      onToolbarLookup(currentSelection.value?.text ?? "");
-    },
-    // 高亮：复用 onToolbarHighlight；非法颜色回退黄色（壳传 'yellow'|'green'|'blue'|'pink'|'purple'）
-    highlight: (color: string) => {
-      syncSelectionFromDom();
-      const c: HighlightColor = HIGHLIGHT_COLOR_STYLES[color as HighlightColor]
-        ? (color as HighlightColor)
-        : "yellow";
-      onToolbarHighlight("", c);
-    },
-    // 下划线（V4）：选中文字 → underline 标注（落库 red）
-    underline: () => {
-      syncSelectionFromDom();
-      onToolbarHighlight("", "yellow", "underline");
-    },
-    // 移除高亮：选中 cfi 已有高亮时删除该条；无选中/无高亮安全 no-op
-    remove: () => {
-      syncSelectionFromDom();
-      onToolbarRemove();
-    },
-    // 改颜色：已有高亮条目换色（删除重建，色点永远产出底色高亮，iBooks 行为）
-    recolor: (color: string) => {
-      syncSelectionFromDom();
-      const c: HighlightColor = HIGHLIGHT_COLOR_STYLES[color as HighlightColor]
-        ? (color as HighlightColor)
-        : "yellow";
-      const h = findHighlightForSelection();
-      if (h) changeHighlightColor(h, c);
-    },
-    // 书内搜索：选中词 → SearchPanel（searchRequest 由 watch 消费）
-    search: () => {
-      syncSelectionFromDom();
-      onToolbarSearch(currentSelection.value?.text ?? "");
-    },
-    // 笔记：复用 onToolbarNote（openNoteCreate 内部判空）；无选中时安全 no-op
-    note: () => {
-      syncSelectionFromDom();
-      onToolbarNote("");
-    },
-  };
-}
-
-function uninstallNativeMenuApi() {
-  delete nativeShell.__qqReaderMenu;
-}
-
-function onLookupClose() {
-  lookupState.open = false;
-  void refreshVocab(); // 弹窗内可能加入了生词
-}
-
-function onOpenDictManager() {
-  lookupState.open = false;
-  dictManagerOpen.value = true;
-}
-
-function togglePanel() {
-  panelOpen.value = !panelOpen.value;
-  if (panelOpen.value) {
-    tocOpen.value = false;
-    settingsOpen.value = false;
-    void refreshVocab();
-  }
-}
-
-/** 跳转到标注锚点（书签点 cfi / 高亮与笔记范围 cfi 均可 display） */
-function jumpTo(cfi: string) {
-  try {
-    void renditionRef.value?.display(cfi)?.catch?.(() => {});
-  } catch {
-    /* 跳转失败静默 */
-  }
-}
-
-// ============ 设置应用到 epub.js（themes.override 作用到 iframe body 的 inline 样式） ============
-/** 字体注入 style 的 id（hooks.content 每次内容加载时应用；applyReaderSettings 时对当前内容手动应用） */
-const FONT_STYLE_ID = "qqp-reader-font";
-
-/**
- * 字体族注入：themes.font() 只把 font-family 设在 documentElement（html）上，EPUB 内部
- * CSS 对 body/段落的显式 font-family 会覆盖继承值 → 点字体不生效。改用注入
- * `body, body * { font-family: <css> !important }` 强覆盖（iBooks 等阅读器同类做法）。
- * default（空 CSS）→ 移除注入，恢复 EPUB 原字体。
- */
-function applyFontToContents(contents: { document?: Document }) {
-  const doc = contents.document;
-  if (!doc) return;
-  doc.getElementById(FONT_STYLE_ID)?.remove();
-  const css = readerFontCss(readerSettings.fontFamily);
-  if (!css) return;
-  const style = doc.createElement("style");
-  style.id = FONT_STYLE_ID;
-  style.textContent = `body, body * { font-family: ${css} !important; }`;
-  doc.head.appendChild(style);
-}
-
-/**
- * 禁 EPUB 内容 iframe 内浏览器默认右键菜单（EPUB 正文只读，右键应弹自定义菜单/无菜单；
- * input/textarea/[contenteditable] 保留系统菜单）。iframe 内 contextmenu 不冒泡到父页面，
- * 必须挂在内容 document 上（走 hooks.content 注入，换章重建 iframe 后自动重新挂）。
- * 注意：处理器是父 realm 函数、事件来自 iframe realm，e.target instanceof Element 会判错，
- * 用 realm 无关的 .closest 方法判断（同 onTapClick 的写法）。
- */
-function blockNativeContextMenu(contents: { document?: Document }) {
-  const doc = contents.document;
-  if (!doc) return;
-  doc.addEventListener(
-    "contextmenu",
-    (e: Event) => {
-      const t = (e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]");
-      if (!t) e.preventDefault();
-    },
-    true,
-  );
-}
-
-/**
- * 章节内容去链接语义（2026-08-23 阶段4）：<a> → <span>（保留子节点与 class）。
- * 原因：iOS WKWebView 选区包含 <a> 时，系统编辑菜单自动加“拷贝链接”项（绕过
- * canPerformAction），盖住 Web 选区工具栏；阅读器导航走顶栏目录/epubjs cfi，
- * 正文内链接无功能依赖，去掉后选区工具栏独占交互。
- */
-function stripContentLinks(contents: { document?: Document }) {
-  const doc = contents.document;
-  if (!doc) return;
-  try {
-    doc.querySelectorAll("a").forEach((a) => {
-      const span = doc.createElement("span");
-      if (a.className) span.className = a.className;
-      while (a.firstChild) span.appendChild(a.firstChild);
-      a.replaceWith(span);
-    });
-  } catch {
-    /* 内容处理失败不影响阅读 */
-  }
-}
-
-/**
- * iframe 内容注入 -webkit-touch-callout: none（2026-08-23 阶段4）：
- * iOS 选区菜单里的“拷贝高亮标记的链接”胶囊是 WebKit 的 touch callout 行为，
- * 全局 CSS 只作用于主文档，epub 章节在 iframe 内需要单独注入；
- * 禁掉后选区交互只保留 Web 工具栏（五色点/查词/笔记/搜索/拷贝）。
- */
-function applyNoTouchCallout(contents: { document?: Document }) {
-  const doc = contents.document;
-  if (!doc || !doc.head) return;
-  try {
-    if (doc.getElementById("__qq_no_touch_callout")) return;
-    const style = doc.createElement("style");
-    style.id = "__qq_no_touch_callout";
-    style.textContent =
-      "html, body, * { -webkit-touch-callout: none !important; }\n" +
-      // 水平手势归 JS（滑动翻页）；保留垂直滚动
-      "html, body { touch-action: pan-y !important; }";
-    doc.head.appendChild(style);
-  } catch {
-    /* 样式注入失败不影响阅读 */
-  }
-}
-
-/**
- * 高亮位置重算：marks-pane 的 SVG 矩形只在 epubjs reframe（尺寸变化）时重算，
- * 字体/字号/行距等设置变化引起的内容重排不会触发 → 高亮错位。设置应用后手动
- * 对所有 view 的 pane 重算一次（pane.render 内部遍历 mark 重新 getBoundingClientRect）。
- */
-function refreshMarks() {
-  const rendition = renditionRef.value;
-  if (!rendition) return;
-  try {
-    (rendition as { views?: () => Array<{ pane?: { render?: () => void } }> })
-      .views?.()
-      ?.forEach((v) => v.pane?.render?.());
-  } catch {
-    /* 高亮重算失败不影响阅读 */
-  }
-}
-
-function applyReaderSettings() {
-  const rendition = renditionRef.value;
-  if (!rendition) return;
-  const themes = rendition.themes;
-  const s = readerSettings;
-  // 字体族：注入 body * !important 覆盖（见 applyFontToContents）；default → 移除注入
-  try {
-    const cs = rendition.getContents();
-    const list = (Array.isArray(cs) ? cs : cs ? [cs] : []) as { document?: Document }[];
-    list.forEach(applyFontToContents);
-  } catch {
-    /* 内容未就绪时忽略（hooks.content 会在加载后自动应用） */
-  }
-  // 字号（百分比，相对 iframe 默认字号）
-  themes.fontSize(s.fontSize + "%");
-  // 行距（body 无单位值，子元素按倍数继承）
-  themes.override("line-height", String(s.lineHeight));
-  // 粗体开关：只覆盖 body 字重（EPUB 自带 heading 等显式样式不受影响）；关 → 空值移除覆盖
-  themes.override("font-weight", s.bold ? "700" : "");
-  // 主题色：预设 + textColor/bgColor 自定义覆盖；!important 压过 EPUB 自带 body 样式
-  const { text, bg } = resolveReaderThemeColors(s);
-  themes.override("color", text, true);
-  themes.override("background", bg, true);
-  // 页边距不在这里做：epub.js 分页布局（columns()）会强制写 body padding-left/right !important，
-  // themes.override 会被覆盖。改为容器 padding（readerContainerStyle）+ renderTo/resize 用内容盒尺寸。
-  // 内容重排（字体/字号/行距等）后高亮 SVG 位置需重算
-  refreshMarks();
-}
-
-// 页边距：容器 padding（iframe 外部，不受 epub.js 内部布局影响）
-const readerContainerStyle = computed(() => ({ padding: `${readerSettings.margin}px` }));
-// 页边距变化时 iframe 尺寸跟随（容器 padding 改变 → 内容盒宽度改变）
-let lastMargin = READER_SETTINGS_DEFAULTS.margin;
-
-// 阅读设置变化 → 即时应用到当前渲染（保存走 onSettingsPatch 的防抖）
-watch(
-  () => ({ ...readerSettings }),
-  () => {
-    applyReaderSettings();
-    if (readerSettings.margin !== lastMargin) {
-      lastMargin = readerSettings.margin;
-      onResize();
-    }
+// ============ Swift 壳桥接（useNativeReaderBridge：window.qqplayerNative 注入时启用；浏览器内全部静默 no-op） ============
+const {
+  isNativeShell,
+  isIOSShell,
+  inNativeShell,
+  postReaderState,
+  selectionHasHighlight,
+  selectionHighlightStyle,
+  findHighlightForSelection,
+  installNativeMenuApi,
+  uninstallNativeMenuApi,
+} = useNativeReaderBridge({
+  containerRef,
+  // 晚绑定：以下依赖均来自后续创建的 composable，调用点全部在运行时（非 setup 期）
+  getCurrentSelection: () => currentSelection.value,
+  setCurrentSelection: (sel) => {
+    currentSelection.value = sel;
   },
-);
+  getAnnotations: () => annotations.value,
+  cfiPath: (cfi) => cfiPath(cfi),
+  getCurrentContents: () => getCurrentContents(),
+  extractSentence: (text, contents) => extractSentence(text, contents),
+  onToolbarLookup: (text) => onToolbarLookup(text),
+  onToolbarHighlight: (text, color, style) => onToolbarHighlight(text, color, style),
+  onToolbarRemove: () => onToolbarRemove(),
+  onToolbarSearch: (text) => onToolbarSearch(text),
+  onToolbarNote: (text) => onToolbarNote(text),
+  changeHighlightColor: (h, color) => changeHighlightColor(h, color),
+});
 
-// App 主题变化 → 阅读主题 auto 时需重算（非 auto 重跑无副作用）
-watch(
-  () => uiSettings.theme,
-  () => applyReaderSettings(),
-);
+// ============ 标注：高亮 / 书签 / 笔记 + 生词本（useAnnotations） ============
+const {
+  annotations,
+  vocabList,
+  panelOpen,
+  dictManagerOpen,
+  curCfi,
+  hlMenu,
+  hlMenuHighlight,
+  closeHighlightMenu,
+  noteModal,
+  isCurrentBookmarked,
+  cfiPath,
+  loadAnnotations,
+  refreshVocab,
+  addHighlight,
+  removeHighlight,
+  replaceHighlight,
+  changeHighlightColor,
+  toggleHighlightStyle,
+  changeMenuColor,
+  toggleMenuStyle,
+  removeMenuHighlight,
+  openMenuNote,
+  openNoteForHighlight,
+  toggleBookmark,
+  removeBookmark,
+  openNoteCreate,
+  openNoteEdit,
+  onNoteCancel,
+  saveNote,
+  removeNote,
+  removeVocab,
+  togglePanel,
+  jumpTo,
+} = useAnnotations({
+  renditionRef,
+  getBookId: () => props.book.id,
+  // 壳上报（useNativeReaderBridge；Reader 未拆前为下方内部函数，函数声明提升可安全引用）
+  inNativeShell,
+  postReaderState,
+  selectionHasHighlight,
+  selectionHighlightStyle,
+  // 选中数据源（useSelectionToolbar；晚绑定：读写均在加载/交互后）
+  getToolbar: () => ({ currentSelection, clearSelection }),
+  // 阅读设置（useReaderSettings；晚绑定，高亮样式跟随当前主题）
+  getSettings: () => readerSettings,
+  // 设置抽屉互锁（useReaderSettings；晚绑定）
+  closeSettings: () => {
+    settingsOpen.value = false;
+  },
+  tocOpen,
+});
+
+// ============ 阅读设置（useReaderSettings：后端 /api/settings books namespace；localStorage 只读不写） ============
+const {
+  settingsOpen,
+  readerSettings,
+  dictThemeColors,
+  loadReaderSettings,
+  onSettingsPatch,
+  onResetSettings,
+  toggleSettings,
+  toggleToc,
+  bumpFontSize,
+  clearSaveTimer,
+} = useReaderSettings({
+  tocOpen,
+  panelOpen,
+  // 设置应用到 epub.js 由 useReaderStyling 提供（晚绑定：loadReaderSettings 挂载后才调用）
+  apply: () => applyReaderSettings(),
+});
+
+// ============ 翻页 / 点击热区 / 滑动（useReaderNavigation：epubjs 翻页 + 左右 22% 热区 + iOS 滑动翻页） ============
+const {
+  prevPage,
+  nextPage,
+  getCurrentContents,
+  attachTapHandlers,
+  detachTapHandlers,
+  subscribeSwipe,
+  unsubscribeSwipe,
+} = useReaderNavigation({
+  renditionRef,
+  containerRef,
+  bodyRef,
+  annotations,
+  hlMenu,
+  closeHighlightMenu,
+  // 晚绑定：useSelectionToolbar 随后创建，调用点全部在运行时
+  getToolbar: () => toolbar,
+  hideToolbar: () => hideToolbar(),
+});
+
+// ============ 选中工具栏（useSelectionToolbar：选区状态 + 轮询 + 工具栏动作） ============
+const {
+  toolbar,
+  currentSelection,
+  searchRequest,
+  toolbarHasHighlight,
+  toolbarHighlight,
+  toolbarColor,
+  hideToolbar,
+  clearSelection,
+  extractSentence,
+  stopSelPolling,
+  startSelPolling,
+  onSelected,
+  onToolbarHighlight,
+  onToolbarSearch,
+  onToolbarRemove,
+  onToolbarNote,
+} = useSelectionToolbar({
+  rootRef,
+  containerRef,
+  renditionRef,
+  annotations,
+  // 壳上报/高亮匹配（useNativeReaderBridge；Reader 未拆前为下方内部函数，函数声明提升可安全引用）
+  findHighlightForSelection,
+  postReaderState,
+  selectionHasHighlight,
+  selectionHighlightStyle,
+  // 当前 contents（useReaderNavigation；Reader 未拆前为下方内部函数）
+  getCurrentContents,
+  // 标注动作（useAnnotations）
+  closeHighlightMenu,
+  addHighlight,
+  removeHighlight,
+  toggleHighlightStyle,
+  changeHighlightColor,
+  openNoteCreate,
+});
+
+// ============ 查词（useDictLookup：弹窗状态 + 查词/词典管理入口） ============
+const { lookupState, onToolbarLookup, onLookupClose, onOpenDictManager } = useDictLookup({
+  currentSelection,
+  dictManagerOpen,
+  clearSelection,
+  refreshVocab,
+});
+
+// ============ 书内搜索（useReaderSearch：面板状态 + 临时高亮 + 跳转） ============
+const {
+  searchOpen,
+  searchInitial,
+  openSearch,
+  closeSearch,
+  toggleSearch,
+  clearTempHighlight,
+  onSearchJump,
+  releaseTempHighlight,
+} = useReaderSearch({
+  searchRequest,
+  tocOpen,
+  settingsOpen,
+  panelOpen,
+  renditionRef,
+  // 当前 contents（useReaderNavigation；Reader 未拆前为下方内部函数）
+  getCurrentContents,
+});
+
+// ============ 设置应用到 epub.js（useReaderStyling：themes.override 作用到 iframe body 的 inline 样式） ============
+const {
+  applyReaderSettings,
+  applyFontToContents,
+  blockNativeContextMenu,
+  stripContentLinks,
+  applyNoTouchCallout,
+  readerContainerStyle,
+} = useReaderStyling({
+  renditionRef,
+  readerSettings,
+  onResize,
+});
 
 // ============ 目录（tree 展平为带缩进列表） ============
 function flattenToc(items: NavItem[], depth = 0): { item: NavItem; depth: number }[] {
@@ -1513,162 +519,6 @@ async function goToTocItem(item: NavItem) {
     await renditionRef.value?.display(item.href);
   } catch {
     /* 跳转失败静默 */
-  }
-}
-
-// ============ 翻页 ============
-function prevPage() {
-  renditionRef.value?.prev();
-}
-
-function nextPage() {
-  renditionRef.value?.next();
-}
-
-// ============ 翻页热区（iframe 内事件，不再用透明按钮盖住 iframe） ============
-// 原实现：左右各 22% 透明 button（z-index 2）盖住 epubjs iframe → 左右边缘文字无法拖选。
-// 现方案：epubjs Contents 把 iframe 内 DOM 事件（mousedown/click）转发成 contents 事件，
-// 直接在 iframe document 上监听：click 按坐标判断左右 22% 翻页；拖选（位移 > 阈值或非空选区）不翻页。
-const TAP_EDGE_RATIO = 0.22; // 左右热区各占容器宽度比例（与原 .reader-tap 一致）
-const TAP_DRAG_THRESHOLD = 8; // px：mousedown→click 位移超过视为拖选而非点击
-/** 当前挂了翻页监听的 contents（epubjs 翻页会重建 contents，relocated 后重新挂，防重复挂载） */
-let tapContents: unknown = null;
-let tapDownX = 0;
-let tapDownY = 0;
-
-function getCurrentContents(): unknown {
-  const rendition = renditionRef.value;
-  // 单测 mock 可能没有 views 方法（08-18 坑：诊断逻辑别碰 mock 缺失的 API）
-  if (!rendition || typeof (rendition as { views?: unknown }).views !== "function") return null;
-  let contents: unknown = null;
-  (rendition as { views: () => Array<{ contents?: unknown }> }).views().forEach((v) => {
-    const vc = (v as { contents?: unknown }).contents;
-    if (vc) contents = vc;
-  });
-  return contents;
-}
-
-function attachTapHandlers() {
-  const contents = getCurrentContents();
-  if (!contents || contents === tapContents) return;
-  detachTapHandlers();
-  const doc = (contents as { document?: Document }).document;
-  // 内容未就绪时不设 tapContents（否则永不重挂），等 relocated/下一次调用重试
-  if (!doc) return;
-  tapContents = contents;
-  doc.addEventListener("mousedown", onTapMouseDown, true);
-  doc.addEventListener("click", onTapClick, true);
-}
-
-function detachTapHandlers() {
-  if (!tapContents) return;
-  const doc = (tapContents as { document?: Document }).document;
-  if (doc) {
-    doc.removeEventListener("mousedown", onTapMouseDown, true);
-    doc.removeEventListener("click", onTapClick, true);
-  }
-  tapContents = null;
-}
-
-function onTapMouseDown(e: MouseEvent) {
-  tapDownX = e.clientX;
-  tapDownY = e.clientY;
-}
-
-/** iOS 原生滑动翻页事件订阅（UISwipeGestureRecognizer → native swipe 事件；onMounted 注册，onBeforeUnmount 取消） */
-let unsubSwipe: (() => void) | null = null;
-
-/**
- * 命中检测：epub.js marks 渲染在父文档的 SVG overlay（marks-pane，pointer-events:none），
- * 不在 iframe 内容文档里 —— contents click 的 e.target 是文字本身，closest(".epubjs-hl") 永远不中。
- * 真实验证（0.3.93 + 浏览器实测）：marks-pane 在 iframe 内容文档上监听 click，命中坐标后向父文档的
- * <g class="epubjs-hl|epubjs-ul"> 派发克隆事件（bubbles:false），epubjs 再转发 markClicked ——
- * 顺序依赖 pane 创建时机（首次高亮 vs attachTapHandlers 先后不定），不可靠。
- * 改为在 onTapClick 里按坐标反查父文档 mark：取 <g> 子元素（rect/line）逐段命中。
- * 坐标系：点击事件 clientX/Y 是 iframe 内容文档视口坐标（0 在 iframe 左上），而 mark rect 的
- * getBoundingClientRect 是父文档视口坐标 → 比较前先减去 iframe 偏移（浏览器实测确认）。
- * cfi/id 从 dataset 拿（epubjs 会把 data 和 epubcfi 写进 <g> 的 data-* 属性）。
- */
-function findMarkAt(
-  clientX: number,
-  clientY: number,
-): { el: Element; id: string | null; cfi: string | null; rect: DOMRect } | null {
-  const container = containerRef.value;
-  if (!container) return null;
-  const iframe = container.querySelector("iframe");
-  const iframeRect = iframe?.getBoundingClientRect();
-  const offX = iframeRect?.left ?? 0;
-  const offY = iframeRect?.top ?? 0;
-  const marks = container.querySelectorAll(".epubjs-hl, .epubjs-ul");
-  for (const g of marks) {
-    const gEl = g as Element & { dataset?: DOMStringMap };
-    for (const child of Array.from(g.children)) {
-      const r = (child as SVGGraphicsElement).getBoundingClientRect();
-      // 内容文档坐标 = 父文档坐标 - iframe 偏移
-      const rx = r.left - offX;
-      const ry = r.top - offY;
-      if (clientX >= rx && clientX <= rx + r.width && clientY >= ry && clientY <= ry + r.height) {
-        return { el: g, id: gEl.dataset?.id ?? null, cfi: gEl.dataset?.epubcfi ?? null, rect: r };
-      }
-    }
-  }
-  return null;
-}
-
-/** 点击高亮：按命中段定位菜单（默认高亮上方，靠上翻转），优先 id 反查、cfi 兜底 */
-function openHighlightMenu(mark: { id: string | null; cfi: string | null; rect: DOMRect }) {
-  let h = mark.id ? (annotations.value.highlights.find((x) => x.id === mark.id) ?? null) : null;
-  if (!h && mark.cfi) h = annotations.value.highlights.find((x) => x.cfi === mark.cfi) ?? null;
-  if (!h) return;
-  // mark 的 rect 是父文档 viewport 坐标（marks-pane 渲染在父文档，与工具栏的 iframe 内容坐标不同）。
-  // 菜单挂在 .reader-body 内（position:absolute 以它为包含块）→ 用 body 的 rect 换算，不能用 .reader（
-  // 两者相差顶栏高度，浏览器实测：算错会导致菜单盖住高亮、点不到 mark）。
-  const bodyEl = bodyRef.value;
-  if (!bodyEl) return;
-  const bodyRect = bodyEl.getBoundingClientRect();
-  const r = mark.rect;
-  hlMenu.x = r.left + r.width / 2 - bodyRect.left;
-  hlMenu.y = r.top - bodyRect.top;
-  hlMenu.id = h.id;
-  hlMenu.visible = true;
-  hideToolbar();
-}
-
-function onTapClick(e: MouseEvent) {
-  // 点击已有高亮/下划线 → 弹菜单（不翻页、不触发链接）
-  const mark = findMarkAt(e.clientX, e.clientY);
-  if (mark) {
-    e.preventDefault();
-    openHighlightMenu(mark);
-    return;
-  }
-  // 菜单开着时点击内容其它区域 → 收起（iframe 内点击不冒泡到父窗口，onWindowMouseDown 收不到）
-  if (hlMenu.visible) closeHighlightMenu();
-  // 选区工具栏打开时点击菜单外区域 → 收起（用户要求：点外部应消失）
-  if (toolbar.visible) {
-    hideToolbar();
-    return;
-  }
-  // 链接点击交给 epubjs 默认处理，不翻页
-  const target = e.target as HTMLElement | null;
-  if (target?.closest?.("a")) return;
-  // 拖选不翻页：位移超阈值（拖选文字）或 iframe 内有非空选区
-  if (Math.hypot(e.clientX - tapDownX, e.clientY - tapDownY) > TAP_DRAG_THRESHOLD) return;
-  const iframe = containerRef.value?.querySelector("iframe");
-  const sel = iframe?.contentWindow?.getSelection?.();
-  if (sel && !sel.isCollapsed && sel.toString().trim()) return;
-  // 坐标基准用容器（可见区域）：epubjs iframe 元素宽度是横向分页内容总宽（远超视口），
-  // 用它算 22%/78% 会全落在中间；容器 rect = 用户实际看到的区域，与原 .reader-tap 定位一致
-  const container = containerRef.value;
-  const cRect = container?.getBoundingClientRect();
-  if (!cRect || cRect.width === 0) return;
-  const x = e.clientX - cRect.left;
-  if (x < cRect.width * TAP_EDGE_RATIO) {
-    e.preventDefault();
-    prevPage();
-  } else if (x > cRect.width * (1 - TAP_EDGE_RATIO)) {
-    e.preventDefault();
-    nextPage();
   }
 }
 
@@ -1769,15 +619,12 @@ function onResize() {
 
 // ============ 加载 / 销毁 ============
 function teardown() {
-  searchTempMark = null; // iframe 文档随 rendition.destroy 销毁，仅清引用
+  releaseTempHighlight(); // iframe 文档随 rendition.destroy 销毁，仅清引用
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  if (settingsSaveTimer) {
-    clearTimeout(settingsSaveTimer);
-    settingsSaveTimer = null;
-  }
+  clearSaveTimer();
   detachTapHandlers();
   renditionRef.value?.destroy();
   renditionRef.value = null;
@@ -1881,13 +728,8 @@ onMounted(() => {
   postReaderState(true, ""); // 壳：Reader 激活初始状态（无选区）
   loadReaderSettings();
   loadBook();
-  // iOS 原生滑动翻页（UISwipeGestureRecognizer → native swipe 事件 → 翻页）
-  unsubSwipe = onNativeEvent("swipe", (payload: { dir?: string }) => {
-    if (toolbar.visible) hideToolbar();
-    if (hlMenu.visible) closeHighlightMenu();
-    if (payload?.dir === "left") nextPage();
-    else if (payload?.dir === "right") prevPage();
-  });
+  // iOS 原生滑动翻页（UISwipeGestureRecognizer → native swipe 事件 → 翻页；useReaderNavigation 订阅）
+  subscribeSwipe();
 });
 
 onBeforeUnmount(() => {
@@ -1896,8 +738,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("mousedown", onWindowMouseDown, true);
   stopSelPolling();
   uninstallNativeMenuApi();
-  unsubSwipe?.();
-  postReaderState(false, ""); // 壳：Reader 已卸载（hasSelection:false, text:""）
+  unsubscribeSwipe();
+  postReaderState(false, ""); // 壳：Reader 已卸载（hasSelection:false, text:"")
   teardown();
 });
 </script>
