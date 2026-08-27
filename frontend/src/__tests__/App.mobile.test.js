@@ -106,14 +106,16 @@ describe("App 布局切换（isMobile 响应式）", () => {
     wrapper.unmount();
   });
 
-  it("移动布局下迷你条打开设置：App 转发 open-settings 事件", async () => {
+  it("移动布局下音乐页设置齿轮 → 进入负一屏设置区（不再弹桌面设置弹窗）", async () => {
     mq.set(true);
     const wrapper = mount(App);
     await flushPromises();
     await wrapper.find('.mh-icon-btn[title="设置"]').trigger("click");
     await flushPromises();
-    // SettingsModal 打开（Teleport 到 body）
-    expect(document.body.querySelector(".modal")).toBeTruthy();
+    // MobileShell 内部进入负一屏设置区（同步面板），不再 Teleport 桌面弹窗
+    expect(wrapper.find(".ms-page").exists()).toBe(true);
+    expect(wrapper.find(".msc-page").exists()).toBe(true);
+    expect(document.body.querySelector(".modal")).toBeFalsy();
     wrapper.unmount();
   });
 });

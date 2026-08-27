@@ -1,6 +1,7 @@
-// MobileShell 边缘滑动返回测试（任务 I-10 + T3 负一屏）
+// MobileShell 边缘滑动返回测试（任务 I-10 + 主界面导航重构：负一屏设置区 + 分页左缘翻页）
 // 覆盖：左缘右滑序列触发 pop / 位移不足回弹 / 非左缘起点不响应 /
-//       首页（栈底）左缘右滑 → 打开负一屏同步中心 / 负一屏返回 / 播放器页可返回
+//       分页第 0 屏左缘右滑 → 负一屏设置区（默认同步面板）/ 负一屏返回 /
+//       其余分页屏左缘右滑 → 翻上一屏 / 播放器页可返回 / 纵向滑动不误触
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 
@@ -58,8 +59,26 @@ async function edgeSwipe(wrapper, { from = 8, to = 130, steps = 4 } = {}) {
   await flushPromises();
 }
 
+// 分页容器普通区域横滑（非左缘起点）：左滑=下一页，右滑=上一页
+async function pagerSwipe(wrapper, { from = 220, to = 60, steps = 4 } = {}) {
+  const el = wrapper.find(".mp-pager").element;
+  fireTouch(el, "touchstart", [{ clientX: from, clientY: 200 }]);
+  for (let i = 1; i <= steps; i++) {
+    const x = from + ((to - from) * i) / steps;
+    fireTouch(el, "touchmove", [{ clientX: x, clientY: 200 }]);
+  }
+  fireTouch(el, "touchend", [], [{ clientX: to, clientY: 200 }]);
+  await flushPromises();
+}
+
 function edgeShift(wrapper) {
   return wrapper.find(".mobile-shell").element.style.getPropertyValue("--edge-shift");
+}
+
+// 当前高亮圆点下标（0..3）
+function activeDot(wrapper) {
+  const dots = wrapper.findAll(".mp-dot");
+  return dots.findIndex((d) => d.classes().includes("on"));
 }
 
 beforeEach(() => {
@@ -85,8 +104,8 @@ afterEach(() => {
 });
 
 async function openSongList(wrapper) {
-  const cards = wrapper.findAll(".mh-card");
-  await cards.find((c) => c.text().includes("所有歌曲")).trigger("click");
+  const rows = wrapper.findAll(".mh-row");
+  await rows.find((c) => c.text().includes("所有歌曲")).trigger("click");
 }
 
 describe("MobileShell 边缘滑动返回", () => {
@@ -118,33 +137,55 @@ describe("MobileShell 边缘滑动返回", () => {
     expect(edgeShift(wrapper)).toBe(""); // 从未跟手
   });
 
-  it("首页（页面栈第一层）左缘右滑 → 打开负一屏同步中心（T3）", async () => {
-    const wrapper = mount(MobileShell); // stack = [home]
+  it("分页第 0 屏（音乐页）左缘右滑 → 打开负一屏设置区（默认同步面板）", async () => {
+    const wrapper = mount(MobileShell); // stack = [main]，page 0
     await edgeSwipe(wrapper, { from: 8, to: 150 });
-    expect(wrapper.find(".msc-page").exists()).toBe(true); // MobileSync
+    expect(wrapper.find(".ms-page").exists()).toBe(true); // MobileSettings
+    expect(wrapper.find(".msc-page").exists()).toBe(true); // 同步面板（MobileSync embedded）
     expect(wrapper.find(".mh-page").exists()).toBe(false);
     expect(edgeShift(wrapper)).toBe("0px");
   });
 
-  it("负一屏返回按钮 → 回到首页（pop 出 sync）", async () => {
+  it("负一屏返回按钮 → 回到音乐页（pop 出 settings）", async () => {
     const wrapper = mount(MobileShell);
-    await edgeSwipe(wrapper, { from: 8, to: 150 }); // 进 sync
-    expect(wrapper.find(".msc-page").exists()).toBe(true);
-    await wrapper.find(".msc-back").trigger("click");
+    await edgeSwipe(wrapper, { from: 8, to: 150 }); // 进 settings
+    expect(wrapper.find(".ms-page").exists()).toBe(true);
+    await wrapper.find(".ms-back").trigger("click");
     expect(wrapper.find(".mh-page").exists()).toBe(true);
-    expect(wrapper.find(".msc-page").exists()).toBe(false);
+    expect(wrapper.find(".ms-page").exists()).toBe(false);
   });
 
-  it("负一屏内左缘右滑（栈深>1）→ pop 回首页（右滑返回自动生效）", async () => {
+  it("负一屏内左缘右滑（栈深>1）→ pop 回音乐页（右滑返回自动生效）", async () => {
     const wrapper = mount(MobileShell);
-    await edgeSwipe(wrapper, { from: 8, to: 150 }); // 进 sync
-    expect(wrapper.find(".msc-page").exists()).toBe(true);
+    await edgeSwipe(wrapper, { from: 8, to: 150 }); // 进 settings
+    expect(wrapper.find(".ms-page").exists()).toBe(true);
     await edgeSwipe(wrapper, { from: 8, to: 130 }); // 再滑 → 栈深 2 > 1 → pop
     expect(wrapper.find(".mh-page").exists()).toBe(true);
-    expect(wrapper.find(".msc-page").exists()).toBe(false);
+    expect(wrapper.find(".ms-page").exists()).toBe(false);
   });
 
-  it("全屏播放器页左缘滑动 → 返回首页（与返回按钮共用 pop）", async () => {
+  it("分页第 1 屏左缘右滑 → 翻上一屏（回音乐页），不打开负一屏", async () => {
+    const wrapper = mount(MobileShell);
+    await pagerSwipe(wrapper, { from: 220, to: 60 }); // 普通区域左滑 → 第 1 屏（图书）
+    expect(activeDot(wrapper)).toBe(1);
+    expect(wrapper.find(".mb-page").exists()).toBe(true);
+    await edgeSwipe(wrapper, { from: 8, to: 130 }); // 左缘右滑 → 翻上一屏
+    expect(activeDot(wrapper)).toBe(0);
+    expect(wrapper.find(".mh-page").exists()).toBe(true);
+    expect(wrapper.find(".ms-page").exists()).toBe(false);
+  });
+
+  it("分页第 2 屏左缘右滑 → 翻上一屏（回图书屏）", async () => {
+    const wrapper = mount(MobileShell);
+    await pagerSwipe(wrapper, { from: 220, to: 60 }); // → 1
+    await pagerSwipe(wrapper, { from: 220, to: 60 }); // → 2（有声书）
+    expect(activeDot(wrapper)).toBe(2);
+    await edgeSwipe(wrapper, { from: 8, to: 130 }); // 左缘右滑 → 回第 1 屏
+    expect(activeDot(wrapper)).toBe(1);
+    expect(wrapper.find(".mb-page").exists()).toBe(true);
+  });
+
+  it("全屏播放器页左缘滑动 → 返回音乐页（与返回按钮共用 pop）", async () => {
     const wrapper = mount(MobileShell);
     await wrapper.find(".mini-player").trigger("click");
     expect(wrapper.find(".mobile-player").exists()).toBe(true);

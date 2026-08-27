@@ -1,6 +1,6 @@
 <template>
   <div class="mh-page">
-    <!-- 顶栏：标题 + 搜索/设置入口 -->
+    <!-- 顶栏：标题 + 刷新/搜索/设置入口 -->
     <header class="mh-head">
       <h1 class="mh-title">{{ t("mobile.home.title") }}</h1>
       <div class="mh-actions">
@@ -31,150 +31,99 @@
     </header>
 
     <div class="mh-scroll">
-      <!-- 九张入口卡片 -->
-      <div class="mh-grid">
+      <!-- 一列入口列表：仅音乐相关 6 项（图书/有声书/视频改为分页屏，智能视图入口移除） -->
+      <div class="mh-list">
         <button
-          class="mh-card"
+          class="mh-row"
           @click="$emit('open', { name: 'list', kind: 'songs', title: t('mobile.home.allSongs') })"
         >
           <span class="mh-tile" style="--tile: var(--accent); --tile2: var(--accent2)">
-            <Music2 :size="22" />
+            <Music2 :size="20" />
           </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.allSongs") }}</span>
-            <span class="mh-card-count">{{
+          <span class="mh-row-meta">
+            <span class="mh-row-name">{{ t("mobile.home.allSongs") }}</span>
+            <span class="mh-row-count">{{
               t("mobile.count.song", { n: state.songs.length })
             }}</span>
           </span>
+          <ChevronRight :size="18" class="mh-row-arrow" />
         </button>
 
         <button
-          class="mh-card"
+          class="mh-row"
           @click="
             $emit('open', { name: 'list', kind: 'favorites', title: t('mobile.home.favorites') })
           "
         >
           <span class="mh-tile" style="--tile: #ff6b81; --tile2: #ff9aa8">
-            <Heart :size="22" fill="currentColor" />
+            <Heart :size="20" fill="currentColor" />
           </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.favorites") }}</span>
-            <span class="mh-card-count">{{ t("mobile.count.song", { n: favoriteCount }) }}</span>
+          <span class="mh-row-meta">
+            <span class="mh-row-name">{{ t("mobile.home.favorites") }}</span>
+            <span class="mh-row-count">{{ t("mobile.count.song", { n: favoriteCount }) }}</span>
           </span>
+          <ChevronRight :size="18" class="mh-row-arrow" />
         </button>
 
         <button
-          class="mh-card"
+          class="mh-row"
           @click="
             $emit('open', { name: 'list', kind: 'playlists', title: t('mobile.home.playlists') })
           "
         >
           <span class="mh-tile" style="--tile: #34d399; --tile2: #6ee7b7">
-            <ListMusic :size="22" />
+            <ListMusic :size="20" />
           </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.playlists") }}</span>
-            <span class="mh-card-count">{{
+          <span class="mh-row-meta">
+            <span class="mh-row-name">{{ t("mobile.home.playlists") }}</span>
+            <span class="mh-row-count">{{
               t("mobile.count.playlist", { n: state.playlists.length })
             }}</span>
           </span>
+          <ChevronRight :size="18" class="mh-row-arrow" />
         </button>
 
         <button
-          class="mh-card"
+          class="mh-row"
           @click="$emit('open', { name: 'list', kind: 'artists', title: t('mobile.home.artists') })"
         >
           <span class="mh-tile" style="--tile: #5b9dff; --tile2: #8ab4ff">
-            <Users :size="22" />
+            <Users :size="20" />
           </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.artists") }}</span>
-            <span class="mh-card-count">{{
+          <span class="mh-row-meta">
+            <span class="mh-row-name">{{ t("mobile.home.artists") }}</span>
+            <span class="mh-row-count">{{
               t("mobile.count.artist", { n: artistGroups.length })
             }}</span>
           </span>
+          <ChevronRight :size="18" class="mh-row-arrow" />
         </button>
 
         <button
-          class="mh-card"
+          class="mh-row"
           @click="$emit('open', { name: 'list', kind: 'albums', title: t('mobile.home.albums') })"
         >
           <span class="mh-tile" style="--tile: #a78bfa; --tile2: #c4b5fd">
-            <Disc3 :size="22" />
+            <Disc3 :size="20" />
           </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.albums") }}</span>
-            <span class="mh-card-count">{{
+          <span class="mh-row-meta">
+            <span class="mh-row-name">{{ t("mobile.home.albums") }}</span>
+            <span class="mh-row-count">{{
               t("mobile.count.album", { n: albumGroups.length })
             }}</span>
           </span>
+          <ChevronRight :size="18" class="mh-row-arrow" />
         </button>
 
-        <button class="mh-card" @click="openFilePicker">
+        <button class="mh-row" @click="openFilePicker">
           <span class="mh-tile" style="--tile: #f59e0b; --tile2: #fbbf24">
-            <FolderInput :size="22" />
+            <FolderInput :size="20" />
           </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.openFile") }}</span>
-            <span class="mh-card-count">{{ t("mobile.home.importMusic") }}</span>
+          <span class="mh-row-meta">
+            <span class="mh-row-name">{{ t("mobile.home.openFile") }}</span>
+            <span class="mh-row-count">{{ t("mobile.home.importMusic") }}</span>
           </span>
-        </button>
-
-        <!-- 电子书入口：书架 + 阅读器 -->
-        <button class="mh-card" @click="$emit('open', { name: 'books' })">
-          <span class="mh-tile" style="--tile: #14b8a6; --tile2: #2dd4bf">
-            <BookOpen :size="22" />
-          </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.books") }}</span>
-            <span class="mh-card-count">{{ t("books.title") }}</span>
-          </span>
-        </button>
-
-        <!-- 视频入口：视频库 + 跟唱播放器 -->
-        <button class="mh-card" @click="$emit('open', { name: 'videos' })">
-          <span class="mh-tile" style="--tile: #f43f5e; --tile2: #fb7185">
-            <Video :size="22" />
-          </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.videos") }}</span>
-            <span class="mh-card-count">{{ t("videos.title") }}</span>
-          </span>
-        </button>
-
-        <!-- 智能视图入口：最近添加 / 最近播放 / 常听排行 -->
-        <button class="mh-card" @click="openSmartView('recentAdded')">
-          <span class="mh-tile" style="--tile: #06b6d4; --tile2: #22d3ee">
-            <Sparkles :size="22" />
-          </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.recentAdded") }}</span>
-            <span class="mh-card-count">{{
-              t("mobile.count.song", { n: Math.min(SMART_VIEW_LIMIT, state.songs.length) })
-            }}</span>
-          </span>
-        </button>
-
-        <button class="mh-card" @click="openSmartView('recentPlayed')">
-          <span class="mh-tile" style="--tile: #ec4899; --tile2: #f472b6">
-            <History :size="22" />
-          </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.recentPlayed") }}</span>
-            <span class="mh-card-count">{{
-              t("mobile.count.recentSongs", { n: SMART_VIEW_LIMIT })
-            }}</span>
-          </span>
-        </button>
-
-        <button class="mh-card" @click="openSmartView('topPlayed')">
-          <span class="mh-tile" style="--tile: #eab308; --tile2: #fde047">
-            <TrendingUp :size="22" />
-          </span>
-          <span class="mh-card-meta">
-            <span class="mh-card-name">{{ t("mobile.home.topPlayed") }}</span>
-            <span class="mh-card-count">{{ t("mobile.home.topPlayedDesc") }}</span>
-          </span>
+          <ChevronRight :size="18" class="mh-row-arrow" />
         </button>
       </div>
 
@@ -190,14 +139,6 @@
       multiple
       @change="onFilePicked"
     />
-
-    <!-- 智能视图列表（覆盖首页，保留底部迷你播放条） -->
-    <MobileSmartList
-      v-if="smartKind"
-      :kind="smartKind"
-      @close="smartKind = null"
-      @open-player="$emit('open', { name: 'player' })"
-    />
   </div>
 </template>
 
@@ -211,21 +152,15 @@ import {
   Users,
   Disc3,
   FolderInput,
+  ChevronRight,
   Search,
   Settings,
-  Sparkles,
-  History,
-  TrendingUp,
   RefreshCw,
-  BookOpen,
-  Video,
 } from "@lucide/vue";
 import { state, isFavorite, loadSongs } from "../../composables/usePlayer.js";
 import { useSearchAnything } from "../../composables/useSearchAnything.js";
-import { SMART_VIEW_LIMIT } from "../../composables/useSmartViews.js";
 import { showToast, toastError } from "../../composables/useToast.js";
 import { isAudioFile, importFiles } from "../../composables/useDragImport.js";
-import MobileSmartList from "./MobileSmartList.vue";
 
 defineEmits(["open", "open-settings"]);
 
@@ -277,13 +212,6 @@ const albumGroups = computed(() => {
   return [...m.values()].sort((a, b) => a.album.localeCompare(b.album, "zh"));
 });
 
-// ============ 智能视图入口（卡片 → 列表浮层） ============
-const smartKind = ref(null); // 当前打开的智能视图 kind；null = 关闭
-
-function openSmartView(kind) {
-  smartKind.value = smartKind.value === kind ? null : kind; // 再点同一卡片 = 关闭
-}
-
 // ============ 打开文件（NAS 导入入口） ============
 const fileInput = ref(null);
 
@@ -312,7 +240,6 @@ function onFilePicked(e) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  position: relative; /* 智能视图列表浮层定位基准 */
 }
 .mh-head {
   flex-shrink: 0;
@@ -365,27 +292,21 @@ function onFilePicked(e) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 16px 16px;
+  padding: 8px 16px 20px;
   -webkit-overflow-scrolling: touch;
 }
-.mh-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-/* 平板（≥600px）：三列卡片，避免拉伸过宽 */
-@media (min-width: 600px) {
-  .mh-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-.mh-card {
+/* 一列入口列表：每行 = 左侧图标 tile + 名称 + 副标题计数 */
+.mh-list {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 10px;
-  padding: 16px 14px;
-  border-radius: 16px;
+}
+.mh-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 14px;
   background: var(--card);
   border: 1px solid var(--border);
   text-align: left;
@@ -393,14 +314,14 @@ function onFilePicked(e) {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.mh-card:active {
+.mh-row:active {
   background: var(--card2);
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 .mh-tile {
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -409,22 +330,28 @@ function onFilePicked(e) {
   box-shadow: 0 4px 12px color-mix(in srgb, var(--tile, var(--accent)) 35%, transparent);
   flex-shrink: 0;
 }
-.mh-card-meta {
+.mh-row-meta {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  gap: 2px;
 }
-.mh-card-name {
+.mh-row-name {
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mh-card-count {
+.mh-row-count {
   font-size: 12px;
   color: var(--text3);
-  margin-top: 3px;
+}
+.mh-row-arrow {
+  color: var(--text3);
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 .mh-foot {
   margin-top: 18px;

@@ -1,7 +1,7 @@
 <template>
   <div class="msc-page">
-    <!-- 头部：返回 + 标题 + 上次同步时间 -->
-    <header class="msc-head">
+    <!-- 头部：返回 + 标题 + 上次同步时间（嵌入式模式隐藏：头部由 MobileSettings 提供） -->
+    <header v-if="!embedded" class="msc-head">
       <button class="msc-back" :title="t('mobile.list.back')" @click="$emit('back')">
         <ChevronLeft :size="24" />
       </button>
@@ -406,6 +406,10 @@ import {
 } from "../../utils/sync.js";
 
 defineEmits(["back"]);
+defineProps({
+  // 嵌入式面板模式（负一屏设置区）：隐藏自身头部（返回/标题/上次同步时间），由 MobileSettings 统一头部提供
+  embedded: { type: Boolean, default: false },
+});
 const { t } = useI18n();
 // ---------- 头部 ----------
 const lastSyncText = computed(() => {

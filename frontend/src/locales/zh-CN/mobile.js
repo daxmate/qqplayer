@@ -22,6 +22,15 @@ export default {
       refreshed: "已刷新",
       foot: "从手机/NAS 浏览器直接播放音乐库",
     },
+    // 有声书占位页（分页第 2 屏）
+    audiobooks: {
+      title: "有声书",
+      comingSoon: "有声书功能开发中，敬请期待",
+    },
+    // 负一屏设置区（MobileSettings：汉堡抽屉 + 设置面板）
+    settingsArea: {
+      menu: "设置分类",
+    },
     count: {
       song: "{n} 首",
       playlist: "{n} 个",

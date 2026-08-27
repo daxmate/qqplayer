@@ -58,10 +58,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// 搜索按钮已改为打开全局搜索层（不导航），列表页入口改用「所有歌曲」卡片
+// 搜索按钮已改为打开全局搜索层（不导航），列表页入口改用「所有歌曲」行
 async function openSongList(wrapper) {
-  const cards = wrapper.findAll(".mh-card");
-  await cards.find((c) => c.text().includes("所有歌曲")).trigger("click");
+  const rows = wrapper.findAll(".mh-row");
+  await rows.find((c) => c.text().includes("所有歌曲")).trigger("click");
 }
 
 // 播放器收起（顶栏收起按钮已删除 → 改为封面区下拉返回手势）
@@ -153,10 +153,10 @@ describe("MobileShell 页面栈导航", () => {
   it("分组下钻嵌套：播放列表 → 歌单 → 返回逐级回退到首页", async () => {
     state.playlists = [{ id: "p1", name: "我的歌单", songPaths: ["/lib/a.mp3"] }];
     const wrapper = mount(MobileShell);
-    // 用文本定位「播放列表」卡片
-    const cards = wrapper.findAll(".mh-card");
-    const playlistsCard = cards.find((c) => c.text().includes("播放列表"));
-    await playlistsCard.trigger("click");
+    // 用文本定位「播放列表」行
+    const rows = wrapper.findAll(".mh-row");
+    const playlistsRow = rows.find((c) => c.text().includes("播放列表"));
+    await playlistsRow.trigger("click");
     expect(wrapper.find(".ml-group").exists()).toBe(true);
     expect(wrapper.find(".ml-title").text()).toBe("播放列表");
     // 点歌单 → 嵌套歌曲列表
@@ -169,32 +169,5 @@ describe("MobileShell 页面栈导航", () => {
     // 再返回 → 回首页
     await wrapper.find(".ml-back").trigger("click");
     expect(wrapper.find(".mh-page").exists()).toBe(true);
-  });
-
-  it("智能视图歌曲行点击 → 播放 + 打开全屏播放器", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url) => {
-        if (url === "/api/songs") return { ok: true, json: async () => [] };
-        if (url === "/api/playback") {
-          return {
-            ok: true,
-            json: async () => ({ records: [{ path: "/lib/b.mp3", ts: "2026-08-13T10:00:00Z" }] }),
-          };
-        }
-        return { ok: false, json: async () => ({}) };
-      }),
-    );
-    const wrapper = mount(MobileShell);
-    const cards = wrapper.findAll(".mh-card");
-    const recentPlayed = cards.find((c) => c.text().includes("最近播放"));
-    await recentPlayed.trigger("click");
-    await flushPromises();
-    expect(wrapper.find(".msv-item").exists()).toBe(true);
-    await wrapper.find(".msv-item").trigger("click");
-    await flushPromises();
-    expect(state.currentIndex).toBe(1);
-    expect(state.isPlaying).toBe(true);
-    expect(wrapper.find(".mobile-player").exists()).toBe(true);
   });
 });

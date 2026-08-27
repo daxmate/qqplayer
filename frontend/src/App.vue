@@ -1,13 +1,9 @@
 <template>
   <div class="app">
     <div v-if="blurCoverUrl" class="bg-blur" :style="{ backgroundImage: `url(${blurCoverUrl})` }" />
-    <!-- 移动端（<1024px）：页面栈式布局（媒体库首页 / 列表 / 全屏播放器 + 迷你播放条） -->
-    <MobileShell
-      v-if="isMobile"
-      ref="shellRef"
-      @open-settings="isSettingsOpen = true"
-      @open-sync="openSyncCenter"
-    />
+    <!-- 移动端（<1024px）：页面栈式布局（分页容器 / 列表 / 负一屏设置区 / 全屏播放器 + 迷你播放条）
+    （音乐页齿轮已由 MobileShell 内部处理 → 负一屏，不再弹桌面设置弹窗） -->
+    <MobileShell v-if="isMobile" ref="shellRef" @open-sync="openSyncCenter" />
     <!-- 桌面端（≥1024px）：三栏布局（完全不变） -->
     <template v-else>
       <!-- 顶栏 -->
@@ -290,7 +286,7 @@ import {
 
 const { t } = useI18n();
 
-// 负一屏同步中心：SettingsModal 同步 tab「打开同步中心」→ 关设置弹窗 + MobileShell push sync
+// 负一屏设置区：SettingsModal 同步 tab「打开同步中心」→ 关设置弹窗 + MobileShell 进入负一屏（默认同步面板）
 // （桌面布局无 MobileShell → shellRef 为空，按钮在桌面不展示，此处兜底不动作）
 const shellRef = ref(null);
 function openSyncCenter() {

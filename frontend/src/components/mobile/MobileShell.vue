@@ -1,13 +1,18 @@
 <template>
   <div ref="shellEl" class="mobile-shell" :class="{ 'edge-dragging': edge.dragging }">
-    <!-- 页面栈视图：home / list / sync（负一屏）/ books / videos（底部迷你播放条之上） -->
+    <!-- 页面栈视图：main（分页容器，栈底）/ list / settings（负一屏）/ books / videos（底部迷你播放条之上） -->
     <Transition :name="navTransition" mode="out-in">
-      <MobileHome
-        v-if="top.name === 'home'"
-        key="home"
-        @open="push"
-        @open-settings="$emit('open-settings')"
-      />
+      <!-- 分页容器用 KeepAlive 缓存：从列表/播放器/设置返回后保留当前分页与屏内状态（书架滚动等） -->
+      <KeepAlive v-if="top.name === 'main'">
+        <MobilePager
+          key="main"
+          :page-index="pagerPage"
+          @update:page-index="pagerPage = $event"
+          @open="push"
+          @open-settings="openSettings"
+          @overlay="pagerOverlay = $event"
+        />
+      </KeepAlive>
       <MobileList
         v-else-if="top.name === 'list'"
         :key="'list-' + stack.length"
@@ -18,10 +23,12 @@
         @play="playFromList"
         @open="push"
       />
-      <!-- 负一屏同步中心：从左缘右滑进入（动画方向与普通 push 相反） -->
-      <MobileSync v-else-if="top.name === 'sync'" :key="'sync-' + stack.length" @back="pop" />
-      <MobileBooks v-else-if="top.name === 'books'" :key="'books-' + stack.length" @back="pop" />
-      <MobileVideos v-else-if="top.name === 'videos'" :key="'videos-' + stack.length" @back="pop" />
+      <!-- 负一屏设置区：从左缘右滑进入（动画方向与普通 push 相反） -->
+      <MobileSettings
+        v-else-if="top.name === 'settings'"
+        :key="'settings-' + stack.length"
+        @back="pop"
+      />
       <div v-else key="void" class="mp-void"></div>
     </Transition>
 
@@ -39,24 +46,23 @@
 import { ref, computed } from "vue";
 import { selectSong, play, findSongIndex } from "../../composables/usePlayer.js";
 import { useEdgeSwipe } from "../../composables/useSwipe.js";
-import MobileHome from "./MobileHome.vue";
+import MobilePager from "./MobilePager.vue";
 import MobileList from "./MobileList.vue";
 import MobilePlayer from "./MobilePlayer.vue";
-import MobileSync from "./MobileSync.vue";
-import MobileBooks from "../../books/MobileBooks.vue";
-import MobileVideos from "../../videos/MobileVideos.vue";
+import MobileSettings from "./MobileSettings.vue";
 import MiniPlayerBar from "./MiniPlayerBar.vue";
 
 const shellEl = ref(null);
 
-defineEmits(["open-settings"]);
-
 // ============ 页面栈（Apple Music 式导航） ============
-// 栈底固定为 home；list 支持嵌套下钻（播放列表 → 歌单歌曲等）；sync 为负一屏；player 为栈顶全屏层
-const stack = ref([{ name: "home" }]);
+// 栈底固定为 main（横滑分页容器）；list 支持嵌套下钻；settings 为负一屏；player 为栈顶全屏层
+const stack = ref([{ name: "main" }]);
 const top = computed(() => stack.value[stack.value.length - 1]);
 
-// 切换动画方向：负一屏（sync）进出与普通 push 相反（从左滑入/向右滑出）
+// 分页当前下标（壳层持有：左缘右滑翻上一屏用；KeepAlive 重挂载后经 :page-index 恢复）
+const pagerPage = ref(0);
+
+// 切换动画方向：负一屏（settings）进出与普通 push 相反（从左滑入/向右滑出）
 const navTransition = ref("mp-push");
 
 function push(view) {
@@ -70,25 +76,45 @@ function push(view) {
   ) {
     return;
   }
-  // 本次导航涉及负一屏 → 反向动画（push sync / 从 sync pop 双向生效）
-  navTransition.value = view.name === "sync" ? "mp-push-reverse" : "mp-push";
+  // 本次导航涉及负一屏 → 反向动画（push settings / 从 settings pop 双向生效）
+  navTransition.value = view.name === "settings" ? "mp-push-reverse" : "mp-push";
   stack.value.push(view);
 }
 
 function pop() {
   const leaving = stack.value[stack.value.length - 1];
-  if (leaving && leaving.name === "sync") navTransition.value = "mp-push-reverse";
+  if (leaving && leaving.name === "settings") navTransition.value = "mp-push-reverse";
   else navTransition.value = "mp-push";
   if (stack.value.length > 1) stack.value.pop();
 }
 
-// 屏幕左缘右滑（iOS 式边缘滑动）：栈深>1 → pop 返回；栈深=1（首页）→ 打开负一屏同步中心。
-// 手势判断逻辑在 useEdgeSwipe（通用），onTrigger 按栈深分流放在这里。
+// 音乐页齿轮 / SettingsModal「打开同步中心」→ 负一屏设置区（默认同步面板）
+function openSettings() {
+  push({ name: "settings" });
+}
+function openSyncCenter() {
+  openSettings();
+}
+
+defineExpose({ push, openSyncCenter, openSettings });
+
+// ============ 分页容器（栈底 main） ============
+// 分页屏内阅读器/视频播放器浮层开关（pager 上报；浮层打开时禁边缘滑动）
+const pagerOverlay = ref(false);
+
+// 屏幕左缘右滑（iOS 式边缘滑动）：
+//   栈深 > 1 → pop 返回；栈深 = 1（分页容器）→ 第 0 屏打开负一屏设置区，其余屏翻上一屏。
+// 分页屏内全屏浮层（阅读器/视频播放器）打开时禁用（浮层自身处理返回）。
 const edge = useEdgeSwipe(shellEl, {
-  enabled: () => true, // 首页也响应（打开负一屏），其余页维持返回
+  enabled: () => !(top.value.name === "main" && pagerOverlay.value),
   onTrigger: () => {
-    if (stack.value.length > 1) pop();
-    else push({ name: "sync" });
+    if (stack.value.length > 1) {
+      pop();
+    } else if (pagerPage.value > 0) {
+      pagerPage.value--; // 其余屏左缘右滑 = 翻上一屏
+    } else {
+      push({ name: "settings" }); // 第 0 屏（音乐）左缘右滑 → 负一屏设置区
+    }
   },
 });
 
@@ -104,13 +130,6 @@ async function playFromList(song) {
   play();
   openPlayer();
 }
-
-// 供 App.vue 转发 SettingsModal「打开同步中心」入口
-function openSyncCenter() {
-  push({ name: "sync" });
-}
-
-defineExpose({ push, openSyncCenter });
 </script>
 
 <style scoped>
@@ -148,7 +167,7 @@ defineExpose({ push, openSyncCenter });
   transform: translateX(-12%);
   opacity: 0;
 }
-/* 负一屏（sync）动画方向相反：从左滑入（enter-from -24%）、向右滑出（leave-to +12%） */
+/* 负一屏（settings）动画方向相反：从左滑入（enter-from -24%）、向右滑出（leave-to +12%） */
 .mp-push-reverse-enter-active,
 .mp-push-reverse-leave-active {
   transition:

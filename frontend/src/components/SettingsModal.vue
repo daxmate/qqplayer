@@ -1,9 +1,10 @@
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="modal-mask" @click.self="close">
-      <div class="modal">
-        <!-- 头部 -->
-        <div class="modal-head">
+  <!-- 嵌入式模式（iOS 壳负一屏设置区）：无 Teleport、无 modal 外壳/遮罩/侧边导航，仅渲染当前 tab 面板内容区 -->
+  <Teleport to="body" :disabled="embedded">
+    <div v-if="open" class="modal-mask" :class="{ embedded }" @click.self="onMaskClick">
+      <div class="modal" :class="{ embedded }">
+        <!-- 头部（嵌入式隐藏：头部由 MobileSettings 提供） -->
+        <div v-if="!embedded" class="modal-head">
           <button v-if="isMobile" class="modal-back" :title="t('settings.back')" @click="close">
             <ChevronDown :size="18" />
           </button>
@@ -15,9 +16,9 @@
           </button>
         </div>
 
-        <!-- 主体：左导航 + 右内容 -->
-        <div class="modal-body">
-          <nav class="side-nav">
+        <!-- 主体：左导航 + 右内容（嵌入式隐藏左导航） -->
+        <div class="modal-body" :class="{ embedded }">
+          <nav v-if="!embedded" class="side-nav">
             <button
               v-for="c in categories"
               :key="c.key"
@@ -556,7 +557,7 @@
 
             <!-- ============ 同步（iOS 壳 → 负一屏同步中心入口；非 iOS 保留现状） ============ -->
             <section v-else-if="tab === 'sync'" class="settings-scroll">
-              <template v-if="isNative && isMobile">
+              <template v-if="!embedded && isNative && isMobile">
                 <div class="group">
                   <div class="group-title">
                     <RefreshCw :size="13" />
@@ -1657,12 +1658,10 @@ import {
   X,
   ChevronDown,
   FolderOpen,
-  Music2,
   Type,
   Eye,
   Sparkles,
   LayoutGrid,
-  ListMusic,
   Keyboard,
   Info,
   RotateCcw,
@@ -1718,6 +1717,7 @@ import {
   parseShortcutCombo,
 } from "../composables/usePlayer.js";
 import { showToast } from "../composables/useToast.js";
+import { getSettingsCategories } from "../composables/useSettingsCategories.js";
 import {
   fetchDevices,
   fetchCommandHistory,
@@ -1741,7 +1741,6 @@ import {
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 import PairingSettings from "./PairingSettings.vue";
 import ScrapeResultModal from "./ScrapeResultModal.vue";
-import { isPairingEnabled } from "../composables/usePairingConfirm.js";
 import {
   scrapingSettings,
   SCRAPING_FIELDS,
@@ -1754,6 +1753,10 @@ import pkg from "../../package.json";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  // 嵌入式面板模式（iOS 壳负一屏设置区）：无 modal 外壳/遮罩/导航，仅渲染当前 tab 面板；
+  // 配合 initialTab（进入时定位面板）使用；桌面弹窗行为不变。
+  embedded: { type: Boolean, default: false },
+  initialTab: { type: String, default: "ui" },
 });
 const emit = defineEmits(["close", "open-sync"]);
 
@@ -1781,7 +1784,7 @@ const dataDir = "~/Library/Application Support/qqplayer";
 const localUrl = "http://localhost:17627";
 const repoUrl = "https://github.com/daxmate/qqplayer";
 
-const tab = ref("ui");
+const tab = ref(props.initialTab);
 const lyricSubTab = ref("app"); // 歌词 tab 子页：'app' APP 歌词 | 'desktop' 桌面歌词
 const amllPerfHintOpen = ref(false); // AMLL 三特效性能提示（info 按钮）展开状态
 const libInput = ref("");
@@ -2116,23 +2119,9 @@ function onBatchLibrary() {
   runScrapeBatch({ mode: "library" });
 }
 
-// 分类导航：iOS 壳（发起方）隐藏配对管理，由桌面壳管理配对
-const categories = computed(() => {
-  const list = [
-    { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
-    { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
-    { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },
-    { key: "library", labelKey: "settings.category.library", icon: FolderOpen },
-    { key: "scrape", labelKey: "settings.category.scrape", icon: Tags },
-    { key: "download", labelKey: "settings.category.download", icon: Download },
-    { key: "sync", labelKey: "settings.category.sync", icon: RefreshCw },
-    { key: "video", labelKey: "settings.category.video", icon: Video },
-    { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
-    { key: "pairing", labelKey: "settings.category.pairing", icon: Smartphone },
-    { key: "about", labelKey: "settings.category.about", icon: Info },
-  ];
-  return isPairingEnabled() ? list : list.filter((c) => c.key !== "pairing");
-});
+// 分类导航：与移动端设置区抽屉共用（useSettingsCategories，避免双份维护）
+// 每次实例创建时求值（isPairingEnabled 非响应式，模块级缓存会过期）
+const categories = computed(() => getSettingsCategories());
 
 const playModeOptions = [
   { value: "order", labelKey: "settings.playModeOrder" },
@@ -2296,7 +2285,7 @@ watch(
   () => props.open,
   (o) => {
     if (o) {
-      tab.value = "ui";
+      tab.value = props.initialTab;
       error.value = "";
       loadLibrary().then(() => {
         libInput.value = state.libraryPath;
@@ -2305,11 +2294,13 @@ watch(
     }
   },
 );
-watch(tab, (v) => {
+function runTabLoaders(v) {
   if (v === "download") refreshQuarkState();
   if (v === "scrape") loadScrapingSettings(); // 进入刮削 tab 拉取最新设置（与 library tab 同款）
   if (v === "sync") loadDevicePanel(); // 进入同步 tab 拉取设备面板
-});
+}
+// immediate：嵌入式常驻实例（外部切 tab 后 :key 重挂）挂载时也要跑面板按需加载
+watch(tab, (v) => runTabLoaders(v), { immediate: true });
 
 async function save() {
   const p = libInput.value.trim();
@@ -2328,6 +2319,11 @@ async function save() {
 
 function close() {
   emit("close");
+}
+
+// 嵌入式模式遮罩点击不关闭（无遮罩语义）；弹窗模式保持点遮罩关闭
+function onMaskClick() {
+  if (!props.embedded) close();
 }
 
 function onKey(e) {
@@ -2356,6 +2352,35 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   z-index: 100;
+}
+/* 嵌入式面板模式（iOS 壳负一屏设置区）：无遮罩/无弹窗外壳，作为页面内容区渲染 */
+.modal-mask.embedded {
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  background: none;
+  backdrop-filter: none;
+  display: block;
+  z-index: auto;
+}
+.modal.embedded {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+.modal-body.embedded {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+/* 嵌入式面板内容区：移动端密度（弹窗的 22px 左右内边距偏宽） */
+.modal-mask.embedded .settings-scroll {
+  padding: 14px 14px 24px;
 }
 .modal {
   width: min(780px, calc(100vw - 40px));

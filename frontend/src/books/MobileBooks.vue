@@ -1,12 +1,17 @@
 <template>
   <div class="mb-page">
-    <!-- 页头：返回 + 标题 -->
+    <!-- 页头：返回 + 标题（分页屏模式 standalone=false：书架态隐藏返回按钮，仅阅读器打开时显示用于关闭） -->
     <header class="mb-head">
-      <button class="mb-back" :title="t('books.back')" @click="$emit('back')">
+      <button
+        v-if="standalone || activeBook"
+        class="mb-back"
+        :title="t('books.back')"
+        @click="onBack"
+      >
         <ChevronLeft :size="22" />
       </button>
       <h1 class="mb-title">{{ t("books.title") }}</h1>
-      <span class="mb-head-spacer" />
+      <span v-if="standalone || activeBook" class="mb-head-spacer" />
     </header>
 
     <!-- 书架（复用 Bookshelf） -->
@@ -22,17 +27,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronLeft } from "@lucide/vue";
 import Bookshelf from "./Bookshelf.vue";
 import Reader from "./Reader.vue";
 import type { BookView } from "./types";
 
-defineEmits<{ back: [] }>();
+const props = withDefaults(defineProps<{ standalone?: boolean }>(), { standalone: true });
+// back：独立页模式（壳层页面栈）向上 pop；overlay：阅读器全屏浮层开关（分页屏模式供壳层禁用手势）
+const emit = defineEmits<{ back: []; overlay: [open: boolean] }>();
 const { t } = useI18n();
 
 const activeBook = ref<BookView | null>(null);
+
+// 阅读器浮层状态上报（分页屏模式：壳层据此禁用边缘滑动/横滑翻页）
+watch(activeBook, (b) => emit("overlay", !!b));
+
+// 返回：阅读器打开时先关阅读器；书架态（独立页模式）才向上 pop
+function onBack() {
+  if (activeBook.value) {
+    activeBook.value = null;
+    return;
+  }
+  if (!props.standalone) return;
+  emit("back");
+}
 </script>
 
 <style scoped>

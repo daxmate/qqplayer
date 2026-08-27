@@ -1,12 +1,17 @@
 <template>
   <div class="mv-page">
-    <!-- 页头：返回 + 标题 -->
+    <!-- 页头：返回 + 标题（分页屏模式 standalone=false：书架态隐藏返回按钮，仅播放器打开时显示用于关闭） -->
     <header class="mv-head">
-      <button class="mv-back" :title="t('videos.back')" @click="$emit('back')">
+      <button
+        v-if="standalone || activeVideo"
+        class="mv-back"
+        :title="t('videos.back')"
+        @click="onBack"
+      >
         <ChevronLeft :size="22" />
       </button>
       <h1 class="mv-title">{{ t("videos.title") }}</h1>
-      <span class="mv-head-spacer" />
+      <span v-if="standalone || activeVideo" class="mv-head-spacer" />
     </header>
 
     <!-- 视频库（复用 VideoLibrary：列表 + 本地加载） -->
@@ -22,14 +27,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronLeft } from "@lucide/vue";
 import VideoLibrary from "./VideoLibrary.vue";
 import VideoPlayer from "./VideoPlayer.vue";
 import type { VideoSource } from "./types";
 
-defineEmits<{ back: [] }>();
+const props = withDefaults(defineProps<{ standalone?: boolean }>(), { standalone: true });
+// back：独立页模式（壳层页面栈）向上 pop；overlay：全屏播放器浮层开关（分页屏模式供壳层禁用手势）
+const emit = defineEmits<{ back: []; overlay: [open: boolean] }>();
 const { t } = useI18n();
 
 const activeVideo = ref<VideoSource | null>(null);
@@ -38,6 +45,19 @@ const playerKey = ref(0);
 function onOpen(video: VideoSource) {
   activeVideo.value = video;
   playerKey.value += 1;
+}
+
+// 播放器浮层状态上报（分页屏模式：壳层据此禁用边缘滑动/横滑翻页）
+watch(activeVideo, (v) => emit("overlay", !!v));
+
+// 返回：播放器打开时先关播放器；列表态（独立页模式）才向上 pop
+function onBack() {
+  if (activeVideo.value) {
+    activeVideo.value = null;
+    return;
+  }
+  if (!props.standalone) return;
+  emit("back");
 }
 </script>
 

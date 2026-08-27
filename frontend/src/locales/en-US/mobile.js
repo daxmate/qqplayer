@@ -22,6 +22,15 @@ export default {
       refreshed: "Refreshed",
       foot: "Play your music library from a phone/NAS browser",
     },
+    // Audiobooks placeholder (pager screen 2)
+    audiobooks: {
+      title: "Audiobooks",
+      comingSoon: "Audiobooks are coming soon — stay tuned",
+    },
+    // Negative-screen settings area (MobileSettings: hamburger drawer + setting panels)
+    settingsArea: {
+      menu: "Settings",
+    },
     count: {
       song: "{n} songs",
       playlist: "{n} playlists",
