@@ -644,7 +644,7 @@ async function loadBookBuffer() {
   }
   const resp = await api({ url: props.book.fileUrl, raw: true });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return await resp.response.arrayBuffer();
+  return await resp.response!.arrayBuffer();
 }
 
 async function loadBook() {

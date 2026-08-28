@@ -31,10 +31,12 @@ const TOKEN_KEY = "qqplayer.token";
 const SERVER_KEY = "qqplayer.server";
 
 // ---------- 类型（宽松边界：data 为 unknown，调用方自行断言；字段与 JS 原实现一一对应） ----------
-interface ApiResponse {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 边界：JSON 反序列化体天然任意形状，消费方可传泛型收紧（JS 迁移兼容）
+interface ApiResponse<T = any> {
   ok: boolean;
   status: number;
-  data?: unknown;
+  /** 反序列化 JSON 体（成功响应体 / 错误体）；类型化消费方可传泛型收紧，默认宽松（JS 迁移兼容） */
+  data?: T;
   message?: string;
   fromCache?: boolean;
   offline?: boolean;
