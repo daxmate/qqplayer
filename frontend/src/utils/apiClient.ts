@@ -575,12 +575,12 @@ export async function flushPendingOps(): Promise<{ flushed: number; kept: number
       const r = await api({ url: entry.op.url, method: entry.op.method, body: entry.payload });
       if (r.ok) {
         flushed++;
-        await removePendingOps([entry.id]);
+        await removePendingOps([entry.id!]);
       } else {
-        kept.push(entry.id);
+        kept.push(entry.id!);
       }
     } catch {
-      kept.push(entry.id);
+      kept.push(entry.id!);
     }
   }
   return { flushed, kept: kept.length };
@@ -606,13 +606,13 @@ export async function writeLocal({
   const id = await enqueuePendingOp({ url, method }, body);
   const r = await api({ url, method, body });
   if (r.ok) {
-    await removePendingOps([id]);
+    await removePendingOps([id!]);
     return "ok";
   }
   if (r.network) {
     scheduleFlush(); // 离线：保留队列，稍后自动重试
     return "queued";
   }
-  await removePendingOps([id]);
+  await removePendingOps([id!]);
   return "rejected";
 }
