@@ -5,7 +5,7 @@
 //   2. coverVisible(zone) 严格等于 !!uiSettings[zoneMap[zone]]（开关开/关各测）
 import { describe, it, expect, beforeEach } from "vitest";
 import { uiSettings } from "../composables/useSettings.js";
-import { coverVisible, zoneMap } from "../composables/useCoverGuard.ts";
+import { coverVisible, zoneMap } from "../composables/useCoverGuard.js";
 
 describe("useCoverGuard 契约：zoneMap 映射 + coverVisible 布尔判断", () => {
   beforeEach(() => {

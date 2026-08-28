@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 // 构造带 dataTransfer 的 window 事件（jsdom 的 DragEvent 不支持 dataTransfer 赋值）
-function fireEvent(type, dataTransfer) {
+function fireEvent(type: string, dataTransfer: unknown) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(ev, "dataTransfer", { value: dataTransfer });
   window.dispatchEvent(ev);
@@ -64,9 +64,11 @@ describe("isAudioFile / filterAudioFiles 白名单", () => {
 
 describe("isFileDrag", () => {
   it("types 含 Files 视为文件拖拽", () => {
-    expect(isFileDrag({ dataTransfer: { types: ["Files"] } })).toBe(true);
-    expect(isFileDrag({ dataTransfer: { types: ["text/plain"] } })).toBe(false);
-    expect(isFileDrag({ dataTransfer: {} })).toBe(false);
+    expect(isFileDrag({ dataTransfer: { types: ["Files"] } } as unknown as DragEvent)).toBe(true);
+    expect(isFileDrag({ dataTransfer: { types: ["text/plain"] } } as unknown as DragEvent)).toBe(
+      false,
+    );
+    expect(isFileDrag({ dataTransfer: {} } as unknown as DragEvent)).toBe(false);
     expect(isFileDrag(null)).toBe(false);
   });
 });
@@ -91,14 +93,14 @@ describe("拖拽计数与遮罩显隐", () => {
 
   it("dragover 必须 preventDefault（否则浏览器默认打开文件）", () => {
     const e = { preventDefault: vi.fn() };
-    handleDragOver(e);
+    handleDragOver(e as unknown as DragEvent);
     expect(e.preventDefault).toHaveBeenCalled();
   });
 });
 
 describe("drop 处理", () => {
   it("drop 混合文件：只上传音频，成功 toast「已导入 n 首；跳过 m 首」", async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (url: string, opts: { method?: string; body?: FormData }) => ({
       ok: true,
       json: async () => ({ imported: 2, skipped: 1, errors: 0 }),
     }));
@@ -109,14 +111,14 @@ describe("drop 处理", () => {
       dataTransfer: {
         files: [new File(["a"], "a.mp3"), new File(["b"], "b.flac"), new File(["c"], "c.txt")],
       },
-    });
+    } as unknown as DragEvent);
     expect(preventDefault).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/import");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeInstanceOf(FormData);
-    expect(opts.body.getAll("files").map((f) => f.name)).toEqual(["a.mp3", "b.flac"]);
+    expect(opts.body!.getAll("files").map((f) => (f as File).name)).toEqual(["a.mp3", "b.flac"]);
     const { items } = useToast();
     expect(items).toHaveLength(1);
     expect(items[0].type).toBe("success");
@@ -129,7 +131,7 @@ describe("drop 处理", () => {
     await handleDrop({
       preventDefault: vi.fn(),
       dataTransfer: { files: [new File(["x"], "a.txt"), new File(["y"], "b.jpg")] },
-    });
+    } as unknown as DragEvent);
     expect(fetchMock).not.toHaveBeenCalled();
     const { items } = useToast();
     expect(items[0].type).toBe("error");
@@ -146,7 +148,7 @@ describe("drop 处理", () => {
     await handleDrop({
       preventDefault: vi.fn(),
       dataTransfer: { files: [new File(["a"], "a.mp3")] },
-    });
+    } as unknown as DragEvent);
     expect(dragVisible.value).toBe(false);
   });
 
@@ -158,7 +160,7 @@ describe("drop 处理", () => {
     const p = handleDrop({
       preventDefault: vi.fn(),
       dataTransfer: { files: [new File(["a"], "a.mp3")] },
-    });
+    } as unknown as DragEvent);
     expect(dragUploading.value).toBe(true);
     await p;
     expect(dragUploading.value).toBe(false);

@@ -2,33 +2,36 @@
 // 验证链路：右键 mousedown → ctxState 上报（去重）→ 壳注入菜单点击 → __qqCtxMenu.* → 事件 →
 // Playlist.vue / Sidebar.vue 复用浏览器右键菜单同一套实现（播放/收藏/加歌单/废纸篓/改名/删除）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import type { Mock } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
+import type { Song } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     this.listeners["play"]?.();
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void): void {
     this.listeners[ev] = fn;
   }
-  removeAttribute() {}
+  removeAttribute(): void {}
 }
 vi.stubGlobal("Audio", FakeAudio);
 
@@ -41,13 +44,13 @@ const Playlist = (await import("../components/Playlist.vue")).default;
 const Sidebar = (await import("../components/Sidebar.vue")).default;
 const SmartViewPanel = (await import("../components/SmartViewPanel.vue")).default;
 
-const SONG = [
+const SONG: Song[] = [
   { id: "a", name: "A歌", artist: "五月天", album: "知足", path: "/a.mp3" },
   { id: "b", name: "B歌", artist: "高橋優", album: "開往明天的旅行", path: "/b.mp3" },
   { id: "c", name: "C歌", artist: "", album: "", path: "/c.mp3" },
 ];
 
-let postMock;
+let postMock: Mock;
 
 beforeEach(() => {
   Object.assign(state, {
@@ -83,9 +86,12 @@ afterEach(() => {
   // 注意：不删 window.__qqCtxMenu（init 幂等，删了不会重装）
 });
 
-const wrappers = [];
+const wrappers: VueWrapper[] = [];
 
-function mountPlaylist(songs = SONG) {
+/** 壳菜单 API（initNativeCtxMenu 在 beforeEach 安装；这里仅做类型收窄） */
+const qqMenu = () => window.__qqCtxMenu!;
+
+function mountPlaylist(songs: Song[] = SONG) {
   state.songs = songs.map((s) => ({ ...s }));
   const wrapper = mount(Playlist, { attachTo: document.body }); // attachTo：壳桥监听挂在 document 上，必须进真实 DOM 树
   wrappers.push(wrapper);
@@ -100,7 +106,7 @@ function mountSidebar() {
 
 // 智能视图面板：需要 ResizeObserver stub + .main .playlist 定位锚点（与 SmartViewPanel.test.js 同套路）
 // recentAdded 视图纯前端计算（mapRecentAdded(state.songs)），不发请求，适合壳桥测试
-async function mountSmartPanel(songs = SONG) {
+async function mountSmartPanel(songs: Song[] = SONG) {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -125,8 +131,8 @@ async function mountSmartPanel(songs = SONG) {
 }
 
 // 在目标元素上触发右键 mousedown（WKWebView 里 contextmenu 被吞，只剩 mousedown(button=2)）
-async function rclick(el, x = 120, y = 180) {
-  const node = el.element || el; // 兼容 DOMWrapper / 原生元素
+async function rclick(el: Element | { element: Element }, x = 120, y = 180) {
+  const node = "element" in el ? el.element : el;
   node.dispatchEvent(
     new MouseEvent("mousedown", { bubbles: true, button: 2, clientX: x, clientY: y }),
   );
@@ -208,10 +214,10 @@ describe("壳右键上下文上报（ctxState）", () => {
     expect(lastCtxPost().isFav).toBe(false);
     // 浏览器菜单收藏（同一数据源）→ 状态变化
     await wrapper.findAll(".pl-item")[0].trigger("contextmenu", { clientX: 100, clientY: 100 });
-    const favBtn = [...document.body.querySelectorAll(".ctx-item")].find((b) =>
-      b.textContent.includes("收藏"),
+    const favBtn = [...document.body.querySelectorAll<HTMLElement>(".ctx-item")].find((b) =>
+      b.textContent!.includes("收藏"),
     );
-    favBtn.click();
+    favBtn!.click();
     await nextTick();
     expect(isFavorite("/a.mp3")).toBe(true);
     await rclick(wrapper.findAll(".pl-item")[0]);
@@ -261,10 +267,10 @@ describe("壳右键上下文上报（ctxState）", () => {
     const wrapper = await mountSmartPanel();
     const items = wrapper.findAll(".sv-item");
     await rclick(items[1]); // 右键 B
-    window.__qqCtxMenu.play();
+    qqMenu().play();
     await nextTick();
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("B歌");
+    expect(state.currentSong!.name).toBe("B歌");
     expect(state.isPlaying).toBe(true);
   });
 
@@ -285,20 +291,20 @@ describe("壳右键上下文上报（ctxState）", () => {
     );
     const wrapper = await mountSmartPanel();
     const items = wrapper.findAll(".sv-item");
-    const events = [];
+    const events: Array<[string, unknown]> = [];
     for (const name of [
       "qqplayer:ctx-addplaylist",
       "qqplayer:ctx-deletesong",
       "qqplayer:ctx-goartist",
       "qqplayer:ctx-goalbum",
     ]) {
-      window.addEventListener(name, (e) => events.push([name, e.detail]));
+      window.addEventListener(name, (e) => events.push([name, (e as CustomEvent).detail]));
     }
     await rclick(items[0], 300, 200); // 右键 A
-    window.__qqCtxMenu.addPlaylist();
-    window.__qqCtxMenu.remove();
-    window.__qqCtxMenu.goArtist();
-    window.__qqCtxMenu.goAlbum();
+    qqMenu().addPlaylist();
+    qqMenu().remove();
+    qqMenu().goArtist();
+    qqMenu().goAlbum();
     await nextTick();
     expect(events.map(([n]) => n)).toEqual([
       "qqplayer:ctx-addplaylist",
@@ -307,9 +313,9 @@ describe("壳右键上下文上报（ctxState）", () => {
       "qqplayer:ctx-goalbum",
     ]);
     const add = events.find(([n]) => n === "qqplayer:ctx-addplaylist");
-    expect(add[1]).toMatchObject({ path: "/a.mp3", x: 300, y: 200 });
-    expect(events.find(([n]) => n === "qqplayer:ctx-deletesong")[1]).toEqual({ path: "/a.mp3" });
-    expect(events.find(([n]) => n === "qqplayer:ctx-goartist")[1]).toEqual({ path: "/a.mp3" });
+    expect(add![1]).toMatchObject({ path: "/a.mp3", x: 300, y: 200 });
+    expect(events.find(([n]) => n === "qqplayer:ctx-deletesong")![1]).toEqual({ path: "/a.mp3" });
+    expect(events.find(([n]) => n === "qqplayer:ctx-goartist")![1]).toEqual({ path: "/a.mp3" });
   });
 });
 
@@ -317,10 +323,10 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
   it("播放 → selectSong + play（与浏览器右键菜单同行为）", async () => {
     const wrapper = mountPlaylist();
     await rclick(wrapper.findAll(".pl-item")[1]); // 右键 B
-    window.__qqCtxMenu.play();
+    qqMenu().play();
     await nextTick();
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("B歌");
+    expect(state.currentSong!.name).toBe("B歌");
     expect(state.isPlaying).toBe(true);
   });
 
@@ -329,11 +335,11 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
     await wrapper.findAll(".pl-item")[0].trigger("click"); // 播 A
     await nextTick();
     await rclick(wrapper.findAll(".pl-item")[2]); // 右键 C
-    window.__qqCtxMenu.playNext();
+    qqMenu().playNext();
     await nextTick();
     expect(state.songs.map((s) => s.name)).toEqual(["A歌", "C歌", "B歌"]);
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("C歌");
+    expect(state.currentSong!.name).toBe("C歌");
   });
 
   it("收藏/取消收藏（按当前状态切换，与浏览器菜单一致）", async () => {
@@ -343,11 +349,11 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
     );
     const wrapper = mountPlaylist();
     await rclick(wrapper.findAll(".pl-item")[0]);
-    window.__qqCtxMenu.toggleFav();
+    qqMenu().toggleFav();
     await nextTick();
     expect(isFavorite("/a.mp3")).toBe(true);
     await rclick(wrapper.findAll(".pl-item")[0]); // 上下文 isFav 刷新
-    window.__qqCtxMenu.toggleFav();
+    qqMenu().toggleFav();
     await nextTick();
     expect(isFavorite("/a.mp3")).toBe(false);
   });
@@ -360,17 +366,17 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
     state.playlists = [{ id: "p1", name: "日语歌", songPaths: [] }];
     const wrapper = mountPlaylist();
     await rclick(wrapper.findAll(".pl-item")[0], 300, 200);
-    window.__qqCtxMenu.addPlaylist();
+    qqMenu().addPlaylist();
     await nextTick();
     const am = document.body.querySelector(".add-menu");
     expect(am).toBeTruthy();
-    await am.querySelector(".am-item").click();
+    await am!.querySelector<HTMLElement>(".am-item")!.click();
     await nextTick();
     expect(state.playlists[0].songPaths).toEqual(["/a.mp3"]);
   });
 
   it("移到废纸篓 → 同一确认弹窗链路 → DELETE", async () => {
-    const fetchMock = vi.fn(async (url) => {
+    const fetchMock = vi.fn(async (url: string, opts: { body?: string }) => {
       const u = String(url);
       if (u.includes("/api/library/songs")) {
         return { ok: true, json: async () => ({ deleted: 1, missing: [], errors: [] }) };
@@ -381,21 +387,21 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
     vi.stubGlobal("fetch", fetchMock);
     const wrapper = mountPlaylist();
     await rclick(wrapper.findAll(".pl-item")[1]); // 右键 B
-    window.__qqCtxMenu.remove();
+    qqMenu().remove();
     await nextTick();
     const modal = document.body.querySelector(".dt-modal");
     expect(modal).toBeTruthy();
-    expect(modal.textContent).toContain("将删除 1 首歌");
-    await modal.querySelector(".dt-btn.danger").click();
+    expect(modal!.textContent).toContain("将删除 1 首歌");
+    await modal!.querySelector<HTMLElement>(".dt-btn.danger")!.click();
     await flushPromises();
     const delCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/library/songs"));
-    expect(JSON.parse(delCall[1].body).paths).toEqual(["/b.mp3"]);
+    expect(JSON.parse(delCall![1].body!).paths).toEqual(["/b.mp3"]);
   });
 
   it("进歌手 → 列表过滤到该歌手", async () => {
     const wrapper = mountPlaylist();
     await rclick(wrapper.findAll(".pl-item")[0]); // 右键 A（五月天）
-    window.__qqCtxMenu.goArtist();
+    qqMenu().goArtist();
     await nextTick();
     const items = wrapper.findAll(".pl-item");
     expect(items).toHaveLength(1);
@@ -405,7 +411,7 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
   it("进专辑 → 列表过滤到该专辑", async () => {
     const wrapper = mountPlaylist();
     await rclick(wrapper.findAll(".pl-item")[0]); // 右键 A（知足）
-    window.__qqCtxMenu.goAlbum();
+    qqMenu().goAlbum();
     await nextTick();
     const items = wrapper.findAll(".pl-item");
     expect(items).toHaveLength(1);
@@ -427,17 +433,17 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
       }),
     );
     const wrapper = mountPlaylist();
-    const events = [];
-    window.addEventListener("qqplayer:ctx-edittags", (e) => events.push(e.detail));
+    const events: unknown[] = [];
+    window.addEventListener("qqplayer:ctx-edittags", (e) => events.push((e as CustomEvent).detail));
     await rclick(wrapper.findAll(".pl-item")[1]); // 右键 B
-    window.__qqCtxMenu.editTags();
+    qqMenu().editTags();
     await nextTick();
     // 事件派发带被右键歌曲 path
     expect(events).toEqual([{ path: "/b.mp3" }]);
     // Playlist 监听到 → 打开 TagEditorModal（autoScrape 自动刮削 B）
     const modal = document.body.querySelector(".modal.tag-modal");
     expect(modal).toBeTruthy();
-    expect(modal.querySelectorAll(".field-input")[0].value).toBe("B歌");
+    expect((modal!.querySelectorAll(".field-input")[0] as HTMLInputElement).value).toBe("B歌");
     window.removeEventListener("qqplayer:ctx-edittags", () => {});
   });
 });
@@ -454,10 +460,10 @@ describe("壳菜单动作（侧边栏歌单）", () => {
     const row = wrapper.find(".sb-item[data-playlist-id]");
     await rclick(row.element);
     expect(lastCtxPost().kind).toBe("playlist");
-    window.__qqCtxMenu.play();
+    qqMenu().play();
     await nextTick();
     expect(state.activePlaylistId).toBe("p1");
-    expect(state.currentSong.name).toBe("B歌");
+    expect(state.currentSong!.name).toBe("B歌");
   });
 
   it("重命名 → 行内输入框出现（startRename）", async () => {
@@ -465,10 +471,10 @@ describe("壳菜单动作（侧边栏歌单）", () => {
     const wrapper = mountSidebar();
     const row = wrapper.find(".sb-item[data-playlist-id]");
     await rclick(row.element);
-    window.__qqCtxMenu.rename();
+    qqMenu().rename();
     await nextTick();
     expect(wrapper.find(".sb-input").exists()).toBe(true);
-    expect(wrapper.find(".sb-input").element.value).toBe("日语歌");
+    expect((wrapper.find(".sb-input").element as HTMLInputElement).value).toBe("日语歌");
   });
 
   it("删除 → deletePlaylist + 撤销 toast", async () => {
@@ -482,7 +488,7 @@ describe("壳菜单动作（侧边栏歌单）", () => {
     const wrapper = mountSidebar();
     const row = wrapper.find(".sb-item[data-playlist-id]");
     await rclick(row.element);
-    window.__qqCtxMenu.delete();
+    qqMenu().delete();
     await flushPromises();
     expect(state.playlists).toEqual([]);
     expect(toastText()).toContain("已删除歌单");
@@ -495,9 +501,9 @@ describe("壳菜单动作（侧边栏歌单）", () => {
       vi.fn(async () => ({ ok: true, json: async () => ({}) })),
     );
     mountSidebar();
-    expect(() => window.__qqCtxMenu.play()).not.toThrow();
-    expect(() => window.__qqCtxMenu.rename()).not.toThrow();
-    expect(() => window.__qqCtxMenu.delete()).not.toThrow();
+    expect(() => qqMenu().play()).not.toThrow();
+    expect(() => qqMenu().rename()).not.toThrow();
+    expect(() => qqMenu().delete()).not.toThrow();
     expect(state.activePlaylistId).toBeNull();
   });
 });

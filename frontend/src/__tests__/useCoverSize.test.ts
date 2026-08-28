@@ -14,7 +14,7 @@ import {
 } from "../composables/useCoverSize.js";
 
 // 重置模块级状态（centerH/vh 是模块级 ref，测试间隔离）
-function setEnv(center, viewportH) {
+function setEnv(center: number, viewportH: number) {
   centerH.value = center;
   vh.value = viewportH;
 }
@@ -23,7 +23,7 @@ describe("useCoverSize 自适应公式", () => {
   beforeEach(() => {
     uiSettings.coverSize = 0;
     uiSettings.showCover = true;
-    setEnv(900, 900, 1440);
+    setEnv(900, 900);
   });
 
   it("未测量（首帧）→ 默认 340", () => {
@@ -37,17 +37,17 @@ describe("useCoverSize 自适应公式", () => {
   });
 
   it("小屏（center 481px，1024x768）：保底歌词 220 → 封面 481-220-12=249", () => {
-    setEnv(481, 768, 1024);
+    setEnv(481, 768);
     expect(adaptiveSize.value).toBe(249);
   });
 
   it("极端矮窗（center 300px）：下限 140 兜底", () => {
-    setEnv(300, 500, 1200);
+    setEnv(300, 500);
     expect(adaptiveSize.value).toBe(COVER_MIN);
   });
 
   it("高窗 46vh 限制生效（vh 1500 → 690，超 340 cap）", () => {
-    setEnv(1400, 1500, 1920);
+    setEnv(1400, 1500);
     expect(adaptiveSize.value).toBe(340);
   });
 });
@@ -56,7 +56,7 @@ describe("useCoverSize 手动模式 + 硬保护", () => {
   beforeEach(() => {
     uiSettings.coverSize = 0;
     uiSettings.showCover = true;
-    setEnv(900, 900, 1440);
+    setEnv(900, 900);
   });
 
   it("coverSize>0 → isManual true", () => {
@@ -80,13 +80,13 @@ describe("useCoverSize 手动模式 + 硬保护", () => {
   });
 
   it("手动值受歌词硬保护：center 400 → 上限 400-160-12=228", () => {
-    setEnv(400, 700, 1280);
+    setEnv(400, 700);
     uiSettings.coverSize = 300;
     expect(coverSizePx.value).toBe(228);
   });
 
   it("自适应模式 → coverSizePx 跟随 adaptiveSize", () => {
-    setEnv(481, 768, 1024);
+    setEnv(481, 768);
     expect(coverSizePx.value).toBe(249);
   });
 });
@@ -95,7 +95,7 @@ describe("useCoverSize 拖拽", () => {
   beforeEach(() => {
     uiSettings.coverSize = 0;
     uiSettings.showCover = true;
-    setEnv(900, 900, 1440);
+    setEnv(900, 900);
   });
 
   it("拖拽中实时尺寸生效（向上拖 = 变大）", () => {

@@ -3,46 +3,46 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   // 浏览器行为：换源自动归零播放位置
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
   }
-  removeAttribute() {}
-  addEventListener(ev, fn) {
+  removeAttribute(): void {}
+  addEventListener(ev: string, fn: () => void): void {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub（useAbLoop → playerCore 模块加载时 try/catch 保护；测试体里显式提供）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string): string | null => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string): void => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string): void => {
     delete lsStore[k];
   },
 };
@@ -60,7 +60,8 @@ const { playLine, _resetKaraokeAnchor, _resetKaraokeJump, karaokeState } =
 const { enterAbLoop, setAbEnd, exitAbLoop, clickLine, _getAbLoopCount, resetAbLoopCount } =
   await import("../composables/useAbLoop.js");
 
-const LYRIC = [
+// 测试歌词行：只用 line 变体（s/e 供句末判定与跳转），可整段赋给 state.lyric（LyricLine[]）
+const LYRIC: Array<{ type: "line"; s: number; e: number; text: string[] }> = [
   { type: "line", s: 0, e: 10, text: ["一"] },
   { type: "line", s: 10, e: 20, text: ["二"] },
   { type: "line", s: 20, e: 30, text: ["三"] },
@@ -106,13 +107,13 @@ afterEach(() => {
 });
 
 describe("AB 循环计数（防走开安全阀）", () => {
-  const audio = () => FakeAudio.instances[0];
+  const audio = (): FakeAudio => FakeAudio.instances[0];
 
-  function fireTimeupdate(t) {
+  function fireTimeupdate(t: number): FakeAudio {
     const a = audio();
     a.currentTime = t;
     a.paused = false;
-    a.listeners["timeupdate"]();
+    a.listeners["timeupdate"]!();
     return a;
   }
 
@@ -126,7 +127,7 @@ describe("AB 循环计数（防走开安全阀）", () => {
   }
 
   // 完整跑一遍区间 a→b：起点句播完逐句推进到终点句，终点句播完触发 B 完成
-  function completeRound(a, b) {
+  function completeRound(a: number, b: number): void {
     playLine(a);
     fireTimeupdate(LYRIC[b].s + 0.5); // 起点 → 逐句推进到终点句（while 跨句推进）
     fireTimeupdate(LYRIC[b].e + 0.5); // 终点句播完 → B 完成
@@ -251,7 +252,7 @@ describe("AB 循环计数（防走开安全阀）", () => {
     expect(audio().paused).toBe(true); // 钳制为 1：一遍即停
     expect(audio().currentTime).toBe(10);
     // 非法值（持久化脏数据）
-    playbackSettings.abLoopMaxCount = "abc";
+    playbackSettings.abLoopMaxCount = "abc" as unknown as number;
     playbackSettings.abLoopCountOn = true;
     state.abLoop = { a: 1, b: 3 };
     resetAbLoopCount();
@@ -278,9 +279,9 @@ describe("AB 循环计数（防走开安全阀）", () => {
 });
 
 describe("跟唱句末高频检测（变速精度，2026-08-19）", () => {
-  const audio = () => FakeAudio.instances[0];
+  const audio = (): FakeAudio => FakeAudio.instances[0];
 
-  function startKaraoke() {
+  function startKaraoke(): FakeAudio {
     const a = audio();
     state.mode = "karaoke";
     state.karaokeOn = true;

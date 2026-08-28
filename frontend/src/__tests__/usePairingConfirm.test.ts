@@ -25,8 +25,16 @@ const {
   _resetPairingConfirm,
 } = await import("../composables/usePairingConfirm.js");
 
+/** 配对请求对象（与 usePairingConfirm 内部 PairingRequest 对齐的宽松形状） */
+interface PairingRequestShape {
+  request_id: string;
+  device_name?: string;
+  device_type?: string;
+  created_at?: string;
+}
+
 /** 构造配对请求对象 */
-const req = (id, extra = {}) => ({
+const req = (id: string, extra: Record<string, unknown> = {}): PairingRequestShape => ({
   request_id: id,
   device_name: "iPhone 15",
   device_type: "iPhone",
@@ -35,7 +43,11 @@ const req = (id, extra = {}) => ({
 });
 
 /** apiGet 归一化成功响应 */
-const pendingResponse = (...requests) => ({ ok: true, status: 200, data: { requests } });
+const pendingResponse = (...requests: PairingRequestShape[]) => ({
+  ok: true,
+  status: 200,
+  data: { requests },
+});
 
 beforeEach(() => {
   apiMock.apiGet.mockReset();
@@ -57,8 +69,8 @@ describe("轮询发现新请求", () => {
     await _pollOnce();
     const s = _pairingUiState();
     expect(s.visible).toBe(true);
-    expect(s.current.request_id).toBe("r1");
-    expect(s.current.device_name).toBe("iPhone 15");
+    expect(s.current!.request_id).toBe("r1");
+    expect(s.current!.device_name).toBe("iPhone 15");
   });
 
   it("已见请求不重复弹：同请求持续出现在 pending 不重新触发", async () => {
@@ -78,12 +90,12 @@ describe("轮询发现新请求", () => {
   it("多个新请求 → 队列逐个弹：处理完一台再弹下一台", async () => {
     apiMock.apiGet.mockResolvedValue(pendingResponse(req("r1"), req("r2")));
     await _pollOnce();
-    expect(_pairingUiState().current.request_id).toBe("r1"); // 先弹第一台
+    expect(_pairingUiState().current!.request_id).toBe("r1"); // 先弹第一台
     apiMock.apiPost.mockResolvedValue({ ok: true, status: 200, data: {} });
     await approvePairing();
     const s = _pairingUiState();
     expect(s.visible).toBe(true);
-    expect(s.current.request_id).toBe("r2"); // 接着弹第二台
+    expect(s.current!.request_id).toBe("r2"); // 接着弹第二台
   });
 });
 
@@ -114,7 +126,7 @@ describe("approve / reject", () => {
   it("处理中（busy）防重复提交：请求未返回时再次点按钮被忽略", async () => {
     apiMock.apiGet.mockResolvedValue(pendingResponse(req("r1")));
     await _pollOnce();
-    let resolvePost;
+    let resolvePost: ((v: unknown) => void) | undefined;
     apiMock.apiPost.mockReturnValue(
       new Promise((res) => {
         resolvePost = res;
@@ -124,7 +136,7 @@ describe("approve / reject", () => {
     const p2 = approvePairing(); // busy 中 → 直接返回 false，不再发请求
     expect(await p2).toBe(false);
     expect(apiMock.apiPost).toHaveBeenCalledTimes(1);
-    resolvePost({ ok: true, status: 200, data: {} });
+    resolvePost!({ ok: true, status: 200, data: {} });
     expect(await p1).toBe(true);
     expect(_pairingUiState().visible).toBe(false);
   });
@@ -155,7 +167,7 @@ describe("失败处理不崩", () => {
     const s = _pairingUiState();
     expect(s.visible).toBe(true); // 保留弹窗供重试
     expect(s.busy).toBe(false);
-    expect(s.current.request_id).toBe("r1");
+    expect(s.current!.request_id).toBe("r1");
   });
 
   it("approve 404（请求已过期）→ 自动关闭弹窗，不崩", async () => {

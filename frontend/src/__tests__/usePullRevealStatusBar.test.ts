@@ -15,7 +15,7 @@ function makeScrollable(top = 0) {
 }
 
 // 派发 touch 事件（冒泡到 document，listener 在 document 上）
-function fireTouch(type, clientY, target) {
+function fireTouch(type: string, clientY: number, target: Element) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, "touches", { value: [{ clientY }] });
   Object.defineProperty(event, "target", { value: target });
@@ -23,15 +23,15 @@ function fireTouch(type, clientY, target) {
 }
 
 // 一个完整手势序列：start → move（可多次）→ end
-function gesture(target, startY, moveYs) {
+function gesture(target: Element, startY: number, moveYs: number[]) {
   fireTouch("touchstart", startY, target);
   for (const y of moveYs) fireTouch("touchmove", y, target);
   fireTouch("touchend", startY, target);
 }
 
 describe("installPullRevealStatusBar", () => {
-  let uninstall;
-  let scroller;
+  let uninstall: (() => void) | null = null;
+  let scroller!: HTMLDivElement;
 
   beforeEach(() => {
     scroller = makeScrollable();
@@ -111,7 +111,7 @@ describe("installPullRevealStatusBar", () => {
   it("卸载后不再触发", () => {
     window.qqplayerIosBridge = { postMessage: vi.fn() };
     uninstall = installPullRevealStatusBar();
-    uninstall();
+    uninstall!();
     gesture(scroller, 100, [160]);
     expect(window.qqplayerIosBridge.postMessage).not.toHaveBeenCalled();
   });
