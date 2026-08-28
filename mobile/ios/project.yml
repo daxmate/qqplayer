@@ -63,7 +63,8 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         CODE_SIGN_STYLE: Automatic
-        # 真机签名：写死个人 team（免费签名），xcodegen 重新生成工程后无需在 Xcode 重选。
+        # 真机签名：写死开发者 team（zhangchaont@live.com，Apple Developer Program 会员），
+        # xcodegen 重新生成工程后无需在 Xcode 重选。
         # 不设 CODE_SIGN_IDENTITY：Automatic 自动选 Apple Development（设 "-" 会强制 ad-hoc，
         # 真机带 entitlements 构建失败；模拟器构建由 build.sh 的 CODE_SIGNING_ALLOWED=NO 免签名）
         DEVELOPMENT_TEAM: B6FA37AYT5

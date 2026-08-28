@@ -49,8 +49,8 @@ fi
 
 echo "=== 4/4 xcodebuild ==="
 if [ "$INSTALL" -eq 1 ]; then
-  # 签名构建（DEVELOPMENT_TEAM 已写死 project.yml；免费签名自动注册设备）
-  # -allowProvisioningUpdates: 允许 xcodebuild 自动创建/更新个人团队 provisioning profile
+  # 签名构建（DEVELOPMENT_TEAM 已写死 project.yml；正式开发者账号自动注册设备）
+  # -allowProvisioningUpdates: 允许 xcodebuild 自动创建/更新 provisioning profile
   xcodebuild -project QQPlayer.xcodeproj -scheme QQPlayer -configuration Debug \
     -destination "platform=iOS,id=$UDID" -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
@@ -59,7 +59,7 @@ if [ "$INSTALL" -eq 1 ]; then
   xcrun devicectl device install app --device "$UDID" "$APP_PATH"
   echo "✅ 已安装，启动 QQPlayer..."
   if xcrun devicectl device process launch --device "$UDID" com.daxmate.qqplayer.ios; then
-    echo "✅ 完成: 已安装并启动（免费签名 7 天有效期，到期重新 --install）"
+    echo "✅ 完成: 已安装并启动（正式开发者签名，profile 一年有效期自动续）"
   else
     echo "⚠️ 已安装但启动失败：iPhone 可能锁屏——解锁后手动点开 QQPlayer 即可"
   fi
