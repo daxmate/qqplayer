@@ -1,8 +1,10 @@
 // ControlBar 移动端跟唱折叠测试
 // 覆盖：karaoke + collapsible 时——下滑手势收起（保留项仍在/隐藏项消失/根 class collapsed）、
 //       上滑展开恢复、位移不足 30px 不触发、横向主导（进度条拖动）不触发、
-//       带水平漂移的垂直下滑仍触发、信息按钮气泡出现/点气泡展开、
+//       带水平漂移的垂直下滑仍触发、受控 collapsed prop 联动、
 //       collapsible 默认 false（桌面）手势完全不生效。
+// 注：collapsed 为受控 prop（父级 MobilePlayer 统一管理，顶部信息按钮联动）；
+//     信息按钮/气泡已移至 KaraokePanel（见 KaraokePanel.collapse.test.ts）。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
@@ -47,6 +49,19 @@ const t = (x: number, y: number): TouchLike => ({ clientX: x, clientY: y });
 function swipe(el: Element, from: TouchLike, to: TouchLike) {
   fireTouch(el, "touchstart", [from]);
   fireTouch(el, "touchend", [], [to]);
+}
+
+// 受控挂载：模拟父级 MobilePlayer 监听 update:collapsed 并回写 prop
+function mountCollapsible() {
+  const w = mount(ControlBar, {
+    props: {
+      karaoke: true,
+      collapsible: true,
+      collapsed: false,
+      "onUpdate:collapsed": (v: boolean) => w.setProps({ collapsed: v }),
+    },
+  });
+  return w;
 }
 
 function btnByTitle(w: ReturnType<typeof mount>, title: string) {
@@ -106,7 +121,6 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
     expect(w.find(".controls.collapsible").exists()).toBe(true);
     expect(w.find(".controls.collapsed").exists()).toBe(false);
-    // 保留项
     expect(w.find(".progress-row").exists()).toBe(true);
     expect(btnByTitle(w, "播放/暂停")).toBeTruthy();
     expect(btnByTitle(w, "变速")).toBeTruthy();
@@ -122,19 +136,16 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     expect(btnByTitle(w, "显示/隐藏中文")).toBeTruthy();
     expect(w.find(".vol-group").exists()).toBe(true);
     expect(w.find(".song-line").exists()).toBe(true);
-    // 收起态专属元素不存在
-    expect(w.find(".ctrl-info-btn").exists()).toBe(false);
-    expect(w.find(".ctrl-edit-btn").exists()).toBe(false);
-    expect(w.find(".ctrl-tip").exists()).toBe(false);
     w.unmount();
   });
 
   it("下滑手势（|dy|≥30 垂直主导）→ 收起：隐藏项消失、保留项仍在、根 class 含 collapsed", async () => {
     state.currentSong = { ...STREAM_SONG };
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
+    const w = mountCollapsible();
     swipe(w.element, t(100, 50), t(100, 130)); // dy=+80 → 下滑
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(true);
+    expect(w.emitted("update:collapsed")?.at(-1)).toEqual([true]);
     // 隐藏项
     expect(btnByTitle(w, "上一首")).toBeFalsy();
     expect(btnByTitle(w, "返回音乐")).toBeFalsy();
@@ -151,53 +162,51 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     expect(btnByTitle(w, "变速")).toBeTruthy();
     expect(btnByTitle(w, "退出跟唱")).toBeTruthy();
     expect(loopBtn(w)).toBeTruthy();
-    // 收起态按钮排序 class：倍速/播放/跟唱/循环 + 编辑/信息（flex order 视觉排序，jsdom 不布局只验证 class）
+    // 收起态按钮排序 class：倍速/播放/跟唱/循环（flex order 视觉排序，jsdom 不布局只验证 class）
     expect(w.find(".ctrl-speed").exists()).toBe(true);
     expect(w.find(".ctrl-play").exists()).toBe(true);
     expect(w.find(".ctrl-mic").exists()).toBe(true);
     expect(w.find(".ctrl-loop").exists()).toBe(true);
-    expect(w.find(".ctrl-edit-btn").exists()).toBe(true);
-    expect(w.find(".ctrl-info-btn").exists()).toBe(true);
-    // 收起态编辑按钮（铅笔）可点开标签编辑弹窗
-    expect(w.find('[data-testid="song-edit-btn"]').exists()).toBe(true);
     w.unmount();
   });
 
   it("上滑手势 → 展开恢复（隐藏项重新出现）", async () => {
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
+    const w = mountCollapsible();
     swipe(w.element, t(100, 50), t(100, 130)); // 下滑收起
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(true);
     swipe(w.element, t(100, 130), t(100, 50)); // 上滑展开（dy=-80）
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(false);
+    expect(w.emitted("update:collapsed")?.at(-1)).toEqual([false]);
     expect(btnByTitle(w, "上一首")).toBeTruthy();
     expect(btnByTitle(w, "返回音乐")).toBeTruthy();
     expect(btnByTitle(w, "上一句")).toBeTruthy();
     expect(btnByTitle(w, "下一句")).toBeTruthy();
     expect(w.find(".song-line").exists()).toBe(true);
-    expect(w.find(".ctrl-info-btn").exists()).toBe(false);
     w.unmount();
   });
 
   it("位移不足 30px（视为点击）→ 不收起", async () => {
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
+    const w = mountCollapsible();
     swipe(w.element, t(100, 50), t(100, 72)); // dy=+22 < 30
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(false);
+    expect(w.emitted("update:collapsed")).toBeFalsy();
     w.unmount();
   });
 
   it("横向主导（|dy| ≤ |dx|*1.2，进度条拖动场景）→ 不收起", async () => {
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
+    const w = mountCollapsible();
     swipe(w.element, t(50, 100), t(200, 130)); // dx=+150, dy=+30（dx*1.2=180 ≥ dy）
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(false);
+    expect(w.emitted("update:collapsed")).toBeFalsy();
     w.unmount();
   });
 
   it("带水平漂移的垂直下滑（dy=60, dx=30）→ 仍收起", async () => {
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
+    const w = mountCollapsible();
     swipe(w.element, t(50, 100), t(80, 160)); // dy=+60, dx=+30（dx*1.2=36 < 60）
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(true);
@@ -205,7 +214,7 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
   });
 
   it("收起后上滑展开：AB/单句循环按钮也恢复可用", async () => {
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
+    const w = mountCollapsible();
     swipe(w.element, t(100, 50), t(100, 130));
     await nextTick();
     // 收起态：循环按钮保留（title 为 karaoke.abHint，含「单句循环」）
@@ -216,21 +225,14 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     w.unmount();
   });
 
-  it("点击信息按钮 → 气泡出现（文本为提示语）；点击气泡 → 展开", async () => {
-    const w = mount(ControlBar, { props: { karaoke: true, collapsible: true } });
-    swipe(w.element, t(100, 50), t(100, 130)); // 先收起
+  it("受控：父级置 collapsed=true 时隐藏项消失（顶部信息按钮联动场景）", async () => {
+    const w = mountCollapsible();
+    await w.setProps({ collapsed: true });
     await nextTick();
-    const info = w.find(".ctrl-info-btn");
-    expect(info.exists()).toBe(true);
-    await info.trigger("click");
-    await nextTick();
-    const tip = w.find(".ctrl-tip");
-    expect(tip.exists()).toBe(true);
-    expect(tip.text()).toContain("控制区已收起");
-    await tip.trigger("click"); // 点气泡 → 展开
-    await nextTick();
-    expect(w.find(".controls.collapsed").exists()).toBe(false);
-    expect(w.find(".ctrl-tip").exists()).toBe(false);
+    expect(w.find(".controls.collapsed").exists()).toBe(true);
+    expect(btnByTitle(w, "上一首")).toBeFalsy();
+    expect(w.find(".song-line").exists()).toBe(false);
+    expect(btnByTitle(w, "播放/暂停")).toBeTruthy();
     w.unmount();
   });
 
@@ -240,9 +242,9 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     swipe(w.element, t(100, 50), t(100, 130));
     await nextTick();
     expect(w.find(".controls.collapsed").exists()).toBe(false);
+    expect(w.emitted("update:collapsed")).toBeFalsy();
     expect(btnByTitle(w, "上一首")).toBeTruthy();
     expect(w.find(".song-line").exists()).toBe(true);
-    expect(w.find(".ctrl-info-btn").exists()).toBe(false);
     w.unmount();
   });
 

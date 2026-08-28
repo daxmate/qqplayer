@@ -20,6 +20,17 @@
       <button class="kp-spec-btn" :title="t('spec.title')" @click="openLyricSpec()">
         <FileMusic :size="14" />
       </button>
+      <!-- 移动端跟唱折叠：控制区收起时顶部显示信息按钮（提示上滑/点击展开） -->
+      <template v-if="collapseHint">
+        <button class="kp-info-btn" :title="t('control.expandHint')" @click="tipOpen = !tipOpen">
+          <Info :size="14" />
+        </button>
+        <Transition name="ctrl-tip">
+          <div v-if="tipOpen" class="kp-tip" @click="expandControls()">
+            {{ t("control.expandTip") }}
+          </div>
+        </Transition>
+      </template>
     </div>
     <!-- AB 区间进度：区间确定后显示当前句在区间内的位置（abVisual 开关控制） -->
     <div v-if="abProgress" class="ab-progress">
@@ -92,7 +103,7 @@
 import { ref, watch, computed, nextTick } from "vue";
 import type { PropType } from "vue";
 import { useI18n } from "vue-i18n";
-import { Mic, Music2, PanelLeftOpen, FileMusic } from "@lucide/vue";
+import { Mic, Music2, PanelLeftOpen, FileMusic, Info } from "@lucide/vue";
 import {
   state,
   clickLine,
@@ -117,7 +128,18 @@ const props = defineProps({
   headless: { type: Boolean, default: false },
   // 字号缩放（全歌词界面用）：默认 1 不影响现有使用方，>1 时按比例放大 --fs-active
   fontScale: { type: Number, default: 1 },
+  // 移动端跟唱：控制区折叠收起时显示顶部信息按钮（提示上滑/点击展开，气泡点开展开控制区）
+  collapseHint: { type: Boolean, default: false },
 });
+
+const emit = defineEmits(["expand-controls"]);
+
+// 信息按钮气泡（点击气泡 → 通知父级展开控制区）
+const tipOpen = ref(false);
+function expandControls() {
+  tipOpen.value = false;
+  emit("expand-controls");
+}
 
 function expandPanels() {
   toggleMusicLib();
@@ -367,6 +389,52 @@ watch(
   color: var(--accent-text);
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+/* 移动端跟唱折叠：顶部信息按钮（控制区收起时显示） */
+.kp-info-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  background: var(--card2);
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+.kp-info-btn:hover {
+  color: var(--text);
+  background: var(--border);
+}
+/* 信息气泡：标题栏下方右对齐（点击 → 展开控制区） */
+.kp-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 12px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--text);
+  box-shadow: 0 8px 24px var(--shadow-strong);
+  cursor: pointer;
+  white-space: nowrap;
+  z-index: 10;
+}
+.kp-tip-enter-active,
+.kp-tip-leave-active {
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+.kp-tip-enter-from,
+.kp-tip-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 .kp-expand {
   width: 28px;

@@ -164,24 +164,6 @@
           @input="onVolume"
         />
       </div>
-      <!-- 收起态：歌词编辑（铅笔）+ 信息按钮（提示气泡）——信息按钮放编辑按钮旁边 -->
-      <template v-if="collapsed">
-        <button
-          class="btn song-edit-btn ctrl-edit-btn"
-          :title="t('tags.editTitle')"
-          data-testid="song-edit-btn"
-          @click="tagEditorOpen = true"
-        >
-          <Pencil :size="14" />
-        </button>
-        <button
-          class="btn ctrl-info-btn"
-          :title="t('control.expandHint')"
-          @click="tipOpen = !tipOpen"
-        >
-          <Info :size="15" />
-        </button>
-      </template>
     </div>
 
     <!-- 当前歌曲信息 -->
@@ -208,12 +190,6 @@
 
     <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
     <div v-if="!isMobile && sleepTimerText" class="sleep-timer">{{ sleepTimerText }}</div>
-    <!-- 收起态提示气泡（absolute 不占布局；点击 → 展开） -->
-    <Transition name="ctrl-tip">
-      <div v-if="collapsed && tipOpen" class="ctrl-tip" @click="expand()">
-        {{ t("control.expandTip") }}
-      </div>
-    </Transition>
     <!-- 播放 URL 弹窗（试听语义：临时播放，默认不计统计；支持电台流） -->
     <Teleport to="body">
       <div v-if="urlOpen" class="url-mask" @click.self="urlOpen = false">
@@ -264,7 +240,6 @@ import {
   Languages,
   Download,
   Loader2,
-  Info,
 } from "@lucide/vue";
 import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
 import { apiPost } from "../utils/apiClient.js";
@@ -302,15 +277,17 @@ const props = defineProps({
   hideCollapse: { type: Boolean, default: false },
   // 移动端跟唱模式：控制区可下滑收起/上滑展开（桌面端不传，零影响）
   collapsible: { type: Boolean, default: false },
+  // 受控收起态（由父级 MobilePlayer 统一管理，供顶部信息按钮联动）
+  collapsed: { type: Boolean, default: false },
 });
+
+const emit = defineEmits(["update:collapsed"]);
 
 const { t } = useI18n();
 
 // ============ 移动端跟唱：控制区折叠（下滑收起 / 上滑展开） ============
-// 收起态只保留：进度条 + 播放 + 倍速 + 跟唱 + 循环 + 信息小按钮；
+// 收起态只保留：进度条 + 播放 + 倍速 + 跟唱 + 循环；
 // 其余按钮 v-if="!collapsed" 隐藏；桌面端不传 collapsible，此逻辑完全不生效。
-const collapsed = ref(false); // 收起态
-const tipOpen = ref(false); // 信息按钮提示气泡
 let touchStart: { x: number; y: number } | null = null; // 手势起点（仅在 collapsible 时记录）
 
 function onTouchStart(e: TouchEvent) {
@@ -339,13 +316,11 @@ function onTouchEnd(e: TouchEvent) {
 }
 
 function collapse() {
-  collapsed.value = true;
-  tipOpen.value = false;
+  emit("update:collapsed", true);
 }
 
 function expand() {
-  collapsed.value = false;
-  tipOpen.value = false;
+  emit("update:collapsed", false);
 }
 
 // 模式切换（音乐 ↔ 跟唱；顶栏 tab 已不提供跟唱入口，这里由按钮直达）
@@ -799,55 +774,5 @@ function fmt(t: number) {
 }
 .controls.collapsed .ctrl-loop {
   order: 4;
-}
-.controls.collapsed .ctrl-edit-btn {
-  order: 5;
-}
-.controls.collapsed .ctrl-info-btn {
-  order: 6;
-}
-/* 收起态编辑按钮：紧凑小按钮（覆盖 .btn-row .btn 的宽度规则） */
-.controls.collapsed .btn.ctrl-edit-btn {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  padding: 0;
-}
-/* 收起态信息小按钮：与 .btn 同尺寸风格，颜色偏 text3，hover 提亮 */
-.ctrl-info-btn {
-  color: var(--text3);
-}
-.ctrl-info-btn:hover {
-  color: var(--text);
-}
-/* 收起态提示气泡：按钮行上方、水平居中（absolute 不占布局） */
-.ctrl-tip {
-  position: absolute;
-  left: 0;
-  right: 0;
-  margin: 0 auto;
-  width: fit-content;
-  bottom: 68px;
-  background: var(--card2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 14px;
-  font-size: 12.5px;
-  color: var(--text);
-  box-shadow: 0 8px 24px var(--shadow-strong);
-  cursor: pointer;
-  white-space: nowrap;
-  z-index: 5;
-}
-.ctrl-tip-enter-active,
-.ctrl-tip-leave-active {
-  transition:
-    opacity 0.15s,
-    transform 0.15s;
-}
-.ctrl-tip-enter-from,
-.ctrl-tip-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
 }
 </style>
