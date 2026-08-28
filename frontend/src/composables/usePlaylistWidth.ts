@@ -34,7 +34,7 @@ if (typeof window !== "undefined") {
   }
 }
 
-function applyPlW(px) {
+function applyPlW(px: number): number {
   const w = Math.round(Math.max(PL_W_MIN, Math.min(px, PL_W_MAX)));
   if (typeof document !== "undefined") {
     document.documentElement.style.setProperty("--pl-w", `${w}px`);
@@ -42,7 +42,7 @@ function applyPlW(px) {
   return w;
 }
 
-function currentPlW() {
+function currentPlW(): number {
   const v = Number.parseFloat(
     typeof document !== "undefined"
       ? document.documentElement.style.getPropertyValue("--pl-w")
@@ -51,12 +51,12 @@ function currentPlW() {
   return Number.isFinite(v) ? v : PL_W_DEFAULT;
 }
 
-function onPointerMove(e) {
+function onPointerMove(e: PointerEvent): void {
   // 向右拖 = 面板变宽
   applyPlW(dragStartW + (e.clientX - dragStartX));
 }
 
-function endDrag() {
+function endDrag(): void {
   dragging.value = false;
   window.removeEventListener("pointermove", onPointerMove);
   window.removeEventListener("pointerup", endDrag);
@@ -73,7 +73,7 @@ function endDrag() {
   }
 }
 
-export function startPlWidthDrag(e) {
+export function startPlWidthDrag(e: PointerEvent): void {
   if (isMobile.value || dragging.value) return;
   dragging.value = true;
   dragStartX = e.clientX;
