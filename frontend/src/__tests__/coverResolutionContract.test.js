@@ -3,7 +3,7 @@
 // 三组断言：
 //   1. 静态扫描（防裸调）：components/** 与 composables/* 不允许出现手写 path→/api/cover
 //      映射（`resolveServerUrl("/api/cover…")` 或裸 `"/api/cover?path=…"`），
-//      白名单 = 唯一入口 useCoverURL.js + 原生桥 nativeAudioBridge.ts（resolveCoverURL）
+//      白名单 = 唯一入口 useCoverURL.ts + 原生桥 nativeAudioBridge.ts（resolveCoverURL）
 //      + 锁屏/媒体键元数据域 mediaSession.ts（契约消费点 #6，resolveCoverForMetadata 自有兑底链）。
 //      注释剥离后扫描（注释里的契约说明/示例不参与匹配；字符串里的 URL 保留参与匹配）。
 //   2. 消费点接入断言：MobilePlayer.vue / Cover.vue / TagEditorModal.vue 必须 import 并调用
@@ -97,7 +97,7 @@ function stripComments(code) {
 
 // 白名单（绝对路径）：唯一入口 + 原生桥 + 锁屏/媒体键元数据域
 const BARE_CALL_WHITELIST = new Set([
-  path.join(srcDir, "composables", "useCoverURL.js"), // 唯一入口自身（契约）
+  path.join(srcDir, "composables", "useCoverURL.ts"), // 唯一入口自身（契约）
   path.join(srcDir, "composables", "nativeAudioBridge.ts"), // 原生桥 resolveCoverURL（契约白名单）
   path.join(srcDir, "composables", "mediaSession.ts"), // 锁屏/媒体键元数据（契约消费点 #6 自有兑底链）
 ]);
