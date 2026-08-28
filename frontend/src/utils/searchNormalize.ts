@@ -3,16 +3,16 @@
 import { sify } from "chinese-conv";
 
 // 全角 ASCII（！～）与全角空格（U+3000）
-const FULLWIDTH_RE = /[\uFF01-\uFF5E\u3000]/g;
+const FULLWIDTH_RE: RegExp = /[\uFF01-\uFF5E\u3000]/g;
 // NFD 分解后残留的组合变音标记（é → e + U+0301，ā → a + U+0304，ü → u + U+0308）
-const COMBINING_MARKS_RE = /[\u0300-\u036f]/g;
+const COMBINING_MARKS_RE: RegExp = /[\u0300-\u036f]/g;
 
 /**
  * 归一化单个文本（供每行匹配用）：
  * NFD 分解 → 剥离组合变音标记 → 全角转半角 → 繁转简 → 小写。
  * 空值统一返回 ""。
  */
-export function normalizeText(text) {
+export function normalizeText(text: string | null | undefined): string {
   if (!text) return "";
   return sify(
     String(text)
@@ -29,7 +29,7 @@ export function normalizeText(text) {
  * 查询串归一化：去首尾空白 + normalizeText。
  * 供输入框查询变化时归一化一次，避免每行重复归一化同一 query。
  */
-export function normalizeQuery(query) {
+export function normalizeQuery(query: string | null | undefined): string {
   return normalizeText(query == null ? "" : String(query).trim());
 }
 
@@ -37,7 +37,7 @@ export function normalizeQuery(query) {
  * 归一化后包含匹配。空 query 恒为 false（"无查询 → 无匹配"），
  * 调用方需自行保证空查询显示全部（Playlist 现有逻辑已如此）。
  */
-export function matchQuery(text, query) {
+export function matchQuery(text: string, query: string | null | undefined): boolean {
   const q = normalizeQuery(query);
   if (!q) return false;
   return normalizeText(text).includes(q);

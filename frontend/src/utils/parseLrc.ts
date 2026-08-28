@@ -3,6 +3,7 @@
 // 本地歌的歌词由后端 /api/lyric 解析（parse_lrc → lines）；非本地歌（无 path）没有对应
 // 文件，后端无法解析，这里复用 /api/lyric/search 的候选原文，在前端解析成与后端相同的
 // lines 结构：{type:'line', s, e, text:[原文]}（text[1] 罗马音占位空、text[2] 翻译见合并）。
+import type { LyricLine } from "../composables/playerState.js";
 
 const LRC_TIME_RE = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
@@ -13,15 +14,15 @@ const LRC_META_RE =
   /^(?:作词|作曲|编曲|制作人?|原唱|出品|企划|监制|录音|混音|母带|发行|策划|词|曲|唱)(?:\s*[:：]\s*|\s+)\S/;
 
 /** 解析 LRC 文本 → [{type:'line', s, e, text:[txt]}]（与后端 parse_lrc 同构） */
-export function parseLrcText(text) {
-  const items = [];
+export function parseLrcText(text: string | null | undefined): LyricLine[] {
+  const items: { t: number; text: string }[] = [];
   for (const line of String(text || "")
     .replace(/\r/g, "")
     .split("\n")) {
     const matches = [...line.matchAll(LRC_TIME_RE)];
     if (!matches.length) continue;
     const lyricText = line
-      .slice(matches[matches.length - 1].index + matches[matches.length - 1][0].length)
+      .slice(matches[matches.length - 1].index! + matches[matches.length - 1][0].length)
       .trim();
     for (const m of matches) {
       const ms = m[3] || "0";
@@ -36,7 +37,7 @@ export function parseLrcText(text) {
     const txt = it.text.trim();
     return txt && !LRC_META_RE.test(txt);
   });
-  const out = [];
+  const out: LyricLine[] = [];
   for (let i = 0; i < kept.length; i++) {
     const e = i + 1 < kept.length ? kept[i + 1].t : kept[i].t + 5;
     // 过滤 3：超短行（duration < 0.3s 且文本 <= 2 字，如 0.13s 的残留碎片/标点残行）
@@ -47,7 +48,7 @@ export function parseLrcText(text) {
 }
 
 /** 合并中文翻译（tlyric LRC）→ text = [原文, "", 翻译]（与后端 merge_translation 同构） */
-export function mergeTranslationLines(lines, tlines) {
+export function mergeTranslationLines(lines: LyricLine[], tlines: LyricLine[]): LyricLine[] {
   if (!tlines || !tlines.length) return lines;
   return lines.map((ln) => {
     if (ln.type !== "line") return ln;

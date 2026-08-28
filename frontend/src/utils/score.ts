@@ -13,7 +13,10 @@ import { normalizeQuery, normalizeText } from "./searchNormalize.js";
  * 单字段匹配度：0-120 整数。
  * query 为空 → 0；text 为空 → 0；归一化后前缀/包含/不中。
  */
-export function matchScore(query, text) {
+export function matchScore(
+  query: string | null | undefined,
+  text: string | null | undefined,
+): number {
   const q = normalizeQuery(query);
   if (!q) return 0;
   const t = normalizeText(text);
@@ -28,7 +31,7 @@ export function matchScore(query, text) {
  * 类别优先级：本地歌曲 > 在线歌曲 > 歌手 > 专辑 > 设置。
  * 同匹配度时按此升序排列（数字小的在前）。
  */
-export function kindRank(kind) {
+export function kindRank(kind: string): number {
   switch (kind) {
     case "song":
       return 0;
