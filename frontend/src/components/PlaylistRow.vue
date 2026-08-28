@@ -17,18 +17,18 @@
     </span>
     <span v-if="coverVisible('list')" class="pl-cover">
       <img
-        v-if="coverSrc(song.path) && coverOk(song.path)"
-        :src="coverSrc(song.path)"
+        v-if="coverSrc(song.path!) && coverOk(song.path!)"
+        :src="coverSrc(song.path!)"
         :alt="song.name"
         loading="lazy"
-        @error="markCoverError(song.path)"
+        @error="markCoverError(song.path!)"
       />
     </span>
     <span class="pl-idx">{{ vi + 1 }}</span>
     <div class="pl-info">
       <div class="pl-name">
         {{ song.name }}
-        <span v-if="isFavorite(song.path)" class="pl-fav-mark" :title="t('playlist.fav.faved')">
+        <span v-if="isFavorite(song.path!)" class="pl-fav-mark" :title="t('playlist.fav.faved')">
           <Heart :size="10" fill="currentColor" />
         </span>
       </div>
@@ -54,11 +54,11 @@
     <div class="pl-actions">
       <button
         class="pl-action heart"
-        :class="{ on: isFavorite(song.path) }"
-        :title="isFavorite(song.path) ? t('playlist.fav.remove') : t('playlist.fav.add')"
+        :class="{ on: isFavorite(song.path!) }"
+        :title="isFavorite(song.path!) ? t('playlist.fav.remove') : t('playlist.fav.add')"
         @click.stop="emit('favorite', song.path)"
       >
-        <Heart :size="14" :fill="isFavorite(song.path) ? 'currentColor' : 'none'" />
+        <Heart :size="14" :fill="isFavorite(song.path!) ? 'currentColor' : 'none'" />
       </button>
       <button
         class="pl-action"
@@ -70,11 +70,11 @@
       <button
         v-if="isStreamSong(song)"
         class="pl-action dl"
-        :class="{ busy: downloading[song.streamId] }"
-        :title="downloading[song.streamId] ? t('playlist.downloading') : t('playlist.download')"
+        :class="{ busy: downloading[song.streamId!] }"
+        :title="downloading[song.streamId!] ? t('playlist.downloading') : t('playlist.download')"
         @click.stop="emit('download', song)"
       >
-        <Loader2 v-if="downloading[song.streamId]" :size="14" class="pl-spin" />
+        <Loader2 v-if="downloading[song.streamId!]" :size="14" class="pl-spin" />
         <Download v-else :size="14" />
       </button>
       <button
@@ -88,14 +88,16 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { useI18n } from "vue-i18n";
+import type { PropType } from "vue";
 import { GripVertical, Heart, Mic, ListPlus, Loader2, Download, X } from "@lucide/vue";
 import { isFavorite, isStreamSong } from "../composables/usePlayer.js";
 import { coverVisible } from "../composables/useCoverGuard.ts";
+import type { Song } from "../composables/playerState.js";
 
 defineProps({
-  song: { type: Object, required: true },
+  song: { type: Object as PropType<Song>, required: true },
   vi: { type: Number, required: true },
   active: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
@@ -123,7 +125,7 @@ const emit = defineEmits([
 
 const { t } = useI18n();
 
-function fmtDur(d) {
+function fmtDur(d: number) {
   const m = Math.floor(d / 60);
   const s = Math.floor(d % 60);
   return m + ":" + String(s).padStart(2, "0");

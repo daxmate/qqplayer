@@ -161,7 +161,7 @@
       <div ref="listEl" class="pl-list">
         <PlaylistRow
           v-for="({ song, i }, vi) in visible"
-          :key="song.id"
+          :key="song.id as PropertyKey"
           :song="song"
           :vi="vi"
           :active="i === state.currentIndex"
@@ -208,7 +208,7 @@
       :visible="ctxOpen"
       :x="ctxPos.x"
       :y="ctxPos.y"
-      :fav="ctxSong ? isFavorite(ctxSong.path) : false"
+      :fav="ctxSong ? isFavorite(ctxSong.path!) : false"
       :can-go-artist="ctxCanGoArtist"
       :can-go-album="ctxCanGoAlbum"
       :has-path="!!ctxSong?.path"
@@ -235,7 +235,7 @@
     <!-- 编辑标签/刮削弹窗（右键目标歌曲；autoScrape 打开自动刮削） -->
     <TagEditorModal
       :open="tagEditorOpen"
-      :song="tagEditorSong"
+      :song="tagEditorSong ?? undefined"
       auto-scrape
       @close="tagEditorOpen = false"
     />
@@ -263,9 +263,10 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
+import type { Song } from "../composables/playerState.js";
 import { smartViewState } from "../composables/useSmartViews.js";
 import { Music, RefreshCw, Search, Heart, ArrowLeft, Trash2, LocateFixed } from "@lucide/vue";
 import {
@@ -297,6 +298,14 @@ import { usePlaylistContextMenu } from "../composables/usePlaylistContextMenu.ts
 import { usePlaylistDnD } from "../composables/usePlaylistDnD.ts";
 import { fetchDevices, pushSongsToDevice } from "../utils/deviceCommands.js";
 
+// 视图行结构：可见列表元素（{ song, i }；i 为曲库索引，歌单/过滤/排序视图下与视图索引不同）
+interface ViewEntry {
+  song: Song;
+  i: number;
+}
+// 设备记录结构型（deviceCommands 接口未导出，用 ReturnType 跟随真实签名）
+type DeviceRecord = Awaited<ReturnType<typeof fetchDevices>>["devices"][number];
+
 // 注：曾有过 compact prop（class 绑定），无任何调用方且与全局 html[data-compact] 机制重复，已移除。
 
 const { t } = useI18n();
@@ -318,10 +327,10 @@ const viewTitle = computed(() =>
 // 浏览模式：songs（列表）/ artists（歌手网格）/ albums（专辑网格）
 const browseMode = ref("songs");
 // 分组过滤：进入某歌手/专辑后的歌曲列表
-const browseFilter = ref(null); // { type: 'artist'|'album', value }
+const browseFilter = ref<{ type: "artist" | "album"; value: string; artist?: string } | null>(null); // { type: 'artist'|'album', value }
 
 // 供外部（search anything @pick）进入分组浏览：type='artists'|'albums'，value 为规范化名字
-function openBrowse(type, value) {
+function openBrowse(type: string, value: string) {
   browseMode.value = type;
   browseFilter.value = { type: type === "artists" ? "artist" : "album", value };
 }
@@ -329,18 +338,20 @@ defineExpose({ openBrowse, computeAddMenuPos });
 
 const UNKNOWN_ARTIST = t("playlist.unknownArtist");
 const UNKNOWN_ALBUM = t("playlist.unknownAlbum");
-const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
+const norm = (v: unknown, fallback: string) => (typeof v === "string" ? v.trim() : "") || fallback;
 
 // 当前视图的歌曲列表：歌单视图按歌单顺序（songPaths）展开，i 为曲库索引；分组过滤后只留该组
-const viewSongs = computed(() => {
-  let list;
+const viewSongs = computed<ViewEntry[]>(() => {
+  let list: ViewEntry[];
   if (!inPlaylistView.value) {
     list = state.songs.map((song, i) => ({ song, i }));
   } else {
     const pl = activePlaylist.value;
     if (!pl) return [];
     const byPath = new Map(state.songs.map((s, i) => [s.path, { song: s, i }]));
-    list = (pl.songPaths || []).map((path) => byPath.get(path)).filter(Boolean);
+    list = (pl.songPaths || [])
+      .map((path) => byPath.get(path))
+      .filter((x): x is ViewEntry => Boolean(x));
   }
   const f = browseFilter.value;
   if (f) {
@@ -364,18 +375,18 @@ const browseFilterTitle = computed(() => {
 });
 
 // 切换浏览 tab（清空分组过滤）
-function enterBrowse(mode) {
+function enterBrowse(mode: string) {
   browseMode.value = mode;
   browseFilter.value = null;
   query.value = "";
 }
 
 // 点击卡片进入分组
-function enterGroup(g) {
+function enterGroup(g: { name?: string; album?: string; artist?: string }) {
   browseFilter.value =
     browseMode.value === "artists"
-      ? { type: "artist", value: g.name }
-      : { type: "album", value: g.album, artist: g.artist };
+      ? { type: "artist", value: g.name! }
+      : { type: "album", value: g.album!, artist: g.artist };
   query.value = "";
 }
 
@@ -390,7 +401,7 @@ const favOnly = ref(false);
 const visible = computed(() => {
   let list = viewSongs.value;
   if (favOnly.value) {
-    list = list.filter(({ song }) => isFavorite(song.path));
+    list = list.filter(({ song }) => isFavorite(song.path!));
   }
   const q = normalizeQuery(query.value);
   if (q) {
@@ -435,7 +446,7 @@ watch(
 
 // ============ 列头点击排序（三态循环：升序 → 降序 → 默认顺序） ============
 // 不同列 → 切列并重置为升序；同列升 → 降；同列降 → 回到默认（曲库原始顺序）
-function onColSort(key) {
+function onColSort(key: string) {
   if (sortKey.value !== key) {
     sortKey.value = key;
     sortDir.value = "asc";
@@ -448,7 +459,7 @@ function onColSort(key) {
 }
 
 // 列头激活态方向箭头：仅当前排序列返回 'asc' | 'desc'，否则 null（不显示）
-function colArrow(key) {
+function colArrow(key: string) {
   return sortKey.value === key ? sortDir.value : null;
 }
 
@@ -466,17 +477,17 @@ const canReorder = computed(
 // 网络歌（path=null）由 onRowDragStart preventDefault / 壳内 sourcePath null 天然拦截
 const canDragOut = computed(() => true);
 
-function pick(i) {
+function pick(i: number) {
   selectSong(i);
   play(); // 点击列表直接开始播放
 }
 
 // ============ 多选批量（桌面：⌘/Ctrl 点选进入多选态） ============
 // 多选状态由 PlaylistBatchBar 持有（isSelected/清空/切换经模板 ref 转发）
-const batchBar = ref(null);
+const batchBar = ref<InstanceType<typeof PlaylistBatchBar> | null>(null);
 const multiMode = computed(() => !!batchBar.value?.isMulti());
 
-function isSelected(path) {
+function isSelected(path: string | null) {
   return path != null && !!batchBar.value?.isSelected(path);
 }
 
@@ -487,7 +498,7 @@ function clearSelection() {
 // 行点击：多选态 = 切换选中；⌘/Ctrl+点选 = 进入多选态并选中；否则播放
 // 网络歌（path=null）不参与多选（所有批量操作都是 path 语义），⌘/Ctrl+点选也不动作
 // vi 是 visible（过滤+排序后）视图索引，entry.i 才是原始曲库索引——歌单/过滤/排序视图下两者不一致（8-19 壳内实测暴露）
-function onRowClick(vi, e) {
+function onRowClick(vi: number, e: MouseEvent) {
   const entry = visible.value[vi];
   if (!entry) return;
   const path = entry.song.path;
@@ -501,7 +512,7 @@ function onRowClick(vi, e) {
 }
 
 // 批量加歌单：复用 addMenu 浮层（批量模式 = 只加不删），路径由 PlaylistBatchBar emit 上来
-function openAddMenuBatch(paths) {
+function openAddMenuBatch(paths: string[]) {
   addMenuRef.value?.openForBatch(paths);
 }
 
@@ -539,9 +550,9 @@ const {
 // ============ 编辑标签/刮削（右键目标歌曲；autoScrape 打开自动刮削） ============
 // （不切换当前播放；弹窗内保存/刮削都以该歌曲的 path 为准）
 const tagEditorOpen = ref(false);
-const tagEditorSong = ref(null);
+const tagEditorSong = ref<Song | null>(null);
 
-function openTagEditor(song) {
+function openTagEditor(song: Song | null) {
   if (!song?.path) return;
   tagEditorSong.value = song;
   tagEditorOpen.value = true;
@@ -549,12 +560,12 @@ function openTagEditor(song) {
 
 // ============ 推送到设备（右键单选 / 多选批量 → DevicePickerModal） ============
 const pickerOpen = ref(false);
-const pickerDevices = ref([]);
-const pickerSongs = ref([]); // 待推送的曲库歌曲对象数组（含 path）
+const pickerDevices = ref<DeviceRecord[]>([]);
+const pickerSongs = ref<Song[]>([]); // 待推送的曲库歌曲对象数组（含 path）
 
 // 打开选择浮层：先拉设备清单，无已配对设备 → toast 提示（不弹浮层）
-async function openDevicePicker(songs) {
-  const list = (songs || []).filter((s) => s && s.path);
+async function openDevicePicker(songs: unknown[]) {
+  const list = (songs || []).filter((s): s is Song => !!s && !!(s as Song).path);
   if (!list.length) {
     showToast(t("playlist.pushFailed"), { type: "error" });
     return;
@@ -570,17 +581,20 @@ async function openDevicePicker(songs) {
 }
 
 // 多选批量：选中路径（PlaylistBatchBar emit）→ 曲库歌曲对象（路径语义，网络歌天然被过滤）
-function batchPushToDevice(paths) {
-  const songs = state.songs.filter((s) => s && paths.includes(s.path));
+function batchPushToDevice(paths: string[]) {
+  const songs = state.songs.filter((s) => s && paths.includes(s.path!));
   openDevicePicker(songs);
 }
 
 // 浮层确认：推送选中歌曲到目标设备 → toast 成功/失败
-async function onDevicePicked(device) {
+async function onDevicePicked(device: DeviceRecord) {
   pickerOpen.value = false;
   const songs = pickerSongs.value;
   pickerSongs.value = [];
-  const r = await pushSongsToDevice(songs, device.device_id);
+  const r = await pushSongsToDevice(
+    songs as Parameters<typeof pushSongsToDevice>[0],
+    device.device_id!,
+  );
   if (r.ok) {
     const n = songs.length - (Array.isArray(r.skipped) ? r.skipped.length : 0);
     showToast(t("playlist.pushSuccess", { n: Math.max(0, n) }));
@@ -594,12 +608,12 @@ async function onDevicePicked(device) {
 }
 
 // ============ 行操作：移除（跟随视图语义） / 加歌 ============
-function removeItem(vi) {
+function removeItem(vi: number) {
   const entry = visible.value[vi];
   if (!entry) return;
   if (inPlaylistView.value) {
     const path = entry.song.path;
-    if (path) removeFromPlaylist(state.activePlaylistId, path);
+    if (path) removeFromPlaylist(state.activePlaylistId!, path);
   } else {
     removeFromQueue(entry.i);
   }
@@ -608,9 +622,9 @@ function removeItem(vi) {
 // ============ 下载网络歌（行内按钮） ============
 // 后端 POST /api/online/download（body {id, level?, title?, artist?}）→ 网易云取直链落盘到
 // 下载目录（设置 download.downloadDir，空 = 曲库）；曲库 mtime 监听自动刷新，下载完成即出现为本地歌。
-const downloading = reactive({}); // streamId → 下载中
+const downloading = reactive<Record<string, boolean>>({}); // streamId → 下载中
 
-async function downloadSong(song) {
+async function downloadSong(song: Song) {
   const id = song?.streamId;
   if (!id || downloading[id]) return;
   downloading[id] = true;
@@ -627,28 +641,28 @@ async function downloadSong(song) {
     }
     showToast(t("playlist.downloadSuccess", { title: song.name }));
   } catch (err) {
-    toastError(t("playlist.downloadFailed", { msg: err.message || "" }));
+    toastError(t("playlist.downloadFailed", { msg: (err as Error).message || "" }));
   } finally {
     downloading[id] = false;
   }
 }
 
 // 加歌浮层（AddToPlaylistMenu）：状态/位置计算/Teleport 全在子组件内，主组件只做打开转发与 Esc 协调
-const addMenuRef = ref(null);
+const addMenuRef = ref<InstanceType<typeof AddToPlaylistMenu> | null>(null);
 
 // 行内按钮：锚定触发按钮（getBoundingClientRect 动态定位）
-function openAddMenu(e, path) {
-  addMenuRef.value?.openForSingle(path, e?.currentTarget);
+function openAddMenu(e: MouseEvent, path: string) {
+  addMenuRef.value?.openForSingle(path, e.currentTarget as HTMLElement | null);
 }
 
 // 统一入口：anchor 为带 getBoundingClientRect 的元素（行内按钮 / 右键菜单鼠标位置的假 rect）
-function openAddMenuAt(path, anchor) {
-  addMenuRef.value?.openForSingle(path, anchor);
+function openAddMenuAt(path: string, anchor: unknown) {
+  addMenuRef.value?.openForSingle(path, anchor as { getBoundingClientRect(): DOMRect } | null);
 }
 
 // Esc 关闭（优先级：删除弹窗 → 右键菜单 → 加歌浮层 → 多选态）；
 // resize/滚动重算（scroll 用捕获阶段）在 AddToPlaylistMenu 内部自管
-function onKeydown(e) {
+function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   if (deleteOpen.value) {
     deleteOpen.value = false;
@@ -673,9 +687,9 @@ onBeforeUnmount(() => {
 
 // ============ 移到废纸篓（确认 → DELETE → toast → 刷新，单曲/批量同一链路） ============
 const deleteOpen = ref(false);
-const deletePaths = ref([]);
+const deletePaths = ref<string[]>([]);
 
-function openDeleteDialog(paths) {
+function openDeleteDialog(paths: string[]) {
   deletePaths.value = paths.filter((p) => p != null);
   if (deletePaths.value.length) deleteOpen.value = true;
 }
@@ -710,7 +724,7 @@ async function doDelete() {
     // 刷新曲库；最近添加/最近播放/常听排行由既有 watch 自动重算
     await loadSongs({ force: true });
   } catch (e) {
-    toastError(e.message || t("errors.deleteSongs"));
+    toastError((e as Error).message || t("errors.deleteSongs"));
     clearSelection();
   }
 }

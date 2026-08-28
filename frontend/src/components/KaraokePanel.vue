@@ -88,8 +88,9 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, computed, nextTick } from "vue";
+import type { PropType } from "vue";
 import { useI18n } from "vue-i18n";
 import { Mic, Music2, PanelLeftOpen, FileMusic } from "@lucide/vue";
 import {
@@ -103,11 +104,12 @@ import {
   LYRIC_SCHEMES,
 } from "../composables/usePlayer.js";
 import { useLyricScroll } from "../composables/useLyricScroll.js";
+import type { LyricLine } from "../composables/playerState.js";
 
 const { t } = useI18n();
 
 const props = defineProps({
-  lyric: { type: Array, default: () => [] },
+  lyric: { type: Array as PropType<LyricLine[]>, default: () => [] },
   current: { type: Number, default: -1 },
   expandBtn: { type: Boolean, default: false }, // 面板全关时显示展开按钮（跟唱模式无悬浮按钮区）
   // 纯歌词展示模式（移动端音乐模式）：隐藏面板头（逐句练习标题/AB 提示/歌词库入口），
@@ -121,9 +123,9 @@ function expandPanels() {
   toggleMusicLib();
 }
 
-const scrollEl = ref(null);
-const trackEl = ref(null);
-const lineIndexMap = ref([]); // lyric 数组索引 -> 行号（只计 line）
+const scrollEl = ref<HTMLElement | null>(null);
+const trackEl = ref<HTMLElement | null>(null);
+const lineIndexMap = ref<number[]>([]); // lyric 数组索引 -> 行号（只计 line）
 let lastCurrent = -1;
 
 // 跟唱面板不支持 amll（自定义 AB 循环/行号/时间 UI）：amll 时回退弹簧引擎
@@ -146,7 +148,7 @@ const FONTS = {
 
 // 字号/字体/渐隐 → CSS 变量与内联样式（与连播 LyricPanel 一致）
 const scrollStyle = computed(() => ({
-  fontFamily: FONTS[lyricSettings.fontFamily] || "",
+  fontFamily: FONTS[lyricSettings.fontFamily as keyof typeof FONTS] || "",
   "--fs-active": Math.round(lyricSettings.fontSize * props.fontScale) + "px",
   // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
   "--lyr-jp":
@@ -161,14 +163,14 @@ const scrollStyle = computed(() => ({
 
 watch(
   () => props.lyric,
-  (v) => {
+  (v: LyricLine[]) => {
     lineIndexMap.value = v.map((x, i) => (x.type === "line" ? i : -1)).filter((i) => i >= 0);
     lastCurrent = -1;
   },
   { immediate: true },
 );
 
-function lineNumber(lyricIdx) {
+function lineNumber(lyricIdx: number) {
   return lineIndexMap.value.indexOf(lyricIdx) + 1;
 }
 
@@ -179,7 +181,7 @@ const songTitle = computed(() => {
   return s.artist ? `${s.name} · ${s.artist}` : s.name;
 });
 
-function fmt(t) {
+function fmt(t: number) {
   if (t == null || Number.isNaN(t)) return "--:--";
   const m = Math.floor(t / 60);
   const s = Math.floor(t % 60);
@@ -194,12 +196,12 @@ const abHint = computed(() => {
   return t("karaoke.abHintSet", { a: ab.a + 1, b: ab.b + 1 });
 });
 
-function abLineNo(lyricIdx) {
+function abLineNo(lyricIdx: number) {
   return lineIndexMap.value.indexOf(lyricIdx);
 }
 
-function klineClass(lyricIdx) {
-  const cls = { active: lyricIdx === props.current };
+function klineClass(lyricIdx: number) {
+  const cls: Record<string, boolean> = { active: lyricIdx === props.current };
   // 距离分级（与连播歌词一致的字体层级）
   const d = props.current < 0 ? 99 : Math.abs(lyricIdx - props.current);
   if (d === 1) cls.near = true;
@@ -214,7 +216,7 @@ function klineClass(lyricIdx) {
   return cls;
 }
 
-function abBadge(lyricIdx) {
+function abBadge(lyricIdx: number) {
   if (!playbackSettings.abVisual) return "";
   const ab = state.abLoop;
   const n = abLineNo(lyricIdx);
@@ -237,7 +239,7 @@ const abProgress = computed(() => {
   return { pos, total, inside, pct: inside ? (pos / total) * 100 : 0 };
 });
 
-function playLineAt(lyricIdx) {
+function playLineAt(lyricIdx: number) {
   const lineNo = abLineNo(lyricIdx);
   if (lineNo < 0) return;
   clickLine(lineNo); // AB 循环中：区间外退出并播放；区间内跳转播放；等选终点时设为终点
@@ -274,10 +276,15 @@ watch(
       const cur = props.lyric[v];
       const prev = props.lyric[v - 1];
       const intervalMs =
-        cur && prev && typeof cur.s === "number" && typeof prev.s === "number"
+        cur &&
+        prev &&
+        cur.type === "line" &&
+        prev.type === "line" &&
+        typeof cur.s === "number" &&
+        typeof prev.s === "number"
           ? cur.s - prev.s
           : undefined;
-      scrollTo(active, { intervalMs });
+      scrollTo(active as HTMLElement, { intervalMs });
     }
   },
 );

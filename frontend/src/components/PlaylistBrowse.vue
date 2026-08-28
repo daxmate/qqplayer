@@ -45,7 +45,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Music } from "@lucide/vue";
@@ -69,7 +69,7 @@ const { t } = useI18n();
 
 const UNKNOWN_ARTIST = t("playlist.unknownArtist");
 const UNKNOWN_ALBUM = t("playlist.unknownAlbum");
-const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
+const norm = (v: string | undefined, fallback: string) => (v && v.trim ? v.trim() : "") || fallback;
 
 // 歌手分组聚合（名称 → 歌曲数）
 const artistGroups = computed(() => {
@@ -125,7 +125,7 @@ const gridGroups = computed(() => {
   });
 });
 
-const gridKey = (g) =>
+const gridKey = (g: { name?: string; album?: string; artist?: string }) =>
   props.browseMode === "artists" ? "a:" + g.name : "l:" + g.album + ":" + g.artist;
 
 // 专辑分组代表歌封面：useCoverURL 统一解析（resolveCover 幂等；只查不下载，专辑数远小于行数）
@@ -138,7 +138,7 @@ watch(
 );
 
 // 歌手首字母色块：名字哈希 → 渐变背景
-function hashBg(name) {
+function hashBg(name: string) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   const hue = h % 360;

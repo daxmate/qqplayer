@@ -75,10 +75,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, computed, nextTick, defineAsyncComponent, onBeforeUnmount } from "vue";
+import type { PropType } from "vue";
 import { useI18n } from "vue-i18n";
 import { Music2, FileMusic } from "@lucide/vue";
+import type { LyricLineMouseEvent } from "@applemusic-like-lyrics/core";
+import type { LyricLine } from "../composables/playerState.js";
 import {
   seek,
   lyricSettings,
@@ -96,12 +99,13 @@ const LyricPlayer = defineAsyncComponent(() =>
 );
 
 const props = defineProps({
-  lyric: { type: Array, default: () => [] },
+  lyric: { type: Array as PropType<LyricLine[]>, default: () => [] },
   current: { type: Number, default: -1 },
 });
 
 // AMLL 实例引用（异步组件挂载后可用；expose lyricPlayer = 内部实例）
-const amllRef = ref(null);
+// 结构型声明：仅使用 lyricPlayer.value.setFPS（异步组件实例类型不稳定，不引入）
+const amllRef = ref<{ lyricPlayer?: { value?: { setFPS(fps: number): void } } } | null>(null);
 // 浏览器环境（非壳）降 AMLL WebGL 渲染帧率 60→30fps：特效全关时引擎仍每帧渲染歌词，
 // 降帧后绘制量减半（歌词滚动 30fps 视觉无感）。壳（window.qqplayerNative）保持满帧零变化。
 let amllTimer = 0;
@@ -129,8 +133,8 @@ if (typeof window !== "undefined" && !window.qqplayerNative) {
 }
 onBeforeUnmount(() => clearTimeout(amllTimer));
 
-const scrollEl = ref(null);
-const trackEl = ref(null);
+const scrollEl = ref<HTMLElement | null>(null);
+const trackEl = ref<HTMLElement | null>(null);
 let lastCurrent = -1;
 
 const engine = computed(() => lyricSettings.engine);
@@ -149,7 +153,7 @@ const FONTS = {
 
 // 字号/字体/对齐/渐隐 → 全部走 CSS 变量与内联样式
 const scrollStyle = computed(() => ({
-  fontFamily: FONTS[lyricSettings.fontFamily] || "",
+  fontFamily: FONTS[lyricSettings.fontFamily as keyof typeof FONTS] || "",
   textAlign: lyricSettings.align,
   "--fs-active": lyricSettings.fontSize + "px",
   // 配色：自定义颜色优先，否则配色方案色，否则主题强调色
@@ -164,7 +168,7 @@ const scrollStyle = computed(() => ({
 }));
 
 // 距离分级：0 = 当前句，1 = 相邻句，2 = 更远（决定字号/透明度层级）
-function distClass(i) {
+function distClass(i: number) {
   const d = props.current < 0 ? 99 : Math.abs(i - props.current);
   if (d === 0) return "active";
   if (d === 1) return "near";
@@ -210,17 +214,22 @@ watch(
       const cur = props.lyric[v];
       const prev = props.lyric[v - 1];
       const intervalMs =
-        cur && prev && typeof cur.s === "number" && typeof prev.s === "number"
+        cur &&
+        prev &&
+        cur.type === "line" &&
+        prev.type === "line" &&
+        typeof cur.s === "number" &&
+        typeof prev.s === "number"
           ? cur.s - prev.s
           : undefined;
-      scrollTo(active, { intervalMs });
+      scrollTo(active as HTMLElement, { intervalMs });
     }
   },
 );
 
-function seekLine(item) {
-  // 连播模式：点击句子可跳转试听（用户主动点击，允许 seek）
-  seek(item.s);
+function seekLine(item: LyricLine) {
+  // 连播模式：点击句子可跳转试听（用户主动点击，允许 seek）；sec 行无时间戳不 seek
+  if (item.type === "line") seek(item.s);
 }
 
 // ============ amll 引擎：数据与事件 ============
@@ -252,7 +261,7 @@ const amllTime = computed(() => Math.round((state.currentTime || 0) * 1000));
 
 // 主题映射：字号/主色/字体 → amll CSS 变量
 const amllStyle = computed(() => ({
-  fontFamily: FONTS[lyricSettings.fontFamily] || "",
+  fontFamily: FONTS[lyricSettings.fontFamily as keyof typeof FONTS] || "",
   "--amll-lp-font-size": lyricSettings.fontSize + "px",
   "--amll-lp-color":
     lyricSettings.jpColor ||
@@ -260,7 +269,7 @@ const amllStyle = computed(() => ({
     "var(--accent-text)",
 }));
 
-function onAmllLineClick(e) {
+function onAmllLineClick(e: LyricLineMouseEvent) {
   // 点击歌词行跳转试听（amll 行事件）
   const line = e.line?.getLine?.();
   if (line && typeof line.startTime === "number") seek(line.startTime / 1000);

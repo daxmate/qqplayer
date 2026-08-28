@@ -9,7 +9,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // ControlBar 迷你频谱条（任务 C 混合方案：频谱从主区域移到这里）。
 // 沿用 6 样式渲染器（bars/radial/wave/pulse/mirror/particle，small 变体），
 // 半透明低调，作为「正在播放」的节奏指示；开关 = visualizerEnabled && miniSpectrumEnabled。
@@ -31,7 +31,7 @@ import {
 
 const { t } = useI18n();
 
-const canvasEl = ref(null);
+const canvasEl = ref<HTMLCanvasElement | null>(null);
 const enabled = computed(
   () => !!playbackSettings.visualizerEnabled && !!playbackSettings.miniSpectrumEnabled,
 );
@@ -44,7 +44,7 @@ const style = computed(() =>
 
 let rafId = 0;
 let running = false;
-let ro = null;
+let ro: ResizeObserver | null = null;
 
 function resize() {
   const cv = canvasEl.value;

@@ -1,5 +1,5 @@
-<script>
-// 加歌浮层常量 + 位置计算纯函数（模块作用域：同时供 <script setup> 与外部命名导入使用）
+<script lang="ts">
+// 加歌浮层常量 + 位置计算纯函数（模块作用域：同时供 <script setup lang="ts"> 与外部命名导入使用）
 export const ADD_MENU_WIDTH = 220; // 与 .add-menu width 一致
 const ADD_MENU_GAP = 6; // 浮层与按钮间距
 const ADD_MENU_EST_HEIGHT = 220; // 预估高度（标题 + 常见歌单数），渲染后用实际高度精修
@@ -8,8 +8,8 @@ const ADD_MENU_MARGIN = 8; // 视口边缘留白
 // 纯函数：按钮 rect + 浮层高度 + 视口尺寸 → { top, left, flip }
 // 右对齐按钮右缘（浮层宽 220 向左展开）：与旧视觉"右侧弹层"一致，且不盖住行内其他内容
 export function computeAddMenuPos(
-  btnRect,
-  menuHeight,
+  btnRect: DOMRect,
+  menuHeight: number,
   vw = window.innerWidth,
   vh = window.innerHeight,
 ) {
@@ -26,7 +26,7 @@ export function computeAddMenuPos(
 }
 </script>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { ListPlus, ListMusic, Check, Plus } from "@lucide/vue";
@@ -43,23 +43,29 @@ const { t } = useI18n();
 // 加歌浮层：锚定触发按钮（getBoundingClientRect 动态定位，保留 Teleport 到 body 防裁剪）
 const addMenuOpen = ref(false);
 // 目标路径：单曲=[path]（切换收藏态）；批量=多 path（只加不删）
-const addMenuPaths = ref([]);
+const addMenuPaths = ref<string[]>([]);
 const addMenuMode = ref("single"); // 'single' 切换 | 'batch' 只加
-const addMenuEl = ref(null); // 浮层根元素（用于测量实际高度）
-const addMenuAnchor = ref(null); // 触发按钮元素（resize/滚动时重取 rect）
-const addMenuPos = ref({ top: 0, left: 0 });
+// anchor 为带 getBoundingClientRect 的元素（行内按钮 / 右键菜单鼠标位置的假 rect）
+type RectAnchor = HTMLElement | { getBoundingClientRect(): DOMRect };
+const addMenuEl = ref<HTMLElement | null>(null); // 浮层根元素（用于测量实际高度）
+const addMenuAnchor = ref<RectAnchor | null>(null); // 触发按钮元素（resize/滚动时重取 rect）
+const addMenuPos = ref<{ top: number; left: number; flip: boolean }>({
+  top: 0,
+  left: 0,
+  flip: false,
+});
 
 function measureMenuHeight() {
   const h = addMenuEl.value ? addMenuEl.value.getBoundingClientRect().height : 0;
   return h > 0 ? h : ADD_MENU_EST_HEIGHT;
 }
 
-function applyAddMenuPos(rect) {
+function applyAddMenuPos(rect: DOMRect) {
   addMenuPos.value = computeAddMenuPos(rect, measureMenuHeight());
 }
 
 // 统一入口：anchor 为带 getBoundingClientRect 的元素（行内按钮 / 右键菜单鼠标位置的假 rect）
-function openForSingle(path, anchor) {
+function openForSingle(path: string, anchor: RectAnchor | null) {
   addMenuMode.value = "single";
   addMenuPaths.value = [path];
   if (anchor && typeof anchor.getBoundingClientRect === "function") {
@@ -83,7 +89,7 @@ function openForSingle(path, anchor) {
 }
 
 // 批量加歌单（多选批量条）：固定位置（右上角），只加不删
-function openForBatch(paths) {
+function openForBatch(paths: string[]) {
   addMenuMode.value = "batch";
   addMenuPaths.value = paths;
   addMenuPos.value = {
@@ -121,7 +127,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("scroll", onViewportChange, true);
 });
 
-async function toggleAdd(pid) {
+async function toggleAdd(pid: string) {
   const paths = addMenuPaths.value;
   if (!paths.length) return;
   try {
@@ -136,12 +142,12 @@ async function toggleAdd(pid) {
       await addToPlaylist(pid, paths[0]);
     }
   } catch (e) {
-    toastError(e.message);
+    toastError((e as Error).message);
   }
 }
 
 // 浮层内歌单的勾选态：单曲 = 该歌在歌单；批量 = 全部选中歌都在歌单
-function addMenuIn(pid) {
+function addMenuIn(pid: string) {
   const paths = addMenuPaths.value;
   return paths.length > 0 && paths.every((p) => isInPlaylist(pid, p));
 }

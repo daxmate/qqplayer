@@ -165,7 +165,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -189,7 +189,12 @@ import {
   uiState,
   closeLyricSpec,
 } from "../composables/usePlayer.js";
+import type { LyricLine } from "../composables/playerState.js";
 import { toastError, showToast } from "../composables/useToast.js";
+
+// 返回类型结构型取用（useLyric 接口未导出，用 ReturnType 跟随真实签名，不重复声明）
+type ManualLyricState = Awaited<ReturnType<typeof fetchManualLyric>>;
+type LyricSearchCandidate = Awaited<ReturnType<typeof searchLyricCandidates>>[number];
 
 const { t } = useI18n();
 
@@ -200,7 +205,7 @@ const tabs = [
 ];
 
 const tab = ref("upload");
-const manual = ref(null); // {format, text, source, created_at} | null
+const manual = ref<ManualLyricState | null>(null); // {format, text, source, created_at} | null
 const manualSpecified = computed(() => !!manual.value);
 const manualFormat = computed(() => manual.value?.format || "");
 const manualSource = computed(() => manual.value?.source || "");
@@ -211,7 +216,7 @@ const songName = computed(() =>
 );
 
 // ---- 上传文件 ----
-const file = ref(null);
+const file = ref<File | null>(null);
 const fileText = ref("");
 const detectedFormat = computed(() => (fileText.value ? detectFormat(fileText.value) : null));
 const preview = computed(() => {
@@ -226,8 +231,8 @@ const preview = computed(() => {
   return text.split("\n").slice(0, 6).join("\n");
 });
 
-function onFile(e) {
-  const f = e.target.files?.[0];
+function onFile(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0];
   if (!f) return;
   file.value = f;
   const reader = new FileReader();
@@ -243,7 +248,7 @@ const searchArtist = ref("");
 const searching = ref(false);
 const searched = ref(false);
 const searchError = ref("");
-const results = ref([]);
+const results = ref<LyricSearchCandidate[]>([]);
 const savingIdx = ref(-1);
 
 async function doSearch() {
@@ -263,13 +268,13 @@ async function doSearch() {
     );
     searched.value = true;
   } catch (err) {
-    searchError.value = err.message || t("spec.searchFailed");
+    searchError.value = (err as Error).message || t("spec.searchFailed");
   } finally {
     searching.value = false;
   }
 }
 
-async function pickResult(r, i) {
+async function pickResult(r: LyricSearchCandidate, i: number) {
   if (!song.value) return;
   savingIdx.value = i;
   searchError.value = "";
@@ -286,7 +291,7 @@ async function pickResult(r, i) {
     });
     await afterSaved();
   } catch (err) {
-    searchError.value = err.message || t("spec.saveFailed");
+    searchError.value = (err as Error).message || t("spec.saveFailed");
     savingIdx.value = -1;
   }
 }
@@ -304,7 +309,7 @@ const alignSourceText = computed(() => {
   if (pasteText.value.trim()) return pasteText.value; // 粘贴优先（用户主动粘的内容）
   const lines = state.lyric || [];
   return lines
-    .filter((l) => l.type === "line" && l.text?.[0])
+    .filter((l): l is Extract<LyricLine, { type: "line" }> => l.type === "line" && !!l.text?.[0])
     .map((l) => l.text[0])
     .join("\n");
 });
@@ -320,11 +325,11 @@ async function doAlign() {
     const data = await alignLyric({ path: song.value.path, text });
     // 对齐耗时较长，期间用户可能已关弹窗/切歌：结果只在弹窗仍打开时填入
     if (!uiState.specLyricOpen || !song.value) return;
-    pasteText.value = data.lrc; // 填入后 detectFormat 自动识别为 lrc，canSave 通过
+    pasteText.value = data.lrc || ""; // 填入后 detectFormat 自动识别为 lrc，canSave 通过
     tab.value = "paste"; // 切回粘贴 tab 展示结果（用户可能停在别的 tab）
     showToast(t("spec.alignDone"));
   } catch (err) {
-    toastError(err.message || t("spec.alignFailed"));
+    toastError((err as Error).message || t("spec.alignFailed"));
   } finally {
     aligning.value = false;
   }
@@ -342,8 +347,9 @@ const canSave = computed(() => {
 async function save() {
   if (!canSave.value || !song.value) return;
   let text = tab.value === "upload" ? fileText.value : pasteText.value;
-  let format = tab.value === "upload" ? detectedFormat.value : pasteFormat.value;
-  let tlyric = undefined;
+  let format: string | undefined =
+    tab.value === "upload" ? (detectedFormat.value ?? undefined) : (pasteFormat.value ?? undefined);
+  let tlyric: string | undefined = undefined;
   if (format === "json") {
     // JSON 歌词：提取 lrc 原文 + tlyric 翻译，按 LRC 保存
     const obj = JSON.parse(text);
@@ -366,7 +372,7 @@ async function save() {
     await afterSaved();
   } catch (err) {
     saving.value = false;
-    toastError(err.message || t("spec.saveFailed"));
+    toastError((err as Error).message || t("spec.saveFailed"));
   }
 }
 
@@ -374,7 +380,15 @@ async function save() {
 // 清除失败 → toastError（不弹撤销）
 const UNDO_DURATION = 5000;
 
-async function restoreManualLyric(cached) {
+async function restoreManualLyric(
+  cached: {
+    path: string | null;
+    format?: string;
+    text?: string;
+    source?: string;
+    tlyric?: string;
+  } | null,
+) {
   if (!cached) return;
   try {
     await saveManualLyric({
@@ -388,7 +402,7 @@ async function restoreManualLyric(cached) {
     await loadLyric();
     showToast(t("lyric.manualRestored"));
   } catch (err) {
-    toastError(err.message || t("spec.saveFailed"));
+    toastError((err as Error).message || t("spec.saveFailed"));
   }
 }
 
@@ -424,7 +438,7 @@ function close() {
   closeLyricSpec();
 }
 
-function detectFormat(text) {
+function detectFormat(text: string) {
   if (!text) return null;
   const trimmed = text.trim();
   if (trimmed.startsWith("{")) {

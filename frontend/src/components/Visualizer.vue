@@ -9,7 +9,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { state, playbackSettings, VISUALIZER_STYLES } from "../composables/usePlayer.js";
 import { useCoverURL } from "../composables/useCoverURL.js";
@@ -32,7 +32,7 @@ const props = defineProps({
   small: { type: Boolean, default: false },
 });
 
-const canvasEl = ref(null);
+const canvasEl = ref<HTMLCanvasElement | null>(null);
 // 主区域（非 small）= 封面取色氛围背景；small（移动端）= 迷你频谱条。
 // 视觉化总开关关闭 → 全部隐藏；子开关各自控制对应区域。
 const enabled = computed(() => {
@@ -49,7 +49,7 @@ const style = computed(() =>
 
 let rafId = 0;
 let running = false;
-let ro = null;
+let ro: ResizeObserver | null = null;
 
 // 画布实际像素 = CSS 尺寸 × dpr（≤2），保证清晰
 function resize() {
@@ -91,7 +91,8 @@ function accentColors() {
 }
 
 // 封面主色（缓存由 extractCoverColor 内部 Map 负责；取色失败 → null → 降级主题色）
-const coverColor = ref(null);
+// RGB 结构型声明（useVisualizer 的 RGB 接口未导出，保持 10 文件边界）
+const coverColor = ref<{ r: number; g: number; b: number } | null>(null);
 
 // 封面 URL 统一入口（契约 2026-08-27）：本地歌经 useCoverURL 取同源 URL 供 canvas 读像素
 const { coverSrc, resolveCover, dispose: disposeCoverURL } = useCoverURL();

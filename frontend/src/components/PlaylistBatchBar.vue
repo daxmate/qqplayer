@@ -57,7 +57,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Heart, ListPlus, Loader2, Sparkles, Trash2, X, Send } from "@lucide/vue";
@@ -72,14 +72,15 @@ const { t } = useI18n();
 
 // ============ 多选批量（桌面：⌘/Ctrl 点选进入多选态） ============
 // 多选状态由本组件持有；主组件通过 defineExpose 读取（行 selected class / Esc 清理 / 点击切换）
-const selectedPaths = ref([]);
+const selectedPaths = ref<string[]>([]);
 const multiMode = computed(() => selectedPaths.value.length > 0);
 
-function isSelected(path) {
+function isSelected(path: string | null) {
   return path != null && selectedPaths.value.includes(path);
 }
 
-function toggleSelected(path) {
+function toggleSelected(path: string | null) {
+  if (path == null) return;
   const i = selectedPaths.value.indexOf(path);
   if (i >= 0) selectedPaths.value.splice(i, 1);
   else selectedPaths.value.push(path);
