@@ -1,5 +1,6 @@
 // deviceCommands.js 单元测试（桌面端设备指令工具：推送下载/远程删除/清单/格式化）
 import { describe, expect, it, beforeEach, vi } from "vitest";
+import type { Mock } from "vitest";
 
 vi.mock("../utils/apiClient.js", () => ({
   apiGet: vi.fn(),
@@ -9,10 +10,15 @@ vi.mock("../utils/apiClient.js", () => ({
   apiDelete: vi.fn(),
   invalidate: vi.fn(),
   scheduleFlush: vi.fn(),
-  resolveServerUrl: (p) => p,
+  resolveServerUrl: (p: string) => p,
 }));
 
-const { apiGet, apiPost } = await import("../utils/apiClient.js");
+// vi.mock 替换后运行时是 vi.fn()，但静态类型仍是真实 apiGet/apiPost 签名 → 显式收窄为 Mock
+// （运行时行为不变；参考 ReaderSearch.test.ts 的 (x as Mock) 约定）
+const { apiGet, apiPost } = (await import("../utils/apiClient.js")) as unknown as {
+  apiGet: Mock;
+  apiPost: Mock;
+};
 const {
   formatBytes,
   formatLastSeen,
@@ -21,6 +27,11 @@ const {
   pushSongsToDevice,
   deleteAssetsFromDevice,
 } = await import("../utils/deviceCommands.js");
+
+// pushSongsToDevice 参数是宽松 SongLike（path?: string），测试输入带 id 展示字段、
+// path 可为 null（流媒体）→ 本地宽类型 + 断言到参数类型（运行时不变）
+type TestSong = { id: string; path: string | null; type?: string };
+type PushSongs = Parameters<typeof pushSongsToDevice>[0];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,7 +76,7 @@ describe("pushSongsToDevice", () => {
       [
         { id: "a", path: "/a.mp3" },
         { id: "b", path: "/b.mp3" },
-      ],
+      ] as TestSong[] as PushSongs,
       "dev1",
     );
     expect(r).toEqual({ ok: true, id: 42, skipped: [] });
@@ -89,7 +100,7 @@ describe("pushSongsToDevice", () => {
         { id: "s", path: null, type: "stream" }, // 流媒体：直接跳过
         { id: "a", path: "/a.mp3" }, // 命中
         { id: "x", path: "/missing.mp3" }, // 匹配不到
-      ],
+      ] as TestSong[] as PushSongs,
       "dev1",
     );
     expect(apiPost).toHaveBeenCalledWith("/api/sync/commands", {
@@ -103,23 +114,32 @@ describe("pushSongsToDevice", () => {
 
   it("items 空（全部匹配不到）→ 不发送请求，返回 no_valid_items", async () => {
     apiGet.mockResolvedValueOnce({ ok: true, data: { songs: [] } });
-    const r = await pushSongsToDevice([{ id: "x", path: "/x.mp3" }], "dev1");
+    const r = await pushSongsToDevice(
+      [{ id: "x", path: "/x.mp3" }] as TestSong[] as PushSongs,
+      "dev1",
+    );
     expect(r).toEqual({ ok: false, reason: "no_valid_items", skipped: ["/x.mp3"] });
     expect(apiPost).not.toHaveBeenCalled();
   });
 
   it("无 path 输入（空数组/流媒体）→ 不发送请求", async () => {
-    const r = await pushSongsToDevice([], "dev1");
+    const r = await pushSongsToDevice([] as TestSong[] as PushSongs, "dev1");
     expect(r).toEqual({ ok: false, reason: "no_valid_items", skipped: [] });
     expect(apiPost).not.toHaveBeenCalled();
-    const r2 = await pushSongsToDevice([{ id: "s", path: null }], "dev1");
+    const r2 = await pushSongsToDevice(
+      [{ id: "s", path: null }] as TestSong[] as PushSongs,
+      "dev1",
+    );
     expect(r2).toEqual({ ok: false, reason: "no_valid_items", skipped: [] });
     expect(apiPost).not.toHaveBeenCalled();
   });
 
   it("manifest 拉取失败 → 不发送请求，返回 manifest_failed + 全部 skipped", async () => {
     apiGet.mockResolvedValueOnce({ ok: false, status: 0, message: "网络连接失败", network: true });
-    const r = await pushSongsToDevice([{ id: "a", path: "/a.mp3" }], "dev1");
+    const r = await pushSongsToDevice(
+      [{ id: "a", path: "/a.mp3" }] as TestSong[] as PushSongs,
+      "dev1",
+    );
     expect(r.ok).toBe(false);
     expect(r.reason).toBe("manifest_failed");
     expect(r.skipped).toEqual(["/a.mp3"]);
@@ -129,7 +149,10 @@ describe("pushSongsToDevice", () => {
   it("指令发送失败 → send_failed + error（已匹配项已入 items，skipped 为空）", async () => {
     apiGet.mockResolvedValueOnce(MANIFEST_OK);
     apiPost.mockResolvedValueOnce({ ok: false, status: 500, message: "boom" });
-    const r = await pushSongsToDevice([{ id: "a", path: "/a.mp3" }], "dev1");
+    const r = await pushSongsToDevice(
+      [{ id: "a", path: "/a.mp3" }] as TestSong[] as PushSongs,
+      "dev1",
+    );
     expect(r).toEqual({ ok: false, reason: "send_failed", skipped: [], error: "boom" });
   });
 });

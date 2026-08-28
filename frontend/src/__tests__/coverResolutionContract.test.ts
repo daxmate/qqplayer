@@ -13,9 +13,26 @@
 //        最终有值（契约新增：恢复后自动补齐，不等切歌）。
 //      - 桌面直出回归：非壳环境 resolveCover 同步返回远程 URL（行为零变化）。
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+
+// 项目未装 @types/node（tsconfig types 仅 ["vite/client"]）→ node: 内置模块以非常量
+// specifier 动态导入（TS 不对非常量 specifier 做模块解析）；运行时由 vitest/node 提供，
+// 与静态 import 行为一致。引入 @types/node 后可换回静态 import。
+const nodeFS = "node:fs";
+const { readFileSync, readdirSync, statSync } = (await import(nodeFS)) as unknown as {
+  readFileSync(path: string, encoding: string): string;
+  readdirSync(path: string): string[];
+  statSync(path: string): { isDirectory(): boolean };
+};
+const nodeURL = "node:url";
+const { fileURLToPath } = (await import(nodeURL)) as unknown as {
+  fileURLToPath(url: string | URL): string;
+};
+const nodePath = "node:path";
+const path = (await import(nodePath)) as unknown as {
+  join(...paths: string[]): string;
+  resolve(...paths: string[]): string;
+  dirname(path: string): string;
+};
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.resolve(testDir, "..");
@@ -23,7 +40,7 @@ const srcDir = path.resolve(testDir, "..");
 // ================= 静态扫描 =================
 
 /** 递归收集目录下 .vue/.js/.ts 文件 */
-function collectFiles(dir, acc = []) {
+function collectFiles(dir: string, acc: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const p = path.join(dir, name);
     if (statSync(p).isDirectory()) collectFiles(p, acc);
@@ -33,7 +50,7 @@ function collectFiles(dir, acc = []) {
 }
 
 /** 剥离注释（行/块），字符串内容保留（URL 里的 // 不当注释；"/api/cover" 字面量参与匹配） */
-function stripComments(code) {
+function stripComments(code: string): string {
   let out = "";
   let inLine = false;
   let inBlock = false;
@@ -154,21 +171,21 @@ describe("coverResolutionContract：消费点必须接入 useCoverURL", () => {
 
 // ---------- mock：apiClient（isOffline/onOfflineChange 可控 + resolveServerUrl 桌面式实现） ----------
 const apiMock = vi.hoisted(() => {
-  const listeners = new Set();
+  const listeners = new Set<(offline: boolean) => void>();
   const state = { offline: false };
   return {
     state,
     listeners,
-    setOffline(v) {
+    setOffline(v: boolean) {
       state.offline = v;
       for (const cb of [...listeners]) cb(v);
     },
     isOffline: () => state.offline,
-    onOfflineChange: (cb) => {
+    onOfflineChange: (cb: (offline: boolean) => void) => {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
-    resolveServerUrl: (p) =>
+    resolveServerUrl: (p: string) =>
       /^https?:\/\//i.test(p) ? p : "http://192.168.1.50:17627" + (p.startsWith("/") ? p : "/" + p),
   };
 });

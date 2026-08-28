@@ -4,9 +4,28 @@
 // 用户开紧凑模式界面无变化。本测试保证：紧凑规则里出现的每个类名都必须是
 // 当前代码库（.vue 文件）中真实存在的类；黑名单旧类名一旦回退即失败。
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+
+// 项目未装 @types/node（tsconfig types 仅 ["vite/client"]）→ node: 内置模块以非常量
+// specifier 动态导入（TS 不对非常量 specifier 做模块解析）；运行时由 vitest/node 提供，
+// 与静态 import 行为一致。引入 @types/node 后可换回静态 import。
+const nodeFS = "node:fs";
+const { readFileSync, readdirSync } = (await import(nodeFS)) as unknown as {
+  readFileSync(path: string, encoding: string): string;
+  readdirSync(
+    path: string,
+    options: { withFileTypes: true },
+  ): Array<{ name: string; isDirectory(): boolean }>;
+};
+const nodeURL = "node:url";
+const { fileURLToPath } = (await import(nodeURL)) as unknown as {
+  fileURLToPath(url: string | URL): string;
+};
+const nodePath = "node:path";
+const path = (await import(nodePath)) as unknown as {
+  join(...paths: string[]): string;
+  resolve(...paths: string[]): string;
+  dirname(path: string): string;
+};
 
 const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const styleCss = readFileSync(path.join(srcDir, "style.css"), "utf8");
@@ -15,8 +34,8 @@ const styleCss = readFileSync(path.join(srcDir, "style.css"), "utf8");
 const compactSection = styleCss.slice(styleCss.indexOf('紧凑模式（html[data-compact="true"]）'));
 
 // 抽取紧凑规则中使用的所有类名（html[data-compact="true"] 之后的 .xxx）
-function collectClassNames(css) {
-  const names = new Set();
+function collectClassNames(css: string) {
+  const names = new Set<string>();
   const re = /html\[data-compact="true"\]\s+([^{]+)\{/g;
   let m;
   while ((m = re.exec(css)) !== null) {
@@ -29,8 +48,8 @@ function collectClassNames(css) {
 
 // 代码库中真实存在的类名集合（所有 .vue 文件的 class 属性 + scoped 样式类名）
 function collectLiveClassNames() {
-  const live = new Set();
-  const files = [];
+  const live = new Set<string>();
+  const files: string[] = [];
   (function walk(dir) {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);

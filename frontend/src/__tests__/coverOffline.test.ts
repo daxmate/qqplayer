@@ -7,21 +7,35 @@
 // nativeAudioBridge vi.mock（onNativeEvent 订阅 + nativePost 记录）；cacheDb 真实（内存实现）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { LyricLine, State } from "../composables/playerState.js";
+
+// 歌词行联合中本组用例只操作 line 变体（s/e/text）
+type TimedLine = Extract<LyricLine, { type: "line" }>;
 
 // ---------- mock：nativeAudioBridge（事件订阅 + 发消息） ----------
+/** 桥消息最小形状（post 首参；测试只断言这些字段） */
+interface BridgeMsg {
+  cmd: string;
+  requestId?: string;
+  path?: string;
+  kind?: string;
+  json?: string;
+  items?: Array<{ path?: string; url?: string }>;
+}
+
 const bridgeMock = vi.hoisted(() => {
-  const handlers = new Map();
+  const handlers = new Map<string, Set<(payload: Record<string, unknown>) => void>>();
   return {
     handlers,
     post: vi.fn(),
-    onNativeEvent: vi.fn((name, fn) => {
+    onNativeEvent: vi.fn((name: string, fn: (payload: Record<string, unknown>) => void) => {
       if (!handlers.has(name)) handlers.set(name, new Set());
-      handlers.get(name).add(fn);
+      handlers.get(name)!.add(fn);
       return () => {
         handlers.get(name)?.delete(fn);
       };
     }),
-    emit(name, payload) {
+    emit(name: string, payload: Record<string, unknown>) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {
@@ -61,13 +75,13 @@ import * as sync from "../utils/sync.js";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../composables/useCoverURL.js";
 
 // jsdom 无 localStorage → stub
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -96,8 +110,8 @@ async function setNativeEnv({ bridge = true } = {}) {
 }
 
 /** 找到最近一次未回执的 hasAsset 并回执 assetStatus（已回执的 requestId 跳过） */
-async function replyHasAsset({ exists, localURL }) {
-  let msg;
+async function replyHasAsset({ exists, localURL }: { exists: boolean; localURL?: string | null }) {
+  let msg: BridgeMsg | undefined;
   await vi.waitFor(
     () => {
       const calls = bridgeMock.post.mock.calls.filter(
@@ -108,10 +122,11 @@ async function replyHasAsset({ exists, localURL }) {
     },
     { timeout: 5000, interval: 20 },
   );
-  repliedHasAssetIds.add(msg.requestId);
+  // waitFor 超时会抛错，能走到这里 msg 必已赋值
+  repliedHasAssetIds.add(msg!.requestId!);
   bridgeMock.emit("assetStatus", {
-    requestId: msg.requestId,
-    path: msg.path,
+    requestId: msg!.requestId,
+    path: msg!.path,
     exists,
     localURL: localURL || null,
   });
@@ -121,7 +136,7 @@ async function replyHasAsset({ exists, localURL }) {
  * 消除 nativeMetaLoad 8s 挂起（META_LOAD_TIMEOUT_MS）在真实 timer 下的 flaky：
  * 全量跑时 CPU 繁忙，1.5s 本地读超时可能延迟到用例结束后才触发，挂起的 loadLyric
  * 醒来后消费后续用例的 apiGet once 队列 → 确定性回执让 loadLyricFile 立即 resolve。 */
-async function replyMetaLoad(json = null) {
+async function replyMetaLoad(json: string | null = null) {
   const metaLoadsBefore = bridgeMock.post.mock.calls.filter(
     ([m]) => m && m.cmd === "metaLoad",
   ).length;
@@ -130,7 +145,7 @@ async function replyMetaLoad(json = null) {
       bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "metaLoad").length,
     ).toBeGreaterThan(metaLoadsBefore);
   });
-  const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad");
+  const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad")!;
   bridgeMock.emit("metaLoaded", {
     requestId: load[0].requestId,
     kind: load[0].kind,
@@ -160,12 +175,13 @@ describe("cover/lyric 缓存 key（stableHash 派生）", () => {
 
   it("coverAssetKey：空 path → null", async () => {
     expect(await sync.coverAssetKey("")).toBeNull();
-    expect(await sync.coverAssetKey(null)).toBeNull();
+    expect(await sync.coverAssetKey(null as unknown as string)).toBeNull();
   });
 
   it("coverItemFor：url 指向 cover 端点 + 沙盒 path", async () => {
     const item = await sync.coverItemFor("/Music/a.mp3");
     expect(item).not.toBeNull();
+    if (!item) throw new Error("coverItemFor 不应返回空（契约前提）");
     expect(item.url).toBe(
       "http://192.168.1.50:17627/api/cover?path=" + encodeURIComponent("/Music/a.mp3"),
     );
@@ -179,7 +195,7 @@ describe("cover/lyric 缓存 key（stableHash 派生）", () => {
     const k2 = await sync.lyricKindKey("/Music/a.mp3");
     expect(k1).toMatch(/^lyric:[0-9a-f]+$/);
     expect(k1).toBe(k2);
-    expect(await sync.lyricKindKey(null)).toBeNull();
+    expect(await sync.lyricKindKey(null as unknown as string)).toBeNull();
   });
 });
 
@@ -203,7 +219,7 @@ describe("cachedCoverURL：封面本地优先查询（只查不下载）", () =>
   it("空 path → null", async () => {
     await setNativeEnv();
     expect(await sync.cachedCoverURL("")).toBeNull();
-    expect(await sync.cachedCoverURL(null)).toBeNull();
+    expect(await sync.cachedCoverURL(null as unknown as string)).toBeNull();
   });
 
   it("命中本地缓存 → resolve 本地 HTTP URL", async () => {
@@ -254,7 +270,7 @@ describe("cacheCover：封面后台缓存（显式下载）", () => {
       expect(bridgeMock.post.mock.calls.some(([m]) => m && m.cmd === "hasAsset")).toBe(true);
     });
     // 回执未命中 → 触发下载
-    const call = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "hasAsset")[0];
+    const call = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "hasAsset")![0];
     bridgeMock.emit("assetStatus", {
       requestId: call.requestId,
       path: call.path,
@@ -262,7 +278,7 @@ describe("cacheCover：封面后台缓存（显式下载）", () => {
       localURL: null,
     });
     await vi.waitFor(() => {
-      const dl = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "syncDownload");
+      const dl = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "syncDownload")!;
       expect(dl).toBeTruthy();
       expect(dl[0].items[0].path).toMatch(/^covers\//);
       expect(dl[0].items[0].url).toContain("/api/cover");
@@ -276,7 +292,7 @@ describe("cacheCover：封面后台缓存（显式下载）", () => {
     await vi.waitFor(() => {
       expect(bridgeMock.post.mock.calls.some(([m]) => m && m.cmd === "hasAsset")).toBe(true);
     });
-    const call = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "hasAsset")[0];
+    const call = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "hasAsset")![0];
     bridgeMock.emit("assetStatus", {
       requestId: call.requestId,
       path: call.path,
@@ -347,8 +363,8 @@ describe("useCoverURL：封面异步解析 composable", () => {
 });
 
 describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
-  let lyricModule;
-  let lyricState;
+  let lyricModule!: typeof import("../composables/useLyric.js");
+  let lyricState!: State;
 
   beforeEach(async () => {
     delete window.qqplayerNative;
@@ -394,13 +410,13 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     expect(lyricState.lyric.length).toBe(1);
     // saveLyricFile 是 fire-and-forget（lyricKindKey await 链），全量跑 CPU 忙时
     // 单次 flush 可能不够 → waitFor 确定性等待 metaSave 发出
-    let save;
+    let save: BridgeMsg[] | undefined;
     await vi.waitFor(() => {
       save = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaSave");
       expect(save).toBeTruthy();
     });
-    expect(save[0].kind).toMatch(/^lyric:[0-9a-f]+$/);
-    const data = JSON.parse(save[0].json);
+    expect(save![0].kind).toMatch(/^lyric:[0-9a-f]+$/);
+    const data = JSON.parse(save![0].json!);
     expect(data.lines.length).toBe(1);
     expect(data.format).toBe("lrc");
   });
@@ -415,8 +431,8 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
     const p1 = lyricModule.loadLyric(0);
     await replyMetaLoad(); // 文件不存在 → 走远程；消除 8s 挂起 flaky
     await p1;
-    expect(lyricState.lyric[0].text[0]).toBe("离线词");
-    let save;
+    expect((lyricState.lyric[0] as TimedLine).text[0]).toBe("离线词");
+    let save: BridgeMsg[] | undefined;
     await vi.waitFor(() => {
       save = bridgeMock.post.mock.calls.find(([m]) => m && m.cmd === "metaSave");
       expect(save).toBeTruthy();
@@ -434,15 +450,17 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
         bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "metaLoad").length,
       ).toBeGreaterThan(metaLoadsBefore);
     });
-    const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad");
+    const load = [...bridgeMock.post.mock.calls]
+      .reverse()
+      .find(([m]) => m && m.cmd === "metaLoad")!;
     bridgeMock.emit("metaLoaded", {
       requestId: load[0].requestId,
       kind: load[0].kind,
-      json: save[0].json,
+      json: save![0].json,
     });
     await p;
     expect(lyricState.lyric.length).toBe(1);
-    expect(lyricState.lyric[0].text[0]).toBe("离线词");
+    expect((lyricState.lyric[0] as TimedLine).text[0]).toBe("离线词");
     expect(lyricState.lyricFormat).toBe("lrc");
   });
 
@@ -459,7 +477,9 @@ describe("loadLyric 歌词文件兜底（阶段 F2）", () => {
         bridgeMock.post.mock.calls.filter(([m]) => m && m.cmd === "metaLoad").length,
       ).toBeGreaterThan(metaLoadsBefore);
     });
-    const load = [...bridgeMock.post.mock.calls].reverse().find(([m]) => m && m.cmd === "metaLoad");
+    const load = [...bridgeMock.post.mock.calls]
+      .reverse()
+      .find(([m]) => m && m.cmd === "metaLoad")!;
     bridgeMock.emit("metaLoaded", {
       requestId: load[0].requestId,
       kind: load[0].kind,

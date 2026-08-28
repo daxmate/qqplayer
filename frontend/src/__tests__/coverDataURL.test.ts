@@ -7,22 +7,25 @@
 // vi.spyOn 替换 HTMLCanvasElement.prototype 方法；动态 import 拿全新模块实例。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { Mock, MockInstance } from "vitest";
 
 // FileReader stub：readAsDataURL 异步触发 onload（data URL 编码 blob.size 便于断言）
 class FakeFileReader {
-  static instances = [];
+  static instances: FakeFileReader[] = [];
+  onload: ((ev: { target: { result: string } }) => void) | null = null;
+  onerror: ((ev: Error) => void) | null = null;
+  result: string | null = null;
+  _blob: Blob | null = null;
   constructor() {
-    this.onload = null;
-    this.onerror = null;
     FakeFileReader.instances.push(this);
   }
-  readAsDataURL(blob) {
+  readAsDataURL(blob: Blob) {
     this._blob = blob;
     // 真实 FileReader 同时写 reader.result 与事件 target.result（代码读 reader.result）
     this.result = "data:image/png;base64," + String(blob.size);
     queueMicrotask(() => {
       if (this.onload) {
-        this.onload({ target: { result: this.result } });
+        this.onload({ target: { result: this.result as string } });
       }
     });
   }
@@ -30,16 +33,21 @@ class FakeFileReader {
 
 // Image stub：src 赋值异步触发 onload（按 behavior 配置尺寸）/ onerror（fail=true）
 class FakeImage {
-  static behavior = { fail: false, naturalWidth: 1600, naturalHeight: 1200 };
-  static instances = [];
+  static behavior: { fail: boolean; naturalWidth: number; naturalHeight: number } = {
+    fail: false,
+    naturalWidth: 1600,
+    naturalHeight: 1200,
+  };
+  static instances: FakeImage[] = [];
+  onload: (() => void) | null = null;
+  onerror: ((err: Error) => void) | null = null;
+  naturalWidth = 0;
+  naturalHeight = 0;
+  _src: string = "";
   constructor() {
-    this.onload = null;
-    this.onerror = null;
-    this.naturalWidth = 0;
-    this.naturalHeight = 0;
     FakeImage.instances.push(this);
   }
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     const cfg = FakeImage.behavior;
     queueMicrotask(() => {
@@ -52,14 +60,14 @@ class FakeImage {
       }
     });
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
 }
 
-let getContextSpy;
-let toDataURLSpy;
-let drawImageMock;
+let getContextSpy: MockInstance;
+let toDataURLSpy: MockInstance;
+let drawImageMock: Mock;
 
 beforeEach(() => {
   FakeFileReader.instances.length = 0;
@@ -68,7 +76,7 @@ beforeEach(() => {
   drawImageMock = vi.fn();
   getContextSpy = vi
     .spyOn(HTMLCanvasElement.prototype, "getContext")
-    .mockReturnValue({ drawImage: drawImageMock });
+    .mockReturnValue({ drawImage: drawImageMock } as unknown as CanvasRenderingContext2D);
   toDataURLSpy = vi
     .spyOn(HTMLCanvasElement.prototype, "toDataURL")
     .mockReturnValue("data:image/jpeg;base64,xx");
@@ -81,7 +89,7 @@ afterEach(() => {
 });
 
 /** 构造 fetch stub：ok + blob */
-function stubFetchOk(blob) {
+function stubFetchOk(blob: Blob) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ({ ok: true, blob: async () => blob })),
@@ -125,7 +133,7 @@ describe("coverToDataURL：大图 canvas 缩放重编码", () => {
     expect(out).toBe("data:image/jpeg;base64,xx");
     expect(FakeImage.instances).toHaveLength(1);
     expect(FakeImage.instances[0]._src).toBe("data:image/png;base64," + String(blob.size));
-    const canvas = getContextSpy.mock.instances[0];
+    const canvas = getContextSpy.mock.instances[0] as HTMLCanvasElement;
     expect(canvas.width).toBe(800);
     expect(canvas.height).toBe(600);
     expect(drawImageMock).toHaveBeenCalledWith(FakeImage.instances[0], 0, 0, 800, 600);

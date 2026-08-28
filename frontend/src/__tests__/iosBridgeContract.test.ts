@@ -17,9 +17,30 @@
 //     的 case "xxx" 分发分支
 //   - 兼容 .js/.ts/.vue；__tests__ 目录排除（测试桩里的 cmd 不是前端发出点）
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+
+// 项目未装 @types/node（tsconfig types 仅 ["vite/client"]）→ node: 内置模块以非常量
+// specifier 动态导入（TS 不对非常量 specifier 做模块解析）；运行时由 vitest/node 提供，
+// 与静态 import 行为一致。引入 @types/node 后可换回静态 import。
+const nodeFS = "node:fs";
+const { existsSync, readFileSync, readdirSync } = (await import(nodeFS)) as unknown as {
+  existsSync(path: string): boolean;
+  readFileSync(path: string, encoding: string): string;
+  readdirSync(
+    path: string,
+    options: { withFileTypes: true },
+  ): Array<{ name: string; isDirectory(): boolean }>;
+};
+const nodeURL = "node:url";
+const { fileURLToPath } = (await import(nodeURL)) as unknown as {
+  fileURLToPath(url: string | URL): string;
+};
+const nodePath = "node:path";
+const path = (await import(nodePath)) as unknown as {
+  join(...paths: string[]): string;
+  resolve(...paths: string[]): string;
+  dirname(path: string): string;
+  basename(path: string, suffix?: string): string;
+};
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.resolve(testDir, "..");
@@ -37,12 +58,16 @@ function findContractPath() {
   );
 }
 
-const contract = JSON.parse(readFileSync(findContractPath(), "utf8"));
+interface BridgeContractDoc {
+  webCmd: Array<{ name: string; sender?: string }>;
+  nativeEvent: Array<{ name: string }>;
+}
+const contract = JSON.parse(readFileSync(findContractPath(), "utf8")) as BridgeContractDoc;
 const contractCmds = new Set(contract.webCmd.map((c) => c.name));
 const contractEvents = new Set(contract.nativeEvent.map((e) => e.name));
 
 /** 剥离注释/字符串后保留代码文本：cmd: "xxx" 只认真实代码字面量 */
-function stripCommentsAndStrings(code) {
+function stripCommentsAndStrings(code: string): string {
   let out = "";
   let inLine = false;
   let inBlock = false;
@@ -107,7 +132,7 @@ function stripCommentsAndStrings(code) {
 }
 
 /** 递归收集 src 下（排除 __tests__）的 .js/.ts/.vue 文件 */
-function walkSourceFiles(dir, out = []) {
+function walkSourceFiles(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
@@ -121,11 +146,11 @@ function walkSourceFiles(dir, out = []) {
 }
 
 /** 每文件 cmd 字面量集合（file basename → Set<cmd>） */
-function collectSentCmdsByFile() {
-  const byFile = new Map();
+function collectSentCmdsByFile(): Map<string, Set<string>> {
+  const byFile = new Map<string, Set<string>>();
   for (const f of walkSourceFiles(srcDir)) {
     const clean = stripCommentsAndStrings(readFileSync(f, "utf8"));
-    const set = new Set();
+    const set = new Set<string>();
     const re = /cmd\s*:\s*"([a-zA-Z][a-zA-Z0-9]*)"/g;
     for (const m of clean.matchAll(re)) set.add(m[1]);
     if (set.size) byFile.set(path.basename(f), set);
@@ -134,8 +159,8 @@ function collectSentCmdsByFile() {
 }
 
 /** 前端事件消费集合：onNativeEvent 订阅 + nativeAudioBridge 分发 case */
-function collectConsumedEvents() {
-  const consumed = new Set();
+function collectConsumedEvents(): Set<string> {
+  const consumed = new Set<string>();
   for (const f of walkSourceFiles(srcDir)) {
     const clean = stripCommentsAndStrings(readFileSync(f, "utf8"));
     const base = path.basename(f);
@@ -166,7 +191,7 @@ describe("iOS 桥契约（前端侧，docs/ios-bridge-contract.json）", () => {
 
   it("F2：契约 webCmd 中 sender 标注的每个前端文件确实发出了对应 cmd", () => {
     // 后缀无关匹配：sender 写 .js 但文件已转 .ts 时仍能对上（去扩展名比较）
-    const norm = (n) => n.replace(/\.(js|ts|vue)$/, "");
+    const norm = (n: string) => n.replace(/\.(js|ts|vue)$/, "");
     const problems = [];
     for (const entry of contract.webCmd) {
       const sender = entry.sender;

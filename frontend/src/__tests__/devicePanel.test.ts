@@ -1,19 +1,20 @@
 // SettingsModal 同步 tab 设备管理面板测试（桌面端：设备清单 / 指令历史 / 删除资产 / i18n 键）
 // mock 模式：模块级 vi.mock apiClient（组件 + deviceCommands 共用同一 mock）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import type { Mock } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import SettingsModal（连带 usePlayer）前注册）
+// useDefineForClassFields=true（@vue/tsconfig）→ 构造器 this.x 赋值不推断为类属性，必须显式声明字段
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, unknown> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -34,10 +35,14 @@ vi.mock("../utils/apiClient.js", () => ({
   apiDelete: vi.fn(),
   invalidate: vi.fn(),
   scheduleFlush: vi.fn(),
-  resolveServerUrl: (p) => p,
+  resolveServerUrl: (p: string) => p,
 }));
 
-const { apiGet, apiPost } = await import("../utils/apiClient.js");
+// vi.mock 替换后运行时是 vi.fn()，静态类型仍是真实签名 → 显式收窄为 Mock（参考 deviceCommands.test.ts）
+const { apiGet, apiPost } = (await import("../utils/apiClient.js")) as unknown as {
+  apiGet: Mock;
+  apiPost: Mock;
+};
 const { clearToasts } = await import("../composables/useToast.js");
 const SettingsModal = (await import("../components/SettingsModal.vue")).default;
 const zhSettings = (await import("../locales/zh-CN/settings.js")).default.settings;
@@ -93,8 +98,8 @@ const COMMANDS = [
 ];
 
 // 默认 apiGet 路由：library 相关返回空，sync 接口返回 DEVICES/COMMANDS
-function routeApiGet(devices = DEVICES, commands = COMMANDS) {
-  apiGet.mockImplementation(async (url) => {
+function routeApiGet(devices: unknown = DEVICES, commands: unknown = COMMANDS) {
+  apiGet.mockImplementation(async (url: string) => {
     if (url === "/api/sync/devices") return { ok: true, data: { devices } };
     if (url === "/api/sync/commands") return { ok: true, data: { commands } };
     if (url.startsWith("/api/library")) return { ok: true, data: { path: "", settings: {} } };
@@ -119,9 +124,9 @@ afterEach(() => {
 async function openSyncTab() {
   const w = mount(SettingsModal, { props: { open: true } });
   await flushPromises();
-  const nav = [...document.body.querySelectorAll(".nav-item")].find((n) =>
-    n.textContent.includes("同步"),
-  );
+  const nav = [...document.body.querySelectorAll<HTMLElement>(".nav-item")].find((n) =>
+    n.textContent?.includes("同步"),
+  )!;
   expect(nav).toBeTruthy();
   nav.click();
   await flushPromises();
@@ -132,7 +137,9 @@ async function openSyncTab() {
 describe("SettingsModal 同步 tab · 设备管理面板", () => {
   it("有设备：渲染设备名 / 最后在线 / 占用 / 文件数 / byType 细分", async () => {
     const w = await openSyncTab();
-    const dev = document.body.querySelector('[data-testid="sync-device-device-abc12345"]');
+    const dev = document.body.querySelector<HTMLElement>(
+      '[data-testid="sync-device-device-abc12345"]',
+    )!;
     expect(dev).toBeTruthy();
     expect(dev.textContent).toContain("iPhone 小超");
     expect(dev.textContent).toContain("最后在线");
@@ -142,7 +149,9 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
     expect(dev.textContent).toContain("封面 1");
     expect(dev.textContent).toContain("词典 2");
     // 空设备名 → device_id 前 8 位
-    const dev2 = document.body.querySelector('[data-testid="sync-device-device-noName8888"]');
+    const dev2 = document.body.querySelector<HTMLElement>(
+      '[data-testid="sync-device-device-noName8888"]',
+    )!;
     expect(dev2.textContent).toContain("device-n");
     w.unmount();
   });
@@ -150,7 +159,7 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
   it("无设备：显示暂无已配对设备 + 配对引导文案", async () => {
     routeApiGet([], []);
     const w = await openSyncTab();
-    const panel = document.body.querySelector(".modal");
+    const panel = document.body.querySelector(".modal")!;
     expect(panel.textContent).toContain("暂无已配对设备");
     expect(panel.textContent).toContain("配对");
     w.unmount();
@@ -158,13 +167,17 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
 
   it("指令历史：类型 / 状态标签 / 目标设备 / 全部设备", async () => {
     const w = await openSyncTab();
-    const cmd1 = document.body.querySelector('[data-testid="sync-cmd-1"]');
+    const cmd1 = document.body.querySelector<HTMLElement>('[data-testid="sync-cmd-1"]')!;
     expect(cmd1.textContent).toContain("推送下载");
-    expect(cmd1.querySelector(".sync-status.st-done").textContent).toContain("已完成");
+    expect(cmd1.querySelector<HTMLElement>(".sync-status.st-done")!.textContent).toContain(
+      "已完成",
+    );
     expect(cmd1.textContent).toContain("device-abc12345");
-    const cmd2 = document.body.querySelector('[data-testid="sync-cmd-2"]');
+    const cmd2 = document.body.querySelector<HTMLElement>('[data-testid="sync-cmd-2"]')!;
     expect(cmd2.textContent).toContain("远程删除");
-    expect(cmd2.querySelector(".sync-status.st-pending").textContent).toContain("排队中");
+    expect(cmd2.querySelector<HTMLElement>(".sync-status.st-pending")!.textContent).toContain(
+      "排队中",
+    );
     expect(cmd2.textContent).toContain("全部设备");
     w.unmount();
   });
@@ -172,7 +185,7 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
   it("指令历史为空：显示暂无指令", async () => {
     routeApiGet(DEVICES, []);
     const w = await openSyncTab();
-    expect(document.body.querySelector(".modal").textContent).toContain("暂无指令");
+    expect(document.body.querySelector(".modal")!.textContent).toContain("暂无指令");
     w.unmount();
   });
 
@@ -185,7 +198,7 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
       return { ok: false, message: "not found" };
     });
     const w = await openSyncTab();
-    const panel = document.body.querySelector(".modal");
+    const panel = document.body.querySelector(".modal")!;
     expect(panel.textContent).toContain("获取数据失败，请稍后重试");
     expect(panel.querySelector(".btn")).toBeTruthy(); // 刷新按钮
     w.unmount();
@@ -194,32 +207,32 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
   it("删除资产：展开 → 勾选 → 确认弹窗 → 确认 → 发 remoteDelete + 刷新", async () => {
     const w = await openSyncTab();
     // 展开设备资产列表
-    const head = document.body.querySelector(".sync-device-head");
+    const head = document.body.querySelector<HTMLElement>(".sync-device-head")!;
     head.click();
     await nextTick();
-    const rows = [...document.body.querySelectorAll(".sync-asset-row")];
+    const rows = [...document.body.querySelectorAll<HTMLElement>(".sync-asset-row")];
     expect(rows.length).toBe(2);
     expect(rows[0].textContent).toContain("audio/aaa.m4a");
     expect(rows[0].textContent).toContain("1.0 MB");
     // 勾选第一个资产
-    const cb = rows[0].querySelector("input");
+    const cb = rows[0].querySelector<HTMLInputElement>("input")!;
     cb.checked = true;
     cb.dispatchEvent(new Event("change", { bubbles: true }));
     await nextTick();
     // 删除按钮出现（带数量）
-    const delBtn = [...document.body.querySelectorAll("button")].find((b) =>
-      b.textContent.includes("删除选中资产"),
-    );
+    const delBtn = [...document.body.querySelectorAll<HTMLElement>("button")].find((b) =>
+      b.textContent?.includes("删除选中资产"),
+    )!;
     expect(delBtn).toBeTruthy();
     expect(delBtn.textContent).toContain("(1)");
     // 确认弹窗
     delBtn.click();
     await nextTick();
-    const dialog = document.body.querySelector(".sync-dialog");
+    const dialog = document.body.querySelector<HTMLElement>(".sync-dialog")!;
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain("确认删除选中资产");
     // 确认
-    dialog.querySelector(".sync-dialog-btn.danger").click();
+    dialog.querySelector<HTMLElement>(".sync-dialog-btn.danger")!.click();
     await flushPromises();
     expect(apiPost).toHaveBeenCalledWith("/api/sync/commands", {
       type: "remoteDelete",
@@ -227,7 +240,9 @@ describe("SettingsModal 同步 tab · 设备管理面板", () => {
       device_id: "device-abc12345",
     });
     // 刷新：devices + commands 重新拉取
-    const syncDevCalls = apiGet.mock.calls.filter(([u]) => u === "/api/sync/devices").length;
+    const syncDevCalls = apiGet.mock.calls.filter(
+      ([u]: string[]) => u === "/api/sync/devices",
+    ).length;
     expect(syncDevCalls).toBeGreaterThanOrEqual(2);
     w.unmount();
   });
@@ -254,8 +269,14 @@ describe("设备面板 i18n 键存在性", () => {
     "deleteAssetsConfirm",
     "refresh",
   ];
-  const get = (obj, key) =>
-    key.split(".").reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
+  const get = (obj: Record<string, unknown>, key: string) =>
+    key
+      .split(".")
+      .reduce<unknown>(
+        (o: unknown, k: string) =>
+          o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined,
+        obj,
+      );
 
   it("settings 必需键在 zh-CN 与 en-US 都存在", () => {
     for (const key of REQUIRED) {
