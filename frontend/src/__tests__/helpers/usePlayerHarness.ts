@@ -7,49 +7,54 @@
 //       公共 hooks 在模块顶层注册，随测试文件导入自动生效（与 __tests__/setup.js 同模式）。
 // usePlayer composable 单元测试
 import { beforeEach, afterEach, vi } from "vitest";
+import type { PlaybackSettings } from "../../composables/playerState.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  volume = 1;
+  muted = false;
+  ended = false;
+  preload = "auto";
+  listeners: Record<string, (e?: unknown) => void> = {};
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   // 浏览器行为：换源自动归零播放位置
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
   }
-  removeAttribute() {}
-  addEventListener(ev, fn) {
+  removeAttribute(): void {}
+  addEventListener(ev: string, fn: (e?: unknown) => void): void {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub（vitest 默认 node 环境无 localStorage；usePlayer 模块加载时 try/catch 保护，测试体里需要显式提供）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -191,7 +196,7 @@ beforeEach(() => {
   state.playlists = [];
   // 快捷键配置表默认值复位（含 karaokeNextKey/PrevKey/searchKey，防用例间录制值残留）
   for (const s of SHORTCUTS) {
-    playbackSettings[s.settingKey] = s.defaultCode;
+    playbackSettings[s.settingKey as keyof PlaybackSettings] = s.defaultCode as never;
   }
   _resetKaraokeAnchor();
   _resetKaraokeJump();

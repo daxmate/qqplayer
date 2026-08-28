@@ -2,6 +2,7 @@
 // 拆分自 usePlayer.test.js（纯搬移 + harness 收敛公共头部样板，用例零改动）
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
+import type { LyricLine } from "../composables/playerState.js";
 import {
   state,
   cyclePlayMode,
@@ -100,7 +101,7 @@ describe("歌词显示设置（lyricSettings）", () => {
     lyricSettings.fontSize = 26;
     lyricSettings.align = "center";
     await nextTick();
-    const saved = JSON.parse(localStorage.getItem(LYRIC_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(LYRIC_SETTINGS_KEY) as string);
     expect(saved.fontSize).toBe(26);
     expect(saved.align).toBe("center");
   });
@@ -150,11 +151,11 @@ describe("界面偏好（uiSettings）", () => {
   });
 
   it("auto 主题跟随系统 prefers-color-scheme（浅色系统→light，深色系统→dark）", async () => {
-    const listeners = {};
+    const listeners: Record<string, () => void> = {};
     const mq = {
       matches: true,
       media: "(prefers-color-scheme: light)",
-      addEventListener: (ev, fn) => {
+      addEventListener: (ev: string, fn: () => void) => {
         listeners[ev] = fn;
       },
       removeEventListener: () => {},
@@ -198,7 +199,7 @@ describe("界面偏好（uiSettings）", () => {
     uiSettings.karaokeShowTime = true;
     uiSettings.karaokeShowNum = false;
     await nextTick();
-    const saved = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY) as string);
     expect(saved.showSongInfo).toBe(true);
     expect(saved.karaokeShowTime).toBe(true);
     expect(saved.karaokeShowNum).toBe(false);
@@ -216,7 +217,7 @@ describe("界面偏好（uiSettings）", () => {
 
 describe("播放设置 playbackSettings", () => {
   // 模块级 reactive 跨测试残留：每个测试前保存、后恢复
-  let saved;
+  let saved: { [k: string]: unknown };
   beforeEach(() => {
     saved = { ...playbackSettings };
   });
@@ -231,7 +232,9 @@ describe("播放设置 playbackSettings", () => {
     cyclePlayMode();
     expect(playbackSettings.playMode).toBe("shuffle");
     await nextTick(); // watch 持久化为异步写入
-    expect(JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)).playMode).toBe("shuffle");
+    expect(JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY) as string).playMode).toBe(
+      "shuffle",
+    );
   });
 
   it("设置弹窗里改播放模式立即生效（同步 state）", () => {
@@ -257,7 +260,7 @@ describe("播放设置 playbackSettings", () => {
   it("记住音量：开启时 setVolume 持久化", () => {
     playbackSettings.rememberVolume = true;
     setVolume(0.5);
-    expect(parseFloat(localStorage.getItem(VOLUME_KEY))).toBe(0.5);
+    expect(parseFloat(localStorage.getItem(VOLUME_KEY) as string)).toBe(0.5);
   });
 
   it("记住音量：关闭时 setVolume 不写入 localStorage", () => {
@@ -268,7 +271,7 @@ describe("播放设置 playbackSettings", () => {
 });
 
 describe("歌词延迟校准（lyricSettings.offset）", () => {
-  const LRC = [
+  const LRC: LyricLine[] = [
     { type: "line", s: 0, e: 10, text: ["第一句"] },
     { type: "line", s: 10, e: 20, text: ["第二句"] },
   ];
@@ -281,7 +284,7 @@ describe("歌词延迟校准（lyricSettings.offset）", () => {
     state.currentSong = { path: "/a.mp3" };
     audio().src = "/a.mp3";
   }
-  function fireTimeupdate(t) {
+  function fireTimeupdate(t: number) {
     const a = audio();
     a.currentTime = t;
     a.paused = false;
@@ -344,7 +347,7 @@ describe("歌词延迟校准（lyricSettings.offset）", () => {
 });
 
 describe("歌词来源优先级（lyricSettings.source）", () => {
-  const lyricRes = (source) => ({
+  const lyricRes = (source: string) => ({
     ok: true,
     json: async () => ({
       format: "lrc",
@@ -362,7 +365,7 @@ describe("歌词来源优先级（lyricSettings.source）", () => {
     vi.stubGlobal("fetch", fetchMock);
     state.songs = [{ path: "/a.mp3" }];
     await selectSong(0);
-    const url = fetchMock.mock.calls[0][0];
+    const url = (fetchMock.mock.calls[0] as unknown[])[0];
     expect(url).toContain("/api/lyric?path=");
     expect(url).toContain("prefer=local");
     expect(state.lyricSource).toBe("local");
@@ -377,7 +380,7 @@ describe("歌词来源优先级（lyricSettings.source）", () => {
     lyricSettings.source = "online";
     await new Promise((r) => setTimeout(r, 0)); // watch 异步触发重载
     // 重载请求必须带 prefer=online（次数不做硬断言：watch 链式触发次数随环境而变，验证本质即可）
-    const onlineCalls = fetchMock.mock.calls.filter(([url]) =>
+    const onlineCalls = (fetchMock.mock.calls as unknown[][]).filter(([url]) =>
       String(url).includes("prefer=online"),
     );
     expect(onlineCalls.length).toBeGreaterThanOrEqual(1);
@@ -397,7 +400,7 @@ describe("音乐库设置 librarySettings", () => {
   it("loadLibrarySettings 拉取后端设置并写入 state", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url) => {
+      vi.fn(async (url: unknown) => {
         expect(url).toBe("/api/library/settings");
         return {
           ok: true,
@@ -428,7 +431,7 @@ describe("音乐库设置 librarySettings", () => {
   it("saveLibrarySettings PUT 成功：写入 state 并返回响应", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts) => {
+      vi.fn(async (url: unknown, opts: { method?: string; body: string }) => {
         expect(url).toBe("/api/library/settings");
         expect(opts.method).toBe("PUT");
         expect(JSON.parse(opts.body)).toEqual({ autoRefresh: false });
@@ -442,7 +445,7 @@ describe("音乐库设置 librarySettings", () => {
       }),
     );
     const data = await saveLibrarySettings({ autoRefresh: false });
-    expect(state.librarySettings.autoRefresh).toBe(false);
+    expect((state.librarySettings as Record<string, unknown>).autoRefresh).toBe(false);
     expect(data.count).toBe(10);
   });
 

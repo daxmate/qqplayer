@@ -2,6 +2,7 @@
 // 拆分自 usePlayer.test.js（纯搬移 + harness 收敛公共头部样板，用例零改动）
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
+import type { LyricLine, Song } from "../composables/playerState.js";
 import {
   state,
   stepSpeed,
@@ -33,19 +34,19 @@ import {
 describe("跟唱模式自动停（锚点方案，bug 回归）", () => {
   const audio = () => FakeAudio.instances[0];
   // 无间隙：e == 下一句 s（在线获取的 LRC 场景，旧逻辑中间句全不停）
-  const LRC_LYRIC = [
+  const LRC_LYRIC: LyricLine[] = [
     { type: "line", s: 0, e: 10, text: ["第一句"] },
     { type: "line", s: 10, e: 20, text: ["第二句"] },
     { type: "line", s: 20, e: 30, text: ["第三句"] },
   ];
   // 有间隙（本地 SRT 场景）
-  const SRT_LYRIC = [
+  const SRT_LYRIC: LyricLine[] = [
     { type: "line", s: 0, e: 10, text: ["第一句"] },
     { type: "line", s: 12.5, e: 20, text: ["第二句"] },
     { type: "line", s: 25, e: 35, text: ["第三句"] },
   ];
 
-  function fireTimeupdate(t) {
+  function fireTimeupdate(t: number) {
     const a = audio();
     a.currentTime = t;
     a.paused = false;
@@ -187,12 +188,12 @@ describe("跟唱模式自动停（锚点方案，bug 回归）", () => {
 
 describe("单句循环", () => {
   const audio = () => FakeAudio.instances[0];
-  const LRC_LYRIC = [
+  const LRC_LYRIC: LyricLine[] = [
     { type: "line", s: 0, e: 10, text: ["第一句"] },
     { type: "line", s: 10, e: 20, text: ["第二句"] },
   ];
 
-  function fireTimeupdate(t) {
+  function fireTimeupdate(t: number) {
     const a = audio();
     a.currentTime = t;
     a.paused = false;
@@ -296,14 +297,14 @@ describe("单句循环", () => {
 
 describe("AB 循环", () => {
   const audio = () => FakeAudio.instances[0];
-  const LYRIC = [
+  const LYRIC: LyricLine[] = [
     { type: "line", s: 0, e: 10, text: ["一"] },
     { type: "line", s: 10, e: 20, text: ["二"] },
     { type: "line", s: 20, e: 30, text: ["三"] },
     { type: "line", s: 30, e: 40, text: ["四"] },
   ];
 
-  function fireTimeupdate(t) {
+  function fireTimeupdate(t: number) {
     const a = audio();
     a.currentTime = t;
     a.paused = false;
@@ -511,7 +512,7 @@ describe("AB 循环", () => {
 });
 
 describe("恢复上次播放 restoreLastPlayed", () => {
-  let saved;
+  let saved: { [k: string]: unknown };
   beforeEach(() => {
     saved = { ...playbackSettings };
     Object.assign(lastPlayedState, { path: null, position: 0, ts: 0 }); // 跨测试隔离
@@ -532,7 +533,7 @@ describe("恢复上次播放 restoreLastPlayed", () => {
       vi.fn(async () => ({ ok: false, json: async () => ({}) })),
     );
     await restoreLastPlayed();
-    expect(state.currentSong.path).toBe("/b.mp3");
+    expect((state.currentSong as Song).path).toBe("/b.mp3");
     // 触发 loadedmetadata → seek 到断点
     const a = FakeAudio.instances[0];
     a.duration = 100;
@@ -579,14 +580,14 @@ describe("恢复上次播放 restoreLastPlayed", () => {
     a._src = "/api/audio?path=/a.mp3";
     a.currentTime = 30;
     saveLastPlayed();
-    const saved = JSON.parse(localStorage.getItem(LAST_PLAYED_KEY));
+    const saved = JSON.parse(localStorage.getItem(LAST_PLAYED_KEY) as string);
     expect(saved.path).toBe("/a.mp3");
     expect(saved.position).toBe(30);
   });
 });
 
 describe("切歌淡入淡出 fadeSec", () => {
-  let saved;
+  let saved: { [k: string]: unknown };
   beforeEach(() => {
     vi.useRealTimers(); // 清理其他测试残留的 fake timers
     FakeAudio.instances[0].paused = true; // 重置 audio 播放状态（跨测试残留）
@@ -671,10 +672,10 @@ describe("播放统计", () => {
 
   // 捕获 fetch POST /api/playback 的调用
   function stubPlaybackFetch() {
-    const calls = [];
+    const calls: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts) => {
+      vi.fn(async (url: unknown, opts?: { method?: string; body: string }) => {
         if (url === "/api/playback" && opts?.method === "POST") {
           calls.push(JSON.parse(opts.body));
         }
@@ -820,8 +821,8 @@ describe("播放统计", () => {
     // 捕获 pagehide 监听
     const addSpy = vi.spyOn(window, "addEventListener");
     const un = setupPlaybackFlush();
-    const call = addSpy.mock.calls.find((c) => c[0] === "pagehide");
-    call[1](); // 触发
+    const call = addSpy.mock.calls.find((c) => c[0] === "pagehide")!;
+    (call[1] as () => void)(); // 触发
     vi.useRealTimers();
 
     expect(beacon).toHaveBeenCalledTimes(1);
@@ -871,7 +872,7 @@ describe("播放统计", () => {
     stepSpeed(1); // 回 1.0：再切一次
     expect(calls.length).toBe(0);
     // 真实暂停（非变速）才上报
-    playerMod.audio.listeners["pause"]();
+    (playerMod.audio as unknown as FakeAudio).listeners["pause"]();
     expect(calls.length).toBe(1);
     expect(calls[0].path).toBe("/a.mp3");
     expect(calls[0].played).toBe(30);
