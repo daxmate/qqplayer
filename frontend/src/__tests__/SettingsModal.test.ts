@@ -5,14 +5,13 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -31,15 +30,19 @@ const { VISUALIZER_STYLES } = await import("../composables/usePlayer.js");
 const zhCN = (await import("../locales/zh-CN/index.js")).default;
 
 // 从聚合语言包解析 settings.xxx.yyy 点路径
-function resolveKey(lang, key) {
-  return key.split(".").reduce((o, k) => (o ? o[k] : undefined), lang);
+function resolveKey(lang: Record<string, unknown>, key: string): unknown {
+  return key
+    .split(".")
+    .reduce<unknown>((o, k) => (o ? (o as Record<string, unknown>)[k] : undefined), lang);
 }
 
 // 切到指定分类导航（默认 tab 已改为「界面」，播放相关断言需先切换）
-async function gotoCategory(root, label) {
-  const nav = [...root.querySelectorAll(".nav-item")].find((el) => el.textContent.includes(label));
+async function gotoCategory(root: HTMLElement, label: string) {
+  const nav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
+    el.textContent!.includes(label),
+  );
   expect(nav).toBeTruthy();
-  nav.click();
+  nav!.click();
   await nextTick();
 }
 
@@ -66,27 +69,27 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
     // Teleport 到 body
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     expect(root).toBeTruthy();
     await gotoCategory(root, "播放");
     expect(root.textContent).toContain("频谱可视化");
     // 默认打开
-    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
-      el.textContent.includes("频谱可视化"),
+    const row = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
+      el.textContent!.includes("频谱可视化"),
     );
     expect(row).toBeTruthy();
-    expect(row.querySelector(".switch.on")).toBeTruthy();
+    expect(row!.querySelector(".switch.on")).toBeTruthy();
     w.unmount();
   });
 
   it("点击开关切换 playbackSettings.visualizerEnabled", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     await gotoCategory(root, "播放");
-    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
-      el.textContent.includes("频谱可视化"),
-    );
+    const row = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
+      el.textContent!.includes("频谱可视化"),
+    )!;
     row.click();
     await nextTick();
     expect(playbackSettings.visualizerEnabled).toBe(false);
@@ -100,12 +103,12 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
   it("任务 C：总开关下显示「氛围背景 / 迷你频谱」子开关，点击各自切换", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     await gotoCategory(root, "播放");
-    const subRows = [...root.querySelectorAll(".sub-toggle-row")];
+    const subRows = [...root.querySelectorAll<HTMLElement>(".sub-toggle-row")];
     expect(subRows.length).toBe(2);
-    const ambientRow = subRows.find((el) => el.textContent.includes("氛围背景"));
-    const miniRow = subRows.find((el) => el.textContent.includes("迷你频谱"));
+    const ambientRow = subRows.find((el) => el.textContent!.includes("氛围背景"))!;
+    const miniRow = subRows.find((el) => el.textContent!.includes("迷你频谱"))!;
     expect(ambientRow).toBeTruthy();
     expect(miniRow).toBeTruthy();
     // 默认开
@@ -127,7 +130,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     playbackSettings.miniSpectrumEnabled = false;
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     await gotoCategory(root, "播放");
     expect(root.querySelector(".viz-style-grid")).toBeFalsy();
     expect(root.querySelector(".sub-toggle-row")).toBeTruthy(); // 子开关仍在
@@ -138,7 +141,7 @@ describe("SettingsModal 播放分类 - 频谱可视化", () => {
     playbackSettings.visualizerEnabled = false;
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     await gotoCategory(root, "播放");
     expect(root.querySelector(".viz-style-grid")).toBeFalsy();
     expect(root.querySelector(".sub-toggle-row")).toBeFalsy();
@@ -150,11 +153,11 @@ describe("SettingsModal 任务 K - 视觉化 6 样式 chips", () => {
   it("chips 6 选 1：文案 = VISUALIZER_STYLES 的 zh-CN 翻译，点击生效并移动高亮", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     await gotoCategory(root, "播放");
-    const chips = [...root.querySelectorAll(".viz-style-grid .ext-chip")];
+    const chips = [...root.querySelectorAll<HTMLElement>(".viz-style-grid .ext-chip")];
     expect(chips).toHaveLength(6);
-    expect(chips.map((c) => c.textContent.trim())).toEqual(
+    expect(chips.map((c) => c.textContent!.trim())).toEqual(
       VISUALIZER_STYLES.map((s) => resolveKey(zhCN, s.labelKey)),
     );
     // 默认 bars 高亮
@@ -173,7 +176,7 @@ describe("SettingsModal 任务 K - 视觉化 6 样式 chips", () => {
     playbackSettings.visualizerEnabled = false;
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     expect(root.querySelector(".viz-style-grid")).toBeFalsy();
     w.unmount();
   });
@@ -183,17 +186,17 @@ describe("SettingsModal 任务 K - 显示封面开关", () => {
   it("界面分类：默认开，点击切换 uiSettings.showCover", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     // 切到「界面」分类
-    const uiNav = [...root.querySelectorAll(".nav-item")].find((el) =>
-      el.textContent.includes("界面"),
-    );
+    const uiNav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
+      el.textContent!.includes("界面"),
+    )!;
     expect(uiNav).toBeTruthy();
     uiNav.click();
     await nextTick();
-    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
-      el.textContent.includes("显示封面"),
-    );
+    const row = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
+      el.textContent!.includes("显示封面"),
+    )!;
     expect(row).toBeTruthy();
     expect(row.querySelector(".switch.on")).toBeTruthy();
     row.click();
@@ -209,15 +212,15 @@ describe("SettingsModal 任务 K - 显示封面开关", () => {
   it("界面分类：新增「列表封面」开关默认开，点击切换 uiSettings.showListCover（与 showCover 独立）", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const uiNav = [...root.querySelectorAll(".nav-item")].find((el) =>
-      el.textContent.includes("界面"),
-    );
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const uiNav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
+      el.textContent!.includes("界面"),
+    )!;
     uiNav.click();
     await nextTick();
-    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
-      el.textContent.includes("列表封面"),
-    );
+    const row = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
+      el.textContent!.includes("列表封面"),
+    )!;
     expect(row).toBeTruthy();
     expect(row.querySelector(".switch.on")).toBeTruthy();
     row.click();
@@ -238,20 +241,20 @@ describe("SettingsModal 视频分类 - 浏览器 Cookie 来源", () => {
     videoSettings.cookiesFromBrowser = "";
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
 
     // 切到「视频」分类
-    const videoNav = [...root.querySelectorAll(".nav-item")].find((el) =>
-      el.textContent.includes("视频"),
-    );
+    const videoNav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
+      el.textContent!.includes("视频"),
+    )!;
     expect(videoNav).toBeTruthy();
     videoNav.click();
     await nextTick();
 
-    const select = root.querySelector("select");
+    const select = root.querySelector<HTMLSelectElement>("select")!;
     expect(select).toBeTruthy();
     expect(select.value).toBe("");
-    const opts = [...select.querySelectorAll("option")].map((o) => o.value);
+    const opts = [...select.querySelectorAll<HTMLOptionElement>("option")].map((o) => o.value);
     expect(opts).toEqual(["", "vivaldi", "chrome", "safari", "edge", "firefox", "brave"]);
 
     // 选择 Chrome → v-model 写入 composable
@@ -267,10 +270,10 @@ describe("SettingsModal 歌词分类 - AMLL 三特效开关", () => {
   async function openLyricTab() {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
-      el.textContent.includes("歌词"),
-    );
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
+      el.textContent!.includes("歌词"),
+    )!;
     expect(navItem).toBeTruthy();
     navItem.click();
     await nextTick();
@@ -286,8 +289,8 @@ describe("SettingsModal 歌词分类 - AMLL 三特效开关", () => {
     expect(root.textContent).toContain("AMLL 弹簧动画");
     expect(root.textContent).toContain("AMLL 放大效果");
     // 三个开关行的 on/off 状态与设置一致
-    const rows = [...root.querySelectorAll(".toggle-row")].filter((el) =>
-      /AMLL (模糊效果|弹簧动画|放大效果)/.test(el.textContent),
+    const rows = [...root.querySelectorAll<HTMLElement>(".toggle-row")].filter((el) =>
+      /AMLL (模糊效果|弹簧动画|放大效果)/.test(el.textContent ?? ""),
     );
     expect(rows).toHaveLength(3);
     expect(rows[0].textContent).toContain("AMLL 模糊效果");
@@ -302,9 +305,9 @@ describe("SettingsModal 歌词分类 - AMLL 三特效开关", () => {
   it("点击开关切换 lyricSettings.amll*（写入持久化链路的 reactive）", async () => {
     lyricSettings.amllBlur = true;
     const { w, root } = await openLyricTab();
-    const blurRow = [...root.querySelectorAll(".toggle-row")].find((el) =>
-      el.textContent.includes("AMLL 模糊效果"),
-    );
+    const blurRow = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
+      el.textContent!.includes("AMLL 模糊效果"),
+    )!;
     blurRow.click();
     await nextTick();
     expect(lyricSettings.amllBlur).toBe(false);
@@ -317,7 +320,7 @@ describe("SettingsModal 歌词分类 - AMLL 三特效开关", () => {
 
   it("info 按钮渲染在 AMLL 三开关旁，点击展开/收起性能提示", async () => {
     const { w, root } = await openLyricTab();
-    const btn = root.querySelector(".amll-info-btn");
+    const btn = root.querySelector<HTMLElement>(".amll-info-btn")!;
     expect(btn).toBeTruthy();
     // 提示展开前不显示文案
     expect(btn.getAttribute("aria-expanded")).toBe("false");

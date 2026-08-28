@@ -1,18 +1,20 @@
 // Playlist 组件测试
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import type { VueWrapper, DOMWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -23,7 +25,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -31,6 +33,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 const Playlist = (await import("../components/Playlist.vue")).default;
 const { state, isFavorite, uiSettings } = await import("../composables/usePlayer.js");
+import type { Song } from "../composables/usePlayer.js";
 
 beforeEach(() => {
   Object.assign(state, {
@@ -68,7 +71,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "ヤキモチ", artist: "高橋優", has_lyric: true },
       { id: "b", name: "知足", artist: "五月天", has_lyric: false },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     expect(wrapper.text()).toContain("ヤキモチ");
     expect(wrapper.text()).toContain("高橋優");
@@ -76,7 +79,9 @@ describe("Playlist", () => {
   });
 
   it("有歌词的歌曲显示歌词标记（Mic 图标）", () => {
-    state.songs = [{ id: "a", name: "ヤキモチ", artist: "高橋優", has_lyric: true }];
+    state.songs = [
+      { id: "a", name: "ヤキモチ", artist: "高橋優", has_lyric: true },
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     expect(wrapper.find(".pl-lyric svg").exists()).toBe(true);
   });
@@ -85,7 +90,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "A", artist: "" },
       { id: "b", name: "B", artist: "" },
-    ];
+    ] as unknown as Song[];
     state.currentIndex = 1;
     const wrapper = mount(Playlist);
     const items = wrapper.findAll(".pl-item");
@@ -96,12 +101,12 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "A", artist: "" },
       { id: "b", name: "B", artist: "" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     const items = wrapper.findAll(".pl-item");
     await items[1].trigger("click");
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("B");
+    expect(state.currentSong!.name).toBe("B");
     expect(state.isPlaying).toBe(true);
   });
 
@@ -109,7 +114,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "ヤキモチ", artist: "高橋優" },
       { id: "b", name: "知足", artist: "五月天" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-search input").setValue("知足");
     expect(wrapper.findAll(".pl-item")).toHaveLength(1);
@@ -129,7 +134,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "温柔", artist: "五月天" },
       { id: "b", name: "知足", artist: "五月天" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-search input").setValue("溫柔");
     expect(wrapper.findAll(".pl-item")).toHaveLength(1);
@@ -141,7 +146,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "溫柔", artist: "五月天" },
       { id: "b", name: "知足", artist: "五月天" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-search input").setValue("温柔");
     expect(wrapper.findAll(".pl-item")).toHaveLength(1);
@@ -152,7 +157,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "Resume", artist: "" },
       { id: "b", name: "知足", artist: "" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-search input").setValue("résumé");
     expect(wrapper.findAll(".pl-item")).toHaveLength(1);
@@ -163,7 +168,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "ABC 123", artist: "" },
       { id: "b", name: "知足", artist: "" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-search input").setValue("ＡＢＣ");
     expect(wrapper.findAll(".pl-item")).toHaveLength(1);
@@ -174,7 +179,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "b", name: "B歌", artist: "" },
       { id: "a", name: "A歌", artist: "" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-sort").setValue("name");
     const names = wrapper.findAll(".pl-name").map((n) => n.text());
@@ -185,7 +190,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "long", name: "长歌", artist: "", duration: 300 },
       { id: "short", name: "短歌", artist: "", duration: 90 },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-sort").setValue("duration");
     const names = wrapper.findAll(".pl-name").map((n) => n.text());
@@ -196,13 +201,13 @@ describe("Playlist", () => {
     state.songs = [
       { id: "b", name: "B歌", artist: "" },
       { id: "a", name: "A歌", artist: "" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.find(".pl-sort").setValue("name");
     const items = wrapper.findAll(".pl-item");
     await items[0].trigger("click"); // 排序后第一项是 A歌（原索引 1）
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("A歌");
+    expect(state.currentSong!.name).toBe("A歌");
   });
 
   it("点击红心收藏歌曲（乐观更新，不触发行点击）", async () => {
@@ -238,7 +243,7 @@ describe("Playlist", () => {
     state.songs = [
       { id: "a", name: "A", artist: "" },
       { id: "b", name: "B", artist: "" },
-    ];
+    ] as unknown as Song[];
     const wrapper = mount(Playlist);
     await wrapper.findAll(".pl-action.remove")[0].trigger("click");
     expect(state.songs).toHaveLength(1);
@@ -246,7 +251,7 @@ describe("Playlist", () => {
   });
 
   it("显示歌曲时长", () => {
-    state.songs = [{ id: "a", name: "A", artist: "", duration: 214.5 }];
+    state.songs = [{ id: "a", name: "A", artist: "", duration: 214.5 }] as unknown as Song[];
     const wrapper = mount(Playlist);
     expect(wrapper.text()).toContain("3:34");
   });
@@ -330,7 +335,7 @@ describe("Playlist", () => {
     // zh collation 按拼音排序：高橋優(gao) < 未知歌手(wei) < 五月天(wu)
     const names = cards.map((c) => c.find(".gr-name").text());
     expect(names).toEqual(["高橋優", "未知歌手", "五月天"]);
-    const wy = cards.find((c) => c.find(".gr-name").text() === "五月天");
+    const wy = cards.find((c) => c.find(".gr-name").text() === "五月天")!;
     expect(wy.find(".gr-count").text()).toContain("2");
   });
 
@@ -338,7 +343,7 @@ describe("Playlist", () => {
     state.songs = SAMPLE;
     const wrapper = mount(Playlist);
     await wrapper.findAll(".pb-tab")[1].trigger("click");
-    const wy = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天");
+    const wy = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天")!;
     expect(wy.find(".gr-avatar").text()).toBe("五");
   });
 
@@ -351,7 +356,7 @@ describe("Playlist", () => {
     // 同名专辑聚合，歌手去重显示
     const names = cards.map((c) => c.find(".gr-name").text());
     expect(names).toEqual(["開往明天的旅行", "知足"]);
-    const zz = cards.find((c) => c.find(".gr-name").text() === "知足");
+    const zz = cards.find((c) => c.find(".gr-name").text() === "知足")!;
     expect(zz.find(".gr-count").text()).toContain("五月天");
     expect(zz.find(".gr-count").text()).toContain("3");
     // 封面 img 指向 /api/cover
@@ -435,7 +440,7 @@ describe("Playlist", () => {
     const wrapper = mount(Playlist);
     await wrapper.findAll(".pb-tab")[1].trigger("click");
     // 点“五月天”卡片（拼音序第三张）
-    const wy = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天");
+    const wy = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天")!;
     await wy.trigger("click");
     await wrapper.find(".pl-search input").setValue("溫柔");
     const items = wrapper.findAll(".pl-item");
@@ -481,12 +486,12 @@ describe("Playlist", () => {
   // ============ 加歌浮层：锚定触发按钮 ============
   describe("加歌浮层：锚定触发按钮", () => {
     // 行内按钮顺序：红心 → 加歌（ListPlus） → 移除
-    const addBtn = (wrapper) => wrapper.findAll(".pl-action")[1];
-    const menuEl = () => document.body.querySelector(".add-menu");
-    const backdropEl = () => document.body.querySelector(".am-backdrop");
+    const addBtn = (wrapper: VueWrapper) => wrapper.findAll(".pl-action")[1];
+    const menuEl = () => document.body.querySelector<HTMLElement>(".add-menu")!;
+    const backdropEl = () => document.body.querySelector<HTMLElement>(".am-backdrop")!;
     // 统一登记 wrapper：断言失败也能在 afterEach 卸载，避免残留 Teleport DOM 污染后续测试
-    const wrappers = [];
-    const m = (w) => {
+    const wrappers: VueWrapper[] = [];
+    const m = (w: VueWrapper) => {
       wrappers.push(w);
       return w;
     };
@@ -497,7 +502,10 @@ describe("Playlist", () => {
     }
 
     // mock 触发按钮的 getBoundingClientRect，返回 spy 供后续改值模拟 resize/滚动
-    function stubBtnRect(btn, rect) {
+    function stubBtnRect(
+      btn: DOMWrapper<Element>,
+      rect: { left: number; top: number; right: number; bottom: number },
+    ) {
       return vi.spyOn(btn.element, "getBoundingClientRect").mockReturnValue({
         x: rect.left,
         y: rect.top,
@@ -617,7 +625,15 @@ describe("Playlist", () => {
 
     it("位置纯函数：正常 / 右边界 / 底部翻转 / 左侧兜底 / 顶部兜底", () => {
       const wrapper = mountWithSongs();
-      const { computeAddMenuPos } = wrapper.vm;
+      // wrapper.vm 是组件公开实例类型，computeAddMenuPos 为 defineExpose 的方法 → 收窄访问
+      const { computeAddMenuPos } = wrapper.vm as unknown as {
+        computeAddMenuPos: (
+          btnRect: { left: number; top: number; right: number; bottom: number },
+          menuHeight: number,
+          vw: number,
+          vh: number,
+        ) => { top: number; left: number; flip: boolean };
+      };
       // 正常：按钮下方 + 右对齐右缘
       expect(
         computeAddMenuPos({ left: 400, top: 280, right: 428, bottom: 300 }, 220, 1024, 768),
