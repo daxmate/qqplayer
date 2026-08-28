@@ -2,13 +2,13 @@
 // 五类数据源：本地歌曲 / 在线歌曲（网易云）/ 歌手 / 专辑 / 设置项
 // 混合结果按匹配度排序：score 降序 → kindRank 升序 → title localeCompare(zh)
 // 单例：模块顶层共享 ref，多次调用 useSearchAnything() 返回同一实例。
-import { ref, watch } from "vue";
+import { ref, watch, type Ref } from "vue";
 import { state } from "./usePlayer.js";
 import { isSearchOpen } from "./searchState.js";
 import { history, loadHistory, addHistory, removeHistory, clearHistory } from "./searchHistory.js";
 import { matchScore, kindRank } from "../utils/score.js";
 import { apiGet } from "../utils/apiClient.js";
-import { settingsIndex, SETTING_CATEGORIES } from "../settingsIndex";
+import { settingsIndex, SETTING_CATEGORIES, type SettingEntry } from "../settingsIndex";
 import i18n from "../locales/i18n.js";
 
 const DEBOUNCE_MS = 250;
@@ -19,18 +19,50 @@ const ARTIST_WEIGHT = 10;
 const ALBUM_WEIGHT = 0;
 const ALIAS_BONUS = 10; // 设置项别名命中加成
 
-const query = ref("");
-const results = ref([]);
-const loading = ref(false);
-// 在线歌曲源：'netease' 网易云（默认，现有行为不变）| 'gequhai' 歌曲海（夸克网盘直链下载）
-const onlineSource = ref("netease");
+/** 在线歌曲源：'netease' 网易云（默认，现有行为不变）| 'gequhai' 歌曲海（夸克网盘直链下载） */
+export type OnlineSource = "netease" | "gequhai";
 
-let debounceTimer = null;
+/** 搜索结果条目种类：本地歌曲 / 在线歌曲 / 歌手 / 专辑 / 设置项 */
+export type SearchResultKind = "song" | "online" | "artist" | "album" | "setting";
+
+/** 搜索结果条目（统一形状；payload 按 kind 透传原始对象，消费方按需取值） */
+export interface SearchResult {
+  kind: SearchResultKind;
+  id: string;
+  title: string;
+  subtitle: string;
+  badge: string;
+  score: number;
+  payload: unknown;
+}
+
+/** useSearchAnything() 返回结构（模块级单例：多次调用返回同一实例） */
+export interface SearchAnythingApi {
+  query: Ref<string>;
+  results: Ref<SearchResult[]>;
+  loading: Ref<boolean>;
+  isSearchOpen: Ref<boolean>;
+  onlineSource: Ref<OnlineSource>;
+  history: Ref<string[]>;
+  setOnlineSource: (src: string) => void;
+  clear: () => void;
+  loadHistory: () => Ref<string[]>;
+  addHistory: (term: unknown) => void;
+  removeHistory: (term: unknown) => void;
+  clearHistory: () => void;
+}
+
+const query = ref("");
+const results = ref<SearchResult[]>([]);
+const loading = ref(false);
+const onlineSource = ref<OnlineSource>("netease");
+
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let searchSeq = 0; // 请求序列号：过期响应丢弃（快速连续输入时，参照 OnlineSearch.vue）
 
 // ---------- 本地歌曲 ----------
-function collectSongs(q) {
-  const out = [];
+function collectSongs(q: string): SearchResult[] {
+  const out: SearchResult[] = [];
   for (const song of state.songs) {
     if (!song) continue;
     // 三字段分别 matchScore，取最高分；字段权重：name +20 / artist +10 / album +0
@@ -46,8 +78,8 @@ function collectSongs(q) {
     if (!best) continue;
     out.push({
       kind: "song",
-      id: song.path || song.id,
-      title: song.name,
+      id: (song.path || song.id) as string,
+      title: song.name as string,
       subtitle: [song.artist, song.album].filter(Boolean).join(" · "),
       badge: i18n.global.t("search.badge.song"),
       score: best,
@@ -59,21 +91,21 @@ function collectSongs(q) {
 }
 
 // ---------- 在线歌曲（网易云 / 歌曲海）----------
-async function fetchOnline(q, seq) {
+async function fetchOnline(q: string, seq: number): Promise<SearchResult[]> {
   try {
     const src = onlineSource.value === "gequhai" ? "gequhai" : "netease";
     // 在线搜索是实时数据，不走缓存（离线时在线组不出现，本地结果照常）
-    const r = await apiGet(
+    const r = (await apiGet(
       `/api/online/search?q=${encodeURIComponent(q)}&limit=${ONLINE_LIMIT}&source=${src}`,
-    );
+    )) as { ok: boolean; data?: unknown };
     if (seq !== searchSeq) return []; // 过期响应丢弃
     if (!r.ok) return [];
-    const data = r.data || {};
+    const data = (r.data || {}) as Record<string, unknown>;
     if (seq !== searchSeq) return [];
     const items = Array.isArray(data.items) ? data.items : [];
     return items
       .slice(0, LIMITS.online)
-      .map((item) => ({
+      .map((item): SearchResult => ({
         kind: "online",
         id: "online-" + item.id,
         title: item.title ?? "",
@@ -105,15 +137,15 @@ async function fetchOnline(q, seq) {
 }
 
 // ---------- 歌手（state.songs 按 artist 聚合计数）----------
-function collectArtists(q) {
-  const countMap = new Map(); // artist → count
+function collectArtists(q: string): SearchResult[] {
+  const countMap = new Map<string, number>(); // artist → count
   for (const song of state.songs) {
     if (!song) continue;
     const artist =
       (song.artist && String(song.artist).trim()) || i18n.global.t("search.unknownArtist");
     countMap.set(artist, (countMap.get(artist) || 0) + 1);
   }
-  const scored = [];
+  const scored: { artist: string; count: number; score: number }[] = [];
   for (const [artist, count] of countMap) {
     const score = matchScore(q, artist);
     if (score > 0) scored.push({ artist, count, score });
@@ -133,7 +165,7 @@ function collectArtists(q) {
 }
 
 // 专辑 artists 串：去重 >2 显示 "A / B 等"
-function formatArtists(list) {
+function formatArtists(list: string[]): string {
   const uniq = [...new Set(list.filter(Boolean))];
   if (uniq.length > 2) {
     return i18n.global.t("search.albumMore", { a: uniq[0], b: uniq[1] });
@@ -142,21 +174,22 @@ function formatArtists(list) {
 }
 
 // ---------- 专辑（state.songs 按 album 聚合计数）----------
-function collectAlbums(q) {
-  const map = new Map(); // album → { album, artists:Set, count }
+function collectAlbums(q: string): SearchResult[] {
+  const map = new Map<string, { album: string; artists: Set<string>; count: number }>(); // album → { album, artists:Set, count }
   for (const song of state.songs) {
     if (!song) continue;
     const album = (song.album && String(song.album).trim()) || i18n.global.t("search.unknownAlbum");
     let rec = map.get(album);
     if (!rec) {
-      rec = { album, artists: new Set(), count: 0 };
+      rec = { album, artists: new Set<string>(), count: 0 };
       map.set(album, rec);
     }
     rec.count++;
     const artist = song.artist && String(song.artist).trim();
     if (artist) rec.artists.add(artist);
   }
-  const scored = [];
+  const scored: { rec: { album: string; artists: Set<string>; count: number }; score: number }[] =
+    [];
   for (const rec of map.values()) {
     const score = matchScore(q, rec.album);
     if (score > 0) scored.push({ rec, score });
@@ -179,9 +212,11 @@ function collectAlbums(q) {
 }
 
 // ---------- 设置项 ----------
-function collectSettings(q) {
-  const out = [];
-  for (const entry of settingsIndex) {
+function collectSettings(q: string): SearchResult[] {
+  const out: SearchResult[] = [];
+  // settingsIndex 条目实际无 key 字段（运行时 entry.key 恒为 undefined → 回退 labelKey），
+  // 兼容旧 JS 写法：补 { key?: string } 宽松视图，行为零变化
+  for (const entry of settingsIndex as (SettingEntry & { key?: string })[]) {
     if (!entry) continue;
     const title = i18n.global.t(entry.labelKey); // 翻译文案
     let score = matchScore(q, title);
@@ -211,19 +246,19 @@ function collectSettings(q) {
 }
 
 // 设置项分类名（subtitle）：category key → SETTING_CATEGORIES 的 labelKey 翻译
-function settingsCategoryLabel(category) {
+function settingsCategoryLabel(category: string): string {
   const cat = (SETTING_CATEGORIES || []).find((c) => c.key === category);
   return cat ? i18n.global.t(cat.labelKey) : "";
 }
 
 // ---------- 汇总排序 ----------
-function sortResults(a, b) {
+function sortResults(a: SearchResult, b: SearchResult): number {
   return (
     b.score - a.score || kindRank(a.kind) - kindRank(b.kind) || a.title.localeCompare(b.title, "zh")
   );
 }
 
-async function runSearch(rawQ) {
+async function runSearch(rawQ: string): Promise<void> {
   const q = String(rawQ).trim();
   const seq = searchSeq;
   // 本地来源（歌曲/歌手/专辑/设置）同步立即出结果，不等在线
@@ -245,7 +280,7 @@ async function runSearch(rawQ) {
 }
 
 // 打开时刷新历史（从 localStorage 重载；组件聚焦输入框后即可见）
-watch(isSearchOpen, (open) => {
+watch(isSearchOpen, (open: boolean) => {
   if (open) loadHistory();
 });
 
@@ -270,8 +305,8 @@ watch(query, () => {
 });
 
 /** 切换在线歌曲源；已输入关键词时立即重新搜索 */
-function setOnlineSource(src) {
-  const next = src === "gequhai" ? "gequhai" : "netease";
+function setOnlineSource(src: string) {
+  const next: OnlineSource = src === "gequhai" ? "gequhai" : "netease";
   if (next === onlineSource.value) return;
   onlineSource.value = next;
   const q = String(query.value).trim();
@@ -291,7 +326,7 @@ function clear() {
   isSearchOpen.value = false;
 }
 
-export function useSearchAnything() {
+export function useSearchAnything(): SearchAnythingApi {
   return {
     query,
     results,

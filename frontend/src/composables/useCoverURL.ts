@@ -18,7 +18,7 @@
 //     （前 N 行 = 用户大概率会看的；滚动后新可见行随 watch 触发，行号 < N 的才下载）
 //   - 同一 path 幂等：已解析出 URL 后直接跳过（查询/下载不重复）
 
-import { ref } from "vue";
+import { ref, type Ref } from "vue";
 import { resolveServerUrl, isOffline, onOfflineChange } from "../utils/apiClient.js";
 import {
   syncEnabled,
@@ -31,19 +31,28 @@ import {
 /** 列表前 N 行封面后台缓存（行号超出只查不下载） */
 export const COVER_CACHE_FIRST_N = 30;
 
-/**
- * 封面 URL 解析状态（每组件实例一份；coverErrors 语义同原组件内实现）。
- * @param {{onOnlineRefresh?:function}} [opts] onOnlineRefresh：恢复在线（offline→online）时
- *   清空本实例已解析结果/错误标记后触发——调用方传入「对当前歌曲/可见行重新 resolveCover」
- *   的逻辑（2026-08-27 契约：断网期间解析为空/失败标记的封面恢复后自动补齐，不等切歌）。
- * @returns {{coverSrc:function, coverOk:function, markCoverError:function, resolveCover:function,
- *   dispose:function}}
- */
-export function useCoverURL({ onOnlineRefresh } = {}) {
-  const coverErrors = ref(new Set());
-  const urlMap = new Map(); // path → ref(url)；ref 在模板渲染期被读取 → 异步填充后自动重渲染
+/** useCoverURL() 选项 */
+export interface UseCoverURLOptions {
+  /** 恢复在线（offline→online）时清空本实例已解析结果/错误标记后触发；
+   *  调用方传入「对当前歌曲/可见行重新 resolveCover」的逻辑
+   *  （2026-08-27 契约：断网期间解析为空/失败标记的封面恢复后自动补齐，不等切歌）。 */
+  onOnlineRefresh?: () => void;
+}
 
-  function refFor(path) {
+/** useCoverURL() 返回结构（每组件实例一份；coverErrors 语义同原组件内实现） */
+export interface UseCoverURLReturn {
+  coverSrc: (path: string) => string;
+  coverOk: (path: string) => boolean;
+  markCoverError: (path: string) => void;
+  resolveCover: (path: string, opts?: { download?: boolean }) => void;
+  dispose: () => void;
+}
+
+export function useCoverURL({ onOnlineRefresh }: UseCoverURLOptions = {}): UseCoverURLReturn {
+  const coverErrors = ref<Set<string>>(new Set());
+  const urlMap = new Map<string, Ref<string>>(); // path → ref(url)；ref 在模板渲染期被读取 → 异步填充后自动重渲染
+
+  function refFor(path: string): Ref<string> {
     let r = urlMap.get(path);
     if (!r) {
       r = ref("");
@@ -53,25 +62,25 @@ export function useCoverURL({ onOnlineRefresh } = {}) {
   }
 
   /** 远程封面 URL（桌面同源原样返回；iOS 壳转服务器绝对 URL + token） */
-  function remoteURL(path) {
+  function remoteURL(path: string): string {
     return resolveServerUrl("/api/cover?path=" + encodeURIComponent(path));
   }
 
   /** 模板绑定值：未解析完成前返回 ""（配合 v-if 隐藏 <img>，避免空 src 闪烁/坏图） */
-  function coverSrc(path) {
+  function coverSrc(path: string): string {
     if (!path) return "";
     return refFor(path).value;
   }
 
   /** 封面是否可显示（未被 markCoverError 标记失败） */
-  function coverOk(path) {
+  function coverOk(path: string): boolean {
     return !coverErrors.value.has(path);
   }
 
   /** 封面加载失败标记（远程 404 / 断网时回退图标，保留原兜底逻辑）。
    *  远程 URL 加载失败（断网/离线切换）→ 先尝试本地兑底（封面缓存 → 内嵌 APIC），
    *  成功则替换 URL 并取消错误标记；都无才保持隐藏（2026-08-27 离线封面兑底）。 */
-  function markCoverError(path) {
+  function markCoverError(path: string) {
     const cur = urlMap.get(path);
     if (cur && cur.value && cur.value.startsWith("http")) {
       const prev = cur.value;
@@ -100,10 +109,10 @@ export function useCoverURL({ onOnlineRefresh } = {}) {
 
   /**
    * 异步解析封面 URL（本地优先 + 按需后台缓存）。同一 path 幂等。
-   * @param {string} path 歌曲 path
-   * @param {{download?:boolean}} [opts] download:true → 未命中时后台缓存（调用方节流）
+   * @param path 歌曲 path
+   * @param opts download:true → 未命中时后台缓存（调用方节流）
    */
-  function resolveCover(path, opts = {}) {
+  function resolveCover(path: string, opts: { download?: boolean } = {}) {
     if (!path) return;
     const r = refFor(path);
     if (r.value) return; // 已解析（本地或远程），跳过
@@ -145,7 +154,7 @@ export function useCoverURL({ onOnlineRefresh } = {}) {
   // 并通知调用方重新解析（当前歌曲/可见行）。断网时解析为空（无缓存且无内嵌）的 path
   // 保持空且无标记（见 resolveCover 断网分支），必须由本回调重新 resolve 才能补上。
   // 桌面/非壳：resolveCover 同步远程直出，重解析结果 URL 相同，行为零变化。
-  const dispose = onOfflineChange((offline) => {
+  const dispose: () => void = onOfflineChange((offline: boolean) => {
     if (offline) return; // 只处理「恢复在线」方向
     urlMap.clear();
     coverErrors.value.clear();

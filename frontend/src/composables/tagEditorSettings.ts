@@ -11,16 +11,22 @@
 
 import { apiGet } from "../utils/apiClient.js";
 
-let enabledFieldsCache = null; // null = 未加载 / 无字段选择配置
+/** apiClient 响应宽松视图（apiClient.js 为 JS 未类型化，这里只取本模块用到的字段） */
+interface ApiResult {
+  ok: boolean;
+  data?: unknown;
+}
+
+let enabledFieldsCache: string[] | null = null; // null = 未加载 / 无字段选择配置
 let loaded = false; // 是否已成功缓存过（成功后才免重复请求）
 
 /** 拉取 enabled_fields（模块级缓存；幂等，未加载才真正发请求） */
 export async function loadEnabledFields() {
   if (loaded) return;
   try {
-    const r = await apiGet("/api/library/settings");
+    const r = (await apiGet("/api/library/settings")) as ApiResult;
     if (r.ok) {
-      const data = r.data || {};
+      const data = (r.data || {}) as { settings?: { scraping?: { enabled_fields?: unknown } } };
       const ef = data?.settings?.scraping?.enabled_fields;
       if (Array.isArray(ef)) {
         enabledFieldsCache = ef;
@@ -33,7 +39,7 @@ export async function loadEnabledFields() {
 }
 
 /** 当前生效的 enabled_fields（数组）或 null（不限制） */
-export function getEnabledFields() {
+export function getEnabledFields(): string[] | null {
   return Array.isArray(enabledFieldsCache) ? enabledFieldsCache : null;
 }
 

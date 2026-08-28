@@ -6,37 +6,37 @@
 // PUT 到后端，无需自行调 API。settingsSync 异步 GET 覆盖 uiSettings 后，
 // 下方镜像 watch 自动同步到 history ref（组件渲染出口）。
 // 变更语义：最新在前、最多 10 条、去重置顶、单删、清空。
-import { ref, watch } from "vue";
+import { ref, watch, type Ref } from "vue";
 import { uiSettings } from "./useSettings.js";
 
 const MAX_ITEMS = 10;
 
 // 响应式出口（组件渲染用）：镜像 uiSettings.searchHistory
-export const history = ref([]);
+export const history = ref<string[]>([]);
 
 // 镜像：uiSettings.searchHistory 变化（含 settingsSync GET 覆盖）→ 同步到 history
 watch(
   () => uiSettings.searchHistory,
-  (arr) => {
+  (arr: string[]) => {
     history.value = Array.isArray(arr) ? [...arr] : [];
   },
   { immediate: true, flush: "sync" },
 );
 
 // 当前列表（防御：uiSettings 字段可能被外部置为非法值）
-function currentList() {
+function currentList(): string[] {
   const arr = uiSettings.searchHistory;
   return Array.isArray(arr) ? arr : [];
 }
 
 /** 从 uiSettings 重新同步 history（打开搜索层时调用；正常由镜像 watch 自动同步） */
-export function loadHistory() {
+export function loadHistory(): Ref<string[]> {
   history.value = [...currentList()];
   return history;
 }
 
 /** 记录一条搜索词：去重（重复移到最前）→ 插入头部 → 截断 MAX_ITEMS；空白不记 */
-export function addHistory(term) {
+export function addHistory(term: unknown) {
   if (typeof term !== "string") return;
   const q = term.trim();
   if (!q) return;
@@ -44,7 +44,7 @@ export function addHistory(term) {
 }
 
 /** 删除单条历史 */
-export function removeHistory(term) {
+export function removeHistory(term: unknown) {
   const q = String(term ?? "");
   uiSettings.searchHistory = currentList().filter((s) => s !== q);
 }
@@ -54,6 +54,15 @@ export function clearHistory() {
   uiSettings.searchHistory = [];
 }
 
-export function useSearchHistory() {
+/** useSearchHistory() 返回结构（模块级单例：多次调用返回同一实例） */
+export interface SearchHistoryApi {
+  history: Ref<string[]>;
+  loadHistory: () => Ref<string[]>;
+  addHistory: (term: unknown) => void;
+  removeHistory: (term: unknown) => void;
+  clearHistory: () => void;
+}
+
+export function useSearchHistory(): SearchHistoryApi {
   return { history, loadHistory, addHistory, removeHistory, clearHistory };
 }
