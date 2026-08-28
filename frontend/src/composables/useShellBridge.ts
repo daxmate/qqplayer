@@ -9,14 +9,44 @@
 // CustomEvent（qqplayer:nativelibrary / qqplayer:nativeDictFiles）派发，前端两种模式统一用
 // window.addEventListener(webEventName) 监听，现有监听逻辑一行不改。
 
+/** 壳环境：'tauri'（Tauri 2 桌面壳）| 'webkit'（macOS Swift 壳）| null（浏览器直连） */
+export type ShellMode = "tauri" | "webkit" | null;
+
+/** tauri 壳事件对象（listen 回调入参；payload 为壳 emit 的任意数据） */
+interface TauriEvent {
+  payload?: unknown;
+}
+
+/** tauri 壳运行时全局（window.__TAURI__，Tauri 2 注入） */
+interface TauriGlobal {
+  core?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> };
+  event?: { listen?: (event: string, handler: (event: TauriEvent) => void) => Promise<unknown> };
+}
+
+/** WebKit（macOS Swift 壳）消息桥全局（window.webkit） */
+interface WebkitShellGlobal {
+  messageHandlers?: { native?: { postMessage?: (message: unknown) => void } };
+}
+
+declare global {
+  interface Window {
+    /** Tauri 2 壳环境标记（壳注入；与 window.__TAURI__ 同生命周期） */
+    __TAURI_INTERNALS__?: unknown;
+    /** Tauri 2 运行时 API（core.invoke / event.listen） */
+    __TAURI__?: TauriGlobal;
+    /** macOS Swift 壳的 WebKit 消息桥 */
+    webkit?: WebkitShellGlobal;
+  }
+}
+
 // tauri 壳事件名 → 前端 window 事件名（CustomEvent）映射（与 SettingsModal/DictManagerModal 现有监听一致）
-const TAURI_EVENT_MAP = {
+const TAURI_EVENT_MAP: Record<string, string> = {
   "qqplayer:nativelibrary": "library-changed",
   "qqplayer:nativeDictFiles": "dict-files",
 };
 
 /** 实时探测当前壳环境（每次调用重新判定，测试友好） */
-function detectMode() {
+function detectMode(): ShellMode {
   if (typeof window === "undefined") return null;
   if (window.__TAURI_INTERNALS__) return "tauri";
   if (window.webkit?.messageHandlers?.native) return "webkit";
@@ -24,7 +54,7 @@ function detectMode() {
 }
 
 /** tauri invoke 安全封装：invoke 缺失/失败一律静默（返回已 catch 的 Promise，杜绝 unhandled rejection） */
-function tauriInvoke(cmd, args) {
+function tauriInvoke(cmd: string, args?: unknown): Promise<unknown> {
   try {
     const p =
       args === undefined
@@ -37,13 +67,13 @@ function tauriInvoke(cmd, args) {
 }
 
 /** tauri 壳事件监听：listen 返回 Promise<UnlistenFn>，解绑函数在就绪后调用真实 unlisten */
-function tauriListen(tauriEvent, onPayload) {
-  let unlisten = () => {};
+function tauriListen(tauriEvent: string, onPayload: (event: TauriEvent) => void): () => void {
+  let unlisten: () => void = () => {};
   try {
     const p = window.__TAURI__?.event?.listen?.(tauriEvent, onPayload);
     if (p?.then) {
       p.then((fn) => {
-        if (typeof fn === "function") unlisten = fn;
+        if (typeof fn === "function") unlisten = fn as () => void;
       }).catch(() => {});
     }
   } catch {
@@ -64,7 +94,7 @@ function tauriListen(tauriEvent, onPayload) {
  * - webkit → postMessage(msg)（保持现状）
  * - null → noop
  */
-function report(msg) {
+function report(msg: unknown) {
   const m = detectMode();
   if (m === "tauri") return tauriInvoke("report", { msg });
   if (m === "webkit") {
@@ -73,8 +103,24 @@ function report(msg) {
   // null：浏览器直连，静默 noop
 }
 
+/** 统一壳桥实例结构（useShellBridge() 返回值；模块级单例） */
+export interface ShellBridge {
+  /** 当前壳环境：'tauri' | 'webkit' | null（每次访问实时探测） */
+  readonly mode: ShellMode;
+  /** 通用壳消息上报（tauri invoke('report') / webkit postMessage / null noop） */
+  report: (msg: unknown) => void;
+  /** 选库（tauri invoke('pick_library') / webkit postMessage("pickLibrary") / null noop） */
+  pickLibrary: () => void;
+  /** 选词典文件（tauri invoke('pick_dict_files') / webkit postMessage({ type: "pickDictFiles" }) / null noop） */
+  pickDictFiles: () => void;
+  /** 整窗拖动：等价 report({ type: "nativeDrag" }) */
+  startDragging: () => void;
+  /** 壳事件监听，返回解绑函数（tauri 转发 CustomEvent / webkit 直接 addEventListener / null noop） */
+  on: (webEventName: string, handler: (event: Event) => void) => () => void;
+}
+
 /** 桥实例（模块级单例） */
-const shellBridge = {
+const shellBridge: ShellBridge = {
   /** 当前壳环境：'tauri' | 'webkit' | null（每次访问实时探测） */
   get mode() {
     return detectMode();
@@ -123,7 +169,7 @@ const shellBridge = {
    * - webkit：直接 window.addEventListener(webEventName, handler)（macOS 壳本来就用 evaluateJavaScript dispatch CustomEvent）
    * - null → 返回 noop 解绑函数
    */
-  on(webEventName, handler) {
+  on(webEventName: string, handler: (event: Event) => void) {
     const m = detectMode();
     if (m === "tauri") {
       const tauriEvent = TAURI_EVENT_MAP[webEventName] || webEventName;
@@ -143,6 +189,6 @@ const shellBridge = {
 };
 
 /** 模块级单例：任何调用点拿到同一桥实例 */
-export function useShellBridge() {
+export function useShellBridge(): ShellBridge {
   return shellBridge;
 }
