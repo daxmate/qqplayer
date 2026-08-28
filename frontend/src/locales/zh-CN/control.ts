@@ -36,5 +36,7 @@ export default {
     // 移动端跟唱：控制区折叠
     expandHint: "控制区已收起，上滑或点此展开",
     expandTip: "控制区已收起，上滑或点击此处展开",
+    collapseHint: "下滑可收起控制区",
+    collapseTip: "下滑可收起控制区",
   },
 };

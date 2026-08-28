@@ -102,3 +102,33 @@ describe("ControlBar 歌曲编辑入口", () => {
     w.unmount();
   });
 });
+
+describe("ControlBar 退出跟唱清理 AB/单句循环", () => {
+  it("AB 循环中退出跟唱（点跟唱按钮）→ abLoop 清空、karaokeLoop 关闭、mode 回 continuous", async () => {
+    state.mode = "karaoke";
+    state.abLoop = { a: 3, b: 8 };
+    state.karaokeLoop = true;
+    const w = mount(ControlBar, { props: { karaoke: true } });
+    const mic = w.findAll(".btn").find((b) => b.attributes("title") === "退出跟唱");
+    expect(mic).toBeTruthy();
+    await mic!.trigger("click");
+    await nextTick();
+    expect(state.mode).toBe("continuous");
+    expect(state.abLoop).toBeNull();
+    expect(state.karaokeLoop).toBe(false);
+    w.unmount();
+  });
+
+  it("无 AB/单句状态时退出跟唱不受影响", async () => {
+    state.mode = "karaoke";
+    state.abLoop = null;
+    state.karaokeLoop = false;
+    const w = mount(ControlBar, { props: { karaoke: true } });
+    const mic = w.findAll(".btn").find((b) => b.attributes("title") === "退出跟唱");
+    await mic!.trigger("click");
+    await nextTick();
+    expect(state.mode).toBe("continuous");
+    expect(state.abLoop).toBeNull();
+    w.unmount();
+  });
+});

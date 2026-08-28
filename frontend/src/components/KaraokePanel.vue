@@ -20,14 +20,14 @@
       <button class="kp-spec-btn" :title="t('spec.title')" @click="openLyricSpec()">
         <FileMusic :size="14" />
       </button>
-      <!-- 移动端跟唱折叠：控制区收起时顶部显示信息按钮（提示上滑/点击展开） -->
-      <template v-if="collapseHint">
-        <button class="kp-info-btn" :title="t('control.expandHint')" @click="tipOpen = !tipOpen">
+      <!-- 移动端跟唱：顶部信息按钮常驻（控制区收起时提示展开，展开时提示可收起） -->
+      <template v-if="showInfoBtn">
+        <button class="kp-info-btn" :title="infoBtnTitle" @click="tipOpen = !tipOpen">
           <Info :size="14" />
         </button>
         <Transition name="ctrl-tip">
-          <div v-if="tipOpen" class="kp-tip" @click="expandControls()">
-            {{ t("control.expandTip") }}
+          <div v-if="tipOpen" class="kp-tip" @click="onTipClick()">
+            {{ controlsCollapsed ? t("control.expandTip") : t("control.collapseTip") }}
           </div>
         </Transition>
       </template>
@@ -128,17 +128,22 @@ const props = defineProps({
   headless: { type: Boolean, default: false },
   // 字号缩放（全歌词界面用）：默认 1 不影响现有使用方，>1 时按比例放大 --fs-active
   fontScale: { type: Number, default: 1 },
-  // 移动端跟唱：控制区折叠收起时显示顶部信息按钮（提示上滑/点击展开，气泡点开展开控制区）
-  collapseHint: { type: Boolean, default: false },
+  // 移动端跟唱：顶部信息按钮常驻（控制区收起时提示上滑展开，展开时提示下滑可收起）
+  showInfoBtn: { type: Boolean, default: false },
+  // 底部控制区当前收起态（决定气泡文案与点击行为）
+  controlsCollapsed: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["expand-controls"]);
+const emit = defineEmits(["expand-controls", "collapse-controls"]);
 
-// 信息按钮气泡（点击气泡 → 通知父级展开控制区）
+// 信息按钮气泡：收起态 → 提示展开（点气泡展开）；展开态 → 提示收起（点气泡收起）
 const tipOpen = ref(false);
-function expandControls() {
+const infoBtnTitle = computed(() =>
+  props.controlsCollapsed ? t("control.expandHint") : t("control.collapseHint"),
+);
+function onTipClick() {
   tipOpen.value = false;
-  emit("expand-controls");
+  emit(props.controlsCollapsed ? "expand-controls" : "collapse-controls");
 }
 
 function expandPanels() {

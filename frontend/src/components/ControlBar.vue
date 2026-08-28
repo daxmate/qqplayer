@@ -324,7 +324,12 @@ function expand() {
 }
 
 // 模式切换（音乐 ↔ 跟唱；顶栏 tab 已不提供跟唱入口，这里由按钮直达）
+// 退出跟唱时清理 AB/单句循环：避免回到连播模式后歌词区残留 A/B 标注、句子循环播放
 function switchMode(m: string) {
+  if (m === "continuous") {
+    exitAbLoop();
+    if (state.karaokeLoop) state.karaokeLoop = false;
+  }
   state.mode = m;
 }
 

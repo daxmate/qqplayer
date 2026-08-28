@@ -128,8 +128,10 @@
             :lyric="state.lyric"
             :current="currentLineIndex"
             :expand-btn="false"
-            :collapse-hint="controlsCollapsed"
+            :show-info-btn="true"
+            :controls-collapsed="controlsCollapsed"
             @expand-controls="controlsCollapsed = false"
+            @collapse-controls="controlsCollapsed = true"
           />
         </div>
         <div v-if="sleepTimerText" class="mp-sleep-timer mp-sleep-line">{{ sleepTimerText }}</div>
@@ -651,7 +653,7 @@ const lyricAreaStyle = computed(() => ({
 const fullLyricOpen = ref(false);
 const fullLyricRef = ref(null);
 // 跟唱模式：底部控制区折叠态（下滑收起/上滑展开由 ControlBar 手势驱动，
-// 顶部 KaraokePanel 信息按钮联动：收起时显示，点气泡展开）
+// 顶部 KaraokePanel 信息按钮常驻联动：收起时提示展开，展开时提示可收起）
 const controlsCollapsed = ref(false);
 const fullLyricNoTransition = ref(false);
 let fullLyricCloseTimer: ReturnType<typeof setTimeout> | undefined = undefined;
