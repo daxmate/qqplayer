@@ -5,7 +5,15 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.0.0] - 2026-08-28
+
+### 🎯 架构改造 P0-P3 全部落地（2026-08-27 ~ 08-28，行为零变化）
+
+- **P0 设置体系统一**：三方契约测试（设置注册表 ↔ 前端默认值 ↔ 后端白名单，抓出 shortcutOpenSettings 真实缺口）；注册表驱动渲染（`settingsIndex.ts` 70 entry 类型化单一事实源——新增设置只改一处）；后端白名单补齐；接线规范文档 `docs/settings-architecture.md`
+- **P1 桥契约单一事实源**：`docs/ios-bridge-contract.json`（26 cmd / 18 event）+ 前端/iOS 双端契约测试；UI 状态移出内核（`uiState.ts` 单 key 持久化 + 旧 key 迁移）；**playerCore.js 2339 行按域拆 7 个 TS 模块**（playerState/audioEngine/queueEngine/playbackEngine/shortcuts/mediaSession/miniControl，77 导出零缺失，循环依赖函数注入根治）
+- **P2 跨端抽离 + 存储归一**：`useCoverGuard` 语义化守卫（16 处收敛）；kv_store 统一 KV 表 6 域迁移（queue_order/network_songs/books/annotations/vocab/pairing），JsonStore 退役；annotations/vocab 接入 manifest 同步（按书 LWW / vocab 按 id merge 防丢词）；存储边界定案：全部数据进 SQLite、同步按白名单按需
+- **P3 巨型组件拆分**：Playlist.vue 2249→1071（4 组件 + 2 composable）；Reader.vue 2131→973（8 composable，词典独立）；SettingsModal.vue 3378→1225（容器 + 9 区块面板 `components/settings/`）；usePlayer.test.js 3813→9 文件 + 共享 harness（用例零改动）；coverOffline CI flaky 根治
+- 前端测试 1707/1707 全绿；typecheck 9 错误=基线（books/* 存量待清）
 
 ### 🐛 修复：封面三端失效根因 / macOS 壳误判 / 弹窗定位 / 签名与装机（2026-08-26）
 
@@ -33,7 +41,7 @@
 - **存储路径可配置**：DB 在 `DATA_DIR/qqplayer.db`（QQPLAYER_DATA_DIR 可覆盖），测试通过 conftest autouse fixture 注入临时 DB + 迁移源路径，绝不触碰真实用户数据
 - 测试：新增 tests/test_sqlite_storage.py 20 用例（建表/迁移含幂等与失败容错/DAO 读写/ops 游标/滚动截断/多线程并发/API 集成），全量 684 全绿（原 664 零回归）
 
-## [1.0.0] - 2026-08-22
+## [1.0.0-rc.1] - 2026-08-22
 
 ### 📦 打包与分发（首个自包含安装包）
 

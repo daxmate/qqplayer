@@ -115,6 +115,8 @@ pnpm install
 pnpm tauri build
 ```
 
+**架构现状（2026-08）**：前端设置体系单一事实源（`settingsIndex.ts` 注册表驱动渲染，新增设置只改一处）；播放内核按域拆分（playerState/audioEngine/queueEngine/playbackEngine/shortcuts/mediaSession/miniControl 全 TS）；iOS 桥契约单一事实源（`docs/ios-bridge-contract.json` + 双端契约测试）；存储归一 SQLite（`kv_store` 统一 KV 表，同步按白名单）；巨型组件已拆（Playlist/Reader/SettingsModal 均 <1300 行）。
+
 ## 测试 / 质量
 
 ```bash
