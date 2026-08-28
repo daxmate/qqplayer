@@ -99,7 +99,7 @@ function buildCtx(e: MouseEvent): CtxTarget | null {
           songName: song.name || "",
           artist: song.artist || "",
           album: song.album || "",
-          isFav: isFavorite(path),
+          isFav: path ? isFavorite(path) : false,
           hasPath: !!path,
           // 与 ContextMenu.vue 的 canGoArtist/canGoAlbum 同源：歌手/专辑非空才显示入口
           // （Playlist 分组视图内隐藏入口的细化逻辑只在浏览器菜单生效，壳内点击重复进入同一视图无害）
