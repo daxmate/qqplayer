@@ -18,32 +18,32 @@ import {
 //   · 满 N 暂停在 A 句首并保持区间；再次播放后，下一次 B 句播完视为新一轮第 1 遍
 //     （等价于计数重置——避免"再播一遍就立刻又停"）
 //   · 等选终点（b=null）与单句循环不计数；AB 区间确定后仅 B 终点句完成计 1 遍
-let abLoopCount = 0; // 已完成的区间循环遍数（B 句播完 +1）
-let abLoopPaused = false; // 满 N 暂停标记：下次 B 完成视为新一轮第 1 遍
+let abLoopCount: number = 0; // 已完成的区间循环遍数（B 句播完 +1）
+let abLoopPaused: boolean = false; // 满 N 暂停标记：下次 B 完成视为新一轮第 1 遍
 
 // 循环上限钳制（设置持久化可能写入脏值：非数字/越界 → 回落合法范围）
-function abLoopMax() {
+function abLoopMax(): number {
   const n = Math.floor(Number(playbackSettings.abLoopMaxCount));
   if (!Number.isFinite(n)) return 10;
   return Math.min(20, Math.max(1, n));
 }
 
-export function resetAbLoopCount() {
+export function resetAbLoopCount(): void {
   abLoopCount = 0;
   abLoopPaused = false;
 }
 
 // 仅供测试：读取当前计数
-export function _getAbLoopCount() {
+export function _getAbLoopCount(): number {
   return abLoopCount;
 }
 
 // ============ 跟唱开关 ============
-export function toggleKaraoke() {
+export function toggleKaraoke(): void {
   state.karaokeOn = !state.karaokeOn;
 }
 
-export function toggleKaraokeLoop() {
+export function toggleKaraokeLoop(): void {
   state.karaokeLoop = !state.karaokeLoop;
 }
 
@@ -51,7 +51,7 @@ export function toggleKaraokeLoop() {
 // 进入：当前句为起点 A，等待点击另一句作为终点 B
 // 循环：A→B 区间句子连播，播到 B 句尾自动跳回 A 句首
 
-export function enterAbLoop() {
+export function enterAbLoop(): void {
   if (state.abLoop) return; // 已在 AB 循环中，忽略
   const cur = currentLineIndex.value;
   if (cur < 0) return; // 无当前句（前奏/间隙）→ 忽略
@@ -60,7 +60,7 @@ export function enterAbLoop() {
   // 不重播当前句：AB 循环设定过程不影响当前播放
 }
 
-export function setAbEnd(lineIndex) {
+export function setAbEnd(lineIndex: number): void {
   if (!state.abLoop) return;
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
@@ -73,14 +73,14 @@ export function setAbEnd(lineIndex) {
   // 不跳回区间起点重播：AB 循环设定过程不影响当前播放
 }
 
-export function exitAbLoop() {
+export function exitAbLoop(): void {
   state.abLoop = null;
   resetAbLoopCount(); // 退出循环：计数清零
 }
 
 // ============ AB 循环：快捷键设点（任务 G，A 设起点 / B 设终点） ============
 // A：当前句为起点（已有区间则重设起点，等待选终点）
-export function setAbPointA() {
+export function setAbPointA(): void {
   const cur = currentLineIndex.value;
   if (cur < 0) return; // 无当前句（前奏/间隙）→ 忽略
   state.abLoop = { a: cur, b: null }; // b=null 等待选终点
@@ -89,7 +89,7 @@ export function setAbPointA() {
 
 // B：等选终点（b=null）时设为终点；无 AB 区间 / 区间已完整 → 忽略
 // （起点/终点自动交换逻辑与 setAbEnd 一致）
-export function setAbPointB() {
+export function setAbPointB(): void {
   if (!state.abLoop || state.abLoop.b !== null) return;
   setAbEnd(currentLineIndex.value);
 }
@@ -98,7 +98,7 @@ export function setAbPointB() {
 // 无 AB → 直接播放该句；等选终点（b=null）→ 点击设为终点；
 // 区间内 → 跳到该句播放（区间不变）；区间外 → 退出 AB 循环并播放该句
 // （2026-08-12 用户拍板：区间外点击 = 退出 AB + 播放当前句；区间内 = 跳转播放）
-export function clickLine(lineIndex) {
+export function clickLine(lineIndex: number): void {
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   const ab = state.abLoop;
@@ -122,7 +122,7 @@ export function clickLine(lineIndex) {
 
 // ============ 跟唱模式句末处理（playerCore 的 audio timeupdate 回调调用）============
 // 每句播完自动停（锚点方案）+ AB 区间循环 + 单句循环
-export function handleKaraokeTick(t) {
+export function handleKaraokeTick(t: number): void {
   if (state.mode !== "karaoke" || !state.karaokeOn) return;
   const lines = lineItems.value;
   if (!lines.length) return;

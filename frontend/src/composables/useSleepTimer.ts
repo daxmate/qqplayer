@@ -16,34 +16,40 @@ const DEFAULT_MINUTES = 30;
 //   active   倒计时是否运行中
 //   remaining 剩余秒数
 //   status   '' 空闲 | 'running' 倒计时中 | 'fired' 已到点（轻提示状态）
-export const sleepTimer = reactive({
+interface SleepTimerState {
+  active: boolean;
+  remaining: number;
+  status: "" | "running" | "fired";
+}
+
+export const sleepTimer = reactive<SleepTimerState>({
   active: false,
   remaining: 0,
   status: "",
 });
 
-let timerId = null;
-let firedMessageTimer = null;
+let timerId: ReturnType<typeof setInterval> | null = null;
+let firedMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 注：开关/时长持久化走统一 Settings 层（playerCore 的 loadPlaybackSettings 同步缓存加载 +
 // settingsSync 的 GET/PUT /api/settings），不再由本模块直接读 localStorage 原始串；
 // sleepTimerOn/sleepTimerMinutes 已纳入 PLAYBACK_SETTINGS_DEFAULTS，随 playbackSettings 一并恢复。
 
-function clearFiredMessage() {
+function clearFiredMessage(): void {
   if (firedMessageTimer) {
     clearTimeout(firedMessageTimer);
     firedMessageTimer = null;
   }
 }
 
-function stopCountdown() {
+function stopCountdown(): void {
   if (timerId) {
     clearInterval(timerId);
     timerId = null;
   }
 }
 
-function startCountdown(minutes) {
+function startCountdown(minutes: number): void {
   stopCountdown();
   clearFiredMessage();
   playbackSettings.sleepTimerOn = true;
@@ -58,7 +64,7 @@ function startCountdown(minutes) {
 }
 
 // 到点：暂停播放（与现有暂停一致——playerCore 的 pause 事件监听同步 state.isPlaying）
-function fire() {
+function fire(): void {
   stopCountdown();
   if (state.isPlaying) {
     audio.pause();
@@ -74,7 +80,7 @@ function fire() {
 }
 
 // 开关：开 = 以当前时长启动倒计时；关 = 取消
-export function toggleSleepTimer() {
+export function toggleSleepTimer(): void {
   if (sleepTimer.active) {
     cancelSleepTimer();
   } else {
@@ -83,7 +89,7 @@ export function toggleSleepTimer() {
 }
 
 // 切时长：倒计时运行中重置；开关开着但未运行（如刷新后）则直接启动
-export function setSleepTimerMinutes(minutes) {
+export function setSleepTimerMinutes(minutes: number): void {
   const m = SLEEP_TIMER_OPTIONS.includes(minutes) ? minutes : DEFAULT_MINUTES;
   playbackSettings.sleepTimerMinutes = m;
   if (sleepTimer.active) {
@@ -94,7 +100,7 @@ export function setSleepTimerMinutes(minutes) {
 }
 
 // 取消（关开关）
-export function cancelSleepTimer() {
+export function cancelSleepTimer(): void {
   stopCountdown();
   clearFiredMessage();
   playbackSettings.sleepTimerOn = false;
@@ -104,14 +110,14 @@ export function cancelSleepTimer() {
 }
 
 // 倒计时显示文案：mm:ss（如 14:59）；空闲返回空
-export const sleepTimerLabel = computed(() => {
+export const sleepTimerLabel = computed<string>(() => {
   const m = Math.floor(sleepTimer.remaining / 60);
   const s = sleepTimer.remaining % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 });
 
 // 控制栏/移动端播放器统一展示文案：倒计时中 / 已到点 / 空
-export const sleepTimerText = computed(() => {
+export const sleepTimerText = computed<string>(() => {
   if (sleepTimer.status === "fired") return i18n.global.t("control.sleepTimerFired");
   if (sleepTimer.active)
     return i18n.global.t("control.sleepTimerRunning", { time: sleepTimerLabel.value });
@@ -119,7 +125,7 @@ export const sleepTimerText = computed(() => {
 });
 
 // 仅供测试：重置运行态与开关/时长
-export function _resetSleepTimer() {
+export function _resetSleepTimer(): void {
   stopCountdown();
   clearFiredMessage();
   playbackSettings.sleepTimerOn = false;
@@ -130,6 +136,6 @@ export function _resetSleepTimer() {
 }
 
 // 仅供测试：重新从 localStorage 恢复（模拟页面刷新）——走 playerCore 的同步缓存加载（统一层）
-export function _reloadPersisted() {
+export function _reloadPersisted(): void {
   loadPlaybackSettings();
 }
