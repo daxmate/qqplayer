@@ -266,13 +266,14 @@ export const HIGHLIGHT_COLOR_STYLES: Record<HighlightColor, Record<string, strin
   purple: { fill: "#b388ff", "fill-opacity": "0.5", "mix-blend-mode": "multiply" },
 };
 
-/** 高亮色块 UI 色（工具栏色点 / 面板色点） */
-export const HIGHLIGHT_COLOR_HEX: Record<HighlightColor, string> = {
+/** 高亮色块 UI 色（工具栏色点 / 面板色点）；"red" 为下划线专用色（UNDERLINE_COLOR） */
+export const HIGHLIGHT_COLOR_HEX: Record<HighlightColor | "red", string> = {
   yellow: "#f6d32d",
   green: "#7bc47f",
   blue: "#64b5f6",
   pink: "#f28bb0",
   purple: "#b388ff",
+  red: "#e5484d",
 };
 
 /** 下划线样式（style=underline）：epub.js marks pane 用 stroke；颜色固定，不依赖 blend 模式 */

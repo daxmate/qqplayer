@@ -48,8 +48,8 @@ const props = defineProps<{
   x: number;
   y: number;
   visible: boolean;
-  /** 当前激活色点（点击高亮菜单用；选中工具栏传 null） */
-  color: HighlightColor | null;
+  /** 当前激活色点（点击高亮菜单用；选中工具栏传 null）；"red" 为下划线条目色 */
+  color: HighlightColor | "red" | null;
   /** U 下划线 active（当前条目 style 是 underline 时） */
   underlineActive: boolean;
 }>();

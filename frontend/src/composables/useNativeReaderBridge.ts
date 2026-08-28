@@ -45,12 +45,16 @@ export function useNativeReaderBridge(options: {
   /** 壳注入的全局对象：qqplayerNative 环境标记 + webkit 消息桥 + 菜单 API 挂载点 */
   const nativeShell = window as unknown as {
     qqplayerNative?: boolean;
+    qqplayerIosBridge?: unknown;
     webkit?: { messageHandlers?: { native?: { postMessage?: (message: unknown) => void } } };
     __qqReaderMenu?: {
       lookup: () => void;
       highlight: (color: HighlightColor) => void;
+      underline: () => void;
+      remove: () => void;
+      recolor: (color: string) => void;
+      search: () => void;
       note: () => void;
-      recolor: (color: HighlightColor) => void;
     };
   };
 

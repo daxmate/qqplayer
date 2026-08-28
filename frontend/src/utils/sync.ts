@@ -713,11 +713,12 @@ const embeddedCoverWaiters = new Map<string, (dataURL: string | null) => void>()
 export const EMBEDDED_COVER_TIMEOUT_MS = 5000;
 
 function handleEmbeddedCover(payload: EmbeddedCoverPayload) {
-  const requestId = payload && payload.requestId;
-  const resolve = requestId ? embeddedCoverWaiters.get(requestId) : undefined;
+  const requestId = payload?.requestId;
+  if (!requestId) return;
+  const resolve = embeddedCoverWaiters.get(requestId);
   if (resolve) {
     embeddedCoverWaiters.delete(requestId);
-    resolve(typeof payload.dataURL === "string" && payload.dataURL ? payload.dataURL : null);
+    resolve(typeof payload.dataURL === "string" ? payload.dataURL : null);
   }
 }
 

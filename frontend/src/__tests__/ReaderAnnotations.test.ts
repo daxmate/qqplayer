@@ -751,7 +751,7 @@ describe("点击高亮弹菜单", () => {
       notes: [],
     });
     const tap = makeTapContents();
-    mocks.rendition.views.mockReturnValue([{ contents: tap }]);
+    mocks.rendition.views.mockReturnValue([{ contents: tap } as unknown as never]);
     const wrapper = await mountReader();
     injectMark(wrapper, hl.id, hl.cfi);
     return { wrapper, doc: tap.document };
@@ -869,7 +869,7 @@ describe("点击高亮弹菜单", () => {
       notes: [],
     });
     const tap = makeTapContents();
-    mocks.rendition.views.mockReturnValue([{ contents: tap }]);
+    mocks.rendition.views.mockReturnValue([{ contents: tap } as unknown as never]);
     const wrapper = await mountReader();
     const container = wrapper.find(".reader-container").element;
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");

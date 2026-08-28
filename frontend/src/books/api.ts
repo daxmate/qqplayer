@@ -70,14 +70,16 @@ export async function importBook(file: File): Promise<ImportBookResult> {
  * 网络失败保留队列（离线积累、回网重放）；HTTP 拒绝清队（服务端为准）。
  * 返回 resolved Promise（调用方静默失败处理不变）。
  */
-export function saveBookProgress(id: string, progress: BookProgress): Promise<void> {
-  return writeLocal({
-    url: `/api/books/${id}/progress`,
-    method: "PUT",
-    body: progress,
-  }).then((result) => {
-    if (result === "ok") invalidate("/api/books");
-  });
+export async function saveBookProgress(id: string, progress: BookProgress): Promise<void> {
+  // writeLocal（JS 模块 JSDoc @returns）被 TS 推断为直接返回 union 而非 Promise → 显式包一层
+  const result = await Promise.resolve(
+    writeLocal({
+      url: `/api/books/${id}/progress`,
+      method: "PUT",
+      body: progress,
+    }),
+  );
+  if (result === "ok") invalidate("/api/books");
 }
 
 /** 删除书籍 */
