@@ -83,7 +83,8 @@ describe("pendingOps 表", () => {
   it("removePendingOps 按 id 删除", async () => {
     const id1 = await enqueuePendingOp({ url: "/a" }, 1);
     const id2 = await enqueuePendingOp({ url: "/b" }, 2);
-    await removePendingOps([id1]);
+    // IDB 自增 id 运行时必存在（内存降级实现同样分配）→ 非空断言
+    await removePendingOps([id1!]);
     const ops = await getPendingOps();
     expect(ops.map((o) => o.id)).toEqual([id2]);
   });

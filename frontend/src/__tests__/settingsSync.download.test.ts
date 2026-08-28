@@ -4,22 +4,23 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  volume = 1;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.volume = 1;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
   play() {
@@ -30,39 +31,42 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
 
 const { DOWNLOAD_SETTINGS_KEY } = await import("../composables/useSettings.js");
 
-let getResponder = null;
-let putBodies = [];
+// fetch stub：GET 走 getResponder（对象路由或函数；值可为 Promise），PUT 记录到 putBodies
+type GetResponder = Record<string, unknown> | ((url: string, opts: RequestInit) => unknown);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 反序列化边界：PUT body 为 JSON.parse 产物，断言需深索引
+let getResponder: GetResponder | null = null;
+let putBodies: { url: string; body: Record<string, any> }[] = [];
 function stubFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url, opts = {}) => {
+    vi.fn(async (url: string, opts: RequestInit = {}) => {
       if (opts.method === "PUT") {
-        putBodies.push({ url, body: JSON.parse(opts.body) });
+        putBodies.push({ url, body: JSON.parse(opts.body as string) });
         return { ok: true, json: async () => ({ settings: {} }) };
       }
       const g = typeof getResponder === "function" ? getResponder(url, opts) : getResponder?.[url];
-      if (g && typeof g.then === "function") {
-        const data = await g;
+      if (g && typeof (g as PromiseLike<unknown>).then === "function") {
+        const data = await (g as PromiseLike<unknown>);
         return { ok: true, json: async () => data };
       }
       if (g) return { ok: true, json: async () => g };
@@ -72,7 +76,9 @@ function stubFetch() {
 }
 
 // 默认 GET 响应：各 namespace 空对象（download 缺失 = 后端尚未支持 → 前端默认值兜底）
-function defaultSettings(overrides = {}) {
+function defaultSettings(overrides: Record<string, unknown> = {}): {
+  settings: Record<string, unknown>;
+} {
   return {
     settings: { ui: {}, lyric: {}, desktopLyric: {}, playback: {}, player: {}, ...overrides },
   };

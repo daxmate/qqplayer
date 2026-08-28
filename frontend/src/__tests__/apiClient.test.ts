@@ -26,13 +26,13 @@ import {
 } from "../utils/cacheDb.js";
 
 // localStorage stub（Node 实验性 localStorage 在无 --localstorage-file 时不可用，与既有测试同款 stub）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -52,13 +52,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function okJson(data, status = 200) {
+function okJson(data: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => data };
 }
 
 describe("统一出口与归一化", () => {
   it("GET 返回 {ok, status, data}，fetch 以相对路径调用", async () => {
-    const fetchMock = vi.fn(async () => okJson({ items: [1] }));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => okJson({ items: [1] }));
     vi.stubGlobal("fetch", fetchMock);
     const r = await apiGet("/api/x");
     expect(fetchMock).toHaveBeenCalledWith("/api/x", expect.objectContaining({ method: "GET" }));
@@ -67,24 +67,24 @@ describe("统一出口与归一化", () => {
 
   it("带 token 时自动加 Authorization: Bearer", async () => {
     localStorage.setItem("qqplayer.token", "tok123");
-    const fetchMock = vi.fn(async () => okJson({}));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => okJson({}));
     vi.stubGlobal("fetch", fetchMock);
     await apiGet("/api/x");
-    expect(fetchMock.mock.calls[0][1].headers).toEqual({
+    expect(fetchMock.mock.calls[0][1]!.headers).toEqual({
       Authorization: "Bearer tok123",
     });
   });
 
   it("无 token 时不带 Authorization", async () => {
-    const fetchMock = vi.fn(async () => okJson({}));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => okJson({}));
     vi.stubGlobal("fetch", fetchMock);
     await apiGet("/api/x");
-    expect(fetchMock.mock.calls[0][1].headers).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1]!.headers).toBeUndefined();
   });
 
   it("baseURL 从 localStorage qqplayer.server 读取（iOS 壳注入）", async () => {
     localStorage.setItem("qqplayer.server", "http://192.168.1.5:17627");
-    const fetchMock = vi.fn(async () => okJson({}));
+    const fetchMock = vi.fn(async (url: string) => okJson({}));
     vi.stubGlobal("fetch", fetchMock);
     await apiGet("/api/x");
     expect(fetchMock.mock.calls[0][0]).toBe("http://192.168.1.5:17627/api/x");
@@ -104,14 +104,14 @@ describe("统一出口与归一化", () => {
   });
 
   it("POST 自动 JSON.stringify + Content-Type；DELETE 无 body 不带 header", async () => {
-    const fetchMock = vi.fn(async () => okJson({}));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => okJson({}));
     vi.stubGlobal("fetch", fetchMock);
     await apiPost("/api/favorites/toggle", { path: "/a.mp3" });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/favorites/toggle");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(JSON.stringify({ path: "/a.mp3" }));
-    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(init!.method).toBe("POST");
+    expect(init!.body).toBe(JSON.stringify({ path: "/a.mp3" }));
+    expect(init!.headers).toEqual({ "Content-Type": "application/json" });
 
     await apiDelete("/api/playlists/p1");
     expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ method: "DELETE" }));
@@ -120,12 +120,12 @@ describe("统一出口与归一化", () => {
   it("FormData 原样透传（不 stringify、不设 Content-Type）", async () => {
     const fd = new FormData();
     fd.append("files", new File(["x"], "a.mp3"));
-    const fetchMock = vi.fn(async () => okJson({ imported: 1 }));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => okJson({ imported: 1 }));
     vi.stubGlobal("fetch", fetchMock);
     const r = await apiPost("/api/import", fd);
     const [, init] = fetchMock.mock.calls[0];
-    expect(init.body).toBe(fd);
-    expect(init.headers).toBeUndefined();
+    expect(init!.body).toBe(fd);
+    expect(init!.headers).toBeUndefined();
     expect(r.data).toEqual({ imported: 1 });
   });
 
@@ -176,7 +176,7 @@ describe("统一出口与归一化", () => {
     );
     const r = await api({ url: "/api/books/b1/file", raw: true });
     expect(r.ok).toBe(true);
-    expect(await r.response.arrayBuffer()).toBe(arrayBuffer);
+    expect(await r.response!.arrayBuffer()).toBe(arrayBuffer);
   });
 });
 
@@ -237,7 +237,7 @@ describe("离线降级", () => {
     // 让缓存过期（maxAge 60 判定 miss）：走网络 → 失败 → 离线降级读 stale
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 61 * 1000);
-    const changes = [];
+    const changes: boolean[] = [];
     onOfflineChange((off) => changes.push(off));
     vi.stubGlobal(
       "fetch",
@@ -269,7 +269,7 @@ describe("离线降级", () => {
     await setCache("GET:/api/lyric", { lines: [] }, 3600);
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 61 * 1000); // 过期缓存
-    const changes = [];
+    const changes: boolean[] = [];
     onOfflineChange((off) => changes.push(off));
     vi.stubGlobal(
       "fetch",
@@ -542,11 +542,11 @@ describe("写路径 dirty 队列", () => {
   });
 
   it("apiPut/apiPost 便捷方法可用", async () => {
-    const fetchMock = vi.fn(async () => okJson({}));
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => okJson({}));
     vi.stubGlobal("fetch", fetchMock);
     await apiPut("/api/settings", { ui: {} });
     await apiPost("/api/now-playing", { path: "/a" });
-    expect(fetchMock.mock.calls.map(([u, i]) => [u, i.method])).toEqual([
+    expect(fetchMock.mock.calls.map(([u, i]) => [u, i!.method])).toEqual([
       ["/api/settings", "PUT"],
       ["/api/now-playing", "POST"],
     ]);

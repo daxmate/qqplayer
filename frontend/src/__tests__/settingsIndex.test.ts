@@ -3,16 +3,15 @@
 // `new Audio()` —— 必须在 import 被测模块【前】stub Audio 与 matchMedia。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { installMatchMedia } from "./helpers/matchMedia.js";
+import type { SettingEntry } from "../settingsIndex.js";
 
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -48,8 +47,11 @@ const VALID_TYPES = ["toggle", "slider", "select", "text", "custom"];
 const VALID_SUBTABS = ["app", "desktop"];
 
 // 语言包 key 解析（点路径逐级下钻）
-function resolveKey(pack, key) {
-  return key.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), pack);
+function resolveKey(pack: unknown, key: string): unknown {
+  return key.split(".").reduce<unknown>((o, k) => {
+    if (o && typeof o === "object") return (o as Record<string, unknown>)[k];
+    return undefined;
+  }, pack);
 }
 
 // 音乐库后端回显 stub（saveLibrarySettings 成功后回写 state.librarySettings）
@@ -114,7 +116,7 @@ describe("settingsIndex 结构", () => {
   });
 
   it("视频分类：bilibiliCookie 为 text 项，get/set 读写 videoSettings，语言包 key 齐全", () => {
-    const entry = settingsIndex.find((e) => e.id === "bilibiliCookie");
+    const entry = settingsIndex.find((e) => e.id === "bilibiliCookie")!;
     expect(entry).toBeTruthy();
     expect(entry.category).toBe("video");
     expect(entry.type).toBe("text");
@@ -126,7 +128,7 @@ describe("settingsIndex 结构", () => {
     expect(videoSettings.bilibiliCookie).toBe("SESSDATA=xyz");
     // 语言包 key 齐全（labelKey + placeholder）
     expect(resolveKey(zhCN, entry.labelKey)).toBeTruthy();
-    expect(resolveKey(zhCN, entry.placeholder)).toBeTruthy();
+    expect(resolveKey(zhCN, entry.placeholder!)).toBeTruthy();
   });
 
   it("category 都在 SETTING_CATEGORIES 内", () => {
@@ -216,11 +218,14 @@ describe("settingsIndex 行为（get/set 往返）", () => {
       if (e.type === "toggle") {
         testValue = !original;
       } else if (e.type === "slider") {
-        // 取一个与当前不同的合法值（到边界则回卷到 min）
-        testValue = original >= e.max ? e.min : Math.min(e.max, original + e.step);
+        // 取一个与当前不同的合法值（到边界则回卷到 min）；min/max/step 由结构校验保证存在
+        testValue =
+          (original as number) >= e.max!
+            ? e.min!
+            : Math.min(e.max!, (original as number) + e.step!);
       } else if (e.type === "select") {
-        const other = e.options.find((o) => o.value !== original);
-        testValue = other ? other.value : e.options[0].value;
+        const other = e.options!.find((o) => o.value !== original);
+        testValue = other ? other.value : e.options![0].value;
       } else {
         testValue = "test-value";
       }
@@ -243,7 +248,7 @@ describe("settingsIndex 行为（get/set 往返）", () => {
   it("AMLL 三特效条目：toggle 类型、get/set 读写 lyricSettings.amll*、关键词含 模糊/弹簧/放大", async () => {
     const en = (await import("../locales/en-US/index.js")).default;
     const entries = ["amllBlur", "amllSpring", "amllScale"].map((id) =>
-      settingsIndex.find((e) => e.id === id),
+      settingsIndex.find((e) => e.id === id)!,
     );
     expect(entries.every(Boolean)).toBe(true);
     for (const e of entries) {
@@ -283,7 +288,7 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
   // 注册表 id → 实际字段名推导（与 get() 引用对象一致；id≠字段名的特判集中在这里）
   //   downloadEngine → downloadSettings.engine（注册表 id 与字段名不同）
   //   desktop* → desktopLyricSettings 去前缀首字母小写（desktopShowZh → showZh）
-  function resolveField(e) {
+  function resolveField(e: SettingEntry): string {
     if (e.category === "download" && e.id === "downloadEngine") return "engine";
     if (e.category === "lyric" && e.subTab === "desktop") {
       const rest = e.id.slice("desktop".length); // desktopShowZh → ShowZh
@@ -293,7 +298,11 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
   }
 
   // 分类(+子 tab) → 命名空间映射（与后端 _SETTINGS_SPEC 归属一致，字段级校验在 pytest）
-  const NAMESPACE_OF = {
+  interface SettingsNamespace {
+    reactive: object | null;
+    defaults: object | null;
+  }
+  const NAMESPACE_OF: Record<string, SettingsNamespace> = {
     playback: { reactive: playbackSettings, defaults: PLAYBACK_SETTINGS_DEFAULTS },
     library: { reactive: null, defaults: null }, // 特判：state.librarySettings（后端 LIBRARY_SETTINGS_DEFAULTS 单一来源）
     video: { reactive: videoSettings, defaults: VIDEO_SETTINGS_DEFAULTS },
@@ -303,7 +312,7 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
     ui: { reactive: uiSettings, defaults: UI_SETTINGS_DEFAULTS },
   };
 
-  function nsKeyOf(e) {
+  function nsKeyOf(e: SettingEntry): string {
     return e.category === "lyric" ? `lyric:${e.subTab}` : e.category;
   }
 
@@ -338,12 +347,12 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
       if (e.category === "library") {
         expect(state.librarySettings, `${e.id} state.librarySettings 未初始化`).toBeTruthy();
         expect(
-          field in state.librarySettings,
+          field in state.librarySettings!,
           `${e.id} 字段 ${field} 不在 state.librarySettings`,
         ).toBe(true);
       } else {
-        expect(field in ns.defaults, `${e.id} 字段 ${field} 不在 ${key} 默认值常量`).toBe(true);
-        expect(field in ns.reactive, `${e.id} 字段 ${field} 不在 ${key} reactive`).toBe(true);
+        expect(field in ns.defaults!, `${e.id} 字段 ${field} 不在 ${key} 默认值常量`).toBe(true);
+        expect(field in ns.reactive!, `${e.id} 字段 ${field} 不在 ${key} reactive`).toBe(true);
       }
       expect(typeof e.get(), `${e.id} get() 返回 undefined（字段拼错）`).not.toBe("undefined");
     }
@@ -351,7 +360,7 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
 
   it("category 与后端命名空间归属一致（playback→playback/player；lyric:desktop→desktopLyric；…）", () => {
     // 与 backend/app/services/settings.py _SETTINGS_SPEC 的 namespace 对齐（字段级校验在后端 pytest）
-    const CATEGORY_BACKEND_NS = {
+    const CATEGORY_BACKEND_NS: Record<string, string[]> = {
       playback: ["playback", "player"],
       library: ["library"],
       video: ["video"],
@@ -374,7 +383,7 @@ describe("settingsIndex ↔ 前端默认值命名空间契约", () => {
 
   it("sleepTimer 两条目归属 playbackSettings（与 useSleepTimer 持久化域一致）", () => {
     for (const id of ["sleepTimerOn", "sleepTimerMinutes"]) {
-      const e = settingsIndex.find((x) => x.id === id);
+      const e = settingsIndex.find((x) => x.id === id)!;
       expect(e, `${id} 应存在`).toBeTruthy();
       expect(e.category).toBe("playback");
       expect(id in PLAYBACK_SETTINGS_DEFAULTS, `${id} 不在 PLAYBACK_SETTINGS_DEFAULTS`).toBe(true);

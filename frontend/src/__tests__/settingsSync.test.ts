@@ -6,22 +6,23 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册；与 usePlayer.test.js 同款）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  volume = 1;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.volume = 1;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
   play() {
@@ -32,20 +33,20 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -62,19 +63,21 @@ const {
 } = await import("../composables/usePlayer.js");
 
 // fetch stub：GET 走 getResponder（对象路由或函数；值可为 Promise），PUT 记录到 putBodies
-let getResponder = null;
-let putBodies = [];
+type GetResponder = Record<string, unknown> | ((url: string, opts: RequestInit) => unknown);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 反序列化边界：PUT body 为 JSON.parse 产物，断言需深索引
+let getResponder: GetResponder | null = null;
+let putBodies: { url: string; body: Record<string, any> }[] = [];
 function stubFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url, opts = {}) => {
+    vi.fn(async (url: string, opts: RequestInit = {}) => {
       if (opts.method === "PUT") {
-        putBodies.push({ url, body: JSON.parse(opts.body) });
+        putBodies.push({ url, body: JSON.parse(opts.body as string) });
         return { ok: true, json: async () => ({ settings: {} }) };
       }
       const g = typeof getResponder === "function" ? getResponder(url, opts) : getResponder?.[url];
-      if (g && typeof g.then === "function") {
-        const data = await g;
+      if (g && typeof (g as PromiseLike<unknown>).then === "function") {
+        const data = await (g as PromiseLike<unknown>);
         return { ok: true, json: async () => data };
       }
       if (g) return { ok: true, json: async () => g };
@@ -84,7 +87,9 @@ function stubFetch() {
 }
 
 // 默认 GET 响应：所有 namespace 空对象（后端"已合并默认值"由前端缺省兜底）
-function defaultSettings(overrides = {}) {
+function defaultSettings(overrides: Record<string, unknown> = {}): {
+  settings: Record<string, unknown>;
+} {
   return {
     settings: { ui: {}, lyric: {}, desktopLyric: {}, playback: {}, player: {}, ...overrides },
   };
@@ -179,7 +184,7 @@ describe("统一 Settings 层：GET 分发（load）", () => {
   });
 
   it("GET 返回 player.mode：无本地缓存时应用后端值（后端为真源）并写透缓存", async () => {
-    let resolveGet;
+    let resolveGet: ((value: { settings: Record<string, unknown> }) => void) | undefined;
     getResponder = {
       "/api/settings": new Promise((res) => {
         resolveGet = res;
@@ -190,7 +195,7 @@ describe("统一 Settings 层：GET 分发（load）", () => {
     const m = await import("../composables/usePlayer.js");
     const sync = await import("../composables/settingsSync.js");
     expect(m.state.mode).toBe("continuous"); // 无缓存：默认连播（GET 返回前）
-    resolveGet(defaultSettings({ player: { mode: "books" } }));
+    resolveGet!(defaultSettings({ player: { mode: "books" } }));
     await sync.settingsLoadPromise;
     expect(m.state.mode).toBe("books"); // 后端为真源：应用
     expect(lsStore[MODE_KEY]).toBe("books"); // 写透缓存
@@ -265,7 +270,7 @@ describe("统一 Settings 层：防抖保存（save）", () => {
   });
 
   it("loaded 防回写：GET 返回前修改不 PUT；GET 完成后正常 PUT（窗口内修改经导入保留）", async () => {
-    let resolveGet;
+    let resolveGet: ((value: { settings: Record<string, unknown> }) => void) | undefined;
     getResponder = {
       "/api/settings": new Promise((res) => {
         resolveGet = res;
@@ -282,7 +287,7 @@ describe("统一 Settings 层：防抖保存（save）", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(putBodies.length).toBe(0); // loaded=false：不 PUT（防止拉取结果触发回写覆盖后端）
     // GET 返回（后端 theme=dark，与窗口内修改冲突）
-    resolveGet(defaultSettings({ ui: { theme: "dark" } }));
+    resolveGet!(defaultSettings({ ui: { theme: "dark" } }));
     await sync.settingsLoadPromise;
     // 窗口内修改视为"用户改过的旧数据"：一次性导入只上传脏字段并胜出
     expect(putBodies.length).toBe(1);
@@ -337,7 +342,7 @@ describe("统一 Settings 层：防抖保存（save）", () => {
     expect(putBodies[0].body.player.volume).toBe(0.3);
     // saveLastPlayed → PUT lastPlayed
     m.state.currentSong = { path: "/b.mp3", name: "B" };
-    const a = m.audio; // 当前活动元素（双元素：instances[last] 是裸元素）
+    const a = m.audio as unknown as FakeAudio; // 当前活动元素（双元素：instances[last] 是裸元素）
     a._src = "/api/audio?path=/b.mp3";
     a.currentTime = 30;
     m.saveLastPlayed();
@@ -500,14 +505,15 @@ describe("统一 Settings 层：开关语义", () => {
 
 describe("统一 Settings 层：旧双写收敛", () => {
   it("theme/miniTheme/desktopLyric 修改只 PUT /api/settings，不再调 /api/ui/settings 与 /api/desktop-lyric/settings", async () => {
-    const calls = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 反序列化边界：PUT body 为 JSON.parse 产物，断言需深索引
+    const calls: { url: string; method: string; body: Record<string, any> | null }[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts = {}) => {
+      vi.fn(async (url: string, opts: RequestInit = {}) => {
         calls.push({
           url,
           method: opts.method || "GET",
-          body: opts.body ? JSON.parse(opts.body) : null,
+          body: opts.body ? JSON.parse(opts.body as string) : null,
         });
         if (opts.method === "PUT") return { ok: true, json: async () => ({ settings: {} }) };
         return { ok: false, json: async () => ({}) };
@@ -528,9 +534,10 @@ describe("统一 Settings 层：旧双写收敛", () => {
     const putCalls = calls.filter((c) => c.method === "PUT");
     expect(putCalls).toHaveLength(1);
     expect(putCalls[0].url).toBe("/api/settings");
-    expect(putCalls[0].body.ui.theme).toBe("light");
-    expect(putCalls[0].body.ui.miniTheme).toBe("dark");
-    expect(putCalls[0].body.desktopLyric.enabled).toBe(true);
+    // PUT 必有 body（非 null）；运行时断言兜底
+    expect(putCalls[0].body!.ui.theme).toBe("light");
+    expect(putCalls[0].body!.ui.miniTheme).toBe("dark");
+    expect(putCalls[0].body!.desktopLyric.enabled).toBe(true);
     expect(calls.some((c) => c.url === "/api/ui/settings")).toBe(false);
     expect(calls.some((c) => c.url === "/api/desktop-lyric/settings")).toBe(false);
     vi.useRealTimers();
@@ -595,10 +602,10 @@ describe("统一 Settings 层：useSleepTimer / restoreLastPlayed 走统一层",
       { path: "/b.mp3", name: "B" },
     ];
     await m.restoreLastPlayed();
-    expect(m.state.currentSong.path).toBe("/b.mp3");
-    const a = m.audio; // 当前活动元素（双元素：instances[last] 是裸元素）
+    expect(m.state.currentSong!.path).toBe("/b.mp3");
+    const a = m.audio as unknown as FakeAudio; // 当前活动元素（双元素：instances[last] 是裸元素）
     a.duration = 100;
-    a.listeners["loadedmetadata"]();
+    a.listeners["loadedmetadata"]!();
     expect(a.currentTime).toBe(42);
   });
 });
