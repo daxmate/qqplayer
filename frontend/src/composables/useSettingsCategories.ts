@@ -5,6 +5,7 @@
 // 注意：导出为「函数」而非模块级 computed —— isPairingEnabled() 读取 window.qqplayerIosBridge
 // 是非响应式的，模块级 computed 首次求值即缓存，后续壳环境切换（测试/壳初始化）拿不到最新值；
 // 由各组件在 setup 里包一层 computed（每次实例创建时求值），与 SettingsModal 原实现语义一致。
+import type { Component } from "vue";
 import {
   LayoutGrid,
   Music2,
@@ -20,8 +21,15 @@ import {
 } from "@lucide/vue";
 import { isPairingEnabled } from "./usePairingConfirm.js";
 
-export function getSettingsCategories() {
-  const list = [
+/** 设置分类条目（key 为设置面板路由标识；icon 为 lucide 图标组件） */
+interface SettingsCategory {
+  key: string;
+  labelKey: string;
+  icon: Component;
+}
+
+export function getSettingsCategories(): SettingsCategory[] {
+  const list: SettingsCategory[] = [
     { key: "ui", labelKey: "settings.category.ui", icon: LayoutGrid },
     { key: "lyric", labelKey: "settings.category.lyric", icon: Music2 },
     { key: "playback", labelKey: "settings.category.playback", icon: ListMusic },

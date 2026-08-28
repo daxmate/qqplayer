@@ -16,21 +16,61 @@
 import { state, isFavorite } from "./usePlayer.js";
 import { useShellBridge } from "./useShellBridge.js";
 
+/** 壳右键上下文目标：最近一次右键命中的目标（壳菜单动作的数据源） */
+interface CtxTarget {
+  kind: "song" | "playlist";
+  // 歌曲上下文（kind === 'song'）
+  path?: string | null;
+  songIndex?: number;
+  songName?: string;
+  artist?: string;
+  album?: string;
+  isFav?: boolean;
+  hasPath?: boolean;
+  canGoArtist?: boolean;
+  canGoAlbum?: boolean;
+  // 歌单上下文（kind === 'playlist'）
+  playlistId?: string | null;
+  playlistName?: string;
+  songCount?: number;
+}
+
+/** 壳安装的全局右键菜单 API（evaluateJavaScript 调用入口） */
+interface CtxMenuApi {
+  play: () => void;
+  playNext: () => void;
+  toggleFav: () => void;
+  addPlaylist: () => void;
+  remove: () => void;
+  goArtist: () => void;
+  goAlbum: () => void;
+  editTags: () => void;
+  rename: () => void;
+  delete: () => void;
+}
+
+declare global {
+  interface Window {
+    /** Swift 壳右键菜单 API（installCtxMenuApi 安装；壳点击 NSMenu 项经 evaluateJavaScript 调用） */
+    __qqCtxMenu?: CtxMenuApi;
+  }
+}
+
 // 模块级右键上下文：最近一次右键命中的目标（壳菜单动作的数据源）
-let ctxTarget = null; // { kind: 'song', path, songIndex, songName, artist, album, isFav, hasPath, canGoArtist, canGoAlbum }
+let ctxTarget: CtxTarget | null = null; // { kind: 'song', path, songIndex, songName, artist, album, isFav, hasPath, canGoArtist, canGoAlbum }
 //                  | { kind: 'playlist', playlistId, playlistName, songCount }
 //                  | null（空白区右键 → 清空壳缓存，显示默认系统菜单）
 let lastKey = ""; // 去重：上下文没变化不重复上报（壳缓存仍有效）
-let mousePos = { x: 0, y: 0 }; // 右键坐标（「添加到歌单…」浮层锚定用）
+let mousePos: { x: number; y: number } = { x: 0, y: 0 }; // 右键坐标（「添加到歌单…」浮层锚定用）
 let inited = false; // init 幂等（main.js 只调一次，测试多次调用不重复挂监听）
 
 /** 是否运行在 Swift 原生壳内（壳注入 window.qqplayerNative；浏览器没有） */
-function inNativeShell() {
+function inNativeShell(): boolean {
   return typeof window !== "undefined" && !!window.qqplayerNative;
 }
 
 /** 上下文去重 key：JSON 全量比较（null = 空白区） */
-function ctxKey(ctx) {
+function ctxKey(ctx: CtxTarget | null): string {
   return ctx ? JSON.stringify(ctx) : "none";
 }
 
@@ -41,7 +81,7 @@ function ctxKey(ctx) {
  * - 侧边栏歌单 `.sb-item[data-playlist-id]`（Sidebar 为歌单行挂了 data-playlist-id；全部歌曲/智能视图入口没有 → 不命中）
  * - 其余区域 → null（清空上下文）
  */
-function buildCtx(e) {
+function buildCtx(e: MouseEvent): CtxTarget | null {
   const t = e.target;
   if (t instanceof Element) {
     // 合并选择器：全部歌曲行与智能视图行同一套歌曲上下文（songIndex 按 state.songs 全库索引，
@@ -88,7 +128,7 @@ function buildCtx(e) {
 }
 
 /** 上报 ctxState 给壳（统一壳桥：webkit 走 postMessage / tauri 走 invoke / 浏览器 noop）；非壳环境 / 发送失败静默 */
-function postCtxState() {
+function postCtxState(): void {
   if (!inNativeShell()) return;
   const msg = ctxTarget
     ? {
@@ -113,7 +153,7 @@ function postCtxState() {
 }
 
 /** 右键 mousedown：WKWebView 里 contextmenu 被系统吞掉，用 mousedown(button===2) 检测（⌃+左键也触发系统菜单，一并处理） */
-function onRightMousedown(e) {
+function onRightMousedown(e: MouseEvent): void {
   if (e.button !== 2 && !(e.button === 0 && e.ctrlKey)) return;
   mousePos = { x: e.clientX, y: e.clientY };
   const ctx = buildCtx(e);
@@ -125,12 +165,12 @@ function onRightMousedown(e) {
 }
 
 /** 派发动作事件给组件（Playlist.vue / SmartViewPanel.vue / Sidebar.vue 监听，复用浏览器右键菜单同一套实现） */
-function dispatch(type, detail) {
+function dispatch(type: string, detail: unknown): void {
   window.dispatchEvent(new CustomEvent(type, { detail }));
 }
 
 /** 挂载全局菜单 API：壳点击系统右键菜单项时经 evaluateJavaScript 调用；按当前上下文 kind 路由到对应动作 */
-function installCtxMenuApi() {
+function installCtxMenuApi(): void {
   window.__qqCtxMenu = {
     // 歌曲：播放 | 歌单：打开并播第一首
     play: () => {
@@ -185,7 +225,7 @@ function installCtxMenuApi() {
  * 初始化壳右键菜单桥接（main.js 调用；浏览器内静默 no-op）。
  * 幂等：重复调用不重复挂监听 / 装 API。
  */
-export function initNativeCtxMenu() {
+export function initNativeCtxMenu(): void {
   if (inited || !inNativeShell()) return;
   inited = true;
   document.addEventListener("mousedown", onRightMousedown, true);
@@ -193,7 +233,7 @@ export function initNativeCtxMenu() {
 }
 
 /** 测试隔离：清空去重缓存与上下文（让下一次右键必然重新上报） */
-export function resetNativeCtxMenu() {
+export function resetNativeCtxMenu(): void {
   lastKey = "";
   ctxTarget = null;
 }
