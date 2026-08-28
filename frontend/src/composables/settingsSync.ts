@@ -204,10 +204,7 @@ async function loadSettings(): Promise<void> {
 }
 
 // 字段级应用：只覆盖 reactive 已知字段（k in saved），后端没返回的字段保持现状
-function applyNamespace<T extends object>(
-  saved: unknown,
-  target: T,
-): void {
+function applyNamespace<T extends object>(saved: unknown, target: T): void {
   if (!saved || typeof saved !== "object") return;
   const record = saved as Record<string, unknown>;
   for (const k of Object.keys(target)) {
@@ -340,7 +337,11 @@ function collectDirty(
   const fields: Record<string, unknown> = {};
   for (const k of Object.keys(local)) {
     // 只对比 reactive 已知字段且后端也返回的字段；本地有值且 ≠ 后端 → 视为用户改过的旧数据
-    if (k in target && k in (serverNs as Record<string, unknown>) && !deepEqual(local[k], (serverNs as Record<string, unknown>)[k])) {
+    if (
+      k in target &&
+      k in (serverNs as Record<string, unknown>) &&
+      !deepEqual(local[k], (serverNs as Record<string, unknown>)[k])
+    ) {
       fields[k] = local[k];
     }
   }
