@@ -100,7 +100,7 @@ describe("拖拽计数与遮罩显隐", () => {
 
 describe("drop 处理", () => {
   it("drop 混合文件：只上传音频，成功 toast「已导入 n 首；跳过 m 首」", async () => {
-    const fetchMock = vi.fn(async (url: string, opts: { method?: string; body?: FormData }) => ({
+    const fetchMock = vi.fn(async (_url: string, _opts: { method?: string; body?: FormData }) => ({
       ok: true,
       json: async () => ({ imported: 2, skipped: 1, errors: 0 }),
     }));

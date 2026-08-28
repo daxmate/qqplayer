@@ -240,7 +240,7 @@ describe("MobileSmartList 加载/错误/交互", () => {
   });
 
   it("kind 变化时重新拉取数据", async () => {
-    const fetchSpy = vi.fn(async (url: string) => ({
+    const fetchSpy = vi.fn(async (_url: string) => ({
       ok: true,
       json: async () => ({ records: [] }),
     }));

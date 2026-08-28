@@ -385,7 +385,7 @@ describe("Playlist 移到废纸篓", () => {
     const remaining = [
       { id: "b", name: "B歌", artist: "高橋優", album: "開往明天的旅行", path: "/b.mp3" },
     ];
-    const fetchMock = vi.fn(async (url: RequestInfo | URL, opts?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _opts?: RequestInit) => {
       const u = String(url);
       if (u.includes("/api/library/songs")) {
         return { ok: true, json: async () => ({ deleted: 1, missing: ["/c.mp3"], errors: [] }) };
@@ -442,7 +442,7 @@ describe("Playlist 移到废纸篓", () => {
   });
 
   it("单曲删除：右键菜单 → 确认弹窗 → DELETE 单个 path", async () => {
-    const fetchMock = vi.fn(async (url: RequestInfo | URL, opts?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _opts?: RequestInit) => {
       const u = String(url);
       if (u.includes("/api/library/songs")) {
         return { ok: true, json: async () => ({ deleted: 1, missing: [], errors: [] }) };
@@ -467,7 +467,7 @@ describe("Playlist 移到废纸篓", () => {
   });
 
   it("删除失败（非 200）→ 错误 toast，不刷新曲库", async () => {
-    const fetchMock = vi.fn(async (url: RequestInfo | URL, opts?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _opts?: RequestInit) => {
       const u = String(url);
       if (u.includes("/api/library/songs")) return { ok: false, json: async () => ({}) };
       if (u.includes("/api/songs")) return { ok: true, json: async () => SONG };
@@ -486,7 +486,7 @@ describe("Playlist 移到废纸篓", () => {
   });
 
   it("删除当前播放歌（无剩余歌）→ 播放器复位", async () => {
-    const fetchMock = vi.fn(async (url: RequestInfo | URL, opts?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _opts?: RequestInit) => {
       const u = String(url);
       if (u.includes("/api/library/songs")) {
         return { ok: true, json: async () => ({ deleted: 1, missing: [], errors: [] }) };

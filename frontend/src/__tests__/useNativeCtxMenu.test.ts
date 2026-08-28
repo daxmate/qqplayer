@@ -376,7 +376,7 @@ describe("壳菜单动作（__qqCtxMenu → 事件 → Playlist 复用浏览器�
   });
 
   it("移到废纸篓 → 同一确认弹窗链路 → DELETE", async () => {
-    const fetchMock = vi.fn(async (url: string, opts: { body?: string }) => {
+    const fetchMock = vi.fn(async (url: string, _opts: { body?: string }) => {
       const u = String(url);
       if (u.includes("/api/library/songs")) {
         return { ok: true, json: async () => ({ deleted: 1, missing: [], errors: [] }) };

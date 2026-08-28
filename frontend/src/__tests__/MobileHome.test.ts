@@ -140,7 +140,7 @@ describe("MobileHome 顶栏入口", () => {
 
 describe("MobileHome 打开文件", () => {
   it("打开文件：选择音频 → POST /api/import（FormData files）→ toast 实际导入数（skipped 合并）", async () => {
-    const fetchMock = vi.fn(async (url: string, opt: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, _opt: RequestInit) => {
       if (url === "/api/import") {
         return { ok: true, json: async () => ({ imported: 2, skipped: 1, errors: 0 }) };
       }

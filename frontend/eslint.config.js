@@ -22,6 +22,8 @@ export default [
         "error",
         { allowInterfaces: "with-single-extends" },
       ],
+      // 下划线前缀参数 = 故意忽略（与 .js/.vue 块同惯例，TS 文件此前漏配）
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
   ...vue.configs["flat/recommended"],

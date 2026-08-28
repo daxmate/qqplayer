@@ -1,7 +1,6 @@
 // MobileList 测试：移动端列表页（歌曲/收藏/歌单/艺术家/专辑/分组 + 搜索 + 拖拽排序）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
-import type { VueWrapper, DOMWrapper } from "@vue/test-utils";
 
 // Sortable mock：MobileList 在歌单视图启用拖拽（jsdom 无法真实创建）
 type SortEndEvent = { oldIndex: number; newIndex: number };

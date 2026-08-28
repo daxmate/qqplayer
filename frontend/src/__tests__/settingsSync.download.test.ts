@@ -53,8 +53,8 @@ const { DOWNLOAD_SETTINGS_KEY } = await import("../composables/useSettings.js");
 
 // fetch stub：GET 走 getResponder（对象路由或函数；值可为 Promise），PUT 记录到 putBodies
 type GetResponder = Record<string, unknown> | ((url: string, opts: RequestInit) => unknown);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 反序列化边界：PUT body 为 JSON.parse 产物，断言需深索引
 let getResponder: GetResponder | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- API 反序列化边界：PUT body 为 JSON.parse 产物，断言需深索引
 let putBodies: { url: string; body: Record<string, any> }[] = [];
 function stubFetch() {
   vi.stubGlobal(

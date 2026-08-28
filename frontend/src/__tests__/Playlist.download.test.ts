@@ -3,7 +3,6 @@
 // 下载中显示 Loader2 旋转；成功/失败 toast；本地歌不显示下载按钮。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
-import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
