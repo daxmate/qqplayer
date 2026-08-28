@@ -5,7 +5,7 @@
 //   - 只监听 touch 事件（移动端），jsdom 测试里用原生 Event + 手写 touches 模拟
 //   - preventDefault 只在手势判定为「横向」后执行（e.cancelable 守卫 + passive: false 挂载），
 //     未判定前让位纵向滚动，避免抢列表滚动
-import { reactive, ref, onMounted, onBeforeUnmount } from "vue";
+import { reactive, ref, onMounted, onBeforeUnmount, type Ref } from "vue";
 
 // ============ 横向跟手手势（通用：封面切歌 / 歌词进入全歌词 / 全歌词右划返回） ============
 // 与 useEdgeSwipe 的分工：edge = 屏幕左缘专属（iOS 式页面返回）；本手势 = 任意起点横向拖动。
@@ -23,7 +23,34 @@ export const SWIPE_THRESHOLD = 80; // 触发位移阈值（px）
 export const SWIPE_MIN_VELOCITY = 0.25; // 最低释放速度（px/ms）
 export const SWIPE_BIG_RATIO = 0.4; // 慢速大位移兜底：拖过 屏宽*比例 直接触发（不要求速度）
 
-export function useHorizontalSwipe(opts = {}) {
+/** 横向手势允许方向 */
+export type SwipeDirection = "left" | "right";
+
+/** useHorizontalSwipe 选项（全可选，默认值见函数内解构） */
+export interface HorizontalSwipeOptions {
+  enabled?: () => boolean;
+  direction?: "both" | SwipeDirection; // 'both' | 'left' | 'right'：允许的滑动方向
+  threshold?: number; // 触发位移阈值（px）
+  minVelocity?: number; // 最低释放速度（px/ms）
+  bigRatio?: number; // 慢速大位移兜底：拖过 屏宽*比例 直接触发（不要求速度）
+  lockDx?: number; // 方向锁定阈值（px）
+  maxShiftRatio?: number; // 跟手最大位移 = 屏宽 * 比例（两侧同限）
+  excludeEdgeZone?: boolean; // 左缘起点不横向接管（让位 useEdgeSwipe 页面返回，封面用）
+  onTrigger?: (dir: SwipeDirection) => void; // 触发时调用
+}
+
+/** 横向手势内部状态 */
+interface HorizontalGesture {
+  startX: number;
+  startY: number;
+  lastDx: number;
+  lastT: number;
+  lastV: number;
+  locked: boolean;
+  dir: SwipeDirection | null;
+}
+
+export function useHorizontalSwipe(opts: HorizontalSwipeOptions = {}) {
   const {
     enabled = () => true,
     direction = "both", // 'both' | 'left' | 'right'：允许的滑动方向
@@ -38,10 +65,10 @@ export function useHorizontalSwipe(opts = {}) {
 
   const shift = ref(0); // 跟手位移（px，带符号：负=左）
   const dragging = ref(false); // 跟手中（true 时组件应关闭 transform transition）
-  let gesture = null; // { startX, startY, lastDx, lastT, lastV, locked, dir }
-  let el = null; // 当前绑定的元素
+  let gesture: HorizontalGesture | null = null; // 当前手势状态（无手势 = null）
+  let el: HTMLElement | null = null; // 当前绑定的元素
 
-  function setShift(v) {
+  function setShift(v: number) {
     shift.value = v;
   }
 
@@ -49,7 +76,7 @@ export function useHorizontalSwipe(opts = {}) {
     shift.value = 0;
   }
 
-  function handleStart(e) {
+  function handleStart(e: TouchEvent) {
     if (!enabled()) return;
     const t = e.touches && e.touches[0];
     if (!t) return;
@@ -64,7 +91,7 @@ export function useHorizontalSwipe(opts = {}) {
     };
   }
 
-  function handleMove(e) {
+  function handleMove(e: TouchEvent) {
     const g = gesture;
     if (!g) return;
     const t = e.touches && e.touches[0];
@@ -75,7 +102,7 @@ export function useHorizontalSwipe(opts = {}) {
       // 未过锁定线 / 纵向主导 → 让位滚动；横向意图明确（且起点不在左缘返回区）才锁定接管
       if (Math.abs(dx) > lockDx && Math.abs(dx) > Math.abs(dy)) {
         if (excludeEdgeZone && g.startX < EDGE_ZONE) return; // 左缘让位 useEdgeSwipe
-        const dir = dx < 0 ? "left" : "right";
+        const dir: SwipeDirection = dx < 0 ? "left" : "right";
         if (direction === "both" || direction === dir) {
           g.locked = true;
           g.dir = dir;
@@ -107,7 +134,7 @@ export function useHorizontalSwipe(opts = {}) {
     const triggered =
       g.locked && Math.abs(g.lastDx) >= threshold && (Math.abs(g.lastV) >= minVelocity || bigDrag);
     if (triggered) {
-      onTrigger(g.dir);
+      onTrigger(g.dir!); // 触发时必已锁定，dir 已赋值
       return; // 位移留给 onTrigger 编排（滑出），编排结束调 reset()
     }
     reset(); // 未触发：回弹（CSS transition 动画）
@@ -120,7 +147,7 @@ export function useHorizontalSwipe(opts = {}) {
     reset();
   }
 
-  function bind(target) {
+  function bind(target: HTMLElement | null) {
     unbind();
     el = target;
     if (!el) return;
@@ -161,10 +188,30 @@ export const EDGE_BIG_RATIO = 0.4; // 慢速大位移兜底：拖过 屏宽*比�
 export const EDGE_MIN_VELOCITY = 0.25; // 最低释放速度（px/ms）：位移够但拖得慢不触发
 const EDGE_LOCK_DX = 12; // 判定为横向手势的最小 dx（避免抢纵向滚动）
 
-export function useEdgeSwipe(elRef, { enabled = () => true, onTrigger = () => {} } = {}) {
+/** useEdgeSwipe 选项（全可选，默认值见函数内解构） */
+export interface EdgeSwipeOptions {
+  enabled?: () => boolean;
+  onTrigger?: () => void;
+}
+
+/** 边缘手势内部状态 */
+interface EdgeGesture {
+  startX: number;
+  startY: number;
+  startT: number;
+  lastT: number;
+  lastDx: number;
+  lastV: number;
+  locked: boolean;
+}
+
+export function useEdgeSwipe(
+  elRef: Ref<HTMLElement | null>,
+  { enabled = () => true, onTrigger = () => {} }: EdgeSwipeOptions = {},
+) {
   // 对外状态：shift（px 位移）/ progress（阴影强度 0..1）/ dragging（跟手中）
   const state = reactive({ shift: 0, progress: 0, dragging: false });
-  let gesture = null; // { startX, startY, startT, lastT, lastDx, lastV, locked }
+  let gesture: EdgeGesture | null = null; // 当前手势状态（无手势 = null）
 
   function apply() {
     const el = elRef.value;
@@ -173,7 +220,7 @@ export function useEdgeSwipe(elRef, { enabled = () => true, onTrigger = () => {}
     el.style.setProperty("--edge-progress", String(state.progress));
   }
 
-  function handleStart(e) {
+  function handleStart(e: TouchEvent) {
     if (!enabled()) return;
     const t = e.touches && e.touches[0];
     if (!t || t.clientX > EDGE_ZONE) return; // 只响应左缘起点
@@ -188,7 +235,7 @@ export function useEdgeSwipe(elRef, { enabled = () => true, onTrigger = () => {}
     };
   }
 
-  function handleMove(e) {
+  function handleMove(e: TouchEvent) {
     if (!gesture) return;
     const t = e.touches && e.touches[0];
     if (!t) return;
@@ -254,20 +301,36 @@ const REVEAL_LOCK_FAR = 60; // 大位移慢速也算滑动（用户明显拖拽�
 const REVEAL_OPEN_RATIO = 0.5; // 位移超过操作区一半 → 展开
 const REVEAL_TAP_SLOP = 6; // 小于该位移视为点击（不抑制 tap）
 
-export function useSwipeReveal(
-  containerRef,
-  { rowSelector = ".ml-item", actionWidth = REVEAL_WIDTH } = {},
-) {
-  const openPath = ref(null); // 当前展开的行（同一时间只展开一行）
-  const drags = reactive(new Map()); // path -> { startX, startY, lastX, base, locked }
-  let activePath = null; // 正在拖动的行 path（touchend 的 target 可能已滑出行，不能靠它定位）
-  let swipedPath = null; // 最近真实滑动过的行：抑制其后的 click（防误触播放）
+/** useSwipeReveal 选项（全可选，默认值见函数内解构） */
+export interface SwipeRevealOptions {
+  rowSelector?: string; // 行选择器（事件委托定位行元素）
+  actionWidth?: number; // 操作区宽度（px）
+}
 
-  function isOpen(path) {
+/** 行拖动内部状态 */
+interface RevealDrag {
+  startX: number;
+  startY: number;
+  lastX: number;
+  startT: number;
+  base: number;
+  locked: boolean;
+}
+
+export function useSwipeReveal(
+  containerRef: Ref<HTMLElement | null>,
+  { rowSelector = ".ml-item", actionWidth = REVEAL_WIDTH }: SwipeRevealOptions = {},
+) {
+  const openPath = ref<string | null>(null); // 当前展开的行（同一时间只展开一行）
+  const drags = reactive(new Map<string, RevealDrag>()); // path -> 拖动状态
+  let activePath: string | null = null; // 正在拖动的行 path（touchend 的 target 可能已滑出行，不能靠它定位）
+  let swipedPath: string | null = null; // 最近真实滑动过的行：抑制其后的 click（防误触播放）
+
+  function isOpen(path: string) {
     return openPath.value === path;
   }
 
-  function isDragging(path) {
+  function isDragging(path: string) {
     const d = drags.get(path);
     return !!d && d.locked;
   }
@@ -277,19 +340,19 @@ export function useSwipeReveal(
   }
 
   // 行当前位移（px，>0 表示向左露出操作区；0 = 收起）
-  function rowShift(path) {
+  function rowShift(path: string) {
     const d = drags.get(path);
     if (d) return d.base + (d.startX - d.lastX);
     return isOpen(path) ? actionWidth : 0;
   }
 
-  function rowTransform(path) {
+  function rowTransform(path: string) {
     const s = rowShift(path);
     return s > 0 ? `translateX(${-Math.min(s, actionWidth)}px)` : "";
   }
 
   // 消费「滑动后伴随的 click」标记；返回 true 表示本次点击应忽略
-  function consumeSwipe(path) {
+  function consumeSwipe(path: string) {
     if (swipedPath === path) {
       swipedPath = null;
       return true;
@@ -297,18 +360,19 @@ export function useSwipeReveal(
     return false;
   }
 
-  function rowElFrom(e) {
-    return e.target && e.target.closest ? e.target.closest(rowSelector) : null;
+  function rowElFrom(e: TouchEvent): HTMLElement | null {
+    const target = e.target as HTMLElement | null;
+    return target && target.closest ? (target.closest(rowSelector) as HTMLElement | null) : null;
   }
 
-  function handleStart(e) {
+  function handleStart(e: TouchEvent) {
     const rowEl = rowElFrom(e);
     const path = rowEl && rowEl.dataset.path;
     if (!path) {
       if (openPath.value) openPath.value = null; // 点空白 → 收起
       return;
     }
-    if (e.target.closest(".ml-drag")) return; // 歌单拖拽手柄交给 Sortable
+    if ((e.target as HTMLElement).closest(".ml-drag")) return; // 歌单拖拽手柄交给 Sortable
     const t = e.touches && e.touches[0];
     if (!t) return;
     const wasOpen = openPath.value === path;
@@ -324,7 +388,7 @@ export function useSwipeReveal(
     });
   }
 
-  function handleMove(e) {
+  function handleMove(e: TouchEvent) {
     const d = activePath && drags.get(activePath);
     if (!d) return;
     const t = e.touches && e.touches[0];
@@ -345,7 +409,7 @@ export function useSwipeReveal(
     d.lastX = t.clientX;
   }
 
-  function handleEnd(e) {
+  function handleEnd(e: TouchEvent) {
     const path = activePath;
     activePath = null;
     const d = path && drags.get(path);

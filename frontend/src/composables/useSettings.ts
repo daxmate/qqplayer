@@ -3,7 +3,29 @@ import { reactive, watch } from "vue";
 // ============ 歌词显示设置（localStorage 持久化）============
 export const LYRIC_SETTINGS_KEY = "qqplayer.lyricSettings.v1";
 
-export const LYRIC_SETTINGS_DEFAULTS = {
+/** 歌词显示设置结构（默认值见 LYRIC_SETTINGS_DEFAULTS，字段语义注释见各字段） */
+export interface LyricSettings {
+  fontFamily: string; // 'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
+  fontSize: number; // 当前句基准字号（px），其他层级按比例缩放
+  align: "left" | "center" | "right";
+  engine: "amll" | "spring" | "native"; // 歌词滚动引擎：amll 组件（默认）| spring 自研弹簧 | native 原生平滑
+  showRoma: boolean; // 显示罗马音
+  showZh: boolean; // 显示中文翻译
+  showSec: boolean; // 显示段落标题
+  focusPos: number; // 焦点句停靠位置（可视区高度比例）：0.33 | 0.5
+  fadeMask: boolean; // 上下渐隐遮罩
+  autoScroll: boolean; // 切句自动跟随滚动
+  offset: number; // 歌词延迟校准（秒，-2~2）：正值 = 歌词比声音延后显示，负值 = 提前
+  source: "local" | "online"; // 歌词来源优先级：'local' 本地优先 | 'online' 在线优先（失败回退本地）
+  colorScheme: string; // 配色方案：'theme' 跟随主题强调色 | 其他见 LYRIC_SCHEMES
+  jpColor: string; // 主行文字颜色（自定义，空 = 跟随 colorScheme）
+  zhColor: string; // 翻译行文字颜色（自定义，空 = 跟随 colorScheme）
+  amllBlur: boolean; // AMLL 歌词行 WebGL 高斯模糊滤镜（三个里最耗性能）
+  amllSpring: boolean; // AMLL 弹簧物理动画（官方注释：需要性能足够强劲的电脑）
+  amllScale: boolean; // AMLL 当前行放大动画
+}
+
+export const LYRIC_SETTINGS_DEFAULTS: LyricSettings = {
   fontFamily: "system", // 'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
   fontSize: 20, // 当前句基准字号（px），其他层级按比例缩放
   align: "left", // 'left' | 'center' | 'right'
@@ -32,7 +54,7 @@ export const lyricSettings = reactive({ ...LYRIC_SETTINGS_DEFAULTS });
 // ============ 界面偏好（localStorage 持久化）============
 export const UI_SETTINGS_KEY = "qqplayer.uiSettings.v1";
 
-export const THEME_OPTIONS = ["dark", "light", "auto"]; // 'auto' = 跟随系统
+export const THEME_OPTIONS = ["dark", "light", "auto"] as const; // 'auto' = 跟随系统
 
 export const ACCENT_OPTIONS = [
   { key: "orange", color: "#ff7e5f", color2: "#feb47b" },
@@ -41,9 +63,26 @@ export const ACCENT_OPTIONS = [
   { key: "purple", color: "#a78bfa", color2: "#c4b5fd" },
   { key: "pink", color: "#f472b6", color2: "#f9a8d4" },
   { key: "teal", color: "#2dd4bf", color2: "#5eead4" },
-];
+] as const;
 
-export const UI_SETTINGS_DEFAULTS = {
+/** 界面偏好结构（默认值见 UI_SETTINGS_DEFAULTS） */
+export interface UiSettings {
+  showSongInfo: boolean; // 跟唱模式歌词面板顶部显示当前歌曲信息（歌名/歌手）
+  karaokeShowTime: boolean; // 跟唱模式每句显示起止时间戳
+  karaokeShowNum: boolean; // 跟唱模式每句左侧显示行号（默认显示，用户可关）
+  theme: "dark" | "light" | "auto"; // 主题：'dark' 深色 | 'light' 浅色 | 'auto' 跟随系统
+  miniTheme: "theme" | "dark" | "light"; // 迷你窗外观：'theme' 跟随主窗口主题 | 'dark' 深色 | 'light' 浅色
+  accent: string; // 强调色预设 key（见 ACCENT_OPTIONS）
+  coverBlur: boolean; // 封面模糊背景（播放器背景铺当前歌曲封面模糊图）
+  glassCover: boolean; // 移动端播放页毛玻璃封面背景（默认开；仅移动端生效，桌面端不用）
+  showCover: boolean; // 显示封面（大封面：播放器主区/移动端播放页/桌面歌词悬浮窗；关闭后隐藏封面图片，不占位——任务 E 起歌词区自动扩充）
+  showListCover: boolean; // 列表封面（列表行/卡片缩略图；与 showCover 独立，默认开 = 现状零变化）
+  coverSize: number; // 封面区域大小：0 = 自适应；140~420 = 手动固定值（拖拽分隔条/设置滑块写入）
+  compact: boolean; // 紧凑模式（减小间距与尺寸，提高信息密度）
+  searchHistory: string[]; // 搜索历史（任务 D）：字符串数组，最新在前，最多 10 条
+}
+
+export const UI_SETTINGS_DEFAULTS: UiSettings = {
   showSongInfo: false, // 跟唱模式歌词面板顶部显示当前歌曲信息（歌名/歌手）
   karaokeShowTime: false, // 跟唱模式每句显示起止时间戳
   karaokeShowNum: true, // 跟唱模式每句左侧显示行号（默认显示，用户可关）
@@ -66,7 +105,22 @@ export const UI_SETTINGS_DEFAULTS = {
 export const uiSettings = reactive({ ...UI_SETTINGS_DEFAULTS });
 
 // ============ 桌面歌词悬浮窗设置（后端存储：主播放器与悬浮窗跨引擎共享）============
-export const DESKTOP_LYRIC_DEFAULTS = {
+/** 桌面歌词悬浮窗设置结构（默认值见 DESKTOP_LYRIC_DEFAULTS） */
+export interface DesktopLyricSettings {
+  enabled: boolean; // 主播放器顶栏开关记住状态（上次开着就开）
+  showZh: boolean; // 显示中文翻译
+  fontFamily: string; // 字体：'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
+  fontSize: number; // 主行（日文）字号 px
+  zhSize: number; // 翻译行字号 px
+  align: "left" | "center" | "right";
+  width: number; // 悬浮窗宽度 px
+  height: number; // 悬浮窗高度 px
+  colorScheme: string; // 配色方案 key（见 DESKTOP_LYRIC_SCHEMES；'theme' = 跟随主播放器强调色）
+  jpColor: string; // 主行文字颜色（配色方案的落地值，可被方案覆盖）
+  zhColor: string; // 翻译行文字颜色
+}
+
+export const DESKTOP_LYRIC_DEFAULTS: DesktopLyricSettings = {
   enabled: false, // 主播放器顶栏开关记住状态（上次开着就开）
   showZh: true, // 显示中文翻译
   fontFamily: "system", // 字体：'system' 系统默认 | 'serif' 衬线 | 'rounded' 圆体
@@ -91,13 +145,13 @@ export const LYRIC_SCHEMES = [
   { key: "green", labelKey: "settings.lyricScheme.green", jp: "#b8f5c8", zh: "#7fd99a" },
   { key: "purple", labelKey: "settings.lyricScheme.purple", jp: "#d4c4ff", zh: "#a88fff" },
   { key: "blue", labelKey: "settings.lyricScheme.blue", jp: "#a8c8ff", zh: "#6f9dff" },
-];
+] as const;
 
 // 桌面歌词配色方案（含「跟随主题」）：{ key, labelKey, jp 主行色, zh 翻译色 }
 export const DESKTOP_LYRIC_SCHEMES = [
   { key: "theme", labelKey: "settings.desktopLyricScheme.theme", jp: "", zh: "" },
   ...LYRIC_SCHEMES.filter((s) => s.key !== "theme"),
-];
+] as const;
 
 export const desktopLyricSettings = reactive({ ...DESKTOP_LYRIC_DEFAULTS });
 
@@ -155,15 +209,16 @@ export const videoSettings = reactive({ ...VIDEO_SETTINGS_DEFAULTS });
 // desktopLyric namespace（主播放器 Vivaldi 与悬浮窗 WKWebView 跨引擎共享，localStorage 不通）
 // Swift 壳内歌词面板被原生关闭（✕/双击）时回写状态，主页面开关保持同步
 if (typeof window !== "undefined") {
-  window.addEventListener("qqplayer:lyricstate", (e) => {
-    if (e.detail && typeof e.detail.enabled === "boolean") {
-      desktopLyricSettings.enabled = e.detail.enabled;
+  window.addEventListener("qqplayer:lyricstate", (e: Event) => {
+    const detail = (e as CustomEvent<{ enabled?: boolean }>).detail;
+    if (detail && typeof detail.enabled === "boolean") {
+      desktopLyricSettings.enabled = detail.enabled;
     }
   });
 }
 
 // ============ 主题 / 强调色 / 封面模糊 / 紧凑模式应用（html data-* 属性驱动 CSS）============
-let themeMedia = null;
+let themeMedia: MediaQueryList | null = null;
 
 function onPrefersColorChange() {
   if (uiSettings.theme === "auto") applyTheme();
@@ -215,9 +270,11 @@ function loadUiSettings() {
   try {
     const raw = localStorage.getItem(UI_SETTINGS_KEY);
     if (!raw) return;
-    const saved = JSON.parse(raw);
-    for (const k of Object.keys(uiSettings)) {
-      if (k in saved) uiSettings[k] = saved[k];
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    // 宽松键值视图写入：saved 为任意 JSON 形态，字段级类型校验由各消费方兜底
+    const view = uiSettings as unknown as Record<string, unknown>;
+    for (const k of Object.keys(view)) {
+      if (k in saved) view[k] = saved[k];
     }
   } catch {
     /* 忽略损坏的缓存 */
@@ -237,9 +294,11 @@ function loadDownloadSettings() {
   try {
     const raw = localStorage.getItem(DOWNLOAD_SETTINGS_KEY);
     if (!raw) return;
-    const saved = JSON.parse(raw);
-    for (const k of Object.keys(downloadSettings)) {
-      if (k in saved) downloadSettings[k] = saved[k];
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    // 宽松键值视图写入：saved 为任意 JSON 形态，字段级类型校验由各消费方兜底
+    const view = downloadSettings as unknown as Record<string, unknown>;
+    for (const k of Object.keys(view)) {
+      if (k in saved) view[k] = saved[k];
     }
   } catch {
     /* 忽略损坏的缓存 */
@@ -272,9 +331,11 @@ function loadLyricSettings() {
   try {
     const raw = localStorage.getItem(LYRIC_SETTINGS_KEY);
     if (!raw) return;
-    const saved = JSON.parse(raw);
-    for (const k of Object.keys(lyricSettings)) {
-      if (k in saved) lyricSettings[k] = saved[k];
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    // 宽松键值视图写入：saved 为任意 JSON 形态，字段级类型校验由各消费方兜底
+    const view = lyricSettings as unknown as Record<string, unknown>;
+    for (const k of Object.keys(view)) {
+      if (k in saved) view[k] = saved[k];
     }
   } catch {
     /* 忽略损坏的缓存 */
