@@ -25,7 +25,7 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     /** 模拟原生侧回推事件 */
-    emit(name, payload) {
+    emit(name: string, payload?: unknown) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {
@@ -60,14 +60,14 @@ import * as sync from "../utils/sync.js";
 
 // jsdom（vitest 4）无 localStorage → 手写 stub（同 Cover.test.js 风格）
 const localStorageStub = {
-  store: {},
-  getItem(key) {
+  store: {} as Record<string, string>,
+  getItem(key: string) {
     return key in this.store ? this.store[key] : null;
   },
-  setItem(key, value) {
+  setItem(key: string, value: string) {
     this.store[key] = String(value);
   },
-  removeItem(key) {
+  removeItem(key: string) {
     delete this.store[key];
   },
   clear() {
@@ -153,8 +153,12 @@ describe("syncAssets：批量下载消息 + downloads 状态登记", () => {
   it("空列表 / 全无效项：返回 false 不发消息", async () => {
     await setNativeEnv();
     expect(sync.syncAssets([])).toBe(false);
-    expect(sync.syncAssets([{ path: "x" }])).toBe(false); // 缺 url
-    expect(sync.syncAssets([null, undefined])).toBe(false);
+    expect(
+      sync.syncAssets([{ path: "x" }] as unknown as Parameters<typeof sync.syncAssets>[0]),
+    ).toBe(false); // 缺 url
+    expect(
+      sync.syncAssets([null, undefined] as unknown as Parameters<typeof sync.syncAssets>[0]),
+    ).toBe(false);
     expect(bridgeMock.post).not.toHaveBeenCalled();
   });
 
@@ -272,7 +276,7 @@ describe("clearAssets：deleteAssets 消息 scope", () => {
     expect(sync.clearAssets("audio")).toBe(true);
     expect(sync.clearAssets("books")).toBe(true);
     expect(sync.clearAssets("dicts")).toBe(true);
-    expect(sync.clearAssets()).toBe(true); // 默认 'all'
+    expect(sync.clearAssets("")).toBe(true); // 默认 'all'（scope 空串回退）
     const calls = bridgeMock.post.mock.calls
       .filter((c) => c[0] && c[0].cmd === "deleteAssets")
       .map((c) => c[0].scope);

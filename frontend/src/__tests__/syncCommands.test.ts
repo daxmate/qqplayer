@@ -24,7 +24,7 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     /** 模拟原生侧回推事件 */
-    emit(name, payload) {
+    emit(name: string, payload?: unknown) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {
@@ -60,13 +60,13 @@ import { setCache } from "../utils/cacheDb.js";
 import * as sync from "../utils/sync.js";
 
 // jsdom（vitest 4）无 localStorage → 手写 stub（wifiOnlyEnabled 依赖）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -90,20 +90,20 @@ async function setNativeEnv() {
 /** 预置 deviceId 缓存：调用 getDeviceId 并立即回执（后续 pollCommands/reportAssets 不再等桥） */
 async function primeDeviceId(deviceId = "dev-123") {
   const p = sync.getDeviceId();
-  const call = bridgeMock.post.mock.calls.find((c) => c[0] && c[0].cmd === "getDeviceId");
+  const call = bridgeMock.post.mock.calls.find((c) => c[0] && c[0].cmd === "getDeviceId")!;
   expect(call).toBeTruthy();
   bridgeMock.emit("deviceId", { requestId: call[0].requestId, deviceId });
   await p;
 }
 
 /** 取 bridgeMock.post 中指定 cmd 的最后一条消息 */
-function lastPost(cmd) {
+function lastPost(cmd: string) {
   const calls = bridgeMock.post.mock.calls.filter((c) => c[0] && c[0].cmd === cmd);
   return calls.length ? calls[calls.length - 1][0] : null;
 }
 
 /** 取 apiPost 指定 url 前缀的最后一次调用 */
-function lastApiPost(urlPrefix) {
+function lastApiPost(urlPrefix: string) {
   const calls = apiMock.apiPost.mock.calls.filter((c) => String(c[0]).startsWith(urlPrefix));
   return calls.length
     ? { url: calls[calls.length - 1][0], body: calls[calls.length - 1][1] }
@@ -111,7 +111,7 @@ function lastApiPost(urlPrefix) {
 }
 
 /** 通用 pending 拉取 mock：单条指令 */
-function mockPending(command) {
+function mockPending(command: Record<string, unknown>) {
   apiMock.apiGet.mockImplementation((url) => {
     if (String(url).includes("/api/sync/commands/pending")) {
       return Promise.resolve({ ok: true, status: 200, data: { commands: [command] } });
@@ -199,7 +199,7 @@ describe("pollCommands：指令拉取 + 执行 + 回执", () => {
     });
     expect(dl.items[1].path).toMatch(/^audio\/[0-9a-f]{64}\.flac$/);
     // ack：ok=true，无 skipped 不带 detail
-    const ack = lastApiPost("/api/sync/commands/c1/ack");
+    const ack = lastApiPost("/api/sync/commands/c1/ack")!;
     expect(ack.url).toBe("/api/sync/commands/c1/ack");
     expect(ack.body).toEqual({ device_id: "dev-123", ok: true });
     expect(r).toEqual({ ok: true, executed: 1 });
@@ -223,7 +223,7 @@ describe("pollCommands：指令拉取 + 执行 + 回执", () => {
     expect(dl).toBeTruthy();
     expect(dl.items).toHaveLength(1); // 只下载匹配到的
     expect(dl.items[0].path).toMatch(/^audio\/[0-9a-f]{64}\.mp3$/);
-    const ack = lastApiPost("/api/sync/commands/c2/ack");
+    const ack = lastApiPost("/api/sync/commands/c2/ack")!;
     expect(ack.body).toEqual({
       device_id: "dev-123",
       ok: true,
@@ -247,7 +247,7 @@ describe("pollCommands：指令拉取 + 执行 + 回执", () => {
       cmd: "deleteAssets",
       paths: ["audio/1.m4a", "audio/2.m4a"],
     });
-    const ack = lastApiPost("/api/sync/commands/c3/ack");
+    const ack = lastApiPost("/api/sync/commands/c3/ack")!;
     expect(ack.body).toEqual({ device_id: "dev-123", ok: true, detail: { deleted: 2 } });
     expect(r).toEqual({ ok: true, executed: 1 });
     bridgeMock.emit("assetIndex", { assets: [] });
@@ -265,7 +265,7 @@ describe("pollCommands：指令拉取 + 执行 + 回执", () => {
     });
     const r = await sync.pollCommands();
     expect(lastPost("syncDownload")).toBeNull(); // 无有效下载项
-    const ack = lastApiPost("/api/sync/commands/c4/ack");
+    const ack = lastApiPost("/api/sync/commands/c4/ack")!;
     expect(ack.body).toEqual({
       device_id: "dev-123",
       ok: false,

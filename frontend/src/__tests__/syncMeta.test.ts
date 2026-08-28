@@ -24,7 +24,7 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     /** 模拟原生侧回推事件 */
-    emit(name, payload) {
+    emit(name: string, payload?: unknown) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {

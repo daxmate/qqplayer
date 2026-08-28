@@ -23,7 +23,7 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     /** 模拟原生侧回推事件 */
-    emit(name, payload) {
+    emit(name: string, payload?: unknown) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {
@@ -99,13 +99,13 @@ const manifestV2 = {
 
 // jsdom（vitest 4）无 localStorage → 手写 stub（同 syncAssets.test.js 风格；
 // autoPrefetch 开关 / 桥环境判定依赖）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -164,7 +164,7 @@ describe("syncNow：manifest 拉取 + version 对比 + 集合写入", () => {
     expect(await getCache("sync:dicts")).toEqual(manifestV1.dicts);
     expect(await getCache("sync:annotations")).toEqual(manifestV1.annotations);
     expect(await getCache("sync:vocab")).toEqual(manifestV1.vocab);
-    const meta = await getCache("sync:meta");
+    const meta = (await getCache("sync:meta"))!;
     expect(meta.version).toBe(manifestV1.version);
     expect(sync.getSyncState().lastSyncAt).toBeTruthy();
     expect(sync.getSyncState().syncing).toBe(false);
@@ -187,23 +187,23 @@ describe("syncNow：manifest 拉取 + version 对比 + 集合写入", () => {
     apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifestV2 });
     const r = await sync.syncNow();
     expect(r.changed).toBe(true);
-    expect(r.counts.songs).toBe(2);
+    expect(r.counts!.songs).toBe(2);
     expect(await getCache("sync:songs")).toEqual(manifestV2.songs);
-    expect((await getCache("sync:meta")).version).toBe(manifestV2.version);
+    expect((await getCache("sync:meta"))!.version).toBe(manifestV2.version);
   });
 
   it("缓存结构升级（schemaVersion）：version 未变也强制刷新——dicts.title 场景", async () => {
     await setNativeEnv();
     apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifestV1 });
     await sync.syncNow();
-    expect((await getCache("sync:meta")).schemaVersion).toBe(3);
+    expect((await getCache("sync:meta"))!.schemaVersion).toBe(3);
     // 手写旧结构缓存（无 schemaVersion）模拟升级前：version 相同但缓存必须刷新
     const oldMeta = { version: manifestV1.version, generatedAt: "", syncedAt: 0 };
     await setCache("sync:meta", oldMeta);
     await setCache("sync:dicts", [{ name: "f37e...mdx", path: "f37e...mdx" }]); // 旧结构：无 title
     const r = await sync.syncNow();
     expect(r.changed).toBe(true);
-    expect((await getCache("sync:meta")).schemaVersion).toBe(3);
+    expect((await getCache("sync:meta"))!.schemaVersion).toBe(3);
     expect(await getCache("sync:dicts")).toEqual(manifestV1.dicts); // 缓存已按新结构重写
     // v2 → v3：旧缓存无 annotations/vocab 集合 → 重写后写入新集合（结构变更强制刷新）
     const oldMetaV2 = {
@@ -350,7 +350,7 @@ describe("ensureAsset：hasAsset → assetStatus 回执 / syncDownload 下载", 
     });
     await Promise.all([p1, p2]);
     await flush();
-    const dl = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "syncDownload");
+    const dl = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "syncDownload")!;
     expect(dl).toBeTruthy();
     expect(dl[0].items).toHaveLength(2);
   });
@@ -467,7 +467,7 @@ describe("assetForSong / assetForDict / assetForBook：沙盒路径内容寻址"
   });
 
   it("assetForSong：url 绝对化，path = audio/<sha256>.<ext>，sha256 暂为空（内容校验待后端补哈希）", async () => {
-    const item = await sync.assetForSong({ path: "/Music/foo.mp3", size: 100 });
+    const item = (await sync.assetForSong({ path: "/Music/foo.mp3", size: 100 }))!;
     expect(item.url).toBe(
       "http://192.168.1.50:17627/api/audio?path=" + encodeURIComponent("/Music/foo.mp3"),
     );
@@ -478,24 +478,24 @@ describe("assetForSong / assetForDict / assetForBook：沙盒路径内容寻址"
 
   it("assetForSong：name = 歌手 - 歌名（同步面板展示用，不显示 hash）", async () => {
     expect(
-      (await sync.assetForSong({ path: "/Music/foo.mp3", name: "星星点灯", artist: "郑智化" }))
+      (await sync.assetForSong({ path: "/Music/foo.mp3", name: "星星点灯", artist: "郑智化" }))!
         .name,
     ).toBe("郑智化 - 星星点灯");
-    expect((await sync.assetForSong({ path: "/Music/foo.mp3", name: "星星点灯" })).name).toBe(
+    expect((await sync.assetForSong({ path: "/Music/foo.mp3", name: "星星点灯" }))!.name).toBe(
       "星星点灯",
     );
-    expect((await sync.assetForSong({ path: "/Music/郑智化 - 星星点灯.mp3" })).name).toBe(
+    expect((await sync.assetForSong({ path: "/Music/郑智化 - 星星点灯.mp3" }))!.name).toBe(
       "郑智化 - 星星点灯",
     );
   });
 
   it("assetForDict：dicts/ 子目录，扩展名保留；name = title（真实词典名）优先", async () => {
-    const item = await sync.assetForDict({
+    const item = (await sync.assetForDict({
       name: "f37e654b0b56489eabc2af427c48a82a.mdx",
       title: "LDOCE6++ En-Cn V2-19",
       path: "f37e654b0b56489eabc2af427c48a82a.mdx",
       size: 11,
-    });
+    }))!;
     expect(item.url).toBe(
       "http://192.168.1.50:17627/api/sync/dicts/file?path=" +
         encodeURIComponent("f37e654b0b56489eabc2af427c48a82a.mdx"),
@@ -506,12 +506,12 @@ describe("assetForSong / assetForDict / assetForBook：沙盒路径内容寻址"
   });
 
   it("assetForDict：无 title 时回退 name（真实文件名）", async () => {
-    const item = await sync.assetForDict({ name: "oxford.mdx", path: "abc123/oxford.mdx" });
+    const item = (await sync.assetForDict({ name: "oxford.mdx", path: "abc123/oxford.mdx" }))!;
     expect(item.name).toBe("oxford");
   });
 
   it("assetForBook：books/ 子目录 .epub；name = 书名", async () => {
-    const item = await sync.assetForBook({ id: "b1", title: "测试书" });
+    const item = (await sync.assetForBook({ id: "b1", title: "测试书" }))!;
     expect(item.url).toBe("http://192.168.1.50:17627/api/books/b1/file");
     expect(item.path).toMatch(/^books\/[0-9a-f]{64}\.epub$/);
     expect(item.name).toBe("测试书");
@@ -624,7 +624,11 @@ describe("mergeVocab / mergeAnnotations：标注按书 LWW、生词按 id 逐条
       { id: "vw_1", word: "hello", addedAt: 300 }, // 远端新 → 胜
       { id: "vw_remote", word: "remote-only", addedAt: 400 }, // 仅远端
     ];
-    const merged = sync.mergeVocab(local, remote);
+    const merged = sync.mergeVocab(local, remote) as Array<{
+      id: string;
+      addedAt: number;
+      word?: string;
+    }>;
     const byId = Object.fromEntries(merged.map((v) => [v.id, v]));
     expect(Object.keys(byId).sort()).toEqual(["vw_1", "vw_local", "vw_remote"]);
     expect(byId["vw_1"].addedAt).toBe(300); // 大者胜
@@ -679,7 +683,11 @@ describe("mergeVocab / mergeAnnotations：标注按书 LWW、生词按 id 逐条
         notes: [],
       },
     ];
-    const merged = sync.mergeAnnotations(local, remote);
+    const merged = sync.mergeAnnotations(local, remote) as Array<{
+      bookId: string;
+      version: number;
+      highlights: Array<{ id: string }>;
+    }>;
     const byBook = Object.fromEntries(merged.map((a) => [a.bookId, a]));
     expect(Object.keys(byBook).sort()).toEqual(["b1", "b2", "b_local"]);
     expect(byBook["b1"].highlights[0].id).toBe("hl_local"); // 本地更新 → 保留
@@ -725,11 +733,15 @@ describe("mergeVocab / mergeAnnotations：标注按书 LWW、生词按 id 逐条
     apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifestV1 });
     const r = await sync.syncNow();
     expect(r.ok).toBe(true);
-    const vocab = await getCache("sync:vocab");
+    const vocab = (await getCache("sync:vocab")) as unknown as Array<{ id: string }>;
     const ids = vocab.map((v) => v.id).sort();
     expect(ids).toEqual(["vw_1", "vw_local"]); // 本地词保留 + 远端词并入
-    const annotations = await getCache("sync:annotations");
-    const b1 = annotations.find((a) => a.bookId === "b1");
+    const annotations = (await getCache("sync:annotations")) as unknown as Array<{
+      bookId: string;
+      version: number;
+      highlights: Array<{ id: string }>;
+    }>;
+    const b1 = annotations.find((a) => a.bookId === "b1")!;
     expect(b1.highlights[0].id).toBe("hl_local"); // 本地书更新 → 保留（不整表覆盖）
     expect(annotations.length).toBe(1);
   });

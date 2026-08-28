@@ -147,7 +147,7 @@ describe("on（壳事件监听）", () => {
   it("tauri → listen('library-changed') 并转发 window CustomEvent('qqplayer:nativelibrary')", async () => {
     window.__TAURI_INTERNALS__ = {};
     const unlisten = vi.fn();
-    const tauriCb = { current: null };
+    const tauriCb: { current: ((payload: unknown) => void) | null } = { current: null };
     window.__TAURI__ = {
       core: { invoke: vi.fn() },
       event: {
@@ -165,7 +165,7 @@ describe("on（壳事件监听）", () => {
     // 壳 emit 'library-changed' → 前端收到 CustomEvent('qqplayer:nativelibrary', { detail: payload })
     const spy = vi.fn();
     window.addEventListener("qqplayer:nativelibrary", spy);
-    tauriCb.current({ payload: { path: "/music" } });
+    tauriCb.current!({ payload: { path: "/music" } });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0].detail).toEqual({ path: "/music" });
     // handler 同步收到同一 CustomEvent
@@ -180,7 +180,7 @@ describe("on（壳事件监听）", () => {
 
   it("tauri → listen('dict-files') 并转发 window CustomEvent('qqplayer:nativeDictFiles')", async () => {
     window.__TAURI_INTERNALS__ = {};
-    const tauriCb = { current: null };
+    const tauriCb: { current: ((payload: unknown) => void) | null } = { current: null };
     window.__TAURI__ = {
       core: { invoke: vi.fn() },
       event: {
@@ -195,7 +195,7 @@ describe("on（壳事件监听）", () => {
 
     const spy = vi.fn();
     window.addEventListener("qqplayer:nativeDictFiles", spy);
-    tauriCb.current({ payload: { paths: ["/a.dict"] } });
+    tauriCb.current!({ payload: { paths: ["/a.dict"] } });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0][0].detail).toEqual({ paths: ["/a.dict"] });
   });

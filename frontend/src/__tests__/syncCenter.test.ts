@@ -26,7 +26,7 @@ const bridgeMock = vi.hoisted(() => {
       };
     }),
     /** 模拟原生侧回推事件 */
-    emit(name, payload) {
+    emit(name: string, payload?: unknown) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {
@@ -59,14 +59,22 @@ vi.mock("../utils/apiClient.js", () => apiMock);
 // ---------- 被测模块 ----------
 import * as sync from "../utils/sync.js";
 
+/** 桥消息下载项宽松视图（测试侧仅读 path/sha256/size/wifiOnly） */
+interface TestDownloadItem {
+  path: string;
+  sha256?: string;
+  size?: number;
+  wifiOnly?: boolean;
+}
+
 // jsdom（vitest 4）无 localStorage → 手写 stub
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -88,7 +96,7 @@ function clearNativeEnv() {
 }
 
 /** 最新一次指定 cmd 的桥消息 */
-function lastMsg(cmd) {
+function lastMsg(cmd: string) {
   const calls = bridgeMock.post.mock.calls.filter((c) => c[0] && c[0].cmd === cmd);
   return calls.length ? calls[calls.length - 1][0] : null;
 }
@@ -116,21 +124,21 @@ const book1 = { id: "b1", title: "书一", size: 1000 };
 const dict1 = { name: "oxford.mdx", path: "abc/oxford.mdx", size: 500 };
 
 /** manifest 下载项的沙盒路径（assetForSong 同构，测试里同步算） */
-async function audioPathOf(song) {
+async function audioPathOf(song: Parameters<typeof sync.assetForSong>[0]) {
   const item = await sync.assetForSong(song);
-  return item.path;
+  return item!.path;
 }
-async function coverPathOf(path) {
+async function coverPathOf(path: string) {
   const item = await sync.coverItemFor(path);
-  return item.path;
+  return item!.path;
 }
-async function bookPathOf(book) {
+async function bookPathOf(book: Parameters<typeof sync.assetForBook>[0]) {
   const item = await sync.assetForBook(book);
-  return item.path;
+  return item!.path;
 }
-async function dictPathOf(dict) {
+async function dictPathOf(dict: Parameters<typeof sync.assetForDict>[0]) {
   const item = await sync.assetForDict(dict);
-  return item.path;
+  return item!.path;
 }
 
 const manifest = {
@@ -177,17 +185,17 @@ describe("fetchAssetsSizeDetailed：assetsSize 回执扩展 byType", () => {
       total: 1000,
       byType: { audio: 400, covers: 100, lyric: 50, books: 300, dicts: 100, meta: 30, other: 20 },
     });
-    const r = await p;
+    const r = (await p)!;
     expect(r.total).toBe(1000);
-    expect(r.byType.audio).toBe(400);
-    expect(r.byType.lyric).toBe(50);
+    expect(r.byType!.audio).toBe(400);
+    expect(r.byType!.lyric).toBe(50);
   });
 
   it("旧壳只回 total：resolve {total, byType:{}}（不抛）", async () => {
     await setNativeEnv();
     const p = sync.fetchAssetsSizeDetailed();
     bridgeMock.emit("assetsSize", { total: 999 });
-    const r = await p;
+    const r = (await p)!;
     expect(r.total).toBe(999);
     expect(r.byType).toEqual({});
   });
@@ -307,11 +315,11 @@ describe("computeOrphanAssets：期望集 diff 本地注册表", () => {
 
 describe("assetForSong 带 sha256 / applyUpdates", () => {
   it("assetForSong：manifest 条目带 sha256 → 下载项 sha256 用真实值", async () => {
-    const item = await sync.assetForSong(songV1);
+    const item = (await sync.assetForSong(songV1))!;
     expect(item.sha256).toBe(songV1.sha256);
     expect(item.path).toMatch(/^audio\/[0-9a-f]{64}\.mp3$/);
     // 老清单缺 sha256 → 空串（兼容旧行为）
-    const legacy = await sync.assetForSong({ path: "/Music/x.mp3", size: 1 });
+    const legacy = (await sync.assetForSong({ path: "/Music/x.mp3", size: 1 }))!;
     expect(legacy.sha256).toBe("");
   });
 
@@ -326,8 +334,8 @@ describe("assetForSong 带 sha256 / applyUpdates", () => {
     expect(sent).toBe(true);
     const msg = lastMsg("syncDownload");
     expect(msg).toBeTruthy();
-    const audio = msg.items.find((i) => i.path.startsWith("audio/"));
-    const cover = msg.items.find((i) => i.path.startsWith("covers/"));
+    const audio = msg.items.find((i: TestDownloadItem) => i.path.startsWith("audio/"));
+    const cover = msg.items.find((i: TestDownloadItem) => i.path.startsWith("covers/"));
     expect(audio.sha256).toBe(songV2.sha256); // 真实内容哈希
     expect(cover).toBeUndefined(); // 封面未过期：不重建封面项（sha256 空 + 已存在会恒过，无需重下）
     expect(audio.wifiOnly).toBe(true);
@@ -358,8 +366,8 @@ describe("assetForSong 带 sha256 / applyUpdates", () => {
     expect(del.paths).toContain(coverPath);
     // 下载项：音频带真实 sha256，封面带 manifest cover_size（原生 size 校验）
     const msg = lastMsg("syncDownload");
-    const audio = msg.items.find((i) => i.path.startsWith("audio/"));
-    const cover = msg.items.find((i) => i.path.startsWith("covers/"));
+    const audio = msg.items.find((i: TestDownloadItem) => i.path.startsWith("audio/"));
+    const cover = msg.items.find((i: TestDownloadItem) => i.path.startsWith("covers/"));
     expect(audio.sha256).toBe(songWithCover.sha256);
     expect(cover.size).toBe(999);
   });
@@ -387,7 +395,7 @@ describe("syncAll：一键拉全（缺失下载 + 更新门控 + 歌词失效）
     expect(r.missing).toEqual({ audio: 1, covers: 2, books: 1, dicts: 1 });
     const msg = lastMsg("syncDownload");
     expect(msg.items).toHaveLength(5);
-    expect(msg.items.every((i) => i.wifiOnly === true)).toBe(true);
+    expect(msg.items.every((i: TestDownloadItem) => i.wifiOnly === true)).toBe(true);
     // 自动更新默认关：a.mp3 已本地且 sha 相同，无更新项
     expect(r.updateCount).toBe(0);
   });
@@ -419,7 +427,7 @@ describe("syncAll：一键拉全（缺失下载 + 更新门控 + 歌词失效）
       .filter((c) => c[0] && c[0].cmd === "syncDownload")
       .map((c) => c[0]);
     const updateMsg = msgs.find((m) =>
-      m.items.some((i) => i.path === audioA && i.sha256 === songV1.sha256),
+      m.items.some((i: TestDownloadItem) => i.path === audioA && i.sha256 === songV1.sha256),
     );
     expect(updateMsg).toBeTruthy();
   });
@@ -463,7 +471,7 @@ describe("歌词失效判定（mock nativeMetaLoad 链路）", () => {
   it("detectStaleLyrics：mtime 变了 → 返回该歌曲；未变 → 空", async () => {
     await setNativeEnv();
     // 先记录基线（metaSave syncMeta {path: 111}）
-    let p = sync.recordLyricMtimes([songWithLyric]);
+    let p: Promise<unknown> = sync.recordLyricMtimes([songWithLyric]);
     let loadMsg = lastMsg("metaLoad");
     bridgeMock.emit("metaLoaded", { requestId: loadMsg.requestId, kind: "syncMeta", json: null });
     await p;
@@ -476,7 +484,7 @@ describe("歌词失效判定（mock nativeMetaLoad 链路）", () => {
       kind: "syncMeta",
       json: saveMsg.json,
     });
-    const stale = await p;
+    const stale = (await p) as Array<{ path: string }>;
     expect(stale).toHaveLength(1);
     expect(stale[0].path).toBe("/Music/a.mp3");
     // mtime 未变：不失效
