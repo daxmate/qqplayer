@@ -233,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, reactive, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Bookmark,
@@ -253,12 +253,8 @@ import {
 } from "@lucide/vue";
 import ePub from "epubjs";
 import type { Book, Rendition, Location, NavItem } from "epubjs";
-import type { BookView, HighlightAnnotation, HighlightColor, HighlightStyle } from "./types";
+import type { BookView } from "./types";
 import { saveBookProgress } from "./api";
-import { HIGHLIGHT_COLOR_STYLES } from "./annotations";
-import { toastError } from "../composables/useToast.js";
-import { uiSettings } from "../composables/useSettings.js";
-import { useShellBridge } from "../composables/useShellBridge.js";
 import { api } from "../utils/apiClient.js";
 import { assetForBook, ensureAsset, localAssetHTTPURL, syncEnabled } from "../utils/sync.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
@@ -270,7 +266,6 @@ import AnnotationPanel from "./AnnotationPanel.vue";
 import DictLookupModal from "./DictLookupModal.vue";
 import NoteEditorModal from "./NoteEditorModal.vue";
 import DictManagerModal from "./DictManagerModal.vue";
-import { READER_SETTINGS_DEFAULTS, readerFontCss, resolveReaderThemeColors } from "./settings";
 import { useReaderSettings } from "../composables/useReaderSettings";
 import { useAnnotations } from "../composables/useAnnotations";
 import { useSelectionToolbar } from "../composables/useSelectionToolbar";
@@ -342,14 +337,12 @@ const {
   refreshVocab,
   addHighlight,
   removeHighlight,
-  replaceHighlight,
   changeHighlightColor,
   toggleHighlightStyle,
   changeMenuColor,
   toggleMenuStyle,
   removeMenuHighlight,
   openMenuNote,
-  openNoteForHighlight,
   toggleBookmark,
   removeBookmark,
   openNoteCreate,
@@ -470,7 +463,6 @@ const { lookupState, onToolbarLookup, onLookupClose, onOpenDictManager } = useDi
 const {
   searchOpen,
   searchInitial,
-  openSearch,
   closeSearch,
   toggleSearch,
   clearTempHighlight,
