@@ -73,7 +73,7 @@
               :class="{ on: isFav }"
               :disabled="!state.currentSong"
               :title="isFav ? t('mobile.list.unfavorite') : t('mobile.list.favorite')"
-              @click="toggleFavorite(state.currentSong.path)"
+              @click="toggleFavorite(state.currentSong?.path || '')"
             >
               <Heart :size="20" :fill="isFav ? 'currentColor' : 'none'" />
             </button>
@@ -322,7 +322,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import {
   Music,
@@ -348,6 +348,7 @@ import {
   prevSong,
   nextSong,
   seek,
+  type Playlist,
 } from "../../composables/usePlayer.js";
 import {
   addToPlaylist,
@@ -413,6 +414,7 @@ function refreshCover() {
     coverPath.value = "";
     return;
   }
+  if (!s) return; // key 非空时必有 currentSong（仅用于类型收窄，运行时不可达）
   // 流媒体歌（stream/试听/URL）：网络图直用，不走 /api/cover
   const direct = s.coverUrl && !s.path ? s.coverUrl : "";
   coverDirect.value = direct;
@@ -420,8 +422,8 @@ function refreshCover() {
     coverPath.value = "";
     return;
   }
-  coverPath.value = s.path;
-  resolveCover(s.path, { download: true });
+  coverPath.value = s.path || "";
+  resolveCover(s.path || "", { download: true });
 }
 
 watch(
@@ -457,10 +459,18 @@ const COVER_SLIDE_MS = 200; // 封面滑出动画时长（与 CSS transition 同
 const COVER_REPOSITION_FALLBACK_MS = 600; // 切歌后封面 URL 未变化（单曲/相同封面）的滑入兜底
 const FULL_LYRIC_SLIDE_MS = 200; // 全歌词界面滑出动画时长（与 CSS transition 同步）
 
-const coverRef = ref(null);
+const coverRef = ref<HTMLDivElement | null>(null);
 const pullY = ref(0);
 const pullDragging = ref(false);
-let coverGesture = null; // { startX, startY, lastY, lastT, lastV, axis: null|'h'|'v' }
+interface CoverGesture {
+  startX: number;
+  startY: number;
+  lastY: number;
+  lastT: number;
+  lastV: number;
+  axis: "h" | "v" | null;
+}
+let coverGesture: CoverGesture | null = null;
 
 const playerStyle = computed(() => ({
   transform: pullY.value ? `translateY(${pullY.value}px)` : "",
@@ -470,8 +480,8 @@ const playerStyle = computed(() => ({
 // 横向切歌：位移跟随（--mp-swipe-shift 由 useHorizontalSwipe 写入）+ 跟手/动画过渡切换
 const coverNoTransition = ref(false); // true=跟手/重定位（无过渡），false=滑出/回弹/滑入（CSS transition）
 const coverBusy = ref(false); // 滑出→切歌→滑入编排中：禁止新手势
-let pendingSlideIn = null; // { from }：切歌后重定位到对侧再滑入 0
-let choreoTimers = [];
+let pendingSlideIn: { from: number } | null = null;
+let choreoTimers: number[] = [];
 
 // 横向手势实例：direction both + 左缘让位（屏幕左缘由 MobileShell 的 useEdgeSwipe 负责页面返回）；
 // 监听不在此 bind——封面元素由下方统一手势机直接转发 handleStart/Move/End。
@@ -487,7 +497,7 @@ const coverStyle = computed(() => ({
   transition: coverNoTransition.value ? "none" : "transform 0.22s ease",
 }));
 
-function onCoverStart(e) {
+function onCoverStart(e: TouchEvent) {
   if (coverBusy.value || fullLyricOpen.value) return;
   const touch = e.touches && e.touches[0];
   if (!touch) return;
@@ -502,7 +512,7 @@ function onCoverStart(e) {
   coverSwipe.handleStart(e);
 }
 
-function onCoverMove(e) {
+function onCoverMove(e: TouchEvent) {
   const g = coverGesture;
   if (!g) return;
   const touch = e.touches && e.touches[0];
@@ -570,7 +580,7 @@ function onCoverCancel() {
 // 封面滑出→切歌→滑入编排：
 //   松手达阈值 → 带过渡滑出到 ±屏宽（约 200ms）→ 切歌 → 等封面 URL 变化（或兜底）
 //   → 无过渡重定位到 ∓屏宽 → 下一帧带过渡滑入 0。期间 coverBusy 锁住重复手势。
-function coverTriggered(dir) {
+function coverTriggered(dir: "left" | "right") {
   coverBusy.value = true;
   coverNoTransition.value = false; // 开过渡：滑出动画
   const w = window.innerWidth || 375;
@@ -628,7 +638,7 @@ const lyricAreaStyle = computed(() => ({
 const fullLyricOpen = ref(false);
 const fullLyricRef = ref(null);
 const fullLyricNoTransition = ref(false);
-let fullLyricCloseTimer = null;
+let fullLyricCloseTimer: ReturnType<typeof setTimeout> | undefined = undefined;
 
 const fullLyricSwipe = useHorizontalSwipe({
   enabled: () => fullLyricOpen.value,
@@ -665,18 +675,20 @@ function closeFullLyric() {
 // ---------- 手势监听生命周期：事件绑定全部在模板上（@touch*），随元素 v-if 出现/消失自动生效；
 // 这里只做组件级清理（定时器）与播放页契约标记。 ----------
 onMounted(() => {
-  window.__qqpPlayerOpen = true; // 契约：播放页打开时不触发原生状态条召唤
+  (window as Window & { __qqpPlayerOpen?: boolean }).__qqpPlayerOpen = true; // 契约：播放页打开时不触发原生状态条召唤
 });
 
 onBeforeUnmount(() => {
-  window.__qqpPlayerOpen = false;
+  (window as Window & { __qqpPlayerOpen?: boolean }).__qqpPlayerOpen = false;
   clearChoreoTimers();
   if (fullLyricCloseTimer) clearTimeout(fullLyricCloseTimer);
   disposeCoverURL(); // 取消恢复在线订阅（契约：组件卸载清理）
 });
 
 // ---------- 歌名行 ----------
-const isFav = computed(() => (state.currentSong ? isFavorite(state.currentSong.path) : false));
+const isFav = computed(() =>
+  state.currentSong ? isFavorite(state.currentSong.path || "") : false,
+);
 const songPath = computed(() => state.currentSong?.path || "");
 
 // ---------- 进度条 ----------
@@ -685,11 +697,11 @@ const progressStyle = computed(() => ({
     state.duration > 0 ? `${Math.min(100, (state.currentTime / state.duration) * 100)}%` : "0%",
 }));
 
-function onSeek(e) {
-  seek(parseFloat(e.target.value));
+function onSeek(e: Event) {
+  seek(parseFloat((e.target as HTMLInputElement).value));
 }
 
-function fmt(time) {
+function fmt(time: number) {
   if (!time || isNaN(time)) return "0:00";
   const m = Math.floor(time / 60);
   const s = Math.floor(time % 60);
@@ -730,7 +742,7 @@ function openSleepSheet() {
 // ---------- ➕ 加到歌单 ----------
 const newName = ref("");
 
-async function togglePlaylistSong(p) {
+async function togglePlaylistSong(p: Playlist) {
   const path = songPath.value;
   if (!path) return;
   try {
@@ -741,7 +753,7 @@ async function togglePlaylistSong(p) {
       showToast(t("sidebar.drag.added", { name: p.name }));
     }
   } catch (err) {
-    toastError(err.message);
+    toastError((err as Error).message);
   }
 }
 
@@ -758,18 +770,18 @@ async function createAndAdd() {
     newName.value = "";
     addOpen.value = false;
   } catch (err) {
-    toastError(err.message);
+    toastError((err as Error).message);
   }
 }
 
 // ---------- 歌单键面板：快捷入口（跳到 MobileList，由 MobileShell push 处理） ----------
-function goList(kind, title) {
+function goList(kind: string, title: string) {
   queueOpen.value = false;
   emit("open-list", { name: "list", kind, title });
 }
 
 // ---------- 月亮：睡眠定时器 ----------
-function pickSleep(minutes) {
+function pickSleep(minutes: number | null) {
   if (minutes == null) {
     cancelSleepTimer();
   } else {

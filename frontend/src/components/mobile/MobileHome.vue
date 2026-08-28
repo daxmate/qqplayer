@@ -142,7 +142,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -182,13 +182,13 @@ async function onRescan() {
   }
 }
 
-// 收藏数量：以曲库中实际收藏的歌曲计
-const favoriteCount = computed(() => state.songs.filter((s) => isFavorite(s.path)).length);
+// 收藏数量：以曲库中实际收藏的歌曲计（path 可能为 null 的流媒体歌按空串查询，行为不变）
+const favoriteCount = computed(() => state.songs.filter((s) => isFavorite(s.path || "")).length);
 
 // 艺术家/专辑分组（与 Playlist.vue 网格视图一致的分组逻辑）
 const UNKNOWN_ARTIST = t("mobile.unknown.artist");
 const UNKNOWN_ALBUM = t("mobile.unknown.album");
-const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
+const norm = (v: string | undefined, fallback: string) => (v && v.trim ? v.trim() : "") || fallback;
 
 const artistGroups = computed(() => {
   const m = new Map();
@@ -213,15 +213,16 @@ const albumGroups = computed(() => {
 });
 
 // ============ 打开文件（NAS 导入入口） ============
-const fileInput = ref(null);
+const fileInput = ref<HTMLInputElement | null>(null);
 
 function openFilePicker() {
   fileInput.value?.click();
 }
 
-function onFilePicked(e) {
-  const files = [...(e.target.files || [])];
-  e.target.value = ""; // 允许重复选择同一文件
+function onFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const files = [...(input.files || [])];
+  input.value = ""; // 允许重复选择同一文件
   if (!files.length) return;
   const audioFiles = files.filter((f) => isAudioFile(f));
   if (!audioFiles.length) {

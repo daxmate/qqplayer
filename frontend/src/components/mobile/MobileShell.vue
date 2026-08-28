@@ -16,7 +16,7 @@
       <MobileList
         v-else-if="top.name === 'list'"
         :key="'list-' + stack.length"
-        :kind="top.kind"
+        :kind="top.kind || ''"
         :title="top.title"
         :payload="top.payload"
         @back="pop"
@@ -42,9 +42,9 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from "vue";
-import { selectSong, play, findSongIndex } from "../../composables/usePlayer.js";
+import { selectSong, play, findSongIndex, type Song } from "../../composables/usePlayer.js";
 import { useEdgeSwipe } from "../../composables/useSwipe.js";
 import MobilePager from "./MobilePager.vue";
 import MobileList from "./MobileList.vue";
@@ -56,7 +56,13 @@ const shellEl = ref(null);
 
 // ============ 页面栈（Apple Music 式导航） ============
 // 栈底固定为 main（横滑分页容器）；list 支持嵌套下钻；settings 为负一屏；player 为栈顶全屏层
-const stack = ref([{ name: "main" }]);
+interface View {
+  name: string;
+  kind?: string;
+  title?: string;
+  payload?: Record<string, unknown>;
+}
+const stack = ref<View[]>([{ name: "main" }]);
 const top = computed(() => stack.value[stack.value.length - 1]);
 
 // 分页当前下标（壳层持有：左缘右滑翻上一屏用；KeepAlive 重挂载后经 :page-index 恢复）
@@ -65,7 +71,7 @@ const pagerPage = ref(0);
 // 切换动画方向：负一屏（settings）进出与普通 push 相反（从左滑入/向右滑出）
 const navTransition = ref("mp-push");
 
-function push(view) {
+function push(view: View) {
   // 同页去重：连续点同一列表不重复入栈
   const last = stack.value[stack.value.length - 1];
   if (
@@ -123,7 +129,7 @@ function openPlayer() {
 }
 
 // 列表点击歌曲：开始播放并进入全屏播放器
-async function playFromList(song) {
+async function playFromList(song: Song) {
   const idx = findSongIndex(song);
   if (idx < 0) return;
   await selectSong(idx);

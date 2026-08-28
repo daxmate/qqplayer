@@ -10,14 +10,14 @@
       <Repeat1 v-else-if="state.playMode === 'repeatOne'" :size="18" />
       <Repeat v-else :size="18" />
     </button>
-    <button class="mp-cbtn" :title="t('control.prevSong')" @click="prevSong">
+    <button class="mp-cbtn" :title="t('control.prevSong')" @click="prevSong()">
       <SkipBack :size="20" />
     </button>
     <button class="mp-cbtn mp-play" :title="t('control.playPause')" @click="togglePlay">
       <Pause v-if="state.isPlaying" :size="26" />
       <Play v-else :size="26" />
     </button>
-    <button class="mp-cbtn" :title="t('control.nextSong')" @click="nextSong">
+    <button class="mp-cbtn" :title="t('control.nextSong')" @click="nextSong()">
       <SkipForward :size="20" />
     </button>
     <button
@@ -42,7 +42,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // 移动端播放页底部控制区（主播放页与全歌词界面共用同一份，保证视觉/行为一致）
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";

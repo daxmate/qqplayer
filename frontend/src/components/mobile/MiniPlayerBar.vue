@@ -39,7 +39,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, watch } from "vue";
 import { Music2, Play, Pause, SkipForward } from "@lucide/vue";
 import { useI18n } from "vue-i18n";

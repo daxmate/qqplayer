@@ -48,7 +48,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Menu, ChevronLeft } from "@lucide/vue";
@@ -70,7 +70,7 @@ const activeLabelKey = computed(() => {
   return c ? c.labelKey : "settings.category.sync";
 });
 
-function selectPanel(key) {
+function selectPanel(key: string) {
   panel.value = key;
   drawerOpen.value = false;
 }

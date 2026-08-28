@@ -28,7 +28,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useHorizontalSwipe } from "../../composables/useSwipe.js";
 import MobileHome from "./MobileHome.vue";
@@ -51,7 +51,7 @@ watch(
     if (v !== page.value) page.value = v;
   },
 );
-function setPage(i) {
+function setPage(i: number) {
   const v = Math.max(0, Math.min(PAGE_COUNT - 1, i));
   if (v === page.value) return;
   page.value = v;
@@ -79,7 +79,7 @@ const pagerStyle = computed(() => ({
   transform: `translateX(calc(${swipe.shift.value}px - ${page.value * 100}%))`,
 }));
 
-function onOverlay(open) {
+function onOverlay(open: boolean) {
   overlayOpen.value = open;
   emit("overlay", open);
 }
