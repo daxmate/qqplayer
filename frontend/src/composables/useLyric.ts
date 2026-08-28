@@ -1,6 +1,6 @@
 import { computed, watch } from "vue";
 import { audio } from "./audioEngine.ts";
-import { state } from "./playerState.ts";
+import { state, type LyricLine, type Song } from "./playerState.ts";
 import { lyricSettings } from "./useSettings.js";
 import { parseLrcText, mergeTranslationLines } from "../utils/parseLrc.js";
 import { apiGet, apiPost, apiPut, apiDelete, invalidate } from "../utils/apiClient.js";
@@ -10,7 +10,44 @@ import i18n from "../locales/i18n.js";
 // 非本地歌（stream 曲库网络条目 / 试听 / URL 播放）：没有可解析的本地歌词文件，
 // 按歌名/歌手走在线候选链路（/api/lyric/search 返回候选 LRC 全文 + 翻译），
 // 前端解析成与后端 /api/lyric 一致的 lines 结构。失败/无结果返回空歌词（不抛错）。
-export async function loadOnlineLyricForSong(song) {
+
+/** 歌词载荷：lines + 来源信息（在线候选 / 文件兜底共用） */
+interface LyricPayload {
+  lines: LyricLine[];
+  format: string | null;
+  source: string | null;
+}
+
+/** 在线歌词搜索候选（/api/lyric/search results 条目） */
+interface LyricSearchCandidate {
+  title?: string;
+  artist?: string;
+  source?: string;
+  text?: string;
+  tlyric?: string;
+  [key: string]: unknown;
+}
+
+/** 手动歌词状态（/api/lyric/manual 响应；fetchManualLyric 未命中时 { specified: false }） */
+interface ManualLyricState {
+  specified?: boolean;
+  path?: string;
+  format?: string;
+  text?: string;
+  source?: string;
+  tlyric?: string;
+  [key: string]: unknown;
+}
+
+/** AI 歌词对齐结果（后端 /api/lyric/align 响应） */
+interface AlignResult {
+  lrc?: string;
+  lines?: unknown;
+  duration?: number;
+  [key: string]: unknown;
+}
+
+export async function loadOnlineLyricForSong(song: Song): Promise<LyricPayload> {
   try {
     const q = new URLSearchParams({ title: song.name || "", artist: song.artist || "" });
     // 歌词搜索结果：1h 缓存 + 离线兜底（离线也能看最近搜过的歌词）
@@ -19,13 +56,13 @@ export async function loadOnlineLyricForSong(song) {
     });
     if (!r.ok) return { lines: [], format: null, source: null };
     const data = r.data || {};
-    const results = Array.isArray(data.results) ? data.results : [];
+    const results = (Array.isArray(data.results) ? data.results : []) as LyricSearchCandidate[];
     if (!results.length) return { lines: [], format: null, source: null };
     // 首选歌名精确匹配且有歌词的候选；否则第一个带歌词的
     const exact = results.find((r) => r.text && r.title === song.name);
     const hit = exact || results.find((r) => r.text);
     if (!hit) return { lines: [], format: null, source: null };
-    let lines = parseLrcText(hit.text || "");
+    let lines = parseLrcText(hit.text || "") as LyricLine[];
     if (hit.tlyric) lines = mergeTranslationLines(lines, parseLrcText(hit.tlyric));
     return { lines, format: lines.length ? "lrc" : null, source: hit.source || "online" };
   } catch {
@@ -41,7 +78,7 @@ export async function loadOnlineLyricForSong(song) {
 // 非 iOS 壳（syncEnabled false）→ 不写不读，桌面行为零变化。
 
 /** 歌词落文件（fire-and-forget；失败静默，不影响加载链路） */
-async function saveLyricFile(song, data) {
+async function saveLyricFile(song: Song, data: LyricPayload): Promise<void> {
   if (!syncEnabled() || !song || !song.path) return;
   try {
     const kind = await lyricKindKey(song.path);
@@ -53,7 +90,7 @@ async function saveLyricFile(song, data) {
 }
 
 /** 读歌词文件兜底；文件缺失/损坏/非 iOS 壳 → null */
-async function loadLyricFile(song) {
+async function loadLyricFile(song: Song): Promise<LyricPayload | null> {
   if (!syncEnabled() || !song || !song.path) return null;
   try {
     const kind = await lyricKindKey(song.path);
@@ -73,8 +110,13 @@ async function loadLyricFile(song) {
 }
 
 // 歌词加载 URL（缓存 key / 失效共用同一构造，保证路径一致）
-function lyricUrl(path, prefer) {
-  return "/api/lyric?path=" + encodeURIComponent(path) + "&prefer=" + encodeURIComponent(prefer);
+function lyricUrl(path: string | null, prefer: string): string {
+  return (
+    "/api/lyric?path=" +
+    encodeURIComponent(path as string) +
+    "&prefer=" +
+    encodeURIComponent(prefer)
+  );
 }
 
 /** 歌词文件本地读取快速超时（ms）：原生 metaLoad 异常挂起时兜底，防歌词加载被拖住 */
@@ -82,7 +124,7 @@ const LOCAL_LYRIC_READ_TIMEOUT_MS = 1500;
 
 // ============ 歌词加载（默认当前歌）；来源优先级按 lyricSettings.source：============
 // 'local' 本地优先 | 'online' 在线优先（在线失败后端自动回退本地）
-export async function loadLyric(index = state.currentIndex) {
+export async function loadLyric(index: number = state.currentIndex): Promise<void> {
   if (index < 0 || index >= state.songs.length) {
     state.lyric = [];
     state.lyricFormat = null;
@@ -105,7 +147,7 @@ export async function loadLyric(index = state.currentIndex) {
     // 快速超时兜底：原生 metaLoad 异常挂起时 1.5s 视为无文件，不阻塞歌词加载。
     const local = await Promise.race([
       loadLyricFile(song),
-      new Promise((resolve) => setTimeout(() => resolve(null), LOCAL_LYRIC_READ_TIMEOUT_MS)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), LOCAL_LYRIC_READ_TIMEOUT_MS)),
     ]);
     if (local) {
       state.lyric = local.lines;
@@ -157,10 +199,10 @@ watch(
 // openLyricSpec/closeLyricSpec 已随 specLyricOpen 迁至 uiState.ts（经 usePlayer barrel 导出）
 
 // 查询歌曲是否有手动指定歌词
-export async function fetchManualLyric(path) {
+export async function fetchManualLyric(path: string | null): Promise<ManualLyricState> {
   try {
     // 手动指定状态：1h 缓存（保存/清除后失效）
-    const r = await apiGet("/api/lyric/manual?path=" + encodeURIComponent(path), {
+    const r = await apiGet("/api/lyric/manual?path=" + encodeURIComponent(path as string), {
       cache: { ttl: 3600, offline: true },
     });
     if (r.ok) return r.data;
@@ -171,7 +213,19 @@ export async function fetchManualLyric(path) {
 }
 
 // 保存手动指定歌词（覆盖旧值）；tlyric 为可选中文翻译 LRC（JSON 歌词携带）
-export async function saveManualLyric({ path, format, text, source, tlyric }) {
+export async function saveManualLyric({
+  path,
+  format,
+  text,
+  source,
+  tlyric,
+}: {
+  path: string | null;
+  format?: string;
+  text?: string;
+  source?: string;
+  tlyric?: string;
+}): Promise<unknown> {
   const r = await apiPut("/api/lyric/manual", {
     path,
     format,
@@ -182,17 +236,17 @@ export async function saveManualLyric({ path, format, text, source, tlyric }) {
   const data = r.data || {};
   if (!r.ok) throw new Error(data.detail || i18n.global.t("errors.saveLyric"));
   // 歌词/手动状态缓存失效：下次加载立即拿到新值
-  invalidate("/api/lyric/manual?path=" + encodeURIComponent(path));
+  invalidate("/api/lyric/manual?path=" + encodeURIComponent(path as string));
   invalidate(lyricUrl(path, lyricSettings.source));
   return data;
 }
 
 // 清除手动指定歌词（恢复自动获取）
-export async function deleteManualLyric(path) {
+export async function deleteManualLyric(path: string | null): Promise<boolean> {
   try {
-    const r = await apiDelete("/api/lyric/manual?path=" + encodeURIComponent(path));
+    const r = await apiDelete("/api/lyric/manual?path=" + encodeURIComponent(path as string));
     if (r.ok) {
-      invalidate("/api/lyric/manual?path=" + encodeURIComponent(path));
+      invalidate("/api/lyric/manual?path=" + encodeURIComponent(path as string));
       invalidate(lyricUrl(path, lyricSettings.source));
     }
     return r.ok;
@@ -202,7 +256,10 @@ export async function deleteManualLyric(path) {
 }
 
 // 在线搜索歌词候选（网易云 + lrclib）
-export async function searchLyricCandidates(title, artist) {
+export async function searchLyricCandidates(
+  title: string,
+  artist: string,
+): Promise<LyricSearchCandidate[]> {
   const q = new URLSearchParams({ title: title || "", artist: artist || "" });
   const r = await apiGet("/api/lyric/search?" + q.toString());
   if (!r.ok) throw new Error(i18n.global.t("errors.searchLyric"));
@@ -212,32 +269,44 @@ export async function searchLyricCandidates(title, artist) {
 // AI 歌词对齐：纯歌词文本（无时间戳）→ 后端调本地 Qwen3-ForcedAligner 生成时间戳 → LRC 字符串
 // 对齐耗时较长（模型加载 + 长音频分段），调用方负责 loading 态；失败抛带 detail 的 Error
 // language 第一版不传（后端自动检测）
-export async function alignLyric({ path, text }) {
+export async function alignLyric({
+  path,
+  text,
+}: {
+  path: string | null;
+  text: string;
+}): Promise<AlignResult> {
   const r = await apiPost("/api/lyric/align", { path, text });
   const data = r.data || {};
   if (!r.ok) throw new Error(data.detail || i18n.global.t("spec.alignFailed"));
   return data; // { lrc, lines, duration? }
 }
 
-export function toggleZh() {
+export function toggleZh(): void {
   state.zhVisible = !state.zhVisible;
 }
 
 // ============ 跟唱模式：点句跳转 ============
-export const lineItems = computed(() => state.lyric.filter((x) => x.type === "line"));
+
+/** 时间歌词行（state.lyric 中 type==='line' 的子集；节标题行不含 s/e） */
+type LyricLineEntry = Extract<LyricLine, { type: "line" }>;
+
+export const lineItems = computed<LyricLineEntry[]>(() =>
+  state.lyric.filter((x): x is LyricLineEntry => x.type === "line"),
+);
 
 // 歌词延迟校准：offset > 0 = 歌词比声音延后显示。
 // 音频时间 t 在歌词时间轴上对应 t - offset；歌词时间 s 在音频轴上对应 s + offset。
 // 定位/锚点比较统一用 lyricTime()，跳句 seek 统一用 audioTime()。
-export const lyricTime = (t) => t - lyricSettings.offset;
-export const audioTime = (t) => t + lyricSettings.offset;
+export const lyricTime = (t: number): number => t - lyricSettings.offset;
+export const audioTime = (t: number): number => t + lyricSettings.offset;
 
 // 跟唱模式锚点：正在唱的句子索引（-1 = 未锚定，如前奏/间隙）
 // 不靠每次 timeupdate 反推当前句——句末 e 一过 currentLineIndex 就指向下一句，
 // "反推"永远判断不出该停，导致一句唱完不停
 // 注意：这是非响应式模块状态（computed 缓存问题特意避免 reactive），
 // 用对象包一层便于跨模块（playerCore/useAbLoop）读写。
-export const karaokeState = { line: -1 };
+export const karaokeState: { line: number } = { line: -1 };
 
 // 跳句静默窗口（2026-08-23 跟唱"下一句马上停"根因修复）：
 // playLine/jumpToLine 跳转后，AVPlayer seek 异步 + timeupdate 250ms 回传延迟的窗口内，
@@ -245,22 +314,22 @@ export const karaokeState = { line: -1 };
 // 跳转后 300ms 内 ticker 不做锚点重定位（句末判定仍生效，不受影响）。
 let jumpQuietUntil = 0;
 
-export function markKaraokeJump() {
+export function markKaraokeJump(): void {
   jumpQuietUntil = performance.now() + 300;
 }
 
 /** ticker 是否处于跳转静默窗口（静默期内不重定位锚点） */
-export function karaokeJumpQuiet() {
+export function karaokeJumpQuiet(): boolean {
   return performance.now() < jumpQuietUntil;
 }
 
 /** 仅供测试：重置跳转静默窗口（防跨测试 300ms 窗口泄漏） */
-export function _resetKaraokeJump() {
+export function _resetKaraokeJump(): void {
   jumpQuietUntil = 0;
 }
 
 // 严格区间匹配：t 落在哪一句内（不含间隙/前奏/尾声）
-export function locateLine(t) {
+export function locateLine(t: number): number {
   const lines = lineItems.value;
   const tt = lyricTime(t);
   for (let i = 0; i < lines.length; i++) {
@@ -270,17 +339,17 @@ export function locateLine(t) {
 }
 
 // 重新锚定当前时间所在句（playerCore 的 play/seek 调用；-1 = 前奏/间隙，播到下一句时自动锚定）
-export function reanchorKaraoke(t) {
+export function reanchorKaraoke(t: number): void {
   karaokeState.line = locateLine(t);
 }
 
 // 仅供测试：重置跟唱锚点
-export function _resetKaraokeAnchor() {
+export function _resetKaraokeAnchor(): void {
   karaokeState.line = -1;
 }
 
 // 跳到某句句首；keepPlaying=true 时若暂停中则继续播
-export function jumpToLine(lineIndex, keepPlaying) {
+export function jumpToLine(lineIndex: number, keepPlaying: boolean): void {
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   karaokeState.line = lineIndex;
@@ -290,7 +359,7 @@ export function jumpToLine(lineIndex, keepPlaying) {
   if (keepPlaying && audio.paused) audio.play().catch(() => {});
 }
 
-export function playLine(lineIndex) {
+export function playLine(lineIndex: number): void {
   const lines = lineItems.value;
   if (lineIndex < 0 || lineIndex >= lines.length) return;
   const ln = lines[lineIndex];
@@ -305,7 +374,7 @@ export function playLine(lineIndex) {
 // currentLineIndex 是 computed，而 karaokeState.line 是非响应式模块变量：
 // 连续按键（n 后立即 p）时 computed 可能返回缓存旧值，导致上一句/下一句跳错。
 // 这里直接读最新值：暂停时用锚点句，播放中用时间反推。
-function currentKaraokeIndex() {
+function currentKaraokeIndex(): number {
   // 暂停判断用 audio.paused（本地同步）：iOS 上 state.isPlaying 靠原生事件回传有桥往返延迟，
   // 句末暂停瞬间按上一句/下一句会误走"播放中"分支（locateLine 在句末边界返回下一句 → +1 跳两句）
   if (state.mode === "karaoke" && karaokeState.line >= 0 && audio.paused) {
@@ -319,12 +388,12 @@ function currentKaraokeIndex() {
   return locateLine(state.currentTime);
 }
 
-export function prevLine() {
+export function prevLine(): void {
   const cur = currentKaraokeIndex();
   if (cur > 0) playLine(cur - 1);
 }
 
-export function nextLine() {
+export function nextLine(): void {
   const lines = lineItems.value;
   const cur = currentKaraokeIndex();
   if (cur >= 0 && cur < lines.length - 1) playLine(cur + 1);
@@ -333,7 +402,7 @@ export function nextLine() {
 // 当前高亮句（按时间戳定位）
 // 取「最后一条已开始的句子」：句间间隙（上一句 e ~ 下一句 s）中保持上一句，
 // 播放结束后保持最后一句；这样跟唱模式 timeupdate 才能识别「该停了」
-export const currentLineIndex = computed(() => {
+export const currentLineIndex = computed<number>(() => {
   const lines = lineItems.value;
   if (!lines.length) return -1;
   // 跟唱模式暂停（含句末自动停）时保持锚点句：句尾边界 e == 下一句 s 时，
