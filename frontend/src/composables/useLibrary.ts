@@ -1,5 +1,5 @@
 import { computed } from "vue";
-import { state } from "./playerState.ts";
+import { state, type Playlist } from "./playerState.ts";
 import { audio } from "./audioEngine.ts";
 import { selectSong, _resetPlayMode } from "./queueEngine.ts";
 import { showToast, toastError } from "./useToast.js";
@@ -14,7 +14,7 @@ import i18n from "../locales/i18n.js";
 export const DRAG_SONG_TYPE = "application/x-qqplayer-song";
 
 // ============ 收藏（后端持久化 ~/Library/Application Support/qqplayer）============
-export async function loadFavorites() {
+export async function loadFavorites(): Promise<void> {
   try {
     // 元数据级缓存：60s + 离线兜底（iOS 离线可看收藏）；toggle 成功后失效
     const r = await apiGet("/api/favorites", { cache: { ttl: 60, offline: true } });
@@ -35,11 +35,11 @@ export async function loadFavorites() {
   }
 }
 
-export function isFavorite(path) {
+export function isFavorite(path: string): boolean {
   return state.favorites.includes(path);
 }
 
-export async function toggleFavorite(path) {
+export async function toggleFavorite(path: string): Promise<void> {
   // 写路径本地优先：乐观更新 UI → 入 dirty 队列 → 立即同步
   // 网络失败保留队列（离线语义）；HTTP 拒绝回滚（服务端为准，与改造前一致）
   const wasFav = state.favorites.includes(path);
@@ -62,7 +62,7 @@ export async function toggleFavorite(path) {
 }
 
 // ============ 歌单（后端持久化 SQLite playlists 表）============
-export async function loadPlaylists() {
+export async function loadPlaylists(): Promise<void> {
   try {
     // 歌单元数据：60s + 离线兜底；增删改成功后失效
     const r = await apiGet("/api/playlists", { cache: { ttl: 60, offline: true } });
@@ -87,21 +87,21 @@ export async function loadPlaylists() {
   }
 }
 
-export const activePlaylist = computed(
+export const activePlaylist = computed<Playlist | null>(
   () => state.playlists.find((p) => p.id === state.activePlaylistId) || null,
 );
 
-function _playlistById(pid) {
+function _playlistById(pid: string | null): Playlist | null {
   return state.playlists.find((p) => p.id === pid) || null;
 }
 
-export function isInPlaylist(pid, path) {
+export function isInPlaylist(pid: string, path: string): boolean {
   const p = _playlistById(pid);
   return !!p && (p.songPaths || []).includes(path);
 }
 
 // 新建歌单：服务端生成 id，保持等待响应后入列表（与改造前一致；写入成功后失效列表缓存）
-export async function createPlaylist(name) {
+export async function createPlaylist(name: string): Promise<Playlist> {
   const r = await apiPost("/api/playlists", { name: name.trim() });
   if (!r.ok) {
     const data = r.data || {};
@@ -113,7 +113,7 @@ export async function createPlaylist(name) {
   return p;
 }
 
-export async function renamePlaylist(pid, name) {
+export async function renamePlaylist(pid: string, name: string): Promise<void> {
   const p = _playlistById(pid);
   if (!p) return;
   const old = p.name;
@@ -132,12 +132,16 @@ export async function renamePlaylist(pid, name) {
   // queued（网络失败）：本地保留新名，队列稍后自动同步
 }
 
-export async function deletePlaylist(pid) {
+export async function deletePlaylist(pid: string): Promise<void> {
   const idx = state.playlists.findIndex((p) => p.id === pid);
   if (idx < 0) return;
   const [removed] = state.playlists.splice(idx, 1);
   if (state.activePlaylistId === pid) state.activePlaylistId = null;
-  const result = await writeLocal({ url: `/api/playlists/${pid}`, method: "DELETE" });
+  const result = await writeLocal({
+    url: `/api/playlists/${pid}`,
+    method: "DELETE",
+    body: undefined,
+  });
   if (result === "ok") {
     invalidate("/api/playlists");
   } else if (result === "rejected") {
@@ -146,7 +150,7 @@ export async function deletePlaylist(pid) {
   }
 }
 
-export async function addToPlaylist(pid, path) {
+export async function addToPlaylist(pid: string, path: string): Promise<void> {
   const p = _playlistById(pid);
   if (!p || isInPlaylist(pid, path)) return;
   p.songPaths.push(path); // 乐观更新
@@ -166,16 +170,16 @@ export async function addToPlaylist(pid, path) {
 // 移除成功后的撤销：加回歌单末尾（POST 现有 API；原位恢复需整体重排，成本高价值低）
 const UNDO_DURATION = 5000;
 
-async function restoreToPlaylist(pid, path, name) {
+async function restoreToPlaylist(pid: string, path: string, name: string): Promise<void> {
   try {
     await addToPlaylist(pid, path);
     showToast(i18n.global.t("playlist.restoredToPlaylist", { name }));
   } catch (e) {
-    toastError(e.message || i18n.global.t("errors.addToPlaylist"));
+    toastError((e as Error).message || i18n.global.t("errors.addToPlaylist"));
   }
 }
 
-export async function removeFromPlaylist(pid, path) {
+export async function removeFromPlaylist(pid: string, path: string): Promise<void> {
   const p = _playlistById(pid);
   if (!p) return;
   const removed = p.songPaths.filter((x) => x === path);
@@ -183,6 +187,7 @@ export async function removeFromPlaylist(pid, path) {
   const result = await writeLocal({
     url: `/api/playlists/${pid}/songs/${encodeURIComponent(path)}`,
     method: "DELETE",
+    body: undefined,
   });
   if (result === "ok") {
     invalidate("/api/playlists");
@@ -202,11 +207,15 @@ export async function removeFromPlaylist(pid, path) {
   });
 }
 
-export async function setPlaylistOrder(pid, paths) {
+export async function setPlaylistOrder(
+  pid: string | null,
+  paths: Array<string | null | undefined>,
+): Promise<void> {
   const p = _playlistById(pid);
   if (!p) return;
   const old = p.songPaths;
-  p.songPaths = paths; // 乐观更新
+  // 调用方（usePlaylistDnD DOM 路径收集）可能带 undefined，运行时原样透传（后端容错），仅类型收紧
+  p.songPaths = paths as string[]; // 乐观更新
   const result = await writeLocal({
     url: `/api/playlists/${pid}/order`,
     method: "PUT",
@@ -225,7 +234,14 @@ export async function setPlaylistOrder(pid, paths) {
 // 网络歌 path 为 null 不参与删除；调用方（Playlist.vue）负责 toast 汇总与 loadSongs() 刷新
 // 非 200 抛错（调用方 toastError）；成功返回契约对象
 // 注意：后端并行开发中，按上述契约实现；后端未就绪时网络失败会走到抛错分支
-export async function deleteLibrarySongs(paths) {
+/** DELETE /api/library/songs 成功响应的契约对象 */
+interface DeleteLibrarySongsResult {
+  deleted: number;
+  missing: string[];
+  errors: Array<{ path: string; reason: string }>;
+}
+
+export async function deleteLibrarySongs(paths: string[]): Promise<DeleteLibrarySongsResult> {
   const r = await apiDelete("/api/library/songs", { body: { paths } });
   if (!r.ok) {
     // 网络失败（后端未就绪 / 服务未起）统一报「删除失败」
@@ -237,9 +253,10 @@ export async function deleteLibrarySongs(paths) {
 // 从播放队列移除已删除的歌曲（文件已删，撤销无意义 → 不弹队列撤销 toast）
 // 复用 removeFromQueue 的索引处理思路：splice + currentIndex 修正 + 当前歌自动切下一首
 // 倒序移除保证索引不漂移；网络歌（path=null）不参与
-const _deletePathSet = (paths) => new Set((paths || []).filter((p) => p != null));
+const _deletePathSet = (paths: Array<string | null> | null | undefined): Set<string | null> =>
+  new Set((paths || []).filter((p) => p != null));
 
-export function removeSongsFromQueue(paths) {
+export function removeSongsFromQueue(paths: Array<string | null> | null | undefined): void {
   const set = _deletePathSet(paths);
   for (let i = state.songs.length - 1; i >= 0; i--) {
     const song = state.songs[i];
@@ -248,7 +265,7 @@ export function removeSongsFromQueue(paths) {
 }
 
 // removeFromQueue 的核心索引逻辑（无 toast/撤销；撤销由删除 toast 语义取代）
-function _spliceQueueAt(index) {
+function _spliceQueueAt(index: number): void {
   state.songs.splice(index, 1);
   if (index < state.currentIndex) {
     state.currentIndex -= 1;
