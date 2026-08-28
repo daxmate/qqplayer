@@ -10,7 +10,7 @@
 // 配对成功后 iOS 原生注入 server + reload → 引导页自然消失（无需轮询/监听）。
 
 /** 是否处于「iOS 壳已启动但尚未连接桌面端」状态（仅 iOS 壳；桌面浏览器/macOS 壳恒 false） */
-export function isShellUnpaired() {
+export function isShellUnpaired(): boolean {
   try {
     // iOS 壳专属桥标记：macOS 壳（仅 qqplayerNative）与桌面浏览器都无此桥 → 不拦截
     if (typeof window === "undefined" || !window.qqplayerIosBridge) return false;

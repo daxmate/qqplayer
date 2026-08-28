@@ -6,4 +6,4 @@
 // 都干净（同 searchState.js 模式，parallel-dev 知识库"watch/顶层求值"坑）。
 import { ref } from "vue";
 
-export const isSettingsOpen = ref(false);
+export const isSettingsOpen = ref<boolean>(false);

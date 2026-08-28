@@ -7,4 +7,4 @@
 // 抽成零依赖模块后两条 import 链都干净（parallel-dev 知识库"watch/顶层求值"坑）。
 import { ref } from "vue";
 
-export const isSearchOpen = ref(false);
+export const isSearchOpen = ref<boolean>(false);
