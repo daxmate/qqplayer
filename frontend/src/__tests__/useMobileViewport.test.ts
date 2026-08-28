@@ -1,9 +1,9 @@
 // useMobileViewport 测试：移动端断点（<1024px）判定与响应式切换
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { installMatchMedia } from "./helpers/matchMedia.js";
+import { installMatchMedia, type MatchMediaHelper } from "./helpers/matchMedia.js";
 
 describe("useMobileViewport 断点判定", () => {
-  let mq;
+  let mq: MatchMediaHelper;
 
   beforeEach(() => {
     mq = installMatchMedia(false); // 桌面初始
@@ -51,8 +51,9 @@ describe("useMobileViewport 断点判定", () => {
 
   it("兼容 addListener 老式监听（removeEventListener 不存在时）", async () => {
     // 移除 addEventListener → 走 addListener 分支
-    mq.mq.addEventListener = undefined;
-    mq.mq.removeEventListener = undefined;
+    mq.mq.addEventListener = undefined as unknown as MatchMediaHelper["mq"]["addEventListener"];
+    mq.mq.removeEventListener =
+      undefined as unknown as MatchMediaHelper["mq"]["removeEventListener"];
     vi.resetModules();
     const { isMobile } = await import("../composables/useMobileViewport.js");
     mq.set(true);

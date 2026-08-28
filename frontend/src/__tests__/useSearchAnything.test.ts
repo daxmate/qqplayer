@@ -6,47 +6,47 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，playerCore 模块顶层 new Audio()）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, () => void> = {};
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     this.listeners["play"]?.();
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
     this.listeners["pause"]?.();
   }
-  removeAttribute() {}
-  addEventListener(ev, fn) {
+  removeAttribute(): void {}
+  addEventListener(ev: string, fn: () => void): void {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub（playerCore/settingsSync 模块加载时 try/catch 保护，测试体里显式提供）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -87,14 +87,27 @@ const BASE_SETTINGS = [
 
 const DEBOUNCE_MS = 250;
 
+// vi.mock 注入的假模块形状（运行时生效；类型层用局部断言覆盖真实模块的严格导出）
+interface MockSettingEntry {
+  key: string;
+  labelKey: string;
+  keywords: string[];
+  category: string;
+  [k: string]: unknown;
+}
+
 const { state } = await import("../composables/usePlayer.js");
-const settingsModule = await import("../settingsIndex");
+// 运行时是 vi.mock 的假 settingsIndex（只有 settingsIndex 数组 + SETTING_CATEGORIES），
+// 类型层无法表达 mock 形状 → as unknown as 局部断言（与 vi.mock 工厂形状对齐）
+const settingsModule = (await import("../settingsIndex")) as unknown as {
+  settingsIndex: MockSettingEntry[];
+};
 const { useSearchAnything } = await import("../composables/useSearchAnything.js");
 
 const { query, results, loading, isSearchOpen, clear, onlineSource, setOnlineSource } =
   useSearchAnything();
 
-let fetchMock;
+let fetchMock: ReturnType<typeof vi.fn>;
 
 function resetSettings() {
   settingsModule.settingsIndex.length = 0;
@@ -191,14 +204,14 @@ describe("五类数据源", () => {
     await flush();
 
     const kinds = new Set(results.value.map((r) => r.kind));
-    for (const k of ["song", "online", "artist", "album", "setting"]) {
+    for (const k of ["song", "online", "artist", "album", "setting"] as const) {
       expect(kinds.has(k)).toBe(true);
     }
-    expect(results.value.find((r) => r.kind === "song").badge).toBe("本地");
-    expect(results.value.find((r) => r.kind === "online").badge).toBe("在线");
-    expect(results.value.find((r) => r.kind === "artist").badge).toBe("歌手");
-    expect(results.value.find((r) => r.kind === "album").badge).toBe("专辑");
-    expect(results.value.find((r) => r.kind === "setting").badge).toBe("设置");
+    expect(results.value.find((r) => r.kind === "song")!.badge).toBe("本地");
+    expect(results.value.find((r) => r.kind === "online")!.badge).toBe("在线");
+    expect(results.value.find((r) => r.kind === "artist")!.badge).toBe("歌手");
+    expect(results.value.find((r) => r.kind === "album")!.badge).toBe("专辑");
+    expect(results.value.find((r) => r.kind === "setting")!.badge).toBe("设置");
   });
 
   it("ResultItem payload 结构", async () => {
@@ -222,14 +235,14 @@ describe("五类数据源", () => {
     query.value = "晴";
     await flush();
 
-    const song = results.value.find((r) => r.kind === "song");
+    const song = results.value.find((r) => r.kind === "song")!;
     expect(song.id).toBe(S1.path);
     expect(song.title).toBe("晴天");
     expect(song.subtitle).toBe("晴天乐队 · 晴空");
     expect(song.score).toBe(120); // 前缀 100 + 歌名字段权重 20
     expect(song.payload).toEqual(S1); // 本地歌曲 payload = state.songs 条目（reactive 代理，deep 相等）
 
-    const online = results.value.find((r) => r.kind === "online");
+    const online = results.value.find((r) => r.kind === "online")!;
     expect(online.id).toBe("online-o1");
     expect(online.payload).toEqual({
       id: "o1",
@@ -241,16 +254,16 @@ describe("五类数据源", () => {
       quality: "standard",
     });
 
-    const artist = results.value.find((r) => r.kind === "artist");
+    const artist = results.value.find((r) => r.kind === "artist")!;
     expect(artist.title).toBe("晴天乐队");
     expect(artist.subtitle).toBe("2 首");
     expect(artist.payload).toEqual({ artist: "晴天乐队", count: 2 });
 
-    const album = results.value.find((r) => r.kind === "album");
+    const album = results.value.find((r) => r.kind === "album")!;
     expect(album.title).toBe("晴空");
     expect(album.payload).toEqual({ album: "晴空", artists: ["晴天乐队"], count: 2 });
 
-    const setting = results.value.find((r) => r.kind === "setting");
+    const setting = results.value.find((r) => r.kind === "setting")!;
     expect(setting.title).toBe("均衡器"); // t(settings.eq)
     expect(setting.subtitle).toBe("播放"); // t(settings.category.playback)
     expect(setting.score).toBe(110); // 别名"晴天设置"前缀命中 100 + 别名加成 10
@@ -297,7 +310,7 @@ describe("打分排序", () => {
 
   it("本地结果先行渲染，在线到达后追加末尾", async () => {
     state.songs = [{ id: 1, path: "/a.mp3", name: "本地歌", artist: "A", album: "B" }];
-    let resolveOnline;
+    let resolveOnline!: (value: unknown) => void;
     fetchMock.mockReturnValue(
       new Promise((res) => {
         resolveOnline = res;
@@ -346,10 +359,10 @@ describe("打分排序", () => {
     // 文案"播放模式"不含"循环"：query="循环" 走 keywords 别名 → 完全相等 120+10
     query.value = "循环";
     await flush();
-    const setting = results.value.find((r) => r.kind === "setting");
+    const setting = results.value.find((r) => r.kind === "setting")!;
     expect(setting).toBeTruthy();
     expect(setting.score).toBe(130);
-    expect(setting.payload.key).toBe("playMode");
+    expect((setting.payload as { key?: string }).key).toBe("playMode");
   });
 });
 
@@ -357,16 +370,16 @@ describe("歌手/专辑聚合", () => {
   it("空 artist/album 归未知歌手/未知专辑", async () => {
     state.songs = [
       { id: 1, path: "/a.mp3", name: "无主", artist: "", album: "" },
-      { id: 2, path: "/b.mp3", name: "无主2", artist: "  ", album: null },
+      { id: 2, path: "/b.mp3", name: "无主2", artist: "  ", album: null as unknown as string },
     ];
     query.value = "未知";
     await flush();
-    const artist = results.value.find((r) => r.kind === "artist");
+    const artist = results.value.find((r) => r.kind === "artist")!;
     expect(artist.title).toBe("未知歌手");
-    expect(artist.payload.count).toBe(2);
-    const album = results.value.find((r) => r.kind === "album");
+    expect((artist.payload as { count?: number }).count).toBe(2);
+    const album = results.value.find((r) => r.kind === "album")!;
     expect(album.title).toBe("未知专辑");
-    expect(album.payload.count).toBe(2);
+    expect((album.payload as { count?: number }).count).toBe(2);
   });
 
   it("专辑 artists 去重，>2 显示 A / B 等", async () => {
@@ -378,10 +391,10 @@ describe("歌手/专辑聚合", () => {
     ];
     query.value = "合辑";
     await flush();
-    const album = results.value.find((r) => r.kind === "album");
+    const album = results.value.find((r) => r.kind === "album")!;
     expect(album.subtitle).toBe("A / B 等");
-    expect(album.payload.count).toBe(4);
-    expect(album.payload.artists).toEqual(["A", "B", "C"]);
+    expect((album.payload as { count?: number }).count).toBe(4);
+    expect((album.payload as { artists?: string[] }).artists).toEqual(["A", "B", "C"]);
   });
 
   it("2 个 artists 显示 A / B（不截断）", async () => {
@@ -391,7 +404,7 @@ describe("歌手/专辑聚合", () => {
     ];
     query.value = "双人辑";
     await flush();
-    const album = results.value.find((r) => r.kind === "album");
+    const album = results.value.find((r) => r.kind === "album")!;
     expect(album.subtitle).toBe("A / B");
   });
 });
@@ -426,7 +439,7 @@ describe("每类上限", () => {
 
 describe("在线请求", () => {
   it("searchSeq：过期响应丢弃", async () => {
-    let resolveFirst;
+    let resolveFirst!: (value: unknown) => void;
     fetchMock
       .mockImplementationOnce(
         () =>
@@ -474,7 +487,7 @@ describe("在线请求", () => {
 
 describe("在线结果匹配扩展到歌手/专辑（2026-08-25）", () => {
   // 构造单条在线 item：title/artist/album 可分别命中不同 query
-  function mockOnlineItem(item) {
+  function mockOnlineItem(item: Record<string, unknown>) {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({

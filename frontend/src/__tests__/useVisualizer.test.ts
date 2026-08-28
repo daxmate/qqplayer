@@ -4,43 +4,41 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
-  set src(v) {
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, () => void> = {};
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
   }
-  removeAttribute() {}
-  addEventListener(ev, fn) {
+  removeAttribute(): void {}
+  addEventListener(ev: string, fn: () => void): void {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -74,12 +72,32 @@ const {
 } = await import("../composables/useVisualizer.js");
 
 // FakeAudioContext：jsdom 无 Web Audio，stub 记录滤波器链 + analyser 挂载
+// 类型：图节点字段与 useEq/useVisualizer 真实读取对齐（connect/disconnect 为 vi.fn）
+interface FakeBiquadFilter {
+  type: string;
+  frequency: { value: number };
+  Q: { value: number };
+  gain: { value: number };
+  connect: ReturnType<typeof vi.fn>;
+  disconnect: ReturnType<typeof vi.fn>;
+}
+
+interface FakeAnalyser {
+  fftSize: number;
+  smoothingTimeConstant: number;
+  frequencyBinCount: number;
+  connect: ReturnType<typeof vi.fn>;
+  getByteFrequencyData: ReturnType<typeof vi.fn>;
+}
+
 class FakeAudioContext {
-  static instances = [];
+  static instances: FakeAudioContext[] = [];
+  destination: Record<string, unknown> = {};
+  filters: FakeBiquadFilter[] = [];
+  analyser: FakeAnalyser | null = null;
+  source: { connect: ReturnType<typeof vi.fn> } | undefined;
+  masterGain: { gain: { value: number }; connect: ReturnType<typeof vi.fn> } | undefined;
   constructor() {
-    this.destination = {};
-    this.filters = [];
-    this.analyser = null;
     FakeAudioContext.instances.push(this);
   }
   createMediaElementSource() {
@@ -91,8 +109,8 @@ class FakeAudioContext {
     this.masterGain = g;
     return g;
   }
-  createBiquadFilter() {
-    const f = {
+  createBiquadFilter(): FakeBiquadFilter {
+    const f: FakeBiquadFilter = {
       type: "",
       frequency: { value: 0 },
       Q: { value: 0 },
@@ -103,19 +121,19 @@ class FakeAudioContext {
     this.filters.push(f);
     return f;
   }
-  createAnalyser() {
+  createAnalyser(): FakeAnalyser {
     this.analyser = {
       fftSize: 0,
       smoothingTimeConstant: 0,
       frequencyBinCount: 128,
       connect: vi.fn(),
-      getByteFrequencyData: vi.fn((arr) => {
+      getByteFrequencyData: vi.fn((arr: Uint8Array) => {
         for (let i = 0; i < arr.length; i++) arr[i] = i < arr.length / 4 ? 200 : 30;
       }),
     };
     return this.analyser;
   }
-  resume() {
+  resume(): Promise<void> {
     return Promise.resolve();
   }
 }
@@ -157,8 +175,8 @@ describe("ensureAnalyser / getAnalyser", () => {
     // 图未建（还没播放过）
     expect(ensureAnalyser()).toBe(null);
     await play(); // audio.play() 同步建图（source → 10 filters → destination）
-    const ctx = FakeAudioContext.instances.at(-1);
-    const a1 = ensureAnalyser();
+    const ctx = FakeAudioContext.instances.at(-1)!;
+    const a1 = ensureAnalyser()!;
     expect(a1).not.toBe(null);
     // analyser 插入图尾：lastFilter.disconnect + lastFilter→analyser→destination
     const last = ctx.filters[9];
@@ -179,7 +197,7 @@ describe("ensureAnalyser / getAnalyser", () => {
     stubAudioContext();
     setupSong();
     await play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     const orig = ctx.createAnalyser.bind(ctx);
     ctx.createAnalyser = () => {
       throw new Error("boom");
@@ -219,12 +237,13 @@ describe("ensureAnalyser / getAnalyser", () => {
 
 describe("readBarData", () => {
   it("归一化 0~1、条数可控、跳过 DC", () => {
+    // 只实现 AnalyserNode 用到的字段，其余缺省 → as unknown as 断言
     const a = {
       frequencyBinCount: 128,
-      getByteFrequencyData: (arr) => {
+      getByteFrequencyData: (arr: Uint8Array) => {
         for (let i = 0; i < arr.length; i++) arr[i] = 0; // 全 0 → 静音
       },
-    };
+    } as unknown as AnalyserNode;
     const vals = readBarData(a, 32);
     expect(vals).toHaveLength(32);
     vals.forEach((v) => {
@@ -237,7 +256,7 @@ describe("readBarData", () => {
     const a = {
       frequencyBinCount: 128,
       getByteFrequencyData: () => {},
-    };
+    } as unknown as AnalyserNode;
     expect(readBarData(a, 999)).toHaveLength(127); // ≤ frequencyBinCount-1
     expect(readBarData(a, 1)).toHaveLength(4); // ≥ 4
   });
@@ -245,7 +264,30 @@ describe("readBarData", () => {
 
 describe("drawSpectrum", () => {
   // 完整 2d mock：记录绘制调用 + shadowBlur 峰值（断言发光）
-  function fakeCtx2d() {
+  // 类型 = CanvasRenderingContext2D & 被 mock 的成员（vi.fn），断言可读 .mock，绘制调用满足真实签名
+  type FakeCtx2D = CanvasRenderingContext2D & {
+    clearRect: ReturnType<typeof vi.fn>;
+    fillRect: ReturnType<typeof vi.fn>;
+    fill: ReturnType<typeof vi.fn>;
+    stroke: ReturnType<typeof vi.fn>;
+    beginPath: ReturnType<typeof vi.fn>;
+    closePath: ReturnType<typeof vi.fn>;
+    arc: ReturnType<typeof vi.fn>;
+    roundRect: ReturnType<typeof vi.fn>;
+    moveTo: ReturnType<typeof vi.fn>;
+    lineTo: ReturnType<typeof vi.fn>;
+    createLinearGradient: ReturnType<typeof vi.fn>;
+    createRadialGradient: ReturnType<typeof vi.fn>;
+    fillStyle: string;
+    strokeStyle: string;
+    lineWidth: number;
+    lineCap: string;
+    lineJoin: string;
+    shadowBlur: number;
+    shadowColor: string;
+    _shadowMax: number;
+  };
+  function fakeCtx2d(): FakeCtx2D {
     const g = {
       clearRect: vi.fn(),
       fillRect: vi.fn(),
@@ -270,12 +312,13 @@ describe("drawSpectrum", () => {
     let sb = 0;
     Object.defineProperty(g, "shadowBlur", {
       get: () => sb,
-      set: (v) => {
+      set: (v: number) => {
         sb = v;
         if (v > g._shadowMax) g._shadowMax = v;
       },
     });
-    return g;
+    // mock 未实现 CanvasRenderingContext2D 全量成员 → as unknown as 断言
+    return g as unknown as FakeCtx2D;
   }
 
   it("有数据：圆角频谱条 + 垂直渐变 + 发光 + 峰值保持亮帽", () => {
@@ -322,7 +365,31 @@ describe("drawSpectrum", () => {
 });
 
 // ============ 任务 K：readWaveData + 6 样式渲染器 ============
-function fullCtx2d() {
+// 与 fakeCtx2d 同款：完整成员用 CanvasRenderingContext2D 交叉类型承接（见 drawSpectrum describe）
+type FullCtx2D = CanvasRenderingContext2D & {
+  clearRect: ReturnType<typeof vi.fn>;
+  fillRect: ReturnType<typeof vi.fn>;
+  fill: ReturnType<typeof vi.fn>;
+  stroke: ReturnType<typeof vi.fn>;
+  beginPath: ReturnType<typeof vi.fn>;
+  closePath: ReturnType<typeof vi.fn>;
+  arc: ReturnType<typeof vi.fn>;
+  roundRect: ReturnType<typeof vi.fn>;
+  quadraticCurveTo: ReturnType<typeof vi.fn>;
+  moveTo: ReturnType<typeof vi.fn>;
+  lineTo: ReturnType<typeof vi.fn>;
+  createLinearGradient: ReturnType<typeof vi.fn>;
+  createRadialGradient: ReturnType<typeof vi.fn>;
+  fillStyle: string;
+  strokeStyle: string;
+  lineWidth: number;
+  lineCap: string;
+  lineJoin: string;
+  shadowBlur: number;
+  shadowColor: string;
+};
+
+function fullCtx2d(): FullCtx2D {
   const g = {
     clearRect: vi.fn(),
     fillRect: vi.fn(),
@@ -345,17 +412,17 @@ function fullCtx2d() {
     shadowBlur: 0,
     shadowColor: "",
   };
-  return g;
+  return g as unknown as FullCtx2D;
 }
 
 describe("readWaveData（时域波形）", () => {
   it("getByteTimeDomainData 数据归一化 -1~1，count 抽稀", () => {
     const a = {
       fftSize: 256,
-      getByteTimeDomainData: (arr) => {
+      getByteTimeDomainData: (arr: Uint8Array) => {
         for (let i = 0; i < arr.length; i++) arr[i] = 128; // 全静音中线
       },
-    };
+    } as unknown as AnalyserNode;
     const vals = readWaveData(a, 16);
     expect(vals).toHaveLength(16);
     vals.forEach((v) => expect(v).toBeCloseTo(0, 5)); // 128/128-1 = 0
@@ -364,13 +431,13 @@ describe("readWaveData（时域波形）", () => {
   it("正负采样值（128=中线，255=+1，0=-1）", () => {
     const a = {
       fftSize: 4,
-      getByteTimeDomainData: (arr) => {
+      getByteTimeDomainData: (arr: Uint8Array) => {
         arr[0] = 255;
         arr[1] = 128;
         arr[2] = 0;
         arr[3] = 64;
       },
-    };
+    } as unknown as AnalyserNode;
     const vals = readWaveData(a, 4);
     expect(vals[0]).toBeCloseTo(0.992, 2); // 255/128-1 ≈ 0.992
     expect(vals[1]).toBeCloseTo(0, 5);
@@ -464,11 +531,11 @@ describe("开关持久化", () => {
     localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
     playbackSettings.visualizerEnabled = false;
     await nextTick(); // 持久化 watch 异步落盘
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.visualizerEnabled).toBe(false);
     playbackSettings.visualizerEnabled = true;
     await nextTick();
-    const saved2 = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved2 = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved2.visualizerEnabled).toBe(true);
   });
 
@@ -480,7 +547,7 @@ describe("开关持久化", () => {
     expect(playbackSettings.visualizerStyle).toBe("bars");
     playbackSettings.visualizerStyle = "radial";
     await nextTick();
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.visualizerStyle).toBe("radial");
     playbackSettings.visualizerStyle = "bars"; // 恢复默认，避免污染其他用例
     await nextTick();
@@ -502,7 +569,7 @@ describe("开关持久化", () => {
     expect(playbackSettings.miniSpectrumEnabled).toBe(true);
     playbackSettings.ambientEnabled = false;
     await nextTick();
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.ambientEnabled).toBe(false);
     playbackSettings.ambientEnabled = true;
     await nextTick();
@@ -549,7 +616,7 @@ describe("extractCoverColor（封面取色）", () => {
   it("空 src / 无 window → resolve(null)，不抛错", async () => {
     _resetColorCache();
     expect(await extractCoverColor("")).toBe(null);
-    expect(await extractCoverColor(null)).toBe(null);
+    expect(await extractCoverColor(null as unknown as string)).toBe(null);
   });
 
   it("同 src 并发调用共享同一 Promise（缓存，不重复建 Image）", () => {

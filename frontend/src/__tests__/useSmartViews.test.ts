@@ -4,30 +4,32 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, () => void> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     this.listeners["play"]?.();
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
   }
-  removeAttribute() {}
-  addEventListener(ev, fn) {
+  removeAttribute(): void {}
+  addEventListener(ev: string, fn: () => void): void {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
+
+import type { Song } from "../composables/usePlayer.js";
 
 const {
   mapRecentPlayed,
@@ -56,8 +58,8 @@ const lib = [
   { id: "c", path: "/lib/c.mp3", name: "温柔", artist: "五月天", album: "愛情萬歲" },
 ];
 
-function makeFetch(dataByUrl) {
-  return vi.fn(async (url) => ({
+function makeFetch(dataByUrl: Record<string, unknown>) {
+  return vi.fn(async (url: string) => ({
     ok: true,
     json: async () => dataByUrl[url] || {},
   }));
@@ -91,7 +93,7 @@ describe("mapRecentPlayed（最近播放：按 ts 倒序、path 去重、跳过�
     const rows = mapRecentPlayed(records, byPath(lib));
     expect(rows).toHaveLength(2);
     expect(rows[0].song.path).toBe("/lib/a.mp3");
-    expect(rows[0].record.ts).toBe("2026-08-13T10:00:00Z"); // 保留最新
+    expect(rows[0].record!.ts).toBe("2026-08-13T10:00:00Z"); // 保留最新
     expect(rows[1].song.path).toBe("/lib/b.mp3");
   });
 
@@ -139,7 +141,7 @@ describe("mapTopPlayed（常听排行：播放次数降序，并列按累计时�
     const rows = mapTopPlayed(stats, byPath(lib), 2);
     expect(rows).toHaveLength(2);
     expect(rows[0].song.path).toBe("/lib/b.mp3");
-    expect(rows[0].stat.plays).toBe(9);
+    expect(rows[0].stat!.plays).toBe(9);
   });
 
   it("空统计返回空数组", () => {
@@ -227,7 +229,7 @@ describe("loadSmartView（进入视图拉取一次）", () => {
     vi.stubGlobal("fetch", fetchMock);
     await loadSmartView("topPlayed");
     expect(smartViewState.rows.map((r) => r.song.path)).toEqual(["/lib/b.mp3", "/lib/a.mp3"]);
-    expect(smartViewState.rows[0].stat.plays).toBe(5);
+    expect(smartViewState.rows[0].stat!.plays).toBe(5);
   });
 
   it("接口失败时记录 error，rows 为空", async () => {
@@ -241,7 +243,7 @@ describe("loadSmartView（进入视图拉取一次）", () => {
   });
 
   it("加载期间 loading 为 true", async () => {
-    let resolveFetch;
+    let resolveFetch!: (value: unknown) => void;
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -265,7 +267,7 @@ describe("playSmartRow（点击行播放链路）", () => {
     const ok = playSmartRow({ song: lib[1] });
     expect(ok).toBe(true);
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     expect(state.isPlaying).toBe(true);
   });
 
@@ -284,7 +286,7 @@ describe("playSmartRow（点击行播放链路）", () => {
     const ok = playSmartRow({ song: state.songs[2] });
     expect(ok).toBe(true);
     expect(state.currentIndex).toBe(2);
-    expect(state.currentSong.streamId).toBe("s2");
+    expect(state.currentSong!.streamId).toBe("s2");
   });
 });
 
@@ -376,6 +378,7 @@ describe("mapDecade（年代聚合：按 song.year 纯前端分组）", () => {
 
 describe("countByDecade（年代计数：未知年代徽标数据源）", () => {
   it("统计各年代数量（含 unknown）", () => {
+    // 只关心 year 字段，path 缺省（Song 类型要求 path，用 Song[] 断言覆盖宽松测试数据）
     const counts = countByDecade([
       { year: 1985 },
       { year: 1990 },
@@ -383,7 +386,7 @@ describe("countByDecade（年代计数：未知年代徽标数据源）", () => 
       { year: null },
       { year: "2020" },
       { year: "bad" },
-    ]);
+    ] as unknown as Song[]);
     expect(counts["1980s"]).toBe(1);
     expect(counts["1990s"]).toBe(2);
     expect(counts["2020s"]).toBe(1);
@@ -447,7 +450,7 @@ describe("loadSmartView decades（年代视图：纯前端聚合，不发请求�
 
 describe("副信息格式化", () => {
   it("常听排行显示播放次数与累计时长", () => {
-    const row = { song: lib[0], stat: { plays: 12, totalPlayed: 3720 } };
+    const row = { song: lib[0], stat: { path: "/lib/a.mp3", plays: 12, totalPlayed: 3720 } };
     expect(fmtSmartSub(row)).toBe("播放 12 次 · 1.0 小时");
   });
 

@@ -7,48 +7,48 @@ import { nextTick } from "vue";
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册）
 // 与真实浏览器一致：play/pause 触发对应事件（playerCore 靠 pause 事件同步 state.isPlaying）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, () => void> = {};
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   // 浏览器行为：换源自动归零播放位置
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
-  play() {
+  play(): Promise<void> {
     this.paused = false;
     this.listeners["play"]?.();
     return Promise.resolve();
   }
-  pause() {
+  pause(): void {
     this.paused = true;
     this.listeners["pause"]?.();
   }
-  removeAttribute() {}
-  addEventListener(ev, fn) {
+  removeAttribute(): void {}
+  addEventListener(ev: string, fn: () => void): void {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
 // localStorage stub（模块加载与测试体共用）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -197,7 +197,7 @@ describe("睡眠定时器", () => {
     setSleepTimerMinutes(60);
     toggleSleepTimer();
     await nextTick(); // 等待 deep watch 落盘
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.sleepTimerOn).toBe(true);
     expect(saved.sleepTimerMinutes).toBe(60);
   });

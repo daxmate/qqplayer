@@ -2,6 +2,7 @@
 // 覆盖：默认值 / 字段规范化（非法值回落）/ GET 回读应用（含后端未合并容错）/ PUT 保存回读 /
 // 保存失败返回值 / 重命名模板预览（纯函数）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import type { ScrapingSettings } from "../composables/useScrapingSettings.js";
 
 const {
   SCRAPING_FIELDS,
@@ -36,7 +37,7 @@ describe("默认值（契约形状）", () => {
 });
 
 describe("loadScrapingSettings（GET /api/library/settings）", () => {
-  function stubGet(settings) {
+  function stubGet(settings: Record<string, unknown>) {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -100,13 +101,14 @@ describe("loadScrapingSettings（GET /api/library/settings）", () => {
 
 describe("saveScrapingSettings（PUT /api/library/settings）", () => {
   it("PUT {scraping: 全字段}，后端回读应用", async () => {
-    let putBody = null;
+    let putBody: { scraping: ScrapingSettings } | null = null;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts = {}) => {
+      vi.fn(async (url: RequestInfo | URL, opts: RequestInit = {}) => {
         if (opts.method === "PUT") {
-          putBody = JSON.parse(opts.body);
-          return { ok: true, json: async () => ({ settings: { scraping: putBody.scraping } }) };
+          const body = JSON.parse(opts.body as string) as { scraping: ScrapingSettings };
+          putBody = body;
+          return { ok: true, json: async () => ({ settings: { scraping: body.scraping } }) };
         }
         return { ok: true, json: async () => ({ settings: {} }) };
       }),
@@ -114,17 +116,19 @@ describe("saveScrapingSettings（PUT /api/library/settings）", () => {
     scrapingSettings.batch_enabled = true;
     const r = await saveScrapingSettings();
     expect(r.ok).toBe(true);
-    expect(putBody).toEqual({ scraping: expect.objectContaining({ batch_enabled: true }) });
-    expect(putBody.scraping.enabled_fields).toEqual(SCRAPING_FIELDS);
+    const put = putBody!; // PUT 必然已发出（r.ok 已验证）
+    expect(put).toEqual({ scraping: expect.objectContaining({ batch_enabled: true }) });
+    expect(put.scraping.enabled_fields).toEqual(SCRAPING_FIELDS);
   });
 
   it("patch 合并进全量提交；后端未回读 → 本地值保留", async () => {
-    let putBody = null;
+    let putBody: { scraping: ScrapingSettings } | null = null;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts = {}) => {
+      vi.fn(async (url: RequestInfo | URL, opts: RequestInit = {}) => {
         if (opts.method === "PUT") {
-          putBody = JSON.parse(opts.body);
+          const body = JSON.parse(opts.body as string) as { scraping: ScrapingSettings };
+          putBody = body;
           return { ok: true, json: async () => ({ settings: {} }) };
         }
         return { ok: true, json: async () => ({ settings: {} }) };
@@ -132,9 +136,10 @@ describe("saveScrapingSettings（PUT /api/library/settings）", () => {
     );
     const r = await saveScrapingSettings({ rename_template: "{title}" });
     expect(r.ok).toBe(true);
-    expect(putBody.scraping.rename_template).toBe("{title}");
-    expect(putBody.scraping.batch_enabled).toBe(false);
-    expect(putBody.scraping.enabled_fields).toEqual(SCRAPING_FIELDS);
+    const put = putBody!; // PUT 必然已发出（r.ok 已验证）
+    expect(put.scraping.rename_template).toBe("{title}");
+    expect(put.scraping.batch_enabled).toBe(false);
+    expect(put.scraping.enabled_fields).toEqual(SCRAPING_FIELDS);
     expect(scrapingSettings.rename_template).toBe("{title}");
   });
 
@@ -173,7 +178,8 @@ describe("renderRenamePreview（重命名模板实时预览）", () => {
   it("title 缺失回落 name；无模板/无歌曲返回空串", () => {
     expect(renderRenamePreview("{title}", { name: "N" })).toBe("N");
     expect(renderRenamePreview("", song)).toBe("");
-    expect(renderRenamePreview(null, song)).toBe("");
+    // 函数签名 template: string，但实现容忍 falsy（null 视为无模板）——测试场景刻意传非法值
+    expect(renderRenamePreview(null as unknown as string, song)).toBe("");
     expect(renderRenamePreview("{title}", null)).toBe("");
   });
 });
