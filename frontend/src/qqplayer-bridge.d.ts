@@ -16,5 +16,7 @@ declare global {
     qqplayerOnNativeEvent?: (event: string, payload?: Record<string, unknown>) => void;
     /** iOS 壳环境标记（壳注入 true；桌面浏览器没有） */
     qqplayerNative?: boolean;
+    /** Tauri 壳运行时标记（main.ts 检测到 __TAURI_INTERNALS__ 时补注入 qqplayerNative） */
+    __TAURI_INTERNALS__?: unknown;
   }
 }
