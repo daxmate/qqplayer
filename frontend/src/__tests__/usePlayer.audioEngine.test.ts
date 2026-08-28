@@ -26,7 +26,7 @@ describe("音量", () => {
   it("setVolume 设置音量并持久化到 localStorage", () => {
     setVolume(0.5);
     expect(state.volume).toBe(0.5);
-    expect(parseFloat(localStorage.getItem(VOLUME_KEY))).toBe(0.5);
+    expect(parseFloat(localStorage.getItem(VOLUME_KEY)!)).toBe(0.5);
   });
 
   it("setVolume 越界值被 clamp 到 0~1", () => {
@@ -54,13 +54,25 @@ describe("音量", () => {
 
 describe("均衡器 EQ", () => {
   // FakeAudioContext：jsdom 无 Web Audio，stub 记录滤波器链
+  // 测试体通过 FakeAudioContext.instances.at(-1)! 取最新实例，断言只读它记录的节点形状；
+  // instances 用完整类型（FakeAudioContext[]），取实例处用非空断言（.at 返回 T|undefined）
+  /** BiquadFilter stub 形状（与 useEq 图的滤波器节点字段对齐） */
+  interface FakeBiquadFilter {
+    type: string;
+    frequency: { value: number };
+    Q: { value: number };
+    gain: { value: number };
+    connect: ReturnType<typeof vi.fn>;
+  }
   class FakeAudioContext {
-    static instances = [];
+    static instances: FakeAudioContext[] = [];
+    destination: Record<string, unknown> = {};
+    filters: FakeBiquadFilter[] = [];
+    state = "running";
+    resumeMock = vi.fn().mockResolvedValue(undefined);
+    source: { connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> } | undefined;
+    masterGain: { gain: { value: number }; connect: ReturnType<typeof vi.fn> } | undefined;
     constructor() {
-      this.destination = {};
-      this.filters = [];
-      this.state = "running";
-      this.resumeMock = vi.fn().mockResolvedValue();
       FakeAudioContext.instances.push(this);
     }
     createMediaElementSource() {
@@ -111,7 +123,7 @@ describe("均衡器 EQ", () => {
     stubAudioContext();
     setupSong();
     await play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     expect(ctx.filters).toHaveLength(10);
     ctx.filters.forEach((f, i) => {
       expect(f.type).toBe("peaking");
@@ -119,25 +131,25 @@ describe("均衡器 EQ", () => {
       expect(f.gain.value).toBe(0);
     });
     // source → masterGain → 10 filters → destination 串联
-    expect(ctx.source.connect).toHaveBeenCalledWith(ctx.masterGain);
-    expect(ctx.masterGain.connect).toHaveBeenCalledWith(ctx.filters[0]);
+    expect(ctx.source!.connect).toHaveBeenCalledWith(ctx.masterGain);
+    expect(ctx.masterGain!.connect).toHaveBeenCalledWith(ctx.filters[0]);
     ctx.filters.forEach((f, i) => {
       expect(f.connect).toHaveBeenCalledWith(i === 9 ? ctx.destination : ctx.filters[i + 1]);
     });
     // 音量主控初始化为当前音量（默认 1）
-    expect(ctx.masterGain.gain.value).toBe(1);
+    expect(ctx.masterGain!.gain.value).toBe(1);
   });
 
   it("创建前已设置的均衡器值在创建时应用（启动恢复持久化场景）", async () => {
     stubAudioContext();
     playbackSettings.eqEnabled = true;
     playbackSettings.eqPreset = "bass";
-    playbackSettings.eqGains = [...EQ_PRESETS.bass.gains];
+    playbackSettings.eqGains = [...EQ_PRESETS.bass.gains!];
     setupSong();
     await play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     ctx.filters.forEach((f, i) => {
-      expect(f.gain.value).toBe(EQ_PRESETS.bass.gains[i]);
+      expect(f.gain.value).toBe(EQ_PRESETS.bass.gains![i]);
     });
   });
 
@@ -161,25 +173,25 @@ describe("均衡器 EQ", () => {
     stubAudioContext();
     setupSong();
     await play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     // 图接管：setVolume → masterGain.gain；元素音量恒 1
     setVolume(0.3);
-    expect(ctx.masterGain.gain.value).toBe(0.3);
+    expect(ctx.masterGain!.gain.value).toBe(0.3);
     expect(audioEq.volume).toBe(1);
     // 静音 → gain 0；取消恢复
     toggleMute();
-    expect(ctx.masterGain.gain.value).toBe(0);
+    expect(ctx.masterGain!.gain.value).toBe(0);
     toggleMute();
-    expect(ctx.masterGain.gain.value).toBe(0.3);
+    expect(ctx.masterGain!.gain.value).toBe(0.3);
     // 变速切裸元素：未接管 → 元素音量承载，masterGain 不动
     state.speed = 1.0;
     stepSpeed(-1);
     setVolume(0.7);
     expect(audioBare.volume).toBe(0.7);
-    expect(ctx.masterGain.gain.value).toBe(0.3);
+    expect(ctx.masterGain!.gain.value).toBe(0.3);
     // 回图元素：applyVolume 把音量同步到 masterGain，元素归一
     stepSpeed(1);
-    expect(ctx.masterGain.gain.value).toBe(0.7);
+    expect(ctx.masterGain!.gain.value).toBe(0.7);
     expect(audioEq.volume).toBe(1);
   });
 
@@ -188,7 +200,7 @@ describe("均衡器 EQ", () => {
     playbackSettings.eqEnabled = true;
     setupSong();
     play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     setEqGain(0, 6);
     expect(playbackSettings.eqGains[0]).toBe(6);
     expect(ctx.filters[0].gain.value).toBe(6);
@@ -208,7 +220,7 @@ describe("均衡器 EQ", () => {
     playbackSettings.eqPreset = "bass";
     setupSong();
     play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     playbackSettings.eqEnabled = false;
     await nextTick(); // 开关走 watch 异步应用
     ctx.filters.forEach((f) => expect(f.gain.value).toBe(0));
@@ -219,7 +231,7 @@ describe("均衡器 EQ", () => {
     playbackSettings.eqEnabled = true;
     setEqPreset("vocal");
     await nextTick(); // 持久化 watch 异步落盘
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.eqEnabled).toBe(true);
     expect(saved.eqPreset).toBe("vocal");
     expect(saved.eqGains).toEqual(EQ_PRESETS.vocal.gains);
@@ -280,10 +292,10 @@ describe("均衡器 EQ", () => {
     stubAudioContext();
     setupSong();
     await play(); // 建图，speed=1.0 活动元素 = audioEq（走 EQ 链）
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     expect(audioEq).toBeDefined();
     expect(playerMod.audio).toBe(audioEq);
-    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.masterGain);
+    expect(ctx.source!.connect).toHaveBeenLastCalledWith(ctx.masterGain);
 
     state.speed = 1.0;
     stepSpeed(-1); // → 0.75：切到裸元素
@@ -306,14 +318,14 @@ describe("均衡器 EQ", () => {
     stubAudioContext();
     setupSong();
     await play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     state.speed = 1.0;
     stepSpeed(-1); // 0.75 切裸元素
     state.songs = [{ path: "/b.mp3", name: "B" }];
     state.currentIndex = 0;
     await nextSong();
     expect(playerMod.audio).toBe(audioBare); // 变速状态：新歌加载到裸元素
-    expect(ctx.source.connect).toHaveBeenLastCalledWith(ctx.masterGain); // 图元素链路未被扰动
+    expect(ctx.source!.connect).toHaveBeenLastCalledWith(ctx.masterGain); // 图元素链路未被扰动
     state.speed = 0.75;
     stepSpeed(1); // 回 1.0：切回图元素
     expect(playerMod.audio).toBe(audioEq);
@@ -323,7 +335,7 @@ describe("均衡器 EQ", () => {
     stubAudioContext();
     setupSong();
     await play();
-    const ctx = FakeAudioContext.instances.at(-1);
+    const ctx = FakeAudioContext.instances.at(-1)!;
     audioEq.currentTime = 42;
     setVolume(0.6);
     toggleMute(); // muted=true：图接管 → masterGain.gain = 0
@@ -341,7 +353,7 @@ describe("均衡器 EQ", () => {
     stepSpeed(1);
     expect(playerMod.audio).toBe(audioEq);
     expect(audioEq.currentTime).toBe(55);
-    expect(ctx.masterGain.gain.value).toBe(0.6); // 图接管 → 音量走 masterGain
+    expect(ctx.masterGain!.gain.value).toBe(0.6); // 图接管 → 音量走 masterGain
     expect(audioEq.volume).toBe(1); // 元素音量归一（音量由 gain 承担）
   });
 });

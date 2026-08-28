@@ -3,13 +3,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { state, selectSong, setupMediaSession, FakeAudio } from "./helpers/usePlayerHarness.js";
 
-// ============ MediaSession 系统媒体键 ============// navigator.mediaSession stub：记录 setActionHandler 绑定的处理器与 metadata/playbackState
+// ============ MediaSession 系统媒体键 ============
+// navigator.mediaSession stub：记录 setActionHandler 绑定的处理器与 metadata/playbackState
+
+/** setActionHandler 绑定的媒体键处理器（detail 为 MediaSessionActionDetails 的宽松视图） */
+type MediaKeyHandler = (detail?: Record<string, unknown>) => void;
+
 function createMediaSessionStub() {
-  const handlers = {};
+  const handlers: Record<string, MediaKeyHandler> = {};
   const ms = {
-    metadata: null,
+    metadata: null as MediaMetadata | null,
     playbackState: "none",
-    setActionHandler: vi.fn((action, fn) => {
+    setActionHandler: vi.fn((action: string, fn: MediaKeyHandler) => {
       handlers[action] = fn;
     }),
     setPositionState: vi.fn(),
@@ -18,7 +23,7 @@ function createMediaSessionStub() {
   vi.stubGlobal(
     "MediaMetadata",
     class {
-      constructor(opts) {
+      constructor(opts: Record<string, unknown>) {
         Object.assign(this, opts);
       }
     },
@@ -27,7 +32,7 @@ function createMediaSessionStub() {
 }
 
 // 触发全局 audio 的某个事件（如 play/pause/timeupdate）
-function fireAudioEvent(name) {
+function fireAudioEvent(name: string) {
   const a = FakeAudio.instances[0];
   if (a.listeners[name]) a.listeners[name]();
   return a;
@@ -55,13 +60,14 @@ describe("MediaSession 系统媒体键", () => {
   });
 
   it("无 MediaSession 环境安全返回卸载函数", () => {
-    const orig = globalThis.navigator;
-    globalThis.navigator = undefined;
+    const g = globalThis as { navigator?: unknown };
+    const orig = g.navigator;
+    g.navigator = undefined;
     try {
       const un = setupMediaSession();
       expect(typeof un).toBe("function");
     } finally {
-      globalThis.navigator = orig;
+      g.navigator = orig;
     }
   });
 
@@ -159,10 +165,12 @@ describe("MediaSession 系统媒体键", () => {
     );
     await selectSong(0);
     expect(ms.metadata).toBeTruthy();
-    expect(ms.metadata.title).toBe("A");
-    expect(ms.metadata.artist).toBe("ArtistX");
-    expect(ms.metadata.album).toBe("AlbumY");
-    expect(ms.metadata.artwork[0].src).toContain("/api/cover?path=" + encodeURIComponent("/a.mp3"));
+    expect(ms.metadata!.title).toBe("A");
+    expect(ms.metadata!.artist).toBe("ArtistX");
+    expect(ms.metadata!.album).toBe("AlbumY");
+    expect(ms.metadata!.artwork[0].src).toContain(
+      "/api/cover?path=" + encodeURIComponent("/a.mp3"),
+    );
   });
 
   it("nexttrack/previoustrack 切歌后自动播放", async () => {

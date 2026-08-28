@@ -6,14 +6,12 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -22,7 +20,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -168,7 +166,7 @@ describe("MobilePlayer 歌名行按钮", () => {
     expect(heartBtn.find("svg").exists()).toBe(true);
     await heartBtn.trigger("click");
     expect(state.favorites).toContain(song.path);
-    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const fetchCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
     expect(
       fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt.method === "POST"),
     ).toBe(true);
@@ -212,7 +210,7 @@ describe("MobilePlayer ➕ 加到歌单面板", () => {
     await flushPromises();
     expect(playlist.songPaths).toContain(song.path); // 乐观更新
     expect(wrapper.find(".mp-pl-row").classes()).toContain("checked"); // 勾选态
-    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const fetchCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
     expect(
       fetchCalls.some(([url, opt]) => url === "/api/playlists/p1/songs" && opt.method === "POST"),
     ).toBe(true);
@@ -226,7 +224,7 @@ describe("MobilePlayer ➕ 加到歌单面板", () => {
     await wrapper.find(".mp-pl-row").trigger("click");
     await flushPromises();
     expect(state.playlists[0].songPaths).not.toContain(song.path);
-    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const fetchCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
     expect(
       fetchCalls.some(
         ([url, opt]) =>
@@ -238,7 +236,7 @@ describe("MobilePlayer ➕ 加到歌单面板", () => {
 
   it("新建歌单并自动加入当前歌曲", async () => {
     state.playlists = [];
-    vi.mocked(fetch).mockImplementation(async (url, opt) => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (url, opt) => {
       if (url === "/api/playlists" && opt?.method === "POST") {
         return { ok: true, json: async () => ({ id: "p-new", name: "新歌单", songPaths: [] }) };
       }
@@ -252,7 +250,7 @@ describe("MobilePlayer ➕ 加到歌单面板", () => {
     await flushPromises();
     const created = state.playlists.find((p) => p.id === "p-new");
     expect(created).toBeTruthy();
-    expect(created.songPaths).toContain(song.path);
+    expect(created!.songPaths).toContain(song.path);
     expect(wrapper.find(".mp-sheet").exists()).toBe(false); // 面板关闭
   });
 });
@@ -278,7 +276,7 @@ describe("MobilePlayer 歌单键面板（播放队列）", () => {
     expect(quicks.length).toBe(2);
     await quicks[0].trigger("click");
     expect(wrapper.emitted("open-list")).toBeTruthy();
-    expect(wrapper.emitted("open-list")[0][0]).toMatchObject({ name: "list", kind: "favorites" });
+    expect(wrapper.emitted("open-list")![0][0]).toMatchObject({ name: "list", kind: "favorites" });
   });
 
   it("快捷入口：歌单库 → emit open-list（playlists）", async () => {
@@ -286,7 +284,7 @@ describe("MobilePlayer 歌单键面板（播放队列）", () => {
     await wrapper.find(".mp-queue-btn").trigger("click");
     const quicks = wrapper.findAll(".mp-quick");
     await quicks[1].trigger("click");
-    expect(wrapper.emitted("open-list")[0][0]).toMatchObject({ name: "list", kind: "playlists" });
+    expect(wrapper.emitted("open-list")![0][0]).toMatchObject({ name: "list", kind: "playlists" });
   });
 });
 
@@ -351,7 +349,7 @@ describe("MobilePlayer 毛玻璃背景", () => {
   });
 
   it("glassCover 未定义（契约兼容）→ 默认开启", () => {
-    delete uiSettings.glassCover;
+    delete (uiSettings as { glassCover?: boolean }).glassCover;
     const wrapper = mount(MobilePlayer);
     expect(wrapper.find(".mp-glass").exists()).toBe(true);
   });
@@ -393,9 +391,9 @@ describe("MobilePlayer 进度条与杂项", () => {
 
   it("挂载时置 window.__qqpPlayerOpen，卸载时清除", () => {
     const wrapper = mount(MobilePlayer);
-    expect(window.__qqpPlayerOpen).toBe(true);
+    expect((window as Window & { __qqpPlayerOpen?: boolean }).__qqpPlayerOpen).toBe(true);
     wrapper.unmount();
-    expect(window.__qqpPlayerOpen).toBe(false);
+    expect((window as Window & { __qqpPlayerOpen?: boolean }).__qqpPlayerOpen).toBe(false);
   });
 });
 

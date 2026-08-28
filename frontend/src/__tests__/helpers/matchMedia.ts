@@ -12,11 +12,38 @@
 
 import { vi } from "vitest";
 
-export function installMatchMedia(initialMatches = false) {
-  let matches = initialMatches;
-  const listeners = new Set();
+/** change 事件负载（useMobileViewport 传递的是 { matches, media }） */
+interface MatchMediaChangeEvent {
+  matches: boolean;
+  media: string;
+}
 
-  const mq = {
+type MatchMediaListener = (ev: MatchMediaChangeEvent) => void;
+
+/** matchMedia 返回的 MQL 兼容对象（mq 本体 + 每个 query 的派生副本） */
+interface MediaQueryListLike {
+  readonly matches: boolean;
+  media: string;
+  addEventListener(ev: string, fn: MatchMediaListener): void;
+  removeEventListener(ev: string, fn: MatchMediaListener): void;
+  addListener(fn: MatchMediaListener): void;
+  removeListener(fn: MatchMediaListener): void;
+  dispatchEvent(): boolean;
+}
+
+/** installMatchMedia 的返回值：mq 可切换布局，matchMedia/calls 供断言 */
+export interface MatchMediaHelper {
+  mq: MediaQueryListLike;
+  matchMedia: ReturnType<typeof vi.fn>;
+  calls: string[];
+  set(v: boolean): void;
+}
+
+export function installMatchMedia(initialMatches = false): MatchMediaHelper {
+  let matches = initialMatches;
+  const listeners = new Set<MatchMediaListener>();
+
+  const mq: MediaQueryListLike = {
     get matches() {
       return matches;
     },
@@ -38,8 +65,8 @@ export function installMatchMedia(initialMatches = false) {
     },
   };
 
-  const calls = [];
-  const matchMedia = vi.fn((query) => {
+  const calls: string[] = [];
+  const matchMedia = vi.fn((query: string) => {
     calls.push(query);
     return {
       ...mq,

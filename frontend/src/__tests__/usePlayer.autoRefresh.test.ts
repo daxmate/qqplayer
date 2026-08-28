@@ -9,10 +9,10 @@ describe("setupAutoRefresh（iCloud 库自动刷新）", () => {
     stopAutoRefresh();
   });
 
-  function stubVersion(version) {
+  function stubVersion(version: number) {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url) => {
+      vi.fn(async (url: string) => {
         if (url === "/api/library/version") {
           return { ok: true, json: async () => ({ version }) };
         }
@@ -43,7 +43,7 @@ describe("setupAutoRefresh（iCloud 库自动刷新）", () => {
     let v = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url) => {
+      vi.fn(async (url: string) => {
         if (url === "/api/library/version") {
           return { ok: true, json: async () => ({ version: v }) };
         }
@@ -68,7 +68,7 @@ describe("setupAutoRefresh（iCloud 库自动刷新）", () => {
     let songsCalls = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url) => {
+      vi.fn(async (url: string) => {
         if (url === "/api/library/version") {
           return { ok: true, json: async () => ({ version: 3 }) };
         }
