@@ -19,12 +19,12 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { useToast } from "../composables/useToast.js";
 
 const { items, handleToastAction } = useToast();
 
-function onAction(id) {
+function onAction(id: number) {
   handleToastAction(id);
 }
 </script>

@@ -16,11 +16,11 @@
   </div>
 </template>
 
-<script setup>
-import { ref, watch, computed, onBeforeUnmount } from "vue";
+<script setup lang="ts">
+import { ref, watch, computed, onBeforeUnmount, type PropType } from "vue";
 import { Music } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { state } from "../composables/usePlayer.js";
+import { state, type Song } from "../composables/usePlayer.js";
 import { coverVisible } from "../composables/useCoverGuard.ts";
 import { useCoverURL } from "../composables/useCoverURL.js";
 
@@ -55,7 +55,7 @@ const coverFailed = computed(() => {
 });
 
 const props = defineProps({
-  song: { type: Object, default: null },
+  song: { type: Object as PropType<Song | null>, default: null },
   small: { type: Boolean, default: false },
   // 显式尺寸 px（0/缺省 = 走 CSS 默认：桌面 min(46vh,340px)）
   // 桌面传入 coverSizePx（自适应计算/拖拽值）；本组件仅桌面使用（移动端播放页自带封面）

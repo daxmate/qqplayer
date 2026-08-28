@@ -143,8 +143,8 @@
   </aside>
 </template>
 
-<script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from "vue";
+<script setup lang="ts">
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, type Component } from "vue";
 import {
   Library,
   Music2,
@@ -170,6 +170,8 @@ import {
   addToPlaylist,
   isInPlaylist,
   DRAG_SONG_TYPE,
+  type Playlist,
+  type Song,
 } from "../composables/usePlayer.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import {
@@ -179,6 +181,8 @@ import {
   loadSmartView,
   closeSmartView,
   countByDecade,
+  type DecadeBucket,
+  type SmartViewKind,
 } from "../composables/useSmartViews.js";
 import SmartViewPanel from "./SmartViewPanel.vue";
 import DevicePickerModal from "./DevicePickerModal.vue";
@@ -187,7 +191,7 @@ import { fetchDevices, pushSongsToDevice } from "../utils/deviceCommands.js";
 const { t } = useI18n();
 
 // 智能视图入口定义（图标组件在模板里用 <component :is> 渲染）
-const smartViewEntries = [
+const smartViewEntries: Array<{ kind: SmartViewKind; titleKey: string; icon: Component }> = [
   { kind: "recentAdded", titleKey: SMART_VIEWS.recentAdded.titleKey, icon: Sparkles },
   { kind: "recentPlayed", titleKey: SMART_VIEWS.recentPlayed.titleKey, icon: History },
   { kind: "topPlayed", titleKey: SMART_VIEWS.topPlayed.titleKey, icon: TrendingUp },
@@ -197,18 +201,18 @@ const smartViewEntries = [
 const decadeEntries = DECADE_BUCKETS;
 const decadeCounts = computed(() => countByDecade(state.songs));
 
-function decadeLabel(b) {
+function decadeLabel(b: DecadeBucket) {
   return b.labelParams ? t(b.labelKey, b.labelParams) : t(b.labelKey);
 }
 
-function activate(pid) {
+function activate(pid: string | null) {
   if (smartViewState.active) closeSmartViewPanel(); // 切回常规视图时关闭智能视图
   state.activePlaylistId = pid;
   uiState.playlistOpen = true; // 点击曲库条目时自动打开播放列表面板
 }
 
 // ============ 智能视图 ============
-function openSmartView(kind, decade) {
+function openSmartView(kind: SmartViewKind, decade: string | null = null) {
   // 再点同一项 = 关闭（年代视图：同 kind + 同 decade）
   const same =
     smartViewState.active === kind && (kind !== "decades" || smartViewState.decade === decade);
@@ -243,26 +247,26 @@ onBeforeUnmount(() => {
 
 // ============ 拖拽加歌单（歌曲行 → 歌单项） ============
 // 只响应歌曲行拖拽（Playlist 用自定义 MIME 写入路径）；文件拖拽导入（Files 类型）不受影响
-const dropOverId = ref(null);
+const dropOverId = ref<string | null>(null);
 
-function dragHasSong(e) {
+function dragHasSong(e: DragEvent) {
   return Array.from(e?.dataTransfer?.types || []).includes(DRAG_SONG_TYPE);
 }
 
-function onPlaylistDragOver(p, e) {
+function onPlaylistDragOver(p: Playlist, e: DragEvent) {
   if (!dragHasSong(e)) return;
   e.preventDefault(); // 允许 drop
   if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
   dropOverId.value = p.id; // 高亮歌单项
 }
 
-function onPlaylistDragLeave(p, e) {
+function onPlaylistDragLeave(p: Playlist, e: DragEvent) {
   // 移入子元素也会触发 dragleave：relatedTarget 仍在歌单项内 → 不取消高亮
-  if (e.currentTarget.contains(e.relatedTarget)) return;
+  if ((e.currentTarget as Node).contains(e.relatedTarget as Node)) return;
   if (dropOverId.value === p.id) dropOverId.value = null;
 }
 
-async function onPlaylistDrop(p, e) {
+async function onPlaylistDrop(p: Playlist, e: DragEvent) {
   if (!dragHasSong(e)) return;
   e.preventDefault();
   dropOverId.value = null;
@@ -272,7 +276,7 @@ async function onPlaylistDrop(p, e) {
 }
 
 // 加歌到歌单（幂等 + toast）：浏览器 drop / 壳内拖拽（useShellDrag 派发）共用，语义完全一致
-async function addSongToPlaylist(p, path) {
+async function addSongToPlaylist(p: Playlist, path: string) {
   if (isInPlaylist(p.id, path)) {
     showToast(t("sidebar.drag.alreadyIn", { name: p.name }));
     return;
@@ -281,7 +285,7 @@ async function addSongToPlaylist(p, path) {
     await addToPlaylist(p.id, path); // 幂等：先查再调，toast 区分「已加入」/「已在」
     showToast(t("sidebar.drag.added", { name: p.name }));
   } catch (err) {
-    toastError(err.message);
+    toastError((err as Error).message);
   }
 }
 
@@ -295,12 +299,12 @@ onMounted(() => {
 
 // ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报上下文 → 壳注入 NSMenu → 点击调 __qqCtxMenu → 事件派发到这里） ============
 // 复用侧边栏既有实现（activate/startRename/askDelete）；事件只在原生壳内派发，浏览器永不触发。
-function playlistFromEvent(e) {
-  return state.playlists.find((x) => x.id === e.detail?.id) ?? null;
+function playlistFromEvent(e: Event) {
+  return state.playlists.find((x) => x.id === (e as CustomEvent).detail?.id) ?? null;
 }
 
 // 播放：打开该歌单视图；有歌则从第一首开始播（与点击歌单 + 点歌行为等价）
-function onCtxPlayPlaylist(e) {
+function onCtxPlayPlaylist(e: Event) {
   const p = playlistFromEvent(e);
   if (!p) return;
   activate(p.id);
@@ -315,18 +319,18 @@ function onCtxPlayPlaylist(e) {
 }
 
 // 重命名：行内输入（startRename 内部聚焦并全选）
-function onCtxRenamePlaylist(e) {
+function onCtxRenamePlaylist(e: Event) {
   const p = playlistFromEvent(e);
   if (p) startRename(p);
 }
 
 // 删除：Gmail 式删除 + 撤销 toast（askDelete）
-function onCtxDeletePlaylist(e) {
+function onCtxDeletePlaylist(e: Event) {
   const p = playlistFromEvent(e);
   if (p) askDelete(p);
 }
 
-const CTX_EVENTS = [
+const CTX_EVENTS: Array<[string, (e: Event) => void]> = [
   ["qqplayer:ctx-playplaylist", onCtxPlayPlaylist],
   ["qqplayer:ctx-renameplaylist", onCtxRenamePlaylist],
   ["qqplayer:ctx-deleteplaylist", onCtxDeletePlaylist],
@@ -334,14 +338,16 @@ const CTX_EVENTS = [
 
 // 壳内拖拽加歌单（useShellDrag 派发，无 dataTransfer）：与右键菜单一样走 window 事件，
 // 复用浏览器 drop 同一套幂等加歌 + toast（addSongToPlaylist）
-function onShellDragDrop(e) {
+function onShellDragDrop(e: Event) {
   const p = playlistFromEvent(e); // e.detail.id
-  const path = e.detail?.path;
+  const path = (e as CustomEvent).detail?.path;
   if (!p || !path) return;
   addSongToPlaylist(p, path);
 }
 
-const SHELL_DRAG_EVENTS = [["qqplayer:shell-drag-drop", onShellDragDrop]];
+const SHELL_DRAG_EVENTS: Array<[string, (e: Event) => void]> = [
+  ["qqplayer:shell-drag-drop", onShellDragDrop],
+];
 
 function bindCtxEvents() {
   for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn);
@@ -356,7 +362,7 @@ function unbindCtxEvents() {
 // ============ 新建 ============
 const creating = ref(false);
 const createName = ref("");
-const createInput = ref(null);
+const createInput = ref<HTMLInputElement | null>(null);
 
 async function startCreate() {
   creating.value = true;
@@ -374,16 +380,16 @@ async function commitCreate() {
     const p = await createPlaylist(name);
     state.activePlaylistId = p.id; // 建完直接进入该歌单
   } catch (e) {
-    toastError(e.message);
+    toastError((e as Error).message);
   }
 }
 
 // ============ 改名 ============
-const editingId = ref(null);
+const editingId = ref<string | null>(null);
 const editName = ref("");
-const editInput = ref(null);
+const editInput = ref<HTMLInputElement[] | null>(null);
 
-async function startRename(p) {
+async function startRename(p: Playlist) {
   editingId.value = p.id;
   editName.value = p.name;
   await nextTick();
@@ -401,7 +407,7 @@ async function commitEdit() {
   try {
     await renamePlaylist(pid, name);
   } catch (e) {
-    toastError(e.message);
+    toastError((e as Error).message);
   }
 }
 
@@ -413,17 +419,17 @@ function cancelEdit() {
 // 与 Playlist.openDevicePicker 同一链路：歌单歌曲路径反查曲库对象（流媒体/已删歌曲被过滤）
 // → 拉设备清单 → 无设备 toast 提示 → 弹 DevicePickerModal → 确认后推送
 const pushPickerOpen = ref(false);
-const pushPickerDevices = ref([]);
-const pushPickerSongs = ref([]); // 待推送的曲库歌曲对象数组（含 path）
+const pushPickerDevices = ref<Awaited<ReturnType<typeof fetchDevices>>["devices"]>([]);
+const pushPickerSongs = ref<Song[]>([]); // 待推送的曲库歌曲对象数组（含 path）
 
-async function openPlaylistPush(p) {
+async function openPlaylistPush(p: Playlist) {
   // p = 歌单对象 {id, songPaths: [...]}
   const paths = (p.songPaths || []).filter(Boolean);
   if (!paths.length) {
     showToast(t("playlist.pushFailed"), { type: "error" });
     return;
   }
-  const songs = state.songs.filter((s) => s && paths.includes(s.path)); // 路径反查歌曲对象
+  const songs = state.songs.filter((s) => s && paths.includes(s.path ?? "")); // 路径反查歌曲对象
   if (!songs.length) {
     showToast(t("playlist.pushFailed"), { type: "error" });
     return;
@@ -438,11 +444,14 @@ async function openPlaylistPush(p) {
   pushPickerOpen.value = true;
 }
 
-async function onPlaylistPushPicked(device) {
+async function onPlaylistPushPicked(device: { device_id?: string }) {
   pushPickerOpen.value = false;
   const songs = pushPickerSongs.value;
   pushPickerSongs.value = [];
-  const r = await pushSongsToDevice(songs, device.device_id);
+  const r = await pushSongsToDevice(
+    songs.map((s) => ({ path: s.path ?? undefined })),
+    device.device_id ?? "",
+  );
   if (r.ok) {
     const n = songs.length - (Array.isArray(r.skipped) ? r.skipped.length : 0);
     showToast(t("playlist.pushSuccess", { n: Math.max(0, n) }));
@@ -457,7 +466,7 @@ async function onPlaylistPushPicked(device) {
 // Gmail 式：删除直接执行 + toast 带撤销按钮（duration 窗口期内可恢复）
 const UNDO_DURATION = 5000;
 
-async function askDelete(p) {
+async function askDelete(p: Playlist) {
   // 删除前缓存完整歌单数据，供撤销恢复
   const cached = {
     id: p.id,
@@ -470,7 +479,7 @@ async function askDelete(p) {
     await deletePlaylist(p.id);
   } catch (e) {
     // 删除失败：不弹撤销
-    toastError(e.message);
+    toastError((e as Error).message);
     return;
   }
   showToast(t("sidebar.deletedPlaylist", { name: p.name }), {
@@ -483,7 +492,13 @@ async function askDelete(p) {
 }
 
 // 撤销恢复：后端 POST /api/playlists 不支持指定 id → 重建拿新 id + 批量加回歌曲
-async function restorePlaylist(cached) {
+async function restorePlaylist(cached: {
+  id: string;
+  name: string;
+  songPaths: string[];
+  createdAt: unknown;
+  updatedAt: unknown;
+}) {
   try {
     const p = await createPlaylist(cached.name);
     for (const path of cached.songPaths || []) {
@@ -491,7 +506,7 @@ async function restorePlaylist(cached) {
     }
     showToast(t("sidebar.restoredPlaylist", { name: cached.name }));
   } catch (e) {
-    toastError(e.message || t("errors.restorePlaylist"));
+    toastError((e as Error).message || t("errors.restorePlaylist"));
   }
 }
 </script>

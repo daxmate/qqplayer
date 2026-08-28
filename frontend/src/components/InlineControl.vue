@@ -58,7 +58,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -80,8 +80,8 @@ const fmtValue = computed(() => {
   return String(v ?? "");
 });
 
-function onSlider(e) {
-  props.entry.set(Number(e.target.value));
+function onSlider(e: Event) {
+  props.entry.set(Number((e.target as HTMLInputElement).value));
 }
 
 // text 输入框：本地编辑态，外部值变化时同步

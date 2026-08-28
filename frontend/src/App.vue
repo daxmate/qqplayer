@@ -205,7 +205,7 @@
     <!-- 壳内配对确认弹窗（桌面壳轮询到新配对请求时自动弹出；iOS 壳是发起方，不启用） -->
     <PairingConfirmModal
       :open="pairVisible"
-      :request="pairRequest"
+      :request="pairRequest ?? undefined"
       :busy="pairBusy"
       @approve="approvePairing"
       @reject="rejectPairing"
@@ -226,7 +226,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -321,7 +321,7 @@ const { t } = useI18n();
 
 // 负一屏设置区：SettingsModal 同步 tab「打开同步中心」→ 关设置弹窗 + MobileShell 进入负一屏（默认同步面板）
 // （桌面布局无 MobileShell → shellRef 为空，按钮在桌面不展示，此处兜底不动作）
-const shellRef = ref(null);
+const shellRef = ref<InstanceType<typeof MobileShell> | null>(null);
 function openSyncCenter() {
   isSettingsOpen.value = false;
   shellRef.value?.openSyncCenter();
@@ -340,8 +340,8 @@ const {
 // 统一壳桥（Tauri 2 Windows / WebKit macOS Swift / 浏览器直连静默降级）
 const bridge = useShellBridge();
 
-const centerRef = ref(null);
-let cleanupCoverObserve = null;
+const centerRef = ref<HTMLElement | null>(null);
+let cleanupCoverObserve: (() => void) | null = null;
 
 // iOS 壳未连接引导页：仅壳环境（window.qqplayerNative 存在）且无 server 时为 true。
 // 配对成功后原生注入 server + reload → 重新加载时此值自然变 false（无需监听变化）。
@@ -367,7 +367,7 @@ const panelClass = computed(() => {
   return c;
 });
 
-function switchMode(m) {
+function switchMode(m: string) {
   state.mode = m;
 }
 
@@ -402,7 +402,7 @@ function closeFloatingForReader() {
 
 watch(
   () => state.mode,
-  (mode) => {
+  (mode: string) => {
     if (mode === "books") closeFloatingForReader();
   },
 );
@@ -442,8 +442,8 @@ function openMiniPlayer() {
 }
 
 // search anything：歌手/专辑结果 → 打开 Playlist 分组浏览（@pick 由 App 根部实例触发）
-const playlistRef = ref(null);
-function onSearchPick(item) {
+const playlistRef = ref<InstanceType<typeof Playlist> | null>(null);
+function onSearchPick(item: { kind: string; payload: { artist?: string; album?: string } }) {
   if (!uiState.playlistOpen) togglePlaylist();
   nextTick(() => {
     const type = item.kind === "artist" ? "artists" : "albums";
@@ -454,8 +454,8 @@ function onSearchPick(item) {
 
 // 智能视图右键「进歌手/进专辑」→ 同一链路：打开 Playlist 分组浏览
 // （SmartViewPanel 已先 emit close 关闭智能视图，这里补开播放列表面板 + 设置分组过滤）
-function onOpenBrowse(e) {
-  const { type, value } = e.detail || {};
+function onOpenBrowse(e: Event) {
+  const { type, value } = (e as CustomEvent).detail || {};
   if (!type || !value) return;
   if (!uiState.playlistOpen) togglePlaylist();
   nextTick(() => {
@@ -463,10 +463,10 @@ function onOpenBrowse(e) {
   });
 }
 
-let cleanupDragImport = null;
-let offlineUnsub = null;
-let offlineRecoveryUnsub = null;
-let unauthorizedUnsub = null;
+let cleanupDragImport: ReturnType<typeof setupDragImport> | null = null;
+let offlineUnsub: ReturnType<typeof onOfflineChange> | null = null;
+let offlineRecoveryUnsub: ReturnType<typeof onOfflineChange> | null = null;
+let unauthorizedUnsub: ReturnType<typeof onUnauthorized> | null = null;
 
 // 启动自检（静默，不弹 UI、不影响正常流程）：验证相对 /api 请求在当前页面源下可直达后端。
 // 关键判据：res.ok 且 body 能按 JSON 解析——tauri:// 资源协议源时请求打到资源服务器返回 index.html，
@@ -490,7 +490,7 @@ async function runStartupSelfTest() {
         "frontend-selftest FAIL origin=" +
         window.location.origin +
         " err=" +
-        (err && err.message ? err.message : String(err)),
+        ((err as Error | null)?.message || String(err)),
     });
   }
 }

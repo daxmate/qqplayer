@@ -50,7 +50,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { Play, SkipForward, Heart, ListPlus, Send, Mic, Disc, Tags, Trash2 } from "@lucide/vue";
@@ -84,7 +84,7 @@ const { t } = useI18n();
 const MENU_WIDTH = 200; // 与 .ctx-menu width 一致
 const MENU_MARGIN = 8; // 视口边缘留白
 
-const menuEl = ref(null);
+const menuEl = ref<HTMLElement | null>(null);
 const pos = ref({ top: 0, left: 0 });
 
 // 菜单位于鼠标位置，超出视口右/下边缘时 clamp（宽度固定，高度渲染后实测）

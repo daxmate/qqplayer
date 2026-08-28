@@ -41,7 +41,7 @@
           <Repeat v-else :size="15" />
         </button>
       </template>
-      <button class="btn" :title="t('control.prevSong')" @click="prevSong">
+      <button class="btn" :title="t('control.prevSong')" @click="prevSong()">
         <SkipBack :size="17" />
       </button>
 
@@ -92,7 +92,7 @@
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
-        <button class="btn" :title="t('control.nextSong')" @click="nextSong">
+        <button class="btn" :title="t('control.nextSong')" @click="nextSong()">
           <SkipForward :size="17" />
         </button>
         <button class="btn" :title="t('control.karaoke')" @click="switchMode('karaoke')">
@@ -204,7 +204,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -265,7 +265,7 @@ defineProps({
 const { t } = useI18n();
 
 // 模式切换（音乐 ↔ 跟唱；顶栏 tab 已不提供跟唱入口，这里由按钮直达）
-function switchMode(m) {
+function switchMode(m: string) {
   state.mode = m;
 }
 
@@ -279,12 +279,12 @@ const tagEditorOpen = ref(false);
 const isNetworkCurrent = computed(
   () => isStreamSong(state.currentSong) || isPreviewSong(state.currentSong),
 );
-const downloadingId = ref(null); // 下载中的 streamId（同一时刻只下一首）
+const downloadingId = ref<string | number | null>(null); // 下载中的 streamId（同一时刻只下一首）
 
 async function downloadCurrent() {
   const song = state.currentSong;
   const id = song?.streamId;
-  if (!id || downloadingId.value !== null) return;
+  if (!song || !id || downloadingId.value !== null) return;
   downloadingId.value = id;
   try {
     const res = await apiPost("/api/online/download", {
@@ -294,12 +294,12 @@ async function downloadCurrent() {
       artist: song.artist || "",
     });
     if (!res.ok) {
-      const data = res.data || {};
-      throw new Error(data.error || data.message || "");
+      const data = (res.data || {}) as Record<string, unknown>;
+      throw new Error(String(data.error || data.message || ""));
     }
     showToast(t("control.downloadSuccess", { title: song.name }));
   } catch (err) {
-    toastError(t("control.downloadFailed", { msg: err.message || "" }));
+    toastError(t("control.downloadFailed", { msg: (err as Error).message || "" }));
   } finally {
     downloadingId.value = null;
   }
@@ -322,16 +322,16 @@ async function confirmUrl() {
   await playUrl(raw);
 }
 
-function onSeek(e) {
-  seek(parseFloat(e.target.value));
+function onSeek(e: Event) {
+  seek(parseFloat((e.target as HTMLInputElement).value));
 }
 
-function onVolume(e) {
-  setVolume(parseFloat(e.target.value));
+function onVolume(e: Event) {
+  setVolume(parseFloat((e.target as HTMLInputElement).value));
 }
 
 // 循环按钮：单击切换单句循环 / 退出 AB；长按 500ms 进入 AB 循环
-let pressTimer = null;
+let pressTimer: ReturnType<typeof setTimeout> | null = null;
 let longPressFired = false;
 
 const loopTitle = computed(() => {
@@ -361,7 +361,7 @@ function onLoopPressStart() {
 }
 
 function onLoopPressEnd() {
-  clearTimeout(pressTimer);
+  if (pressTimer) clearTimeout(pressTimer);
 }
 
 function onLoopClick() {
@@ -377,7 +377,7 @@ function onLoopClick() {
   }
 }
 
-function fmt(t) {
+function fmt(t: number) {
   if (!t || isNaN(t)) return "0:00";
   const m = Math.floor(t / 60);
   const s = Math.floor(t % 60);
