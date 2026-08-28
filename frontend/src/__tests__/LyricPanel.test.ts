@@ -3,7 +3,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { nextTick } from "vue";
 import { flushPromises } from "@vue/test-utils";
-import { mount } from "@vue/test-utils";
+import { mount, type VueWrapper } from "@vue/test-utils";
 
 // amll LyricPlayer 依赖 pixi（jsdom 下 ESM 互操作报错）；面板测试只关心行为，mock 掉组件
 // 数据通过 data-lines 属性透出，供测试断言；enable-* 三特效以 data-* 透出（props 绑定断言）
@@ -28,14 +28,14 @@ vi.mock("@applemusic-like-lyrics/vue", () => ({
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -46,7 +46,7 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -133,10 +133,15 @@ describe("LyricPanel 中文翻译显示（native 引擎 DOM）", () => {
 
 describe("LyricPanel 中文翻译显示（amll 引擎数据映射）", () => {
   // amll 引擎渲染的是 LyricPlayer（异步组件 + mock），断言传给它的 LyricLine 数据
-  async function amllProps(wrapper) {
+  type LyricLine = {
+    translatedLyric: string;
+    romanLyric: string;
+    words: { word: string }[];
+  };
+  async function amllProps(wrapper: VueWrapper): Promise<LyricLine[]> {
     await flushPromises(); // 等 defineAsyncComponent 加载完成
     const raw = wrapper.find(".amll-mock").attributes("data-lines");
-    return JSON.parse(raw);
+    return JSON.parse(raw!) as LyricLine[];
   }
 
   it("默认带中文翻译行（translatedLyric）", async () => {
@@ -174,7 +179,7 @@ describe("LyricPanel 中文翻译显示（amll 引擎数据映射）", () => {
 
 describe("LyricPanel 对齐设置", () => {
   it("native 引擎：容器 textAlign 跟随设置（left/center/right）", async () => {
-    for (const a of ["left", "center", "right"]) {
+    for (const a of ["left", "center", "right"] as const) {
       lyricSettings.engine = "native";
       lyricSettings.align = a;
       const wrapper = mountPanel();

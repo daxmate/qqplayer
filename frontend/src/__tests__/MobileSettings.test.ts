@@ -2,18 +2,16 @@
 // 覆盖：默认同步面板（MobileSync embedded）/ 抽屉开关 / 点分类切换面板（SettingsModal 嵌入式）/
 //       返回事件 / 遮罩点击关闭抽屉
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import SettingsModal（连带 usePlayer）前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -42,7 +40,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-async function openDrawer(wrapper) {
+async function openDrawer(wrapper: VueWrapper) {
   await wrapper.find(".ms-burger").trigger("click");
   await flushPromises();
 }
@@ -65,7 +63,7 @@ describe("MobileSettings 负一屏设置区", () => {
     const items = wrapper.findAll(".ms-drawer-item");
     expect(items.length).toBeGreaterThan(0);
     // 当前面板「同步」高亮
-    expect(items.find((b) => b.text().includes("同步")).classes()).toContain("on");
+    expect(items.find((b) => b.text().includes("同步"))!.classes()).toContain("on");
     // 点遮罩（非抽屉本体）关闭
     await wrapper.find(".ms-drawer-mask").trigger("click");
     await flushPromises();
@@ -77,7 +75,7 @@ describe("MobileSettings 负一屏设置区", () => {
     await openDrawer(wrapper);
     await wrapper
       .findAll(".ms-drawer-item")
-      .find((b) => b.text().includes("界面"))
+      .find((b) => b.text().includes("界面"))!
       .trigger("click");
     await flushPromises();
     // 抽屉关闭 + 面板切换
@@ -94,14 +92,14 @@ describe("MobileSettings 负一屏设置区", () => {
     await openDrawer(wrapper);
     await wrapper
       .findAll(".ms-drawer-item")
-      .find((b) => b.text().includes("界面"))
+      .find((b) => b.text().includes("界面"))!
       .trigger("click");
     await flushPromises();
     expect(wrapper.find(".msc-page").exists()).toBe(false);
     await openDrawer(wrapper);
     await wrapper
       .findAll(".ms-drawer-item")
-      .find((b) => b.text().includes("同步"))
+      .find((b) => b.text().includes("同步"))!
       .trigger("click");
     await flushPromises();
     expect(wrapper.find(".msc-page").exists()).toBe(true);

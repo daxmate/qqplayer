@@ -6,14 +6,12 @@ import { flushPromises, mount } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -106,7 +104,7 @@ describe("ControlBar 下载当前网络歌", () => {
   });
 
   it("点击下载当前网络歌 → POST /api/online/download 参数正确，成功 toast", async () => {
-    const calls = [];
+    const calls: { url: string; opts: RequestInit }[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url, opts) => {
@@ -125,7 +123,7 @@ describe("ControlBar 下载当前网络歌", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("/api/online/download");
     expect(calls[0].opts.method).toBe("POST");
-    expect(JSON.parse(calls[0].opts.body)).toEqual({
+    expect(JSON.parse(calls[0].opts.body as string)).toEqual({
       id: "777",
       level: downloadSettings.defaultQuality,
       title: "稻香",
@@ -139,7 +137,7 @@ describe("ControlBar 下载当前网络歌", () => {
   });
 
   it("下载中显示 Loader2 旋转（busy 态）", async () => {
-    let resolveFetch;
+    let resolveFetch!: (value: unknown) => void;
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -177,8 +175,8 @@ describe("ControlBar 下载当前网络歌", () => {
     await flushPromises();
     const err = useToast().items.find((t) => t.type === "error");
     expect(err).toBeTruthy();
-    expect(err.text).toContain("下载失败");
-    expect(err.text).toContain("无法获取下载链接");
+    expect(err!.text).toContain("下载失败");
+    expect(err!.text).toContain("无法获取下载链接");
     w.unmount();
   });
 });

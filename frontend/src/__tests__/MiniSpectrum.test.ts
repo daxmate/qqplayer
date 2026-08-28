@@ -6,14 +6,12 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -31,7 +29,9 @@ const { state, playbackSettings, _resetEqGraph } = await import("../composables/
 const { _resetVisualizer, _resetParticles, _resetPeaks } =
   await import("../composables/useVisualizer.js");
 
-let fakeCtx = null;
+// jsdom 无 canvas 2d 实现 → stub 一个假 2d context（并让绘制路径真实执行）
+type FakeCtx2d = ReturnType<typeof fakeCtx2d>;
+let fakeCtx: FakeCtx2d = null as unknown as FakeCtx2d;
 function fakeCtx2d() {
   return {
     clearRect: vi.fn(),
@@ -57,13 +57,14 @@ function fakeCtx2d() {
   };
 }
 
-const lsStore = {};
+// jsdom 无 localStorage（vitest 4）→ stub 手动实现（持久化断言用）
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -80,7 +81,9 @@ beforeEach(() => {
   playbackSettings.visualizerStyle = "bars";
   state.isPlaying = false;
   fakeCtx = fakeCtx2d();
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(fakeCtx);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    fakeCtx as unknown as RenderingContext,
+  );
 });
 
 afterEach(() => {
@@ -101,7 +104,7 @@ describe("MiniSpectrum 渲染与开关", () => {
     playbackSettings.visualizerEnabled = false;
     await nextTick();
     const root = w.find('[data-testid="mini-spectrum"]');
-    expect(root.element.style.display).toBe("none");
+    expect((root.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
 
@@ -110,7 +113,7 @@ describe("MiniSpectrum 渲染与开关", () => {
     playbackSettings.miniSpectrumEnabled = false;
     await nextTick();
     const root = w.find('[data-testid="mini-spectrum"]');
-    expect(root.element.style.display).toBe("none");
+    expect((root.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
 
@@ -121,7 +124,7 @@ describe("MiniSpectrum 渲染与开关", () => {
     playbackSettings.miniSpectrumEnabled = true;
     await nextTick();
     const root = w.find('[data-testid="mini-spectrum"]');
-    expect(root.element.style.display).not.toBe("none");
+    expect((root.element as HTMLElement).style.display).not.toBe("none");
     w.unmount();
   });
 });

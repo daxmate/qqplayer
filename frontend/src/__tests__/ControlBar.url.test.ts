@@ -3,19 +3,19 @@
 // 电台流 URL 不崩
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { nextTick } from "vue";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  ended = false;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.ended = false;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -27,7 +27,7 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -37,9 +37,9 @@ const ControlBar = (await import("../components/ControlBar.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
 
 // 网络直链 → 同源代理 URL（与 playerCore.streamProxyUrl 同款格式）
-const PROXY_SRC = (u) => "/api/stream/proxy?url=" + encodeURIComponent(u);
+const PROXY_SRC = (u: string) => "/api/stream/proxy?url=" + encodeURIComponent(u);
 
-let wrapper = null;
+let wrapper: VueWrapper | null = null;
 
 beforeEach(() => {
   Object.assign(state, {
@@ -80,18 +80,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function findUrlBtn(w) {
+function findUrlBtn(w: VueWrapper) {
   return w.findAll(".btn").find((b) => b.attributes("title") === "播放 URL");
 }
 
 describe("ControlBar 播放 URL 入口", () => {
   it("按钮存在；点击打开 URL 弹窗（Teleport body）", async () => {
     wrapper = mount(ControlBar);
-    const btn = findUrlBtn(wrapper);
+    const btn = findUrlBtn(wrapper)!;
     expect(btn).toBeTruthy();
     await btn.trigger("click");
     await nextTick();
-    const mask = document.body.querySelector(".url-mask");
+    const mask = document.body.querySelector(".url-mask")!;
     expect(mask).toBeTruthy();
     expect(mask.querySelector("input")).toBeTruthy();
     wrapper.unmount();
@@ -99,13 +99,13 @@ describe("ControlBar 播放 URL 入口", () => {
 
   it("非法 URL → 提示错误，弹窗不关闭，不播放", async () => {
     wrapper = mount(ControlBar);
-    await findUrlBtn(wrapper).trigger("click");
+    await findUrlBtn(wrapper)!.trigger("click");
     await nextTick();
-    const input = document.body.querySelector(".url-input");
+    const input = document.body.querySelector(".url-input") as HTMLInputElement;
     input.value = "ftp://example.com/a.mp3";
     await input.dispatchEvent(new Event("input"));
     await document.body
-      .querySelector(".url-btn.primary")
+      .querySelector(".url-btn.primary")!
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
     expect(document.body.querySelector(".url-err")).toBeTruthy(); // 非法提示
@@ -117,10 +117,10 @@ describe("ControlBar 播放 URL 入口", () => {
 
   it("空输入 → 提示错误（http/https 校验）", async () => {
     wrapper = mount(ControlBar);
-    await findUrlBtn(wrapper).trigger("click");
+    await findUrlBtn(wrapper)!.trigger("click");
     await nextTick();
     await document.body
-      .querySelector(".url-btn.primary")
+      .querySelector(".url-btn.primary")!
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
     expect(document.body.querySelector(".url-err")).toBeTruthy();
@@ -129,47 +129,47 @@ describe("ControlBar 播放 URL 入口", () => {
 
   it("合法 URL → playUrl 试听语义播放（弹窗关闭、currentSong=url 歌）", async () => {
     wrapper = mount(ControlBar);
-    await findUrlBtn(wrapper).trigger("click");
+    await findUrlBtn(wrapper)!.trigger("click");
     await nextTick();
-    const input = document.body.querySelector(".url-input");
+    const input = document.body.querySelector(".url-input") as HTMLInputElement;
     input.value = "https://example.com/radio/station.mp3";
     await input.dispatchEvent(new Event("input"));
     await document.body
-      .querySelector(".url-btn.primary")
+      .querySelector(".url-btn.primary")!
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flushPromises();
     expect(document.body.querySelector(".url-mask")).toBeFalsy(); // 弹窗已关
-    expect(state.currentSong.type).toBe("url");
-    expect(state.currentSong.name).toBe("station.mp3");
+    expect(state.currentSong!.type).toBe("url");
+    expect(state.currentSong!.name).toBe("station.mp3");
     expect(FakeAudio.instances[0].src).toBe(PROXY_SRC("https://example.com/radio/station.mp3"));
     wrapper.unmount();
   });
 
   it("Enter 键提交合法 URL；电台流 URL 不崩（duration=Infinity → 保持 0）", async () => {
     wrapper = mount(ControlBar);
-    await findUrlBtn(wrapper).trigger("click");
+    await findUrlBtn(wrapper)!.trigger("click");
     await nextTick();
-    const input = document.body.querySelector(".url-input");
+    const input = document.body.querySelector(".url-input") as HTMLInputElement;
     input.value = "https://radio.example.com/live";
     await input.dispatchEvent(new Event("input"));
     await input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await flushPromises();
-    expect(state.currentSong.type).toBe("url");
+    expect(state.currentSong!.type).toBe("url");
     const a = FakeAudio.instances[0];
     a.duration = Infinity;
     a.listeners["loadedmetadata"]?.();
     expect(state.duration).toBe(0); // 电台流无时长 → 进度条空态
-    expect(state.currentSong.name).toBe("live"); // 无文件名取域名
+    expect(state.currentSong!.name).toBe("live"); // 无文件名取域名
     wrapper.unmount();
   });
 
   it("取消按钮关闭弹窗，不播放", async () => {
     wrapper = mount(ControlBar);
-    await findUrlBtn(wrapper).trigger("click");
+    await findUrlBtn(wrapper)!.trigger("click");
     await nextTick();
     const cancelBtn = [...document.body.querySelectorAll(".url-btn")].find((b) =>
       b.textContent.includes("取消"),
-    );
+    )!;
     await cancelBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
     expect(document.body.querySelector(".url-mask")).toBeFalsy();

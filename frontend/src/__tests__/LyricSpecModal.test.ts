@@ -5,14 +5,12 @@ import { mount } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -21,7 +19,7 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -29,7 +27,7 @@ vi.stubGlobal("Audio", FakeAudio);
 
 // mock usePlayer 模块：保留全部真实实现，仅替换 alignLyric（组件内点击 AI 对齐用）
 vi.mock("../composables/usePlayer.js", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import("../composables/usePlayer.js")>();
   return { ...actual, alignLyric: vi.fn() };
 });
 
@@ -44,39 +42,47 @@ const SONG = {
 };
 
 // 默认 fetch mock：GET manual 返回未指定
-function mockFetch(routes = {}) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation((url, opts) => {
-    const u = String(url);
-    if (u.includes("/api/lyric/search")) {
+type MockRoutes = {
+  search?: unknown[];
+  put?: () => Promise<unknown>;
+  delete?: () => Promise<unknown>;
+  manual?: unknown;
+};
+function mockFetch(routes: MockRoutes = {}) {
+  return (vi.spyOn(globalThis, "fetch") as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+    (url, opts) => {
+      const u = String(url);
+      if (u.includes("/api/lyric/search")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ results: routes.search || [] }),
+        });
+      }
+      if (u.includes("/api/lyric/manual") && opts?.method === "PUT") {
+        return routes.put
+          ? routes.put()
+          : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
+      }
+      if (u.includes("/api/lyric/manual") && opts?.method === "DELETE") {
+        return routes.delete
+          ? routes.delete()
+          : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
+      }
+      // GET /api/lyric/manual
       return Promise.resolve({
         ok: true,
-        json: async () => ({ results: routes.search || [] }),
+        json: async () => routes.manual || { specified: false },
       });
-    }
-    if (u.includes("/api/lyric/manual") && opts?.method === "PUT") {
-      return routes.put
-        ? routes.put()
-        : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
-    }
-    if (u.includes("/api/lyric/manual") && opts?.method === "DELETE") {
-      return routes.delete
-        ? routes.delete()
-        : Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
-    }
-    // GET /api/lyric/manual
-    return Promise.resolve({
-      ok: true,
-      json: async () => routes.manual || { specified: false },
-    });
-  });
+    },
+  );
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
 // jsdom 下 FileReader.onload 是异步任务，全量并行（42 个 worker）时固定 10ms tick 可能不够，
 // 导致“文本已更新但按钮 disabled 未刷新”的偶发失败 → 轮询等待渲染完成再断言
-function waitFor(fn, timeout = 3000) {
-  return new Promise((resolve, reject) => {
+function waitFor(fn: () => boolean, timeout = 3000) {
+  return new Promise<void>((resolve, reject) => {
     const start = Date.now();
     const check = () => {
       try {
@@ -107,7 +113,7 @@ async function openModal() {
 beforeEach(() => {
   uiState.specLyricOpen = false;
   state.currentSong = { ...SONG };
-  alignLyric.mockReset();
+  (alignLyric as ReturnType<typeof vi.fn>).mockReset();
 });
 
 afterEach(() => {
@@ -176,7 +182,7 @@ describe("LyricSpecModal 上传文件", () => {
 
     const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
     expect(putCall).toBeTruthy();
-    const body = JSON.parse(putCall[1].body);
+    const body = JSON.parse(putCall![1]!.body as string);
     expect(body.path).toBe(SONG.path);
     expect(body.format).toBe("lrc");
     expect(body.text).toContain("一行歌词");
@@ -224,7 +230,7 @@ describe("LyricSpecModal 在线搜索", () => {
 
     const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
     expect(putCall).toBeTruthy();
-    const body = JSON.parse(putCall[1].body);
+    const body = JSON.parse(putCall![1]!.body as string);
     expect(body.text).toContain("沈む");
     expect(body.source).toContain("网易云");
     expect(uiState.specLyricOpen).toBe(false); // 保存后关闭
@@ -260,7 +266,7 @@ describe("LyricSpecModal JSON 歌词", () => {
 
     const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
     expect(putCall).toBeTruthy();
-    const body = JSON.parse(putCall[1].body);
+    const body = JSON.parse(putCall![1]!.body as string);
     expect(body.format).toBe("lrc"); // JSON 转成 LRC 保存
     expect(body.text).toBe("[00:01.00]原文行\n[00:05.00]原文二行");
     expect(body.tlyric).toBe("[00:01.00]翻译行");
@@ -307,7 +313,7 @@ describe("LyricSpecModal 粘贴文本", () => {
 
     const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
     expect(putCall).toBeTruthy();
-    const body = JSON.parse(putCall[1].body);
+    const body = JSON.parse(putCall![1]!.body as string);
     expect(body.format).toBe("srt");
     expect(body.text).toContain("粘贴的歌词行");
     expect(body.source).toBe("粘贴");
@@ -345,8 +351,10 @@ describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
 
   it("点击 AI 对齐 → loading（禁用+文案）→ 成功填入 LRC 并识别格式", async () => {
     mockFetch();
-    let resolveAlign;
-    alignLyric.mockImplementation(() => new Promise((r) => (resolveAlign = r)));
+    let resolveAlign!: (v: unknown) => void;
+    (alignLyric as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((r) => (resolveAlign = r)),
+    );
     const w = await openModal();
     await w.findAll(".spec-tab")[2].trigger("click");
     await nextTick();
@@ -364,7 +372,9 @@ describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
     resolveAlign({ lrc: "[00:01.23]一行歌词\n[00:05.67]二行歌词", lines: 2, duration: 38 });
     await tick();
     await nextTick();
-    expect(w.find(".paste-area").element.value).toBe("[00:01.23]一行歌词\n[00:05.67]二行歌词");
+    expect((w.find(".paste-area").element as HTMLTextAreaElement).value).toBe(
+      "[00:01.23]一行歌词\n[00:05.67]二行歌词",
+    );
     expect(w.text()).toContain("LRC");
     const { items } = useToast();
     expect(items.some((i) => i.type === "success" && i.text.includes("AI 对齐完成"))).toBe(true);
@@ -375,7 +385,9 @@ describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
 
   it("对齐失败 → error toast（带 detail），按钮恢复", async () => {
     mockFetch();
-    alignLyric.mockRejectedValue(new Error("AI 对齐失败，请检查音频文件与歌词内容"));
+    (alignLyric as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("AI 对齐失败，请检查音频文件与歌词内容"),
+    );
     const w = await openModal();
     await w.findAll(".spec-tab")[2].trigger("click");
     await nextTick();
@@ -387,14 +399,16 @@ describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
     const { items } = useToast();
     expect(items.some((i) => i.type === "error" && i.text.includes("AI 对齐失败"))).toBe(true);
     expect(w.find(".align-btn").attributes("disabled")).toBeUndefined();
-    expect(w.find(".paste-area").element.value).toBe("一行歌词"); // 原文本保留
+    expect((w.find(".paste-area").element as HTMLTextAreaElement).value).toBe("一行歌词"); // 原文本保留
     w.unmount();
   });
 
   it("无粘贴文本时，自动用当前已加载歌词（state.lyric）对齐", async () => {
     mockFetch();
-    let resolveAlign;
-    alignLyric.mockImplementation(() => new Promise((r) => (resolveAlign = r)));
+    let resolveAlign!: (v: unknown) => void;
+    (alignLyric as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((r) => (resolveAlign = r)),
+    );
     // 模拟当前歌曲已加载歌词（在线拉取/本地文件）
     state.lyric = [
       { type: "line", s: 1, e: 5, text: ["夜に駆ける", "", ""] },
@@ -415,7 +429,9 @@ describe("LyricSpecModal AI 对齐（粘贴 tab）", () => {
     await tick();
     await nextTick();
     // 自动切回粘贴 tab，结果填入粘贴区，可保存
-    expect(w.find(".paste-area").element.value).toContain("[00:01.00]夜に駆ける");
+    expect((w.find(".paste-area").element as HTMLTextAreaElement).value).toContain(
+      "[00:01.00]夜に駆ける",
+    );
     expect(w.find(".btn-primary").attributes("disabled")).toBeUndefined();
     state.lyric = [];
     w.unmount();
@@ -456,11 +472,11 @@ describe("LyricSpecModal 清除指定歌词（toast + 撤销）", () => {
     expect(items[0].duration).toBe(5000);
     expect(items[0].action).toBeTruthy();
     // 点撤销 → PUT /api/lyric/manual 原样恢复
-    items[0].action.onClick();
+    items[0].action!.onClick();
     await tick();
     const putCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === "PUT");
     expect(putCall).toBeTruthy();
-    expect(JSON.parse(putCall[1].body)).toMatchObject({
+    expect(JSON.parse(putCall![1]!.body as string)).toMatchObject({
       path: SONG.path,
       format: "lrc",
       text: "[00:01.00]x",

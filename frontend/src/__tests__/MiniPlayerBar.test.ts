@@ -4,14 +4,12 @@ import { mount } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -20,7 +18,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -108,7 +106,7 @@ describe("MiniPlayerBar（移动端迷你播放条）", () => {
     const wrapper = mount(MiniPlayerBar);
     await wrapper.findAll(".mp-btn")[1].trigger("click");
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     // 再点：回到第一首
     await wrapper.findAll(".mp-btn")[1].trigger("click");
     expect(state.currentIndex).toBe(0);
@@ -118,7 +116,7 @@ describe("MiniPlayerBar（移动端迷你播放条）", () => {
     const wrapper = mount(MiniPlayerBar);
     await wrapper.findAll(".mp-btn")[1].trigger("click");
     expect(state.currentIndex).toBe(0);
-    expect(state.currentSong.name).toBe("雪の華");
+    expect(state.currentSong!.name).toBe("雪の華");
   });
 
   it("点击整条迷你条发出 open-player 事件（打开全屏播放器）", async () => {

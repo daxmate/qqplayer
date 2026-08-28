@@ -7,14 +7,12 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -34,7 +32,8 @@ const { _resetVisualizer, _resetParticles, _resetPeaks, _resetColorCache } =
   await import("../composables/useVisualizer.js");
 
 // jsdom 无 canvas 2d 实现 → stub 一个假 2d context（并让绘制路径真实执行）
-let fakeCtx = null;
+type FakeCtx2d = ReturnType<typeof fakeCtx2d>;
+let fakeCtx: FakeCtx2d = null as unknown as FakeCtx2d;
 function fakeCtx2d() {
   return {
     clearRect: vi.fn(),
@@ -61,13 +60,13 @@ function fakeCtx2d() {
 }
 
 // jsdom 无 localStorage（vitest 4）→ stub 手动实现（持久化断言用）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -87,7 +86,9 @@ beforeEach(() => {
   state.isPlaying = false;
   state.currentSong = null;
   fakeCtx = fakeCtx2d();
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(fakeCtx);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    fakeCtx as unknown as RenderingContext,
+  );
 });
 
 afterEach(() => {
@@ -116,8 +117,8 @@ describe("Visualizer 主区域（氛围背景，任务 C）", () => {
     playbackSettings.visualizerEnabled = false;
     await nextTick();
     const root = w.find('[data-testid="visualizer"]');
-    expect(root.element.style.display).toBe("none");
-    expect(root.element.style.display).not.toBe("");
+    expect((root.element as HTMLElement).style.display).toBe("none");
+    expect((root.element as HTMLElement).style.display).not.toBe("");
     w.unmount();
   });
 
@@ -128,7 +129,7 @@ describe("Visualizer 主区域（氛围背景，任务 C）", () => {
     playbackSettings.visualizerEnabled = true;
     await nextTick();
     const root = w.find('[data-testid="visualizer"]');
-    expect(root.element.style.display).not.toBe("none");
+    expect((root.element as HTMLElement).style.display).not.toBe("none");
     expect(root.isVisible()).toBe(true);
     w.unmount();
   });
@@ -139,7 +140,7 @@ describe("Visualizer 主区域（氛围背景，任务 C）", () => {
     playbackSettings.ambientEnabled = false;
     await nextTick();
     const root = w.find('[data-testid="visualizer"]');
-    expect(root.element.style.display).toBe("none");
+    expect((root.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
 
@@ -256,7 +257,7 @@ describe("Visualizer small（迷你频谱，移动端/渲染器共用）", () =>
     playbackSettings.miniSpectrumEnabled = false;
     await nextTick();
     const root = w.find('[data-testid="visualizer"]');
-    expect(root.element.style.display).toBe("none");
+    expect((root.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
 });
@@ -266,7 +267,7 @@ describe("开关持久化", () => {
     localStorage.removeItem(PLAYBACK_SETTINGS_KEY);
     playbackSettings.visualizerStyle = "pulse";
     await nextTick();
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.visualizerStyle).toBe("pulse");
     playbackSettings.visualizerStyle = "bars";
     await nextTick();
@@ -277,7 +278,7 @@ describe("开关持久化", () => {
     playbackSettings.ambientEnabled = false;
     playbackSettings.miniSpectrumEnabled = false;
     await nextTick();
-    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(PLAYBACK_SETTINGS_KEY)!);
     expect(saved.ambientEnabled).toBe(false);
     expect(saved.miniSpectrumEnabled).toBe(false);
     playbackSettings.ambientEnabled = true;

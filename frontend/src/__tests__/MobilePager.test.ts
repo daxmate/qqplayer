@@ -2,18 +2,16 @@
 // 覆盖：左滑翻页 + 指示器更新 / 边界（第 0 屏右滑、末屏左滑无动作）/ 左缘起点让位边缘滑动 /
 //       有声书占位页渲染
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { mount, flushPromises } from "@vue/test-utils";
+import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -22,7 +20,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -36,7 +34,17 @@ const lib = [
   { id: "b", path: "/lib/b.mp3", name: "知足", artist: "五月天", album: "知足" },
 ];
 
-function fireTouch(el, type, touches, changedTouches) {
+interface TouchPoint {
+  clientX: number;
+  clientY: number;
+}
+
+function fireTouch(
+  el: Element,
+  type: string,
+  touches?: TouchPoint[],
+  changedTouches?: TouchPoint[],
+) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   if (touches) Object.defineProperty(ev, "touches", { value: touches, configurable: true });
   if (changedTouches)
@@ -46,7 +54,15 @@ function fireTouch(el, type, touches, changedTouches) {
 }
 
 // 分页容器横滑（from → to；clientY 固定避免纵向干扰）
-async function pagerSwipe(wrapper, { from = 220, to = 60, steps = 4, y = 200 } = {}) {
+async function pagerSwipe(
+  wrapper: VueWrapper,
+  {
+    from = 220,
+    to = 60,
+    steps = 4,
+    y = 200,
+  }: { from?: number; to?: number; steps?: number; y?: number } = {},
+) {
   const el = wrapper.find(".mp-pager").element;
   fireTouch(el, "touchstart", [{ clientX: from, clientY: y }]);
   for (let i = 1; i <= steps; i++) {
@@ -57,7 +73,7 @@ async function pagerSwipe(wrapper, { from = 220, to = 60, steps = 4, y = 200 } =
   await flushPromises();
 }
 
-function activeDot(wrapper) {
+function activeDot(wrapper: VueWrapper) {
   const dots = wrapper.findAll(".mp-dot");
   return dots.findIndex((d) => d.classes().includes("on"));
 }

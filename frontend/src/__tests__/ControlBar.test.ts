@@ -5,14 +5,12 @@ import { mount } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -68,7 +66,7 @@ describe("ControlBar 迷你频谱条（任务 C）", () => {
     await nextTick();
     const el = w.find('[data-testid="mini-spectrum"]');
     expect(el.exists()).toBe(true);
-    expect(el.element.style.display).toBe("none");
+    expect((el.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
 
@@ -77,7 +75,7 @@ describe("ControlBar 迷你频谱条（任务 C）", () => {
     playbackSettings.visualizerEnabled = false;
     await nextTick();
     const el = w.find('[data-testid="mini-spectrum"]');
-    expect(el.element.style.display).toBe("none");
+    expect((el.element as HTMLElement).style.display).toBe("none");
     w.unmount();
   });
 });
@@ -91,7 +89,7 @@ describe("ControlBar 歌曲编辑入口", () => {
     btn.trigger("click");
     await nextTick();
     // 弹窗 Teleport 到 body：展示当前歌曲信息
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector(".modal")!;
     expect(root).toBeTruthy();
     expect(root.textContent).toContain("编辑歌曲信息");
     expect(root.textContent).toContain("A");
