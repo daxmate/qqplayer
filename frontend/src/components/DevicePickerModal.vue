@@ -42,15 +42,23 @@
   </Teleport>
 </template>
 
-<script setup>
-import { ref, watch } from "vue";
+<script setup lang="ts">
+import { ref, watch, type PropType } from "vue";
 import { useI18n } from "vue-i18n";
 import { Send, Smartphone } from "@lucide/vue";
 import { formatBytes, formatLastSeen } from "../utils/deviceCommands.js";
 
+/** 推送目标设备（GET /api/sync/devices → devices[] 的宽松视图） */
+interface PickerDevice {
+  device_id: string;
+  device_name?: string;
+  last_seen?: string;
+  total?: number;
+}
+
 const props = defineProps({
   open: { type: Boolean, default: false },
-  devices: { type: Array, default: () => [] },
+  devices: { type: Array as PropType<PickerDevice[]>, default: () => [] },
 });
 const emit = defineEmits(["close", "select"]);
 
@@ -72,12 +80,12 @@ watch(
 );
 
 // 展示名：device_name 非空用设备名，空则取 device_id 前 8 位
-function nameOf(d) {
+function nameOf(d?: PickerDevice | null) {
   if (d && d.device_name && String(d.device_name).trim()) return String(d.device_name).trim();
   return d && d.device_id ? String(d.device_id).slice(0, 8) : t("settings.noDevices");
 }
 
-function fmtLastSeen(iso) {
+function fmtLastSeen(iso?: string | null) {
   return formatLastSeen(iso, {
     justNow: t("settings.deviceJustNow"),
     minutesAgo: (n) => t("settings.deviceMinutesAgo", { n }),

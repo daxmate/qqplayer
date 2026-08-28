@@ -29,7 +29,7 @@
         <template v-if="localMatches.length">
           <button
             v-for="song in localMatches"
-            :key="song.path"
+            :key="song.path ?? ''"
             class="os-item os-local"
             :data-path="song.path"
             @click="playLocal(song)"
@@ -124,11 +124,11 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { Search, X, Music, Play, Download, Loader2 } from "@lucide/vue";
-import { state, selectSong, play, findSongIndex } from "../composables/usePlayer.js";
+import { state, selectSong, play, findSongIndex, type Song } from "../composables/usePlayer.js";
 import {
   downloadSettings,
   DOWNLOAD_QUALITY_OPTIONS,
@@ -154,21 +154,31 @@ const emit = defineEmits(["open-player"]);
 
 const { t } = useI18n();
 
-const rootEl = ref(null);
+/** 在线搜索结果条目（/api/online/search → items[] 与 /api/gequhai/search 共用字段） */
+interface OnlineItem {
+  id: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  cover?: string;
+  duration?: string;
+}
+
+const rootEl = ref<HTMLElement | null>(null);
 const query = ref("");
 const open = ref(false);
 const loading = ref(false); // 在线请求中
 const searched = ref(false); // 是否已完成过至少一次在线搜索（控制空结果文案）
 const searchError = ref("");
-const onlineItems = ref([]);
-const downloading = reactive({}); // 在线条目 id → 下载中
+const onlineItems = ref<OnlineItem[]>([]);
+const downloading = reactive<Record<string, boolean>>({}); // 在线条目 id → 下载中
 
 // 在线源：'netease' 网易云（默认，现有行为不变）| 'gequhai' 歌曲海（夸克网盘直链下载）
 const source = ref("netease");
 const quarkLoginOpen = ref(false); // 夸克扫码登录弹窗
-let pendingDownload = null; // 401 触发登录时待重试的歌曲海条目
+let pendingDownload: OnlineItem | null = null; // 401 触发登录时待重试的歌曲海条目
 
-let debounceTimer = null;
+let debounceTimer: number | undefined;
 let searchSeq = 0; // 请求序列号：过期响应丢弃（快速连续输入时）
 
 // 本地歌曲匹配：title/artist/album 模糊匹配（复用 Playlist 过滤思路 + searchNormalize）
@@ -199,7 +209,7 @@ const qualityLabel = computed(() => {
 });
 
 // 源切换：切源 → 重新搜索（保留输入；若已有在途/待发请求则作废）
-function switchSource(next) {
+function switchSource(next: string) {
   if (next === source.value) return;
   source.value = next;
   searchSeq++;
@@ -228,7 +238,7 @@ watch(query, () => {
 });
 
 // 输入框按键：Esc 收起面板
-function onInputKeydown(e) {
+function onInputKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") closePanel();
 }
 
@@ -261,7 +271,7 @@ async function runSearch() {
 }
 
 // 本地歌曲点击：走现有选歌逻辑直接播放
-function playLocal(song) {
+function playLocal(song: Song) {
   const idx = findSongIndex(song);
   if (idx < 0) return;
   selectSong(idx);
@@ -273,7 +283,7 @@ function playLocal(song) {
 // 下载：网易云走 /api/online/download（level=默认音质）；歌曲海走 /api/gequhai/download
 // （走夸克直链，品质由 quarkQuality 设置决定；401 = 未登录 → 弹扫码登录，成功后自动重试）
 // 按钮转圈禁用（单条目粒度），成功/失败 toast 提示
-async function download(item, opts = {}) {
+async function download(item: OnlineItem, opts: { noLoginPrompt?: boolean } = {}) {
   const { noLoginPrompt = false } = opts;
   if (downloading[item.id]) return;
   downloading[item.id] = true;
@@ -317,7 +327,11 @@ async function download(item, opts = {}) {
     }
     showToast(t("online.downloadSuccess", { title: item.title }));
   } catch (e) {
-    toastError(t("online.downloadFailed", { msg: e.message || t("online.searchFailed") }));
+    toastError(
+      t("online.downloadFailed", {
+        msg: e instanceof Error ? e.message : t("online.searchFailed"),
+      }),
+    );
   } finally {
     downloading[item.id] = false;
   }
@@ -340,8 +354,8 @@ function closePanel() {
 }
 
 // 点击组件外部 → 收起面板
-function onDocClick(e) {
-  if (rootEl.value && !rootEl.value.contains(e.target)) closePanel();
+function onDocClick(e: MouseEvent) {
+  if (rootEl.value && !rootEl.value.contains(e.target as Node)) closePanel();
 }
 
 onMounted(() => {

@@ -132,7 +132,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { Smartphone, Tablet, Monitor, Pencil, Trash2, Clock } from "@lucide/vue";
@@ -141,16 +141,35 @@ import { showToast, toastError } from "../composables/useToast.js";
 
 const { t } = useI18n();
 
+/** 已配对设备条目（GET /api/pairing/devices → devices[]） */
+interface PairingDevice {
+  server_id: string;
+  device_id: string;
+  device_type?: string;
+  device_name?: string;
+  note?: string;
+  created_at?: string;
+  last_seen_at?: string;
+}
+
+/** 待确认配对请求（GET /api/pairing/pending → requests[]） */
+interface PairingRequest {
+  request_id: string;
+  device_type?: string;
+  device_name?: string;
+  created_at?: string;
+}
+
 const loading = ref(true); // 首次加载中
 const busy = ref(false); // 删除/拒绝/保存请求中（防重复提交）
-const devices = ref([]);
-const pending = ref([]);
-const confirmTarget = ref(null); // 待撤销的配对设备
-const noteTarget = ref(null); // 正在编辑备注的设备
+const devices = ref<PairingDevice[]>([]);
+const pending = ref<PairingRequest[]>([]);
+const confirmTarget = ref<PairingDevice | null>(null); // 待撤销的配对设备
+const noteTarget = ref<PairingDevice | null>(null); // 正在编辑备注的设备
 const noteDraft = ref("");
 
 /** 设备类型 → 图标：iphone→手机 / ipad→平板 / macos·desktop→桌面 / 其他→手机兜底 */
-function deviceIcon(type) {
+function deviceIcon(type?: string) {
   const ty = String(type || "").toLowerCase();
   if (ty.includes("iphone")) return Smartphone;
   if (ty.includes("ipad")) return Tablet;
@@ -160,7 +179,7 @@ function deviceIcon(type) {
 }
 
 /** 时间人性化（配对时间/请求时间）：今天 → HH:mm；跨天 → MM-DD HH:mm；解析失败原样 */
-function fmtTime(iso) {
+function fmtTime(iso?: string | null) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
@@ -170,13 +189,13 @@ function fmtTime(iso) {
 }
 
 /** 最后活跃人性化：今天 → HH:mm；昨天 → 昨天；更早 → MM-DD；解析失败原样 */
-function fmtLastActive(iso) {
+function fmtLastActive(iso?: string | null) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
   const now = new Date();
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  const dayStart = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diffDays = Math.round((dayStart(now) - dayStart(d)) / 86400000);
   if (diffDays <= 0) return hm;
   if (diffDays === 1) return t("pairing.yesterday");
@@ -204,7 +223,7 @@ async function load() {
 }
 
 // ---- 删除（撤销配对） ----
-function askDelete(d) {
+function askDelete(d: PairingDevice) {
   confirmTarget.value = d;
 }
 function closeConfirm() {
@@ -217,7 +236,7 @@ const confirmName = computed(() => {
 });
 
 /// 展示名：有备注用备注（用户可区分同名设备），无备注用设备名
-function displayName(d) {
+function displayName(d: PairingDevice | null) {
   if (d && d.note && String(d.note).trim()) return String(d.note).trim();
   return d && d.device_name ? d.device_name : t("pairing.deviceUnknown");
 }
@@ -239,7 +258,7 @@ async function confirmDelete() {
 }
 
 // ---- 备注编辑 ----
-function openNote(d) {
+function openNote(d: PairingDevice) {
   noteDraft.value = d.note || "";
   noteTarget.value = d;
 }
@@ -266,7 +285,7 @@ async function saveNote() {
 }
 
 // ---- 拒绝待确认请求（幂等；无批准入口，批准由桌面弹窗负责） ----
-async function rejectRequest(r) {
+async function rejectRequest(r: PairingRequest) {
   if (!r || busy.value) return;
   busy.value = true;
   const res = await apiPost(`/api/pairing/request/${encodeURIComponent(r.request_id)}/reject`);

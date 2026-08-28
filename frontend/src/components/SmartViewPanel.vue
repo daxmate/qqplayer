@@ -14,7 +14,7 @@
         <template v-else>
           <div
             v-for="row in rows"
-            :key="row.song.path"
+            :key="row.song.path ?? ''"
             class="sv-item"
             :class="{ active: isCurrent(row) }"
             :data-path="row.song.path"
@@ -29,11 +29,11 @@
             </span>
             <span v-if="coverVisible('list')" class="sv-cover">
               <img
-                v-if="coverSrc(row.song.path) && coverOk(row.song.path)"
-                :src="coverSrc(row.song.path)"
+                v-if="coverSrc(row.song.path ?? '') && coverOk(row.song.path ?? '')"
+                :src="coverSrc(row.song.path ?? '')"
                 alt=""
                 loading="lazy"
-                @error="markCoverError(row.song.path)"
+                @error="markCoverError(row.song.path ?? '')"
               />
               <Music2 v-else :size="18" />
             </span>
@@ -58,7 +58,7 @@
       :visible="ctxOpen"
       :x="ctxPos.x"
       :y="ctxPos.y"
-      :fav="ctxSong ? isFavorite(ctxSong.path) : false"
+      :fav="ctxSong ? isFavorite(ctxSong.path ?? '') : false"
       :can-go-artist="ctxCanGoArtist"
       :can-go-album="ctxCanGoAlbum"
       :has-path="!!ctxSong?.path"
@@ -126,7 +126,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -152,6 +152,7 @@ import {
   removeFromPlaylist,
   _resetPlayMode,
   findSongIndex,
+  type Song,
 } from "../composables/usePlayer.js";
 import { coverVisible } from "../composables/useCoverGuard.ts";
 import {
@@ -169,6 +170,8 @@ import {
   loadSmartView,
   playSmartRow,
   fmtSmartSub,
+  type SmartViewKind,
+  type SmartViewRow,
 } from "../composables/useSmartViews.js";
 import ContextMenu from "./ContextMenu.vue";
 import TagEditorModal from "./TagEditorModal.vue";
@@ -180,7 +183,7 @@ const props = defineProps({
 });
 const emit = defineEmits(["close"]);
 
-const meta = computed(() => SMART_VIEWS[props.kind] || SMART_VIEWS.recentAdded);
+const meta = computed(() => SMART_VIEWS[props.kind as SmartViewKind] || SMART_VIEWS.recentAdded);
 const rows = computed(() => smartViewState.rows);
 const loading = computed(() => smartViewState.loading);
 const error = computed(() => smartViewState.error);
@@ -195,13 +198,13 @@ const title = computed(() => {
   return t(meta.value.titleKey);
 });
 
-function isCurrent(row) {
+function isCurrent(row: SmartViewRow) {
   return state.currentSong && row.song.path === state.currentSong.path;
 }
-function sub(row) {
+function sub(row: SmartViewRow) {
   return fmtSmartSub(row);
 }
-function playRow(row) {
+function playRow(row: SmartViewRow) {
   playSmartRow(row);
 }
 function close() {
@@ -213,9 +216,9 @@ function close() {
 // 网络歌（path=null）不能加歌单 → preventDefault。
 // 浮层遮挡：.sv-panel 是 fixed + z-index 40 浮层，拖拽期间 drop 事件到不了下面的侧边栏歌单项，
 // dragstart 时给面板根元素设 pointer-events:none 放行，dragend（drop 后必发）恢复。
-const panelEl = ref(null);
+const panelEl = ref<HTMLElement | null>(null);
 
-function onRowDragStart(e, path) {
+function onRowDragStart(e: DragEvent, path: string | null) {
   if (!path) {
     e.preventDefault();
     return;
@@ -235,10 +238,10 @@ function onDragEnd() {
 // 浏览器：行 @contextmenu.prevent → openCtxMenu 弹 ContextMenu；
 // 壳内：useNativeCtxMenu 上报 .sv-item 命中 → NSMenu 点击派发 qqplayer:ctx-* 事件 → 下面同一套实现。
 const ctxOpen = ref(false);
-const ctxSong = ref(null);
+const ctxSong = ref<Song | null>(null);
 const ctxPos = ref({ x: 0, y: 0 });
 
-function openCtxMenu(e, row) {
+function openCtxMenu(e: MouseEvent, row: SmartViewRow) {
   const song = row && row.song;
   if (!song) return;
   ctxSong.value = song;
@@ -261,7 +264,7 @@ const ctxCanGoAlbum = computed(() => {
 });
 
 // 播放指定曲库索引的歌（浏览器/壳共用；idx 越界静默）
-function playFor(idx) {
+function playFor(idx: number) {
   if (idx >= 0 && idx < state.songs.length) {
     selectSong(idx);
     play();
@@ -269,7 +272,7 @@ function playFor(idx) {
 }
 
 // 下一首播放：把该歌挪到当前歌之后并立即播放（与 Playlist.playNextFor 同一实现）
-function playNextFor(idx) {
+function playNextFor(idx: number) {
   if (idx < 0 || idx >= state.songs.length) return;
   const cur = state.currentIndex;
   if (cur < 0 || idx === cur) {
@@ -316,7 +319,7 @@ function ctxAddPlaylist() {
 }
 
 // 进歌手/进专辑：关闭智能视图并让 Playlist 进入分组浏览（App 监听 qqplayer:open-browse 窗口事件）
-function goBrowse(type, value) {
+function goBrowse(type: string, value: string) {
   ctxClose();
   emit("close");
   window.dispatchEvent(new CustomEvent("qqplayer:open-browse", { detail: { type, value } }));
@@ -345,9 +348,9 @@ function ctxDelete() {
 // 编辑标签/刮削：打开 TagEditorModal（autoScrape 自动触发刮削），编辑对象 = 被右键的歌曲
 // （不切换当前播放；弹窗内保存/刮削都以该歌曲的 path 为准）
 const tagEditorOpen = ref(false);
-const tagEditorSong = ref(null);
+const tagEditorSong = ref<Song | null>(null);
 
-function openTagEditor(song) {
+function openTagEditor(song: Song | null) {
   if (!song?.path) return;
   tagEditorSong.value = song;
   tagEditorOpen.value = true;
@@ -361,18 +364,34 @@ function ctxEditTags() {
 
 // ============ 加歌浮层（与 Playlist 同款：歌单列表 + 勾选/切换） ============
 const addMenuOpen = ref(false);
-const addMenuPaths = ref([]);
+const addMenuPaths = ref<string[]>([]);
 const addMenuPos = ref({ top: 0, left: 0 });
 
 const ADD_MENU_WIDTH = 220; // 与 .add-menu width 一致
 const ADD_MENU_GAP = 6;
 const ADD_MENU_EST_HEIGHT = 220;
 const ADD_MENU_MARGIN = 8;
-let addMenuAnchorRect = null; // 右键坐标假 rect（浮层精修测量用）
+
+/** 锚点 rect（右键坐标假 rect 或真实元素 rect；computeAddMenuPos 只读几何字段） */
+interface AddMenuRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+let addMenuAnchorRect: AddMenuRect | null = null; // 右键坐标假 rect（浮层精修测量用）
 
 // 纯函数：锚点 rect + 浮层高度 + 视口尺寸 → { top, left, flip }
 // 与 Playlist.computeAddMenuPos 同公式：下方放不下翻转，右缘对齐展开
-function computeAddMenuPos(rect, menuHeight, vw = window.innerWidth, vh = window.innerHeight) {
+function computeAddMenuPos(
+  rect: AddMenuRect,
+  menuHeight: number,
+  vw = window.innerWidth,
+  vh = window.innerHeight,
+) {
   const below = Math.max(ADD_MENU_MARGIN, rect.bottom + ADD_MENU_GAP);
   const flip = below + menuHeight > vh - ADD_MENU_MARGIN;
   const top = flip ? Math.max(ADD_MENU_MARGIN, rect.top - menuHeight - ADD_MENU_GAP) : below;
@@ -384,7 +403,7 @@ function computeAddMenuPos(rect, menuHeight, vw = window.innerWidth, vh = window
 }
 
 // 统一入口：鼠标坐标（右键菜单锚定）→ 假 rect 右对齐展开
-function openAddMenuAt(path, x, y) {
+function openAddMenuAt(path: string, x: number, y: number) {
   addMenuPaths.value = [path];
   addMenuAnchorRect = {
     left: x,
@@ -407,7 +426,7 @@ const addMenuStyle = computed(() => ({
   left: addMenuPos.value.left + "px",
 }));
 
-const addMenuEl = ref(null); // 浮层根元素（测量实际高度）
+const addMenuEl = ref<HTMLElement | null>(null); // 浮层根元素（测量实际高度）
 
 // 渲染后用实际浮层高度精修（歌单多时浮层更高，翻转判定更准）——与 Playlist 同一做法
 function refineAddMenuPos() {
@@ -418,12 +437,12 @@ function refineAddMenuPos() {
 }
 
 // 浮层内歌单的勾选态：当前歌在歌单 = 勾选
-function addMenuIn(pid) {
+function addMenuIn(pid: string) {
   const paths = addMenuPaths.value;
   return paths.length > 0 && paths.every((p) => isInPlaylist(pid, p));
 }
 
-async function toggleAdd(pid) {
+async function toggleAdd(pid: string) {
   const paths = addMenuPaths.value;
   if (!paths.length) return;
   try {
@@ -433,16 +452,16 @@ async function toggleAdd(pid) {
       await addToPlaylist(pid, paths[0]);
     }
   } catch (e) {
-    toastError(e.message);
+    toastError(e instanceof Error ? e.message : "");
   }
 }
 
 // ============ 移到废纸篓（确认 → DELETE → toast → 刷新，与 Playlist 同一链路） ============
 const deleteOpen = ref(false);
-const deletePaths = ref([]);
+const deletePaths = ref<string[]>([]);
 
-function openDeleteDialog(paths) {
-  deletePaths.value = paths.filter((p) => p != null);
+function openDeleteDialog(paths: Array<string | null>) {
+  deletePaths.value = paths.filter((p): p is string => p != null);
   if (deletePaths.value.length) deleteOpen.value = true;
 }
 
@@ -475,36 +494,36 @@ async function doDelete() {
     // 刷新曲库；recentAdded 由 useSmartViews 的 watch 自动重算，recentPlayed/topPlayed 保持进入时数据
     await loadSongs({ force: true });
   } catch (e) {
-    toastError(e.message || t("errors.deleteSongs"));
+    toastError(e instanceof Error ? e.message : t("errors.deleteSongs"));
   }
 }
 
 // ============ Swift 壳右键菜单动作（useNativeCtxMenu 上报 .sv-item 命中 → NSMenu 点击 → 事件派发到这里） ============
 // 与浏览器右键菜单共用同一套实现（playFor/playNextFor/goBrowse/openAddMenuAt/openDeleteDialog），
 // 壳内与浏览器行为完全一致；事件只在原生壳内由 __qqCtxMenu 派发，浏览器永不触发。
-function ctxSongFromEvent(e) {
+function ctxSongFromEvent(e: CustomEvent) {
   const path = e.detail?.path;
   if (path == null) return null;
   return state.songs.find((s) => s.path === path) ?? null;
 }
 
-function onCtxPlay(e) {
+function onCtxPlay(e: CustomEvent) {
   const s = ctxSongFromEvent(e);
   if (s) playFor(state.songs.indexOf(s));
 }
 
-function onCtxPlayNext(e) {
+function onCtxPlayNext(e: CustomEvent) {
   const s = ctxSongFromEvent(e);
   if (s) playNextFor(state.songs.indexOf(s));
 }
 
-function onCtxToggleFav(e) {
+function onCtxToggleFav(e: CustomEvent) {
   const s = ctxSongFromEvent(e);
   if (s?.path != null) toggleFavorite(s.path);
 }
 
 // 加歌单：与 ctxAddPlaylist 同一锚定方式（右键坐标 → 假 rect 右对齐 → 浮层从光标处展开）
-function onCtxAddPlaylist(e) {
+function onCtxAddPlaylist(e: CustomEvent) {
   const p = e.detail?.path;
   if (p == null) return;
   const { x, y } = e.detail;
@@ -512,28 +531,28 @@ function onCtxAddPlaylist(e) {
 }
 
 // 移到废纸篓：与 ctxDelete 同一确认弹窗链路
-function onCtxDeleteSong(e) {
+function onCtxDeleteSong(e: CustomEvent) {
   const p = e.detail?.path;
   if (p != null) openDeleteDialog([p]);
 }
 
-function onCtxGoArtist(e) {
+function onCtxGoArtist(e: CustomEvent) {
   const s = ctxSongFromEvent(e);
   if (s?.artist) goBrowse("artist", s.artist);
 }
 
-function onCtxGoAlbum(e) {
+function onCtxGoAlbum(e: CustomEvent) {
   const s = ctxSongFromEvent(e);
   if (s?.album) goBrowse("album", s.album);
 }
 
 // 编辑标签/刮削（壳菜单）：与浏览器右键菜单同一链路 → 打开 TagEditorModal(autoScrape)
-function onCtxEditTags(e) {
+function onCtxEditTags(e: CustomEvent) {
   const s = ctxSongFromEvent(e);
   if (s) openTagEditor(s);
 }
 
-const CTX_EVENTS = [
+const CTX_EVENTS: Array<[string, (e: CustomEvent) => void]> = [
   ["qqplayer:ctx-play", onCtxPlay],
   ["qqplayer:ctx-playnext", onCtxPlayNext],
   ["qqplayer:ctx-togglefav", onCtxToggleFav],
@@ -545,23 +564,23 @@ const CTX_EVENTS = [
 ];
 
 function bindCtxEvents() {
-  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn);
+  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn as EventListener);
 }
 
 function unbindCtxEvents() {
-  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn);
+  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn as EventListener);
 }
 
 // ============ 定位：覆盖桌面播放列表面板（.main .playlist 的网格位置） ============
 // 智能视图复用播放列表所在的 280px 列；面板随 Playlist 的 rect 变化自适应
-const panelStyle = ref(null);
-let ro = null;
+const panelStyle = ref<Record<string, string> | null>(null);
+let ro: ResizeObserver | null = null;
 
 // ============ 壳内拖拽到侧栏歌单（WKWebView 无 HTML5 DnD → Pointer Events 模拟） ============
 // 只拖到侧栏歌单（自动歌单不可排序：getCanReorder=false，reorder 回调空实现）；
 // 几何命中不受浮层遮挡影响，与浏览器 pointer-events 放行无关。
-const svListEl = ref(null);
-let shellDragCleanup = null;
+const svListEl = ref<HTMLElement | null>(null);
+let shellDragCleanup: (() => void) | null = null;
 
 function setupShellDrag() {
   shellDragCleanup?.();
@@ -608,7 +627,7 @@ function remeasure() {
   requestAnimationFrame(measure);
 }
 
-function onKeydown(e) {
+function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   if (deleteOpen.value) {
     deleteOpen.value = false;
@@ -631,7 +650,7 @@ watch(() => uiState.controlsHidden, remeasure);
 watch(panelStyle, () => nextTick(setupShellDrag), { immediate: true });
 watch(
   () => props.kind,
-  (k) => loadSmartView(k),
+  (k) => loadSmartView(k as SmartViewKind),
   { flush: "post" },
 );
 
@@ -641,7 +660,7 @@ onMounted(() => {
   window.addEventListener("resize", remeasure);
   window.addEventListener("keydown", onKeydown);
   bindCtxEvents(); // 壳右键菜单动作（浏览器内事件永不派发，无副作用）
-  loadSmartView(props.kind); // 进入视图时拉取数据
+  loadSmartView(props.kind as SmartViewKind); // 进入视图时拉取数据
 });
 onBeforeUnmount(() => {
   shellDragCleanup?.();

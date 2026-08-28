@@ -201,11 +201,11 @@
   </Teleport>
 </template>
 
-<script setup>
-import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from "vue";
+<script setup lang="ts">
+import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, type PropType } from "vue";
 import { useI18n } from "vue-i18n";
 import { Loader2, Music, Sparkles, Tags, X } from "@lucide/vue";
-import { state, loadSongs } from "../composables/usePlayer.js";
+import { state, loadSongs, type Song } from "../composables/usePlayer.js";
 import { apiPost } from "../utils/apiClient.js";
 import { useCoverURL } from "../composables/useCoverURL.js";
 import { loadEnabledFields, getEnabledFields } from "../composables/tagEditorSettings.js";
@@ -215,7 +215,7 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   // 指定编辑目标歌曲；null = 编辑当前播放歌曲（控制栏入口）。
   // 右键菜单入口传被右键的歌曲（不切换播放），保存/刮削都以它为准。
-  song: { type: Object, default: null },
+  song: { type: Object as PropType<Song | null>, default: null },
   // 打开弹窗时自动触发一次刮削（右键菜单入口用）
   autoScrape: { type: Boolean, default: false },
 });
@@ -234,15 +234,29 @@ const form = reactive({
   albumArtist: "",
 });
 // cover_url：候选封面（null = 不写封面，沿用文件现有封面）
-const remoteCover = ref(null);
+const remoteCover = ref<string | null>(null);
 const previewBroken = ref(false); // 预览图加载失败 → 占位
 const scraping = ref(false);
 const scraped = ref(false); // 是否完成过至少一次刮削（控制空态文案）
 const scrapeQuery = ref("");
 const scrapeError = ref("");
-const netease = ref([]);
-const musicbrainz = ref([]);
+const netease = ref<ScrapeCandidate[]>([]);
+const musicbrainz = ref<ScrapeCandidate[]>([]);
 const saving = ref(false);
+
+/** 刮削候选条目（/api/tags/scrape → netease[] / musicbrainz[]；宽松视图，字段缺省回落空） */
+interface ScrapeCandidate {
+  id?: string | number;
+  title?: string;
+  artist?: string;
+  album?: string;
+  year?: string;
+  genre?: string;
+  duration?: string;
+  track?: string;
+  album_artist?: string;
+  cover?: string | null;
+}
 
 const song = computed(() => props.song || state.currentSong);
 const songName = computed(() =>
@@ -289,10 +303,10 @@ function syncForm() {
   form.title = s?.name || "";
   form.artist = s?.artist || "";
   form.album = s?.album || "";
-  form.year = s?.year ?? "";
-  form.genre = s?.genre || "";
-  form.track = s?.track ?? "";
-  form.albumArtist = s?.album_artist || "";
+  form.year = String(s?.year ?? "");
+  form.genre = String(s?.genre ?? "");
+  form.track = String(s?.track ?? "");
+  form.albumArtist = String(s?.album_artist ?? "");
   remoteCover.value = null;
   previewBroken.value = false;
   scraping.value = false;
@@ -343,7 +357,7 @@ async function scrape() {
     musicbrainz.value = Array.isArray(data.musicbrainz) ? data.musicbrainz : [];
     scraped.value = true;
   } catch (e) {
-    scrapeError.value = e.message || t("tags.scrapeFailed");
+    scrapeError.value = e instanceof Error ? e.message : t("tags.scrapeFailed");
   } finally {
     scraping.value = false;
   }
@@ -353,7 +367,7 @@ async function scrape() {
 // 新字段 item 有值才填，null/undefined 置空（网易云候选缺省 → 自动清空）
 // 网易云候选：cloudsearch 不返回发行时间 → 表单 year 为空时有 id 则惰性调 album-year 补年份
 // （异步 + 静默失败：不 toast、不阻塞点选、无 loading 态）
-function pick(item, source) {
+function pick(item: ScrapeCandidate, source: string) {
   if (!item) return;
   form.title = item.title || "";
   form.artist = item.artist || "";
@@ -371,7 +385,7 @@ function pick(item, source) {
 
 // 惰性补年份：POST /api/tags/album-year → {year: int|null}
 // 成功且 year 非空 → 填表单（String）；失败/无数据 → 静默忽略（catch 不报错）
-async function fetchAlbumYear(songId) {
+async function fetchAlbumYear(songId: string | number) {
   try {
     const res = await apiPost("/api/tags/album-year", { song_id: songId });
     if (!res.ok) return;
@@ -383,7 +397,7 @@ async function fetchAlbumYear(songId) {
 }
 
 // 数字字段转换：空 → null（后端 null = 不写）
-function toIntOrNull(v) {
+function toIntOrNull(v: string | number | null | undefined) {
   if (v === "" || v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
@@ -403,7 +417,7 @@ async function save() {
   }
   saving.value = true;
   const path = song.value.path;
-  const body = {
+  const body: Record<string, unknown> = {
     path,
     title,
     artist,
@@ -445,7 +459,7 @@ async function save() {
     showToast(t("tags.saveSuccess"));
     emit("close");
   } catch (e) {
-    toastError(e.message || t("tags.saveFailed", { msg: "" })); // 错误：toast 提示，弹窗不关
+    toastError(e instanceof Error ? e.message : t("tags.saveFailed", { msg: "" })); // 错误：toast 提示，弹窗不关
   } finally {
     saving.value = false;
   }
@@ -455,7 +469,7 @@ function close() {
   emit("close");
 }
 
-function onKey(e) {
+function onKey(e: KeyboardEvent) {
   if (e.key === "Escape") close();
 }
 onMounted(() => {

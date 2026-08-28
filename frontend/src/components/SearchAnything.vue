@@ -157,7 +157,7 @@
                 </button>
                 <!-- 设置行展开的内联控件（同一时间只展开一个；按 payload 条目 id 匹配） -->
                 <div
-                  v-if="item.kind === 'setting' && expandedId === item.payload?.id && expandedEntry"
+                  v-if="item.kind === 'setting' && expandedId === payloadId(item) && expandedEntry"
                   class="sa-inline"
                   @mousedown.stop
                 >
@@ -235,7 +235,7 @@
   <QuarkLoginModal :open="loginOpen" @success="onQuarkLoginSuccess" @close="loginOpen = false" />
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { Search, X, Loader2, Play, Plus, Download, ChevronRight, History } from "@lucide/vue";
@@ -247,12 +247,13 @@ import {
   playbackSettings,
   fmtShortcutKey,
   parseShortcutCombo,
+  type Song,
 } from "../composables/usePlayer.js";
 import { downloadSettings } from "../composables/useSettings.js";
-import { useSearchAnything } from "../composables/useSearchAnything.js";
+import { useSearchAnything, type SearchResult } from "../composables/useSearchAnything.js";
 import { showToast, toastError } from "../composables/useToast.js";
 import { apiPost } from "../utils/apiClient.js";
-import { settingsIndex } from "../settingsIndex";
+import { settingsIndex, type SettingEntry } from "../settingsIndex";
 import InlineControl from "./InlineControl.vue";
 import QuarkLoginModal from "./QuarkLoginModal.vue";
 
@@ -278,12 +279,12 @@ const {
   clearHistory,
 } = useSearchAnything();
 
-const inputEl = ref(null);
+const inputEl = ref<HTMLInputElement | null>(null);
 const inputFocused = ref(false); // 输入框聚焦态：空 query + 聚焦才显示历史列表
 const activeIndex = ref(-1); // 高亮行索引（有输入=结果行；空输入=历史行，复用同一索引）
-const expandedId = ref(null); // 当前展开内联控件的设置条目 id（互斥单开）
-const downloading = reactive({}); // 在线条目 id → 下载中
-const adding = reactive({}); // 在线条目 id → 添加到曲库中
+const expandedId = ref<string | null>(null); // 当前展开内联控件的设置条目 id（互斥单开）
+const downloading = reactive<Record<string, boolean>>({}); // 在线条目 id → 下载中
+const adding = reactive<Record<string, boolean>>({}); // 在线条目 id → 添加到曲库中
 
 // 空 query + 输入框聚焦 + 有历史 → 显示历史列表（否则提示输入）
 const showHistory = computed(
@@ -292,19 +293,29 @@ const showHistory = computed(
 
 const expandedEntry = computed(() => settingsIndex.find((e) => e.id === expandedId.value) || null);
 
+/** 设置行 payload 的 id（展开匹配用）；非对象/缺 id → undefined */
+function payloadId(item: SearchResult): string | undefined {
+  const p = item.payload;
+  if (!p || typeof p !== "object") return undefined;
+  return typeof (p as { id?: unknown }).id === "string"
+    ? ((p as { id: string }).id as string)
+    : undefined;
+}
+
 // 当前快捷键显示（默认 ⌘K；录制值含 "Meta+" 前缀 → ⌘ 组合）
 const fmtSearchKey = computed(() => fmtShortcutKey(playbackSettings.searchKey));
 
 // Cmd+K（或用户录制键）匹配："Meta+<code>" = ⌘ 组合；纯 <code> = 单键触发。
 // 单键快捷在输入框/文本域聚焦时不触发（防止打字误唤/误关）；组合键（Cmd+K）不受限。
-function matchSearchShortcut(e) {
+function matchSearchShortcut(e: KeyboardEvent) {
   const p = parseShortcutCombo(playbackSettings.searchKey || "Meta+K");
   if (!p) return false;
   if (p.meta) return e.metaKey && e.code === p.code;
   if (e.code !== p.code) return false;
   if (
-    e.target &&
-    (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable)
+    (e.target && (e.target as HTMLElement).tagName === "INPUT") ||
+    (e.target as HTMLElement).tagName === "TEXTAREA" ||
+    (e.target as HTMLElement).isContentEditable
   ) {
     return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
   }
@@ -312,7 +323,7 @@ function matchSearchShortcut(e) {
 }
 
 // 全局键盘：capture 阶段（先于 SettingsModal 的 bubble Esc 监听，避免两层一起收起）
-function onWindowKeydown(e) {
+function onWindowKeydown(e: KeyboardEvent) {
   // 唤起/收起快捷键
   if (matchSearchShortcut(e)) {
     e.preventDefault();
@@ -386,7 +397,7 @@ function clearQuery() {
 }
 
 // 点击/回车历史项：填入 query（走现有 watch→防抖搜索链路）并去重置顶
-function activateHistory(term) {
+function activateHistory(term: string) {
   const q = String(term ?? "").trim();
   if (!q) return;
   query.value = q;
@@ -394,7 +405,7 @@ function activateHistory(term) {
 }
 
 // ============ 结果行交互 ============
-function onRowClick(item) {
+function onRowClick(item: SearchResult) {
   switch (item.kind) {
     case "song":
       playLocal(item);
@@ -403,7 +414,7 @@ function onRowClick(item) {
       downloadOnline(item);
       break;
     case "setting":
-      toggleEntry(item.payload);
+      toggleEntry(item.payload as SettingEntry);
       break;
     case "artist":
     case "album":
@@ -415,8 +426,8 @@ function onRowClick(item) {
 }
 
 // 本地歌曲点击 → 播放（selectSong/play），播放后收起搜索层
-function playLocal(item) {
-  const p = item.payload || {};
+function playLocal(item: SearchResult) {
+  const p = (item.payload || {}) as Song;
   const idx = findSongIndex(p);
   if (idx < 0) return;
   selectSong(idx);
@@ -424,11 +435,21 @@ function playLocal(item) {
   close();
 }
 
+/** 在线条目 payload（/api/online/search items[] 与歌曲海共用字段的宽松视图） */
+interface OnlinePayload {
+  id?: string | number;
+  title?: string;
+  artist?: string;
+  album?: string;
+  cover?: string;
+  duration?: number;
+}
+
 // 在线歌曲点击 = 下载：网易云走 /api/online/download（level=默认音质）；
 // 歌曲海走 /api/gequhai/download（夸克 HQ），401 未登录 → 弹扫码登录，成功后自动重试
-async function downloadOnline(item) {
+async function downloadOnline(item: SearchResult) {
   if (downloading[item.id]) return;
-  const p = item.payload || {};
+  const p = (item.payload || {}) as OnlinePayload;
   downloading[item.id] = true;
   try {
     const isGequhai = onlineSource.value === "gequhai";
@@ -457,7 +478,11 @@ async function downloadOnline(item) {
     showToast(t("search.downloadSuccess", { title: item.title }));
     // 下载完成提示走全局 toast（ToastContainer）：搜索层收起/切页后也能看到
   } catch (err) {
-    toastError(t("search.downloadFailed", { msg: err.message || t("search.noResult") }));
+    toastError(
+      t("search.downloadFailed", {
+        msg: err instanceof Error ? err.message : t("search.noResult"),
+      }),
+    );
   } finally {
     downloading[item.id] = false;
   }
@@ -465,8 +490,8 @@ async function downloadOnline(item) {
 
 // 在线歌曲试听（网易云）：实时取直链 → playPreview（临时播放列表语义：
 // 不改曲库/队列/currentIndex，播完自然停，切歌回主队列；默认不计播放统计）
-async function previewOnline(item) {
-  const p = item.payload || {};
+async function previewOnline(item: SearchResult) {
+  const p = (item.payload || {}) as OnlinePayload;
   const ok = await playPreview({
     provider: "netease",
     id: p.id,
@@ -481,10 +506,10 @@ async function previewOnline(item) {
 }
 
 // 添加到曲库：POST /api/network-songs（后端幂等去重；曲库 3s 轮询自动刷新）
-async function addOnlineToLibrary(item) {
+async function addOnlineToLibrary(item: SearchResult) {
   if (adding[item.id]) return;
   adding[item.id] = true;
-  const p = item.payload || {};
+  const p = (item.payload || {}) as OnlinePayload;
   try {
     const res = await apiPost("/api/network-songs", {
       id: p.id,
@@ -514,7 +539,7 @@ async function addOnlineToLibrary(item) {
     if (failed) throw new Error(errMsg);
     showToast(t("search.addedToLibrary", { title: item.title }));
   } catch (err) {
-    toastError(t("search.addToLibraryFailed", { msg: err.message || "" }));
+    toastError(t("search.addToLibraryFailed", { msg: err instanceof Error ? err.message : "" }));
   } finally {
     adding[item.id] = false;
   }
@@ -522,7 +547,7 @@ async function addOnlineToLibrary(item) {
 
 // ============ 夸克扫码登录（歌曲海下载 401 时触发）============
 const loginOpen = ref(false);
-const pendingDownload = ref(null); // 登录成功后要自动重试的在线条目
+const pendingDownload = ref<SearchResult | null>(null); // 登录成功后要自动重试的在线条目
 
 function onQuarkLoginSuccess() {
   loginOpen.value = false;
@@ -533,7 +558,7 @@ function onQuarkLoginSuccess() {
 }
 
 // 设置行展开内联控件：再点收起；同一时间只展开一个
-function toggleEntry(entry) {
+function toggleEntry(entry: SettingEntry) {
   if (!entry) return;
   expandedId.value = expandedId.value === entry.id ? null : entry.id;
 }

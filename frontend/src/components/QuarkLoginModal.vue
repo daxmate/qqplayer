@@ -29,7 +29,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { QrCode, X, Loader2 } from "@lucide/vue";
@@ -53,8 +53,8 @@ const errorText = ref("");
 const POLL_MS = 2000;
 const DEFAULT_TTL = 150;
 
-let countdownTimer = null;
-let pollTimer = null;
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 let active = false; // 当前会话有效标志：关闭/换码后旧轮询回调不得写入新会话
 
 function clearTimers() {

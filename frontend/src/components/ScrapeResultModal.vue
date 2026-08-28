@@ -88,11 +88,15 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronDown, Sparkles, X } from "@lucide/vue";
-import { scrapeBatchState, closeScrapeResult } from "../composables/useScrapeBatch.js";
+import {
+  scrapeBatchState,
+  closeScrapeResult,
+  type ScrapeBatchResult,
+} from "../composables/useScrapeBatch.js";
 
 const { t } = useI18n();
 
@@ -109,20 +113,20 @@ function close() {
 
 // 明细行展开状态（按 path 记忆；path 即唯一键）
 const expanded = ref(new Set());
-function isOpen(item) {
+function isOpen(item: ScrapeBatchResult) {
   return expanded.value.has(item.path);
 }
-function toggle(item) {
+function toggle(item: ScrapeBatchResult) {
   const next = new Set(expanded.value);
   if (next.has(item.path)) next.delete(item.path);
   else next.add(item.path);
   expanded.value = new Set(next); // 触发响应式
 }
-function writtenFields(item) {
+function writtenFields(item: ScrapeBatchResult) {
   return Array.isArray(item.written) ? item.written : [];
 }
 
-function statusLabel(status) {
+function statusLabel(status: string) {
   const key =
     status === "written"
       ? "scrape.status.written"
@@ -133,7 +137,7 @@ function statusLabel(status) {
 }
 
 // 明细分组：成功一组；跳过/失败按 reason 分组（reason 缺失归入「其他」）
-function groupKeyOf(item) {
+function groupKeyOf(item: ScrapeBatchResult) {
   return item.reason && String(item.reason).trim()
     ? String(item.reason).trim()
     : t("scrape.detail.other");
