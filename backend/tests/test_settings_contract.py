@@ -28,7 +28,7 @@ from app.services.settings import _SETTINGS_SPEC  # noqa: E402
 
 FRONTEND_INDEX = REPO / "frontend" / "src" / "settingsIndex.ts"
 PLAYER_CORE = REPO / "frontend" / "src" / "composables" / "playerState.ts"
-USE_SETTINGS = REPO / "frontend" / "src" / "composables" / "useSettings.js"
+USE_SETTINGS = REPO / "frontend" / "src" / "composables" / "useSettings.ts"
 
 # ============ 已知缺口清单（见模块 docstring；修复后同步更新）============
 FRONTEND_LOCAL_REGISTRY = {
