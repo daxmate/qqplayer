@@ -33,5 +33,8 @@ export default {
     downloading: "下载中…",
     downloadSuccess: "已开始下载：{title}",
     downloadFailed: "下载失败：{msg}",
+    // 移动端跟唱：控制区折叠
+    expandHint: "控制区已收起，上滑或点此展开",
+    expandTip: "控制区已收起，上滑或点击此处展开",
   },
 };

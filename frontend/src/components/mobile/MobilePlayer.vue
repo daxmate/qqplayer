@@ -127,7 +127,7 @@
           <KaraokePanel :lyric="state.lyric" :current="currentLineIndex" :expand-btn="false" />
         </div>
         <div v-if="sleepTimerText" class="mp-sleep-timer mp-sleep-line">{{ sleepTimerText }}</div>
-        <ControlBar karaoke hide-collapse class="mp-controls" />
+        <ControlBar karaoke hide-collapse collapsible class="mp-controls" />
       </template>
 
       <!-- ============ 底部面板：➕ 加到歌单 ============ -->
@@ -1121,6 +1121,10 @@ function pickSleep(minutes: number | null) {
 .mp-karaoke > * {
   flex: 1;
   min-height: 0;
+}
+/* 跟唱页顶部安全区：标题栏不压进 iOS 状态栏（连播封面区已有同款处理，跟唱漏了） */
+.mp-karaoke :deep(.kp-head) {
+  padding-top: calc(12px + env(safe-area-inset-top));
 }
 .mp-controls {
   flex-shrink: 0;

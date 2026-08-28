@@ -1,5 +1,10 @@
 <template>
-  <div class="controls" :class="{ karaoke }">
+  <div
+    class="controls"
+    :class="{ karaoke, collapsible, collapsed }"
+    @touchstart.passive="onTouchStart"
+    @touchend.passive="onTouchEnd"
+  >
     <button
       v-if="!hideCollapse"
       class="collapse-btn"
@@ -41,22 +46,27 @@
           <Repeat v-else :size="15" />
         </button>
       </template>
-      <button class="btn" :title="t('control.prevSong')" @click="prevSong()">
+      <button v-if="!collapsed" class="btn" :title="t('control.prevSong')" @click="prevSong()">
         <SkipBack :size="17" />
       </button>
 
       <template v-if="karaoke">
-        <button class="btn" :title="t('control.backToMusic')" @click="switchMode('continuous')">
+        <button
+          v-if="!collapsed"
+          class="btn"
+          :title="t('control.backToMusic')"
+          @click="switchMode('continuous')"
+        >
           <ArrowLeft :size="16" />
         </button>
-        <button class="btn" :title="t('control.prevLine')" @click="prevLine">
+        <button v-if="!collapsed" class="btn" :title="t('control.prevLine')" @click="prevLine">
           <StepBack :size="17" />
         </button>
         <button class="btn play" :title="t('control.playPause')" @click="togglePlay">
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
-        <button class="btn" :title="t('control.nextLine')" @click="nextLine">
+        <button v-if="!collapsed" class="btn" :title="t('control.nextLine')" @click="nextLine">
           <StepForward :size="17" />
         </button>
         <button
@@ -101,12 +111,12 @@
         </button>
       </template>
 
-      <button class="btn" :title="t('control.playUrl')" @click="urlOpen = true">
+      <button v-if="!collapsed" class="btn" :title="t('control.playUrl')" @click="urlOpen = true">
         <Link2 :size="15" />
       </button>
 
       <button
-        v-if="isNetworkCurrent"
+        v-if="!collapsed && isNetworkCurrent"
         class="btn"
         data-testid="download-btn"
         :class="{ busy: downloadingId !== null }"
@@ -118,6 +128,7 @@
       </button>
 
       <button
+        v-if="!collapsed"
         class="btn"
         :class="{ on: state.zhVisible }"
         :title="t('control.toggleZh')"
@@ -128,7 +139,7 @@
       </button>
 
       <!-- 音量 -->
-      <div class="vol-group">
+      <div v-if="!collapsed" class="vol-group">
         <button
           class="btn vol-btn"
           :title="state.muted || state.volume === 0 ? t('control.unmute') : t('control.mute')"
@@ -149,10 +160,19 @@
           @input="onVolume"
         />
       </div>
+      <!-- 收起态信息按钮：点开显示提示气泡（上滑或点气泡展开） -->
+      <button
+        v-if="collapsed"
+        class="btn ctrl-info-btn"
+        :title="t('control.expandHint')"
+        @click="tipOpen = !tipOpen"
+      >
+        <Info :size="15" />
+      </button>
     </div>
 
     <!-- 当前歌曲信息 -->
-    <div class="song-line">
+    <div v-if="!collapsed" class="song-line">
       <span v-if="state.currentSong" class="song-line-text">
         {{ state.currentSong.name }}
         <template v-if="state.currentSong.artist"> · {{ state.currentSong.artist }}</template>
@@ -175,6 +195,12 @@
 
     <!-- 睡眠定时器倒计时（不显眼小字；移动端在 MobilePlayer 单独显示，这里隐藏避免重复） -->
     <div v-if="!isMobile && sleepTimerText" class="sleep-timer">{{ sleepTimerText }}</div>
+    <!-- 收起态提示气泡（absolute 不占布局；点击 → 展开） -->
+    <Transition name="ctrl-tip">
+      <div v-if="collapsed && tipOpen" class="ctrl-tip" @click="expand()">
+        {{ t("control.expandTip") }}
+      </div>
+    </Transition>
     <!-- 播放 URL 弹窗（试听语义：临时播放，默认不计统计；支持电台流） -->
     <Teleport to="body">
       <div v-if="urlOpen" class="url-mask" @click.self="urlOpen = false">
@@ -225,6 +251,7 @@ import {
   Languages,
   Download,
   Loader2,
+  Info,
 } from "@lucide/vue";
 import { state, setVolume, toggleMute } from "../composables/usePlayer.js";
 import { apiPost } from "../utils/apiClient.js";
@@ -256,13 +283,57 @@ import { ChevronDown, Volume1, Volume2, VolumeX } from "@lucide/vue";
 import { Pencil } from "@lucide/vue";
 import { ref } from "vue";
 
-defineProps({
+const props = defineProps({
   karaoke: { type: Boolean, default: false },
   // 全屏播放器等场景：不显示“收起控制区”按钮（移动端控制条始终展开）
   hideCollapse: { type: Boolean, default: false },
+  // 移动端跟唱模式：控制区可下滑收起/上滑展开（桌面端不传，零影响）
+  collapsible: { type: Boolean, default: false },
 });
 
 const { t } = useI18n();
+
+// ============ 移动端跟唱：控制区折叠（下滑收起 / 上滑展开） ============
+// 收起态只保留：进度条 + 播放 + 倍速 + 跟唱 + 循环 + 信息小按钮；
+// 其余按钮 v-if="!collapsed" 隐藏；桌面端不传 collapsible，此逻辑完全不生效。
+const collapsed = ref(false); // 收起态
+const tipOpen = ref(false); // 信息按钮提示气泡
+let touchStart: { x: number; y: number } | null = null; // 手势起点（仅在 collapsible 时记录）
+
+function onTouchStart(e: TouchEvent) {
+  if (!props.collapsible) return;
+  const t0 = e.touches?.[0] || e.changedTouches?.[0];
+  if (!t0) return;
+  touchStart = { x: t0.clientX, y: t0.clientY };
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (!props.collapsible || !touchStart) return;
+  const t0 = e.changedTouches?.[0];
+  if (!t0) {
+    touchStart = null;
+    return;
+  }
+  const dx = t0.clientX - touchStart.x;
+  const dy = t0.clientY - touchStart.y;
+  touchStart = null;
+  // 位移不足 30px 视为点击；垂直主导（|dy| > |dx|*1.2）才判定为折叠手势，
+  // 进度条/滑块的横向拖动天然免疫
+  if (Math.abs(dy) < 30 || Math.abs(dy) <= Math.abs(dx) * 1.2) return;
+  if (dy > 0)
+    collapse(); // 下滑 → 收起
+  else expand(); // 上滑 → 展开
+}
+
+function collapse() {
+  collapsed.value = true;
+  tipOpen.value = false;
+}
+
+function expand() {
+  collapsed.value = false;
+  tipOpen.value = false;
+}
 
 // 模式切换（音乐 ↔ 跟唱；顶栏 tab 已不提供跟唱入口，这里由按钮直达）
 function switchMode(m: string) {
@@ -697,5 +768,47 @@ function fmt(t: number) {
   font-size: 10.5px;
   text-transform: uppercase;
   vertical-align: 1px;
+}
+/* ---------- 移动端跟唱折叠态 ---------- */
+/* 收起时更紧凑：30px 顶部留白是桌面 collapse-btn 用的，移动端隐藏了该按钮 */
+.controls.collapsible.collapsed {
+  padding-top: 10px;
+}
+/* 收起态信息小按钮：与 .btn 同尺寸风格，颜色偏 text3，hover 提亮 */
+.ctrl-info-btn {
+  color: var(--text3);
+}
+.ctrl-info-btn:hover {
+  color: var(--text);
+}
+/* 收起态提示气泡：按钮行上方、水平居中（absolute 不占布局） */
+.ctrl-tip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  bottom: 68px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--text);
+  box-shadow: 0 8px 24px var(--shadow-strong);
+  cursor: pointer;
+  white-space: nowrap;
+  z-index: 5;
+}
+.ctrl-tip-enter-active,
+.ctrl-tip-leave-active {
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+.ctrl-tip-enter-from,
+.ctrl-tip-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
 }
 </style>
