@@ -4,19 +4,20 @@
 // 去重置顶 / ↑↓ 选中历史项 + Enter 执行 / Esc 行为不变（不清历史）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  ended = false;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.ended = false;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -27,7 +28,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -40,7 +41,9 @@ const { uiSettings } = await import("../composables/useSettings.js");
 
 const { query, results, loading, isSearchOpen, onlineSource } = useSearchAnything();
 
-let wrapper = null;
+// 模块级 wrapper：所有用例均先调用 openLayer()/mount 赋值后再使用（afterEach 负责卸载）
+// 初始值用断言占位（null 仅类型占位，运行时任何读取前必已赋值）
+let wrapper: VueWrapper = null as unknown as VueWrapper;
 
 beforeEach(() => {
   // 清历史（历史存 uiSettings.searchHistory，后端统一设置；镜像 watch 同步到 history ref）
@@ -69,7 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
   wrapper?.unmount();
-  wrapper = null;
+  wrapper = null as unknown as VueWrapper;
   isSearchOpen.value = false;
   query.value = "";
   results.value = [];
@@ -84,13 +87,13 @@ async function openLayer() {
 }
 
 // 模拟真实键盘事件：派发到当前焦点元素（默认 body），冒泡到 window
-function keydown(init) {
+function keydown(init: KeyboardEventInit) {
   const ae = document.activeElement;
   const target = ae && ae.isConnected ? ae : document.body;
   target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
 }
 
-function seedHistory(items) {
+function seedHistory(items: string[]) {
   uiSettings.searchHistory = items;
 }
 
@@ -139,7 +142,7 @@ describe("历史列表展示条件", () => {
 
 describe("历史项交互", () => {
   it("点击历史项 → 填入 query 并触发搜索（走现有 doSearch 链路，含在线请求）", async () => {
-    const calls = [];
+    const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {

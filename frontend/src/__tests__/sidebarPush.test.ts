@@ -4,17 +4,16 @@
 // mock 模式：模块级 vi.mock apiClient（deviceCommands 真实逻辑 + apiClient mock，与 devicePanel 同款）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -23,7 +22,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -37,7 +36,7 @@ vi.mock("../utils/apiClient.js", () => ({
   apiDelete: vi.fn(),
   invalidate: vi.fn(),
   scheduleFlush: vi.fn(),
-  resolveServerUrl: (p) => p,
+  resolveServerUrl: (p: string) => p,
 }));
 
 const { apiGet, apiPost } = await import("../utils/apiClient.js");
@@ -58,7 +57,19 @@ const PLAYLIST = {
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-02T00:00:00Z",
 };
-const DEVICES = [
+// 同步设备 / manifest 条目（mock 数据形状，与 /api/sync/* 契约对齐）
+interface Device {
+  device_id: string;
+  device_name: string;
+  last_seen: string;
+  total: number;
+}
+interface ManifestEntry {
+  path: string;
+  sha256: string;
+  size: number;
+}
+const DEVICES: Device[] = [
   {
     device_id: "dev1",
     device_name: "iPhone 小超",
@@ -66,21 +77,38 @@ const DEVICES = [
     total: 1572864,
   },
 ];
-const MANIFEST = [
+const MANIFEST: ManifestEntry[] = [
   { path: "/a.mp3", sha256: "ha", size: 100 },
   { path: "/b.mp3", sha256: "hb", size: 200 },
 ];
 
+// 推送响应体（mock 用，与 apiClient.ApiResponse 形状兼容；status 运行时无，仅类型字段）
+interface PushPostResult {
+  ok: boolean;
+  status?: number;
+  data: { id: number } | null;
+  message?: string;
+}
+
 // 默认 apiGet：devices + manifest 都正常返回；apiPost 默认失败（防误发）
-function stubApi({ devices = DEVICES, manifest = MANIFEST, post = null } = {}) {
-  apiGet.mockImplementation((url) => {
-    if (url === "/api/sync/devices") return Promise.resolve({ ok: true, data: { devices } });
+function stubApi({
+  devices = DEVICES,
+  manifest = MANIFEST,
+  post = null,
+}: { devices?: Device[]; manifest?: ManifestEntry[]; post?: PushPostResult | null } = {}) {
+  vi.mocked(apiGet).mockImplementation((url: string) => {
+    if (url === "/api/sync/devices")
+      return Promise.resolve({ ok: true, status: 200, data: { devices } });
     if (url === "/api/sync/manifest")
-      return Promise.resolve({ ok: true, data: { songs: manifest } });
-    return Promise.resolve({ ok: false, data: null, message: "unexpected: " + url });
+      return Promise.resolve({ ok: true, status: 200, data: { songs: manifest } });
+    return Promise.resolve({ ok: false, status: 404, data: null, message: "unexpected: " + url });
   });
-  apiPost.mockResolvedValue(
-    post !== null ? post : { ok: false, data: null, message: "unexpected post" },
+  vi.mocked(apiPost).mockResolvedValue(
+    (post !== null
+      ? post
+      : { ok: false, data: null, message: "unexpected post" }) as unknown as Awaited<
+      ReturnType<typeof apiPost>
+    >,
   );
 }
 
@@ -96,7 +124,7 @@ function mountAll() {
 }
 
 // 点歌单行 hover 操作区的推送按钮（title = i18n sidebar.pushToDevice）
-const pushBtn = (sidebar) => sidebar.find('button[title="推送到设备"]');
+const pushBtn = (sidebar: VueWrapper) => sidebar.find('button[title="推送到设备"]');
 
 async function flush() {
   await flushPromises();
@@ -208,7 +236,7 @@ describe("Sidebar 歌单推送到设备（openPlaylistPush）", () => {
 
 describe("Sidebar 歌单推送到设备（onPlaylistPushPicked）", () => {
   // 打开浮层并选设备确认（选中 dev1 → confirm → select 事件 → onPlaylistPushPicked）
-  async function pickAndConfirm(sidebar) {
+  async function pickAndConfirm(sidebar: VueWrapper) {
     await pushBtn(sidebar).trigger("click");
     await flush();
     await sidebar.find('.dp-item[data-testid="dp-device-dev1"]').trigger("click");

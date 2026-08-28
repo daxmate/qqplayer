@@ -4,8 +4,10 @@
 // 歌曲海源隐藏试听/添加（只有下载）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { clearToasts, useToast } from "../composables/useToast.js";
+import type { SearchResult } from "../composables/useSearchAnything.js";
 
 // 最近一条全局 toast
 function latestToast() {
@@ -14,19 +16,19 @@ function latestToast() {
 }
 
 // 网络直链 → 同源代理 URL（与 playerCore.streamProxyUrl 同款格式）
-const PROXY_SRC = (u) => "/api/stream/proxy?url=" + encodeURIComponent(u);
+const PROXY_SRC = (u: string) => "/api/stream/proxy?url=" + encodeURIComponent(u);
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  ended = false;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.ended = false;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -38,7 +40,7 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -51,7 +53,7 @@ const { state, playbackSettings } = await import("../composables/usePlayer.js");
 const { query, results, loading, isSearchOpen, onlineSource } = useSearchAnything();
 
 // 网易云在线结果（SearchAnything 的 online 条目形态）
-function onlineItem(over = {}) {
+function onlineItem(over: Partial<SearchResult> = {}): SearchResult {
   return {
     kind: "online",
     id: "online-1001",
@@ -72,7 +74,9 @@ function onlineItem(over = {}) {
   };
 }
 
-let wrapper = null;
+// 模块级 wrapper：所有用例均先调用 mountOverlay()/renderWithOnline 赋值后再使用
+// 初始值用断言占位（null 仅类型占位，运行时任何读取前必已赋值）
+let wrapper: VueWrapper = null as unknown as VueWrapper;
 let neteaseCalls = 0;
 
 beforeEach(() => {
@@ -131,7 +135,7 @@ beforeEach(() => {
 
 afterEach(() => {
   wrapper?.unmount();
-  wrapper = null;
+  wrapper = null as unknown as VueWrapper;
   isSearchOpen.value = false;
   query.value = "";
   results.value = [];
@@ -144,7 +148,7 @@ function mountOverlay() {
 }
 
 // 渲染带一条在线结果的搜索层
-async function renderWithOnline(item) {
+async function renderWithOnline(item: Partial<SearchResult> = {}) {
   mountOverlay();
   isSearchOpen.value = true;
   results.value = [onlineItem(item)];
@@ -168,10 +172,10 @@ describe("SearchAnything 在线结果三按钮布局（试听 / 添加 / 下载�
     await wrapper.findAll(".sa-act")[0].trigger("click");
     await flushPromises();
     expect(neteaseCalls).toBe(1); // GET /api/stream/url
-    expect(state.currentSong.type).toBe("preview");
-    expect(state.currentSong.name).toBe("晴天");
-    expect(state.currentSong.streamId).toBe("1001");
-    expect(FakeAudio.instances[0].src).toBe(PROXY_SRC("http://stream.example.com/1001.mp3"));
+    expect(state.currentSong!.type).toBe("preview");
+    expect(state.currentSong!.name).toBe("晴天");
+    expect(state.currentSong!.streamId).toBe("1001");
+    expect(FakeAudio.instances[0]!.src).toBe(PROXY_SRC("http://stream.example.com/1001.mp3"));
     // 试听成功 toast（全局 toast）
     expect(latestToast().text).toContain("正在试听");
     // 搜索层不收起（试听 = 边听边逛）

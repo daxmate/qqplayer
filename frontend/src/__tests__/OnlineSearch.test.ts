@@ -2,18 +2,19 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { clearToasts, useToast } from "../composables/useToast.js";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -24,7 +25,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -60,9 +61,36 @@ const onlineItems = [
   },
 ];
 
-let searchCalls = []; // { q, limit, source? }（source 仅歌曲海时记录，网易云省略 = 契约）
-let downloadBodies = [];
-let gequhaiBodies = []; // /api/gequhai/download 请求体
+// 在线搜索请求记录（source 仅歌曲海时记录，网易云省略 = 契约）
+interface SearchCall {
+  q: string | null;
+  limit: string | null;
+  source?: string;
+}
+// 下载请求体（网易云 / 歌曲海）
+interface DownloadBody {
+  id: string;
+  level: string;
+  title: string;
+  artist: string;
+}
+interface GequhaiBody {
+  id: string;
+  title: string;
+  artist: string;
+}
+// 夸克扫码登录流程控制（failDownloadFirst / failAfterLogin 为可选开关）
+interface LoginFlow {
+  failDownloadFirst?: boolean;
+  failAfterLogin?: boolean;
+  qrCalls: number;
+  statusCalls: number;
+  statuses: string[];
+}
+
+let searchCalls: SearchCall[] = [];
+let downloadBodies: DownloadBody[] = [];
+let gequhaiBodies: GequhaiBody[] = []; // /api/gequhai/download 请求体
 let gequhaiDownloadCalls = 0; // 歌曲海下载调用次数（401 → 登录后重试）
 let failSearch = false;
 let failDownload = false;
@@ -89,7 +117,7 @@ const gequhaiItems = [
   },
 ];
 
-let loginFlow = null; // { failDownloadFirst: boolean } 控制夸克登录后重试
+let loginFlow: LoginFlow = { qrCalls: 0, statusCalls: 0, statuses: [] }; // 控制夸克登录后重试
 
 function stubFetch() {
   vi.stubGlobal(
@@ -97,7 +125,7 @@ function stubFetch() {
     vi.fn(async (url, opts = {}) => {
       if (String(url).startsWith("/api/online/search")) {
         const u = new URL(url, "http://localhost");
-        const rec = { q: u.searchParams.get("q"), limit: u.searchParams.get("limit") };
+        const rec: SearchCall = { q: u.searchParams.get("q"), limit: u.searchParams.get("limit") };
         const src = u.searchParams.get("source");
         if (src) rec.source = src; // 网易云省略 source，歌曲海显式传
         searchCalls.push(rec);
@@ -177,7 +205,7 @@ afterEach(() => {
 });
 
 // 输入关键词并等待防抖+请求完成
-async function typeAndSearch(wrapper, keyword) {
+async function typeAndSearch(wrapper: VueWrapper, keyword: string) {
   await wrapper.find(".os-input").setValue(keyword);
   await vi.advanceTimersByTimeAsync(420); // 防抖 400ms 触发请求
   await flushPromises();
@@ -327,7 +355,7 @@ describe("OnlineSearch 本地播放", () => {
     await wrapper.find(".os-local").trigger("click");
     await flushPromises();
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("雪の華");
+    expect(state.currentSong!.name).toBe("雪の華");
     expect(state.isPlaying).toBe(true);
     expect(wrapper.emitted("open-player")).toBeTruthy();
     // 播放后面板收起
@@ -339,7 +367,9 @@ describe("OnlineSearch 本地播放", () => {
 describe("OnlineSearch 下载交互", () => {
   it("点下载 → POST /api/online/download {id, level: 默认音质} → 成功 toast", async () => {
     // 可控下载响应：挂起期间验证按钮 loading 态
-    let resolveDownload;
+    let resolveDownload:
+      | ((resp: { ok: boolean; json: () => Promise<{ ok: boolean; path: string }> }) => void)
+      | undefined;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url, opts = {}) => {
@@ -362,7 +392,7 @@ describe("OnlineSearch 下载交互", () => {
     expect(wrapper.findAll(".os-download")[0].attributes("disabled")).toBeDefined();
     expect(wrapper.findAll(".os-download")[0].text()).toContain("下载中…");
     // 响应到达：请求体正确 + 成功 toast + 按钮恢复
-    resolveDownload({ ok: true, json: async () => ({ ok: true, path: "/dl/1001.mp3" }) });
+    resolveDownload!({ ok: true, json: async () => ({ ok: true, path: "/dl/1001.mp3" }) });
     await flushPromises();
     expect(downloadBodies.length).toBe(1);
     expect(downloadBodies[0]).toEqual({
@@ -419,7 +449,7 @@ describe("OnlineSearch 下载交互", () => {
 
 describe("OnlineSearch 源切换（网易云 / 歌曲海）", () => {
   // 切到歌曲海：输入 + 点击 seg 按钮（防抖待发请求被作废，立即按新源搜索）
-  async function switchToGequhai(wrapper, keyword) {
+  async function switchToGequhai(wrapper: VueWrapper, keyword: string) {
     await wrapper.find(".os-input").setValue(keyword);
     await wrapper.findAll(".src-btn")[1].trigger("click");
     await flushPromises();
@@ -470,7 +500,7 @@ describe("OnlineSearch 源切换（网易云 / 歌曲海）", () => {
 
 describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
   // 切到歌曲海并搜索出结果
-  async function setupGequhai(wrapper) {
+  async function setupGequhai(wrapper: VueWrapper) {
     await wrapper.find(".os-input").setValue("周杰伦");
     await wrapper.findAll(".src-btn")[1].trigger("click");
     await flushPromises();
@@ -499,8 +529,8 @@ describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
     expect(gequhaiBodies.length).toBe(1);
     const modal = document.body.querySelector(".qlm");
     expect(modal).toBeTruthy();
-    expect(modal.querySelector("img").getAttribute("src")).toBe("data:image/png;base64,AAAA");
-    expect(modal.textContent).toContain("二维码有效期");
+    expect(modal!.querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+    expect(modal!.textContent).toContain("二维码有效期");
     // 第一轮 2s 轮询：status=waiting → 弹窗保持
     await vi.advanceTimersByTimeAsync(2100);
     await flushPromises();
@@ -542,7 +572,7 @@ describe("OnlineSearch 歌曲海下载 + 夸克扫码登录", () => {
     await wrapper.findAll(".os-download")[0].trigger("click");
     await flushPromises();
     expect(document.body.querySelector(".qlm")).toBeTruthy();
-    document.body.querySelector(".qlm-close").click();
+    (document.body.querySelector(".qlm-close") as HTMLElement).click();
     await nextTick();
     expect(document.body.querySelector(".qlm")).toBeFalsy();
     expect(gequhaiBodies.length).toBe(1); // 未重试

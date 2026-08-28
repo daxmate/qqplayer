@@ -3,19 +3,20 @@
 // 覆盖：入口渲染 / 遮罩开合 / 结果行 badge / 键盘导航 / Esc 与点空白 / 空态设置目录 / 内联控件互斥 / Cmd+K / playerCore 守卫
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  ended = false;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.ended = false;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -26,7 +27,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -40,13 +41,14 @@ const { state, playbackSettings, setupKeyboardShortcuts } =
   await import("../composables/usePlayer.js");
 
 const { query, results, loading, isSearchOpen, onlineSource } = useSearchAnything();
+import type { SearchResult } from "../composables/useSearchAnything.js";
 
 const SONGS = [
   { id: "a", path: "/lib/a.mp3", name: "知足", artist: "五月天", album: "知足" },
   { id: "b", path: "/lib/b.mp3", name: "倔强", artist: "五月天", album: "神的孩子都在跳舞" },
 ];
 
-function makeItem(over) {
+function makeItem(over: Partial<SearchResult> = {}): SearchResult {
   return {
     kind: "song",
     id: "s1",
@@ -59,7 +61,9 @@ function makeItem(over) {
   };
 }
 
-let wrapper = null;
+// 模块级 wrapper：所有用例均先调用 mountOverlay()/mount 赋值后再使用（afterEach 负责卸载）
+// 初始值用断言占位（null 仅类型占位，运行时任何读取前必已赋值）
+let wrapper: VueWrapper = null as unknown as VueWrapper;
 
 beforeEach(() => {
   // 重置搜索历史模块内存态（jsdom 无 localStorage：Enter 用例只写内存，不跨用例残留）
@@ -88,7 +92,7 @@ beforeEach(() => {
 
 afterEach(() => {
   wrapper?.unmount();
-  wrapper = null;
+  wrapper = null as unknown as VueWrapper;
   isSearchOpen.value = false;
   query.value = "";
   results.value = [];
@@ -102,7 +106,7 @@ function mountOverlay() {
 
 // 模拟真实键盘事件：派发到当前焦点元素（默认 body），冒泡到 window —— e.target 才是真实目标
 // 注意 jsdom 中卸载组件后 activeElement 可能残留为已脱离文档的元素，需 isConnected 兜底
-function keydown(init) {
+function keydown(init: KeyboardEventInit) {
   const ae = document.activeElement;
   const target = ae && ae.isConnected ? ae : document.body;
   target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
@@ -232,8 +236,8 @@ describe("search anything 全屏搜索层", () => {
     mountOverlay();
     isSearchOpen.value = true;
     // 真实 settingsIndex 按 type 查找（索引顺序与 stub 不同，不能假设 [0]/[1]）
-    const toggleEntry = settingsIndex.find((e) => e.type === "toggle");
-    const sliderEntry = settingsIndex.find((e) => e.type === "slider");
+    const toggleEntry = settingsIndex.find((e) => e.type === "toggle")!;
+    const sliderEntry = settingsIndex.find((e) => e.type === "slider")!;
     results.value = [
       makeItem({
         kind: "setting",
@@ -312,14 +316,14 @@ describe("Cmd+K 全局唤起", () => {
 
 describe("playerCore 快捷键守卫", () => {
   // 捕获 window keydown 监听器（setupKeyboardShortcuts 注册的 SHORTCUT_HANDLER）
-  function captureHandler() {
+  function captureHandler(): ((ev: KeyboardEvent) => void) | null {
     const addSpy = vi.spyOn(window, "addEventListener");
     setupKeyboardShortcuts();
     const call = addSpy.mock.calls.find((c) => c[0] === "keydown");
-    return call ? call[1] : null;
+    return call ? (call[1] as (ev: KeyboardEvent) => void) : null;
   }
-  function fire(handler, code, target = {}) {
-    const ev = { code, target, preventDefault: vi.fn() };
+  function fire(handler: (ev: KeyboardEvent) => void, code: string, target: unknown = {}) {
+    const ev = { code, target, preventDefault: vi.fn() } as unknown as KeyboardEvent;
     handler(ev);
     return ev;
   }
@@ -327,26 +331,26 @@ describe("playerCore 快捷键守卫", () => {
   it("isSearchOpen 时 Space/←→/↑↓ 不误触播放（收起后恢复）", () => {
     const h = captureHandler();
     expect(h).toBeTruthy();
-    const a = FakeAudio.instances[0];
+    const a = FakeAudio.instances[0]!;
     state.currentSong = { path: "/a.mp3" };
     a.paused = true;
     // 搜索层打开：Space 不播放、↑ 不调音量
     isSearchOpen.value = true;
-    fire(h, "Space");
+    fire(h!, "Space");
     expect(a.paused).toBe(true);
     state.volume = 0.5;
-    fire(h, "ArrowUp");
+    fire(h!, "ArrowUp");
     expect(state.volume).toBe(0.5);
     // 收起后恢复
     isSearchOpen.value = false;
-    fire(h, "Space");
+    fire(h!, "Space");
     expect(a.paused).toBe(false);
   });
 });
 
 describe("在线源切换（网易云 / 歌曲海）", () => {
   it("切到歌曲海后搜索请求带 source=gequhai，结果 badge 显示歌曲海", async () => {
-    const calls = [];
+    const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {
@@ -382,7 +386,7 @@ describe("在线源切换（网易云 / 歌曲海）", () => {
       b.textContent.includes("歌曲海"),
     );
     expect(srcBtn).toBeTruthy();
-    srcBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    srcBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await flushPromises();
     expect(calls.some((c) => c.includes("source=gequhai"))).toBe(true);
     const badges = [...document.querySelectorAll(".sa-badge")].map((b) => b.textContent.trim());
@@ -443,14 +447,14 @@ describe("在线源切换（网易云 / 歌曲海）", () => {
       await flushPromises();
       // 切到歌曲海
       [...document.querySelectorAll(".sa-source")]
-        .find((b) => b.textContent.includes("歌曲海"))
+        .find((b) => b.textContent.includes("歌曲海"))!
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await flushPromises();
       // 点在线结果行 → 401 → 弹扫码登录
       const row = [...document.querySelectorAll(".sa-row")].find((r) =>
         r.textContent.includes("晴天"),
       );
-      row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      row!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await flushPromises();
       expect(document.querySelector(".qlm")).toBeTruthy(); // 登录弹窗出现
       // 轮询 2s → status ok → emit success → 自动重试下载

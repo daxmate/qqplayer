@@ -6,23 +6,23 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册；与 usePlayer.test.js 同款）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  private _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  ended = false;
+  volume = 1;
+  listeners: Record<string, (() => void) | undefined> = {};
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.ended = false;
-    this.volume = 1;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
-  get src() {
+  get src(): string {
     return this._src;
   }
   play() {
@@ -34,21 +34,28 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
 vi.stubGlobal("Audio", FakeAudio);
 
-// localStorage stub
-const lsStore = {};
-const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+// localStorage stub（仅 get/set/remove 三个方法被使用，其余 Storage 成员空实现）
+const lsStore: Record<string, string> = {};
+const localStorageStub: Storage = {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
+  },
+  clear: () => {
+    for (const k of Object.keys(lsStore)) delete lsStore[k];
+  },
+  key: () => null,
+  get length() {
+    return Object.keys(lsStore).length;
   },
 };
 
@@ -66,10 +73,10 @@ const {
   _resetPlayMode,
 } = await import("../composables/usePlayer.js");
 
-const audio = () => FakeAudio.instances[0];
+const audio = () => FakeAudio.instances[0]!; // 模块级 Audio 单例（usePlayer import 时创建），测试恒存在
 
 // 网络直链 → 同源代理 URL（与 playerCore.streamProxyUrl 同款格式）
-const PROXY_SRC = (u) => "/api/stream/proxy?url=" + encodeURIComponent(u);
+const PROXY_SRC = (u: string) => "/api/stream/proxy?url=" + encodeURIComponent(u);
 
 const LOCAL_SONGS = [
   { path: "/lib/a.mp3", name: "A", artist: "甲", album: "一" },
@@ -89,7 +96,7 @@ const STREAM_SONG = {
   coverUrl: "http://img.example.com/cover.jpg",
 };
 
-const LYRIC_RESULTS = [
+const LYRIC_RESULTS: LyricCandidate[] = [
   {
     source: "netease",
     id: "123",
@@ -101,6 +108,26 @@ const LYRIC_RESULTS = [
     tlyric: "[00:01.00]中文一\n[00:05.00]中文二",
   },
 ];
+
+/** 在线歌词候选条目（/api/lyric/search 响应形状） */
+interface LyricCandidate {
+  source: string;
+  id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  cover: string | null;
+  text: string;
+  tlyric?: string;
+}
+
+/** 播放统计上报体（POST /api/playback） */
+interface PlaybackCall {
+  source: string;
+  name: string;
+  played: number;
+  path?: string | null;
+}
 
 const RESET = {
   songs: [],
@@ -142,9 +169,16 @@ afterEach(() => {
 });
 
 // fetch 路由 mock：stream 直链（可配失败次数）/ 在线歌词候选 / POST /api/playback 收集
-function stubFetch(opts = {}) {
+interface StubFetchOpts {
+  streamFails?: number;
+  lyricResults?: LyricCandidate[] | null;
+}
+function stubFetch(opts: StubFetchOpts = {}): {
+  playbackCalls: PlaybackCall[];
+  streamCalls: () => number;
+} {
   const { streamFails = 0, lyricResults = null } = opts;
-  const playbackCalls = [];
+  const playbackCalls: PlaybackCall[] = [];
   let streamCalls = 0;
   vi.stubGlobal(
     "fetch",
@@ -186,15 +220,15 @@ describe("playPreview 试听语义（临时播放列表）", () => {
 
     expect(state.songs).toHaveLength(3); // 队列未动
     expect(state.currentIndex).toBe(1); // currentIndex 未动
-    expect(state.currentSong.type).toBe("preview");
-    expect(state.currentSong.name).toBe("晴");
-    expect(state.currentSong.path).toBeNull();
+    expect(state.currentSong!.type).toBe("preview");
+    expect(state.currentSong!.name).toBe("晴");
+    expect(state.currentSong!.path).toBeNull();
     expect(audio().src).toBe(PROXY_SRC("http://stream.example.com/song.mp3"));
     expect(streamCalls()).toBe(1); // 实时取直链一次
     // 试听歌词：在线匹配（/api/lyric/search + 前端 LRC 解析）
     expect(state.lyric.length).toBe(2);
-    expect(state.lyric[0].text[0]).toBe("第一句");
-    expect(state.lyric[0].text[2]).toBe("中文一"); // tlyric 合并
+    expect((state.lyric[0] as { text: string[] }).text[0]).toBe("第一句");
+    expect((state.lyric[0] as { text: string[] }).text[2]).toBe("中文一"); // tlyric 合并
     expect(state.lyricFormat).toBe("lrc");
     expect(state.lyricSource).toBe("netease");
   });
@@ -206,8 +240,8 @@ describe("playPreview 试听语义（临时播放列表）", () => {
     await playPreview({ id: "123", title: "晴" });
     const a = audio();
     const playSpy = vi.spyOn(a, "play");
-    a.listeners["ended"]();
-    expect(state.currentSong.type).toBe("preview"); // 仍是试听歌
+    a.listeners["ended"]!();
+    expect(state.currentSong!.type).toBe("preview"); // 仍是试听歌
     expect(state.currentIndex).toBe(1); // 主队列位置未动
     expect(state.isPlaying).toBe(false); // 自然停止
     expect(playSpy).not.toHaveBeenCalled(); // 不自动重播 / 不自动切歌
@@ -219,9 +253,9 @@ describe("playPreview 试听语义（临时播放列表）", () => {
     await selectSong(1);
     await playPreview({ id: "123", title: "晴" });
     await nextSong();
-    expect(state.currentSong.name).toBe("C");
+    expect(state.currentSong!.name).toBe("C");
     expect(state.currentIndex).toBe(2);
-    expect(state.currentSong.type).toBeUndefined(); // 主队列本地歌
+    expect(state.currentSong!.type).toBeUndefined(); // 主队列本地歌
     expect(audio().src).toBe("/api/audio?path=" + encodeURIComponent("/lib/c.mp3"));
   });
 
@@ -231,7 +265,7 @@ describe("playPreview 试听语义（临时播放列表）", () => {
     await selectSong(1);
     await playPreview({ id: "123", title: "晴" });
     await prevSong();
-    expect(state.currentSong.name).toBe("A");
+    expect(state.currentSong!.name).toBe("A");
     expect(state.currentIndex).toBe(0);
   });
 
@@ -241,7 +275,7 @@ describe("playPreview 试听语义（临时播放列表）", () => {
     await selectSong(2);
     await playPreview({ id: "123", title: "晴" });
     await selectSong(0);
-    expect(state.currentSong.path).toBe("/lib/a.mp3");
+    expect(state.currentSong!.path).toBe("/lib/a.mp3");
     expect(state.currentIndex).toBe(0);
   });
 });
@@ -303,9 +337,9 @@ describe("播放统计：streamStats 开关", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-16T00:00:00Z"));
     const a = await startPreview();
-    a.listeners["play"](); // 建会话（playPreview 内 audio.play 已触发，这里幂等）
+    a.listeners["play"]!(); // 建会话（playPreview 内 audio.play 已触发，这里幂等）
     vi.setSystemTime(new Date("2026-08-16T00:00:30Z")); // 播了 30s
-    a.listeners["pause"]();
+    a.listeners["pause"]!();
     expect(playbackCalls).toHaveLength(0);
     vi.useRealTimers();
   });
@@ -316,9 +350,9 @@ describe("播放统计：streamStats 开关", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-16T00:00:00Z"));
     const a = await startPreview();
-    a.listeners["play"]();
+    a.listeners["play"]!();
     vi.setSystemTime(new Date("2026-08-16T00:00:30Z"));
-    a.listeners["pause"]();
+    a.listeners["pause"]!();
     expect(playbackCalls).toHaveLength(1);
     expect(playbackCalls[0].source).toBe("preview");
     expect(playbackCalls[0].name).toBe("晴");
@@ -336,9 +370,9 @@ describe("播放统计：streamStats 开关", () => {
     const a = audio();
     a.duration = 240;
     state.duration = 240;
-    a.listeners["play"]();
+    a.listeners["play"]!();
     vi.setSystemTime(new Date("2026-08-16T00:00:30Z"));
-    a.listeners["pause"]();
+    a.listeners["pause"]!();
     expect(playbackCalls).toHaveLength(1);
     expect(playbackCalls[0].source).toBe("stream");
     expect(playbackCalls[0].path).toBeNull();
@@ -352,7 +386,7 @@ describe("播放统计：streamStats 开关", () => {
     vi.setSystemTime(new Date("2026-08-16T00:00:00Z"));
     await playUrl("https://radio.example.com/live");
     const a = audio();
-    a.listeners["play"]();
+    a.listeners["play"]!();
     vi.setSystemTime(new Date("2026-08-16T00:00:30Z"));
     // pagehide → sendBeacon 兜底：不打 /api/playback
     const sendBeacon = vi.fn();
@@ -369,16 +403,16 @@ describe("URL 播放（playUrl）", () => {
     const { streamCalls } = stubFetch();
     await playUrl("https://example.com/radio/station.mp3");
     expect(audio().src).toBe(PROXY_SRC("https://example.com/radio/station.mp3"));
-    expect(state.currentSong.type).toBe("url");
-    expect(state.currentSong.name).toBe("station.mp3");
-    expect(state.currentSong.path).toBeNull();
+    expect(state.currentSong!.type).toBe("url");
+    expect(state.currentSong!.name).toBe("station.mp3");
+    expect(state.currentSong!.path).toBeNull();
     expect(streamCalls()).toBe(0); // URL 播放不走 /api/stream/url
   });
 
   it("title 无文件名时取域名", async () => {
     stubFetch();
     await playUrl("https://radio.example.com/");
-    expect(state.currentSong.name).toBe("radio.example.com");
+    expect(state.currentSong!.name).toBe("radio.example.com");
   });
 
   it("非法 URL → toast，不播放", async () => {
@@ -394,9 +428,9 @@ describe("URL 播放（playUrl）", () => {
     await playUrl("https://radio.example.com/live");
     const a = audio();
     a.duration = Infinity;
-    a.listeners["loadedmetadata"]();
+    a.listeners["loadedmetadata"]!();
     expect(state.duration).toBe(0); // 进度条走空态
-    expect(state.currentSong.type).toBe("url");
+    expect(state.currentSong!.type).toBe("url");
   });
 
   it("普通流 → loadedmetadata 后 duration 正常", async () => {
@@ -404,7 +438,7 @@ describe("URL 播放（playUrl）", () => {
     await playUrl("https://example.com/a.mp3");
     const a = audio();
     a.duration = 180;
-    a.listeners["loadedmetadata"]();
+    a.listeners["loadedmetadata"]!();
     expect(state.duration).toBe(180);
   });
 });
@@ -434,7 +468,7 @@ describe("非本地歌在线歌词（loadLyric）", () => {
   });
 
   it("本地歌照旧走 /api/lyric（path 非空不受影响）", async () => {
-    const calls = [];
+    const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {
@@ -454,7 +488,7 @@ describe("非本地歌在线歌词（loadLyric）", () => {
     );
     state.songs = [...LOCAL_SONGS];
     await selectSong(0);
-    expect(state.lyric[0].text[0]).toBe("本地");
+    expect((state.lyric[0] as { text: string[] }).text[0]).toBe("本地");
     expect(calls.some((c) => c.startsWith("/api/lyric?"))).toBe(true);
     expect(calls.some((c) => c.startsWith("/api/lyric/search"))).toBe(false);
   });

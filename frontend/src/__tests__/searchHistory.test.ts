@@ -76,7 +76,7 @@ describe("history ref 镜像", () => {
 
   it("uiSettings.searchHistory 外部变化（settingsSync GET 覆盖）→ history 自动同步", () => {
     // 模拟后端 GET 返回的历史（含非法条目，后端已校验，这里防御性清洗）
-    uiSettings.searchHistory = ["甲", 42, "", "乙"];
+    uiSettings.searchHistory = ["甲", 42, "", "乙"] as unknown as string[];
     expect(history.value).toEqual(["甲", 42, "", "乙"]); // 镜像原样（清洗由后端负责）
     uiSettings.searchHistory = ["丙"];
     expect(history.value).toEqual(["丙"]);
@@ -89,7 +89,7 @@ describe("history ref 镜像", () => {
   });
 
   it("非法值防御：uiSettings.searchHistory 被置为非数组 → 操作不崩、镜像为空", () => {
-    uiSettings.searchHistory = "晴天,五月天"; // 不应发生（后端校验），防御处理
+    uiSettings.searchHistory = "晴天,五月天" as unknown as string[]; // 不应发生（后端校验），防御处理
     expect(history.value).toEqual([]);
     addHistory("好歌"); // 基于空列表追加
     expect(uiSettings.searchHistory).toEqual(["好歌"]);
