@@ -6,14 +6,13 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -43,7 +42,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-const navItems = () => [...document.body.querySelectorAll(".nav-item")];
+const navItems = () => [...document.body.querySelectorAll<HTMLElement>(".nav-item")];
 
 describe("SettingsModal 配对分类", () => {
   it("桌面壳（无 iOS 桥）：导航含「配对」，点击进入配对管理页", async () => {
@@ -51,7 +50,7 @@ describe("SettingsModal 配对分类", () => {
     await flushPromises();
     const nav = navItems();
     expect(nav.some((n) => n.textContent.includes("配对"))).toBe(true);
-    nav.find((n) => n.textContent.includes("配对")).click();
+    nav.find((n) => n.textContent.includes("配对"))!.click();
     await nextTick();
     await flushPromises();
     // PairingSettings 已渲染（组件根节点进入 DOM）

@@ -9,14 +9,13 @@ const mq = installMatchMedia(true); // 初始移动布局
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -49,9 +48,9 @@ describe("SettingsModal 移动布局返回按钮（isMobile 分支）", () => {
     mq.set(true);
     const wrapper = mount(SettingsModal, { props: { open: true } });
     await flushPromises();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     expect(root).toBeTruthy();
-    const back = root.querySelector(".modal-back");
+    const back = root.querySelector<HTMLElement>(".modal-back")!;
     expect(back).toBeTruthy();
     back.click();
     await nextTick();
@@ -63,7 +62,7 @@ describe("SettingsModal 移动布局返回按钮（isMobile 分支）", () => {
     mq.set(false);
     const wrapper = mount(SettingsModal, { props: { open: true } });
     await flushPromises();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     expect(root).toBeTruthy();
     expect(root.querySelector(".modal-back")).toBeNull();
     expect(root.querySelector(".modal-close")).toBeTruthy();
@@ -86,10 +85,10 @@ describe("SettingsModal 毛玻璃封面开关（仅移动端）", () => {
   async function openUiTab() {
     const wrapper = mount(SettingsModal, { props: { open: true } });
     await flushPromises();
-    const root = document.body.querySelector(".modal");
-    const uiNav = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const uiNav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("界面"),
-    );
+    )!;
     expect(uiNav).toBeTruthy();
     uiNav.click();
     await nextTick();
@@ -99,9 +98,9 @@ describe("SettingsModal 毛玻璃封面开关（仅移动端）", () => {
   it("移动端（<1024px）：界面分类显示「毛玻璃封面」开关，点击切换 uiSettings.glassCover", async () => {
     mq.set(true);
     const { wrapper, root } = await openUiTab();
-    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
+    const row = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
       el.textContent.includes("毛玻璃封面"),
-    );
+    )!;
     expect(row).toBeTruthy();
     // 默认开
     expect(row.querySelector(".switch.on")).toBeTruthy();
@@ -118,7 +117,7 @@ describe("SettingsModal 毛玻璃封面开关（仅移动端）", () => {
   it("桌面端（≥1024px）：界面分类不显示「毛玻璃封面」开关", async () => {
     mq.set(false);
     const { wrapper, root } = await openUiTab();
-    const row = [...root.querySelectorAll(".toggle-row")].find((el) =>
+    const row = [...root.querySelectorAll<HTMLElement>(".toggle-row")].find((el) =>
       el.textContent.includes("毛玻璃封面"),
     );
     expect(row).toBeFalsy();
@@ -130,10 +129,10 @@ describe("SettingsModal 歌词子 tab 移动端守卫（桌面歌词是桌面壳
   async function openLyricTab() {
     const wrapper = mount(SettingsModal, { props: { open: true } });
     await flushPromises();
-    const root = document.body.querySelector(".modal");
-    const nav = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const nav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("歌词"),
-    );
+    )!;
     expect(nav).toBeTruthy();
     nav.click();
     await nextTick();
@@ -143,7 +142,7 @@ describe("SettingsModal 歌词子 tab 移动端守卫（桌面歌词是桌面壳
   it("移动端（<1024px）：歌词 tab 只显示「APP 歌词」子 tab，无「桌面歌词」", async () => {
     mq.set(true);
     const { wrapper, root } = await openLyricTab();
-    const tabs = [...root.querySelectorAll(".lyric-subtabs .seg-btn")].map((b) =>
+    const tabs = [...root.querySelectorAll<HTMLElement>(".lyric-subtabs .seg-btn")].map((b) =>
       b.textContent.trim(),
     );
     expect(tabs).toEqual(["APP 歌词"]);
@@ -155,7 +154,7 @@ describe("SettingsModal 歌词子 tab 移动端守卫（桌面歌词是桌面壳
   it("桌面端（≥1024px）：歌词 tab 显示「APP 歌词 / 桌面歌词」两个子 tab", async () => {
     mq.set(false);
     const { wrapper, root } = await openLyricTab();
-    const tabs = [...root.querySelectorAll(".lyric-subtabs .seg-btn")].map((b) =>
+    const tabs = [...root.querySelectorAll<HTMLElement>(".lyric-subtabs .seg-btn")].map((b) =>
       b.textContent.trim(),
     );
     expect(tabs).toEqual(["APP 歌词", "桌面歌词"]);

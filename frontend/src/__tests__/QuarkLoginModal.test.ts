@@ -5,9 +5,9 @@ import { mount, flushPromises } from "@vue/test-utils";
 const QuarkLoginModal = (await import("../components/QuarkLoginModal.vue")).default;
 
 let qrCalls = 0;
-let qrMethods = []; // 拉码请求的 method（防 GET 打 POST 端点的回归）
+let qrMethods: string[] = []; // 拉码请求的 method（防 GET 打 POST 端点的回归）
 let statusCalls = 0;
-let statuses = []; // 轮询返回队列，取尽后一直 waiting
+let statuses: string[] = []; // 轮询返回队列，取尽后一直 waiting
 
 function stubFetch() {
   vi.stubGlobal(
@@ -56,9 +56,11 @@ describe("QuarkLoginModal 打开与倒计时", () => {
     await flushPromises();
     expect(qrCalls).toBe(1);
     expect(qrMethods).toEqual(["POST"]); // 拉码必须 POST（GET 打 POST 端点会 405）
-    const modal = document.body.querySelector(".qlm");
+    const modal = document.body.querySelector<HTMLElement>(".qlm")!;
     expect(modal).toBeTruthy();
-    expect(modal.querySelector("img").getAttribute("src")).toBe("data:image/png;base64,AAAA");
+    expect(modal.querySelector<HTMLImageElement>("img")!.getAttribute("src")).toBe(
+      "data:image/png;base64,AAAA",
+    );
     expect(modal.textContent).toContain("二维码有效期");
     expect(modal.textContent).toContain("170");
     wrapper.unmount();
@@ -67,7 +69,7 @@ describe("QuarkLoginModal 打开与倒计时", () => {
   it("倒计时每秒递减；归零后自动重新拉码（计数 +1）并重置倒计时", async () => {
     const wrapper = mount(QuarkLoginModal, { props: { open: true } });
     await flushPromises();
-    const countdownEl = () => document.body.querySelector(".qlm-countdown");
+    const countdownEl = () => document.body.querySelector<HTMLElement>(".qlm-countdown")!;
     expect(countdownEl().textContent).toContain("170");
     await vi.advanceTimersByTimeAsync(3000);
     expect(countdownEl().textContent).toContain("167");
@@ -98,11 +100,11 @@ describe("QuarkLoginModal 打开与倒计时", () => {
     const w2 = mount(QuarkLoginModal, { props: { open: true } });
     await flushPromises();
     expect(qrCalls).toBe(1);
-    expect(document.body.querySelector(".qlm-countdown").textContent).toContain("3");
+    expect(document.body.querySelector<HTMLElement>(".qlm-countdown")!.textContent).toContain("3");
     await vi.advanceTimersByTimeAsync(3200);
     await flushPromises();
     expect(qrCalls).toBe(2); // 归零 → 自动重新拉码
-    expect(document.body.querySelector(".qlm-countdown").textContent).toContain("3"); // 倒计时重置
+    expect(document.body.querySelector<HTMLElement>(".qlm-countdown")!.textContent).toContain("3"); // 倒计时重置
     w2.unmount();
   });
 
@@ -125,10 +127,12 @@ describe("QuarkLoginModal 打开与倒计时", () => {
     );
     const wrapper = mount(QuarkLoginModal, { props: { open: true } });
     await flushPromises();
-    const cd = document.body.querySelector(".qlm-countdown");
+    const cd = document.body.querySelector<HTMLElement>(".qlm-countdown")!;
     expect(cd.classList.contains("warn")).toBe(false);
     await vi.advanceTimersByTimeAsync(6000); // 35 → 29
-    expect(document.body.querySelector(".qlm-countdown").classList.contains("warn")).toBe(true);
+    expect(
+      document.body.querySelector<HTMLElement>(".qlm-countdown")!.classList.contains("warn"),
+    ).toBe(true);
     wrapper.unmount();
   });
 });
@@ -177,7 +181,7 @@ describe("QuarkLoginModal 轮询状态机", () => {
     await flushPromises();
     await vi.advanceTimersByTimeAsync(2100);
     await flushPromises();
-    const modal = document.body.querySelector(".qlm");
+    const modal = document.body.querySelector<HTMLElement>(".qlm")!;
     expect(modal.textContent).toContain("登录状态异常");
     const callsAfter = statusCalls;
     await vi.advanceTimersByTimeAsync(5000); // 不再轮询
@@ -190,7 +194,7 @@ describe("QuarkLoginModal 关闭", () => {
   it("点 ✕ → emit close", async () => {
     const wrapper = mount(QuarkLoginModal, { props: { open: true } });
     await flushPromises();
-    document.body.querySelector(".qlm-close").click();
+    document.body.querySelector<HTMLElement>(".qlm-close")!.click();
     await flushPromises();
     expect(wrapper.emitted("close")).toBeTruthy();
     wrapper.unmount();
@@ -199,7 +203,7 @@ describe("QuarkLoginModal 关闭", () => {
   it("点遮罩 → emit close", async () => {
     const wrapper = mount(QuarkLoginModal, { props: { open: true } });
     await flushPromises();
-    document.body.querySelector(".qlm-mask").click();
+    document.body.querySelector<HTMLElement>(".qlm-mask")!.click();
     await flushPromises();
     expect(wrapper.emitted("close")).toBeTruthy();
     wrapper.unmount();

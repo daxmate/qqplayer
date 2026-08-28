@@ -6,14 +6,13 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -32,8 +31,17 @@ const { scrapingSettings, SCRAPING_SETTINGS_DEFAULTS } =
   await import("../composables/useScrapingSettings.js");
 const { scrapeBatchState } = await import("../composables/useScrapeBatch.js");
 
-let putBodies = [];
-let batchBodies = [];
+/** PUT /api/library/settings 的请求体（scraping 命名空间；仅断言用到的字段） */
+interface ScrapePutBody {
+  scraping: {
+    enabled_fields: string[];
+    rename_template: string;
+    batch_enabled: boolean;
+  };
+}
+
+let putBodies: ScrapePutBody[] = [];
+let batchBodies: Array<{ mode: string }> = [];
 
 beforeEach(() => {
   Object.assign(scrapingSettings, JSON.parse(JSON.stringify(SCRAPING_SETTINGS_DEFAULTS)));
@@ -86,10 +94,10 @@ afterEach(() => {
 async function openScrapeTab() {
   const w = mount(SettingsModal, { props: { open: true } });
   await flushPromises();
-  const root = document.body.querySelector(".modal");
-  const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+  const root = document.body.querySelector<HTMLElement>(".modal")!;
+  const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
     el.textContent.includes("刮削"),
-  );
+  )!;
   expect(navItem).toBeTruthy();
   await navItem.click();
   await nextTick();
@@ -106,7 +114,9 @@ describe("刮削 tab 内容", () => {
     expect(text).toContain("批量刮削");
     expect(text).toContain("自定义刮削源（插件）开发中");
     // 8 个字段 checkbox 默认全选
-    const boxes = [...root.querySelectorAll(".scrape-field input[type=checkbox]")];
+    const boxes = [
+      ...root.querySelectorAll<HTMLInputElement>(".scrape-field input[type=checkbox]"),
+    ];
     expect(boxes).toHaveLength(8);
     expect(boxes.every((b) => b.checked)).toBe(true);
     // 批量刮削默认关 → 一键补全按钮隐藏
@@ -117,7 +127,7 @@ describe("刮削 tab 内容", () => {
   it("切换字段 checkbox → enabled_fields 实时更新（去掉 year）", async () => {
     const { w, root } = await openScrapeTab();
     await root
-      .querySelector('[data-testid="scrape-field-year"]')
+      .querySelector<HTMLInputElement>('[data-testid="scrape-field-year"]')!
       .dispatchEvent(new Event("change", { bubbles: true }));
     await nextTick();
     expect(scrapingSettings.enabled_fields).not.toContain("year");
@@ -129,7 +139,7 @@ describe("刮削 tab 内容", () => {
     vi.useFakeTimers();
     const { w, root } = await openScrapeTab();
     await root
-      .querySelector('[data-testid="scrape-field-year"]')
+      .querySelector<HTMLInputElement>('[data-testid="scrape-field-year"]')!
       .dispatchEvent(new Event("change", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(300);
     expect(putBodies).toHaveLength(1);
@@ -141,32 +151,38 @@ describe("刮削 tab 内容", () => {
 
   it("重命名模板实时预览：取曲库第一首有 artist+title 的歌渲染；无歌显示 —", async () => {
     const { w, root } = await openScrapeTab();
-    expect(root.querySelector('[data-testid="rename-preview"]').textContent).toBe(
+    expect(root.querySelector<HTMLElement>('[data-testid="rename-preview"]')!.textContent).toBe(
       "中島美嘉 - 雪の華",
     );
     // 改模板 → 预览实时变化
     scrapingSettings.rename_template = "{year}/{artist} - {title}";
     await nextTick();
-    expect(root.querySelector('[data-testid="rename-preview"]').textContent).toBe(
+    expect(root.querySelector<HTMLElement>('[data-testid="rename-preview"]')!.textContent).toBe(
       "2003/中島美嘉 - 雪の華",
     );
     // 无歌时显示 —
     state.songs = [];
     await nextTick();
-    expect(root.querySelector('[data-testid="rename-preview"]').textContent).toBe("—");
+    expect(root.querySelector<HTMLElement>('[data-testid="rename-preview"]')!.textContent).toBe(
+      "—",
+    );
     w.unmount();
   });
 
   it("源优先级：默认 网易云→MusicBrainz；上移按钮交换顺序", async () => {
     const { w, root } = await openScrapeTab();
-    const names = [...root.querySelectorAll(".source-name")].map((el) => el.textContent.trim());
+    const names = [...root.querySelectorAll<HTMLElement>(".source-name")].map((el) =>
+      el.textContent.trim(),
+    );
     expect(names).toEqual(["网易云音乐", "MusicBrainz"]);
     // 第二行（MusicBrainz）上移
-    const upBtns = [...root.querySelectorAll('[data-testid="source-up"]')];
+    const upBtns = [...root.querySelectorAll<HTMLElement>('[data-testid="source-up"]')];
     await upBtns[1].click();
     await nextTick();
     expect(scrapingSettings.source_order).toEqual(["musicbrainz", "netease"]);
-    const names2 = [...root.querySelectorAll(".source-name")].map((el) => el.textContent.trim());
+    const names2 = [...root.querySelectorAll<HTMLElement>(".source-name")].map((el) =>
+      el.textContent.trim(),
+    );
     expect(names2).toEqual(["MusicBrainz", "网易云音乐"]);
     w.unmount();
   });
@@ -177,18 +193,18 @@ describe("刮削 tab 内容", () => {
     // 开启
     scrapingSettings.batch_enabled = true;
     await nextTick();
-    const btn = root.querySelector('[data-testid="batch-library-btn"]');
+    const btn = root.querySelector<HTMLElement>('[data-testid="batch-library-btn"]')!;
     expect(btn).toBeTruthy();
     expect(btn.textContent).toContain("立即补全曲库缺失字段");
     // 第一段：确认态
     await btn.click();
     await nextTick();
-    expect(root.querySelector('[data-testid="batch-library-btn"]').textContent).toContain(
-      "确认补全？",
-    );
+    expect(
+      root.querySelector<HTMLElement>('[data-testid="batch-library-btn"]')!.textContent,
+    ).toContain("确认补全？");
     expect(batchBodies).toHaveLength(0);
     // 第二段：真正执行
-    await root.querySelector('[data-testid="batch-library-btn"]').click();
+    await root.querySelector<HTMLElement>('[data-testid="batch-library-btn"]')!.click();
     await flushPromises();
     expect(batchBodies).toEqual([{ mode: "library" }]);
     expect(scrapeBatchState.open).toBe(true);
@@ -200,7 +216,7 @@ describe("刮削 tab 内容", () => {
 
   it("插件占位不可交互（禁用态）", async () => {
     const { w, root } = await openScrapeTab();
-    const item = [...root.querySelectorAll(".setting-item.disabled")][0];
+    const item = [...root.querySelectorAll<HTMLElement>(".setting-item.disabled")][0];
     expect(item.textContent).toContain("自定义刮削源（插件）开发中");
     w.unmount();
   });

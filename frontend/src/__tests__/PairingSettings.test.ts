@@ -20,7 +20,7 @@ vi.mock("../utils/apiClient.js", () => apiMock);
 const PairingSettings = (await import("../components/PairingSettings.vue")).default;
 
 /** 已配对设备：created_at = 两天前 14:32（跨天 → MM-DD）；last_seen_at = 昨天 09:05 */
-const device = (over = {}) => {
+const device = (over: Record<string, unknown> = {}) => {
   const created = new Date();
   created.setDate(created.getDate() - 2);
   created.setHours(14, 32, 0, 0);
@@ -39,7 +39,7 @@ const device = (over = {}) => {
   };
 };
 
-const request = (id = "r1", over = {}) => {
+const request = (id = "r1", over: Record<string, unknown> = {}) => {
   const created = new Date();
   created.setHours(8, 20, 0, 0); // 今天 → 显示 HH:mm
   return {
@@ -51,11 +51,14 @@ const request = (id = "r1", over = {}) => {
   };
 };
 
-const ok = (data) => ({ ok: true, status: 200, data });
+const ok = (data: unknown) => ({ ok: true, status: 200, data });
 
 /** 按 URL 路由 apiGet：/devices → {devices}，/pending → {requests} */
-function routeGet({ devices = [], requests = [] } = {}) {
-  apiMock.apiGet.mockImplementation((url) => {
+function routeGet({
+  devices = [],
+  requests = [],
+}: { devices?: unknown[]; requests?: unknown[] } = {}) {
+  apiMock.apiGet.mockImplementation((url: string) => {
     if (url === "/api/pairing/devices") return Promise.resolve(ok({ devices }));
     if (url === "/api/pairing/pending") return Promise.resolve(ok({ requests }));
     return Promise.resolve(ok({}));
@@ -70,16 +73,16 @@ async function mountSettings() {
 
 /** Teleport 到 body 的弹窗内按钮（按索引：0=取消/次要，末位=确认/主操作） */
 function dialogButtons() {
-  return [...document.body.querySelectorAll(".pairing-dialog .pairing-dialog-btn")];
+  return [...document.body.querySelectorAll<HTMLElement>(".pairing-dialog .pairing-dialog-btn")];
 }
 const confirmDangerBtn = () =>
-  document.body.querySelector(".pairing-dialog .pairing-dialog-btn.danger");
+  document.body.querySelector<HTMLElement>(".pairing-dialog .pairing-dialog-btn.danger")!;
 const confirmPrimaryBtn = () =>
-  document.body.querySelector(".pairing-dialog .pairing-dialog-btn.primary");
+  document.body.querySelector<HTMLElement>(".pairing-dialog .pairing-dialog-btn.primary")!;
 
 /** 备注输入框（原生 DOM；v-model 需手动派发 input 事件） */
-async function setNoteInput(value) {
-  const el = document.body.querySelector(".pairing-note-input");
+async function setNoteInput(value: string) {
+  const el = document.body.querySelector<HTMLInputElement>(".pairing-note-input")!;
   el.value = value;
   el.dispatchEvent(new Event("input"));
   await nextTick();
@@ -147,7 +150,7 @@ describe("PairingSettings 已配对设备列表", () => {
     // 点行内删除按钮（危险图标按钮）
     w.find(".pairing-row .pairing-icon-btn.danger").trigger("click");
     await flushPromises();
-    const dialog = document.body.querySelector(".pairing-dialog");
+    const dialog = document.body.querySelector<HTMLElement>(".pairing-dialog")!;
     expect(dialog.textContent).toContain("确定撤销与「iPhone 15」的配对？");
     // 取消不触发请求
     dialogButtons()[0].click();
@@ -189,7 +192,7 @@ describe("PairingSettings 备注编辑", () => {
     const w = await mountSettings();
     w.find(".pairing-row .pairing-icon-btn").trigger("click"); // 第一个图标按钮 = 编辑
     await flushPromises();
-    const input = document.body.querySelector(".pairing-note-input");
+    const input = document.body.querySelector<HTMLInputElement>(".pairing-note-input")!;
     expect(input.value).toBe("旧备注");
     await setNoteInput("新备注 abc");
     apiMock.apiPatch.mockResolvedValue(ok({ device: {} }));
@@ -222,7 +225,9 @@ describe("PairingSettings 备注编辑", () => {
     const w = await mountSettings();
     w.find(".pairing-row .pairing-icon-btn").trigger("click");
     await flushPromises();
-    expect(document.body.querySelector(".pairing-note-input").getAttribute("maxlength")).toBe("50");
+    expect(
+      document.body.querySelector<HTMLElement>(".pairing-note-input")!.getAttribute("maxlength"),
+    ).toBe("50");
     w.unmount();
   });
 });
@@ -239,7 +244,7 @@ describe("PairingSettings 待确认请求（只读）", () => {
     routeGet({ requests: [] });
     const rows = w.findAll(".pairing-row");
     const rejectBtn = rows
-      .find((r) => r.text().includes("iPad mini"))
+      .find((r) => r.text().includes("iPad mini"))!
       .find(".pairing-icon-btn.danger");
     await rejectBtn.trigger("click");
     await flushPromises();
@@ -252,7 +257,10 @@ describe("PairingSettings 待确认请求（只读）", () => {
   it("绝无批准按钮：不渲染 approve 入口，也不调用 approve 接口", async () => {
     routeGet({ requests: [request("r1")] });
     const w = await mountSettings();
-    const btns = [...w.findAll("button"), ...document.body.querySelectorAll("button")];
+    const btns = [
+      ...w.findAll("button").map((b) => b.element),
+      ...document.body.querySelectorAll("button"),
+    ];
     expect(btns.some((b) => /批准|Approve|approve/i.test(b.textContent || b.title))).toBe(false);
     expect(apiMock.apiPost).not.toHaveBeenCalled();
     w.unmount();

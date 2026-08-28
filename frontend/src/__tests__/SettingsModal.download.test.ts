@@ -5,14 +5,13 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -28,7 +27,7 @@ vi.stubGlobal("Audio", FakeAudio);
 const SettingsModal = (await import("../components/SettingsModal.vue")).default;
 const { downloadSettings } = await import("../composables/useSettings.js");
 
-let logoutBodies = []; // /api/quark/login/logout 请求记录
+let logoutBodies: Array<{ method?: string }> = []; // /api/quark/login/logout 请求记录
 
 beforeEach(() => {
   Object.assign(downloadSettings, { downloadDir: "", defaultQuality: "exhigh", maxSpeed: 4 });
@@ -49,12 +48,12 @@ describe("SettingsModal 下载分类", () => {
   it("左侧导航出现「下载」分类，点击后显示下载设置", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
     expect(root).toBeTruthy();
     // 导航项
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("下载"),
-    );
+    )!;
     expect(navItem).toBeTruthy();
     await navItem.click();
     await nextTick();
@@ -62,7 +61,9 @@ describe("SettingsModal 下载分类", () => {
     expect(root.textContent).toContain("下载目录");
     expect(root.textContent).toContain("留空 = 下载到当前曲库");
     expect(root.textContent).toContain("默认音质");
-    const chips = [...root.querySelectorAll(".ext-chip")].map((el) => el.textContent.trim());
+    const chips = [...root.querySelectorAll<HTMLElement>(".ext-chip")].map((el) =>
+      el.textContent.trim(),
+    );
     expect(chips).toEqual(["标准 128k", "极高 320k", "无损 FLAC", "Hi-Res"]);
     w.unmount();
   });
@@ -70,17 +71,17 @@ describe("SettingsModal 下载分类", () => {
   it("默认值：目录为空 + 音质 exhigh（极高 320k 选中）", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("下载"),
-    );
+    )!;
     await navItem.click();
     await nextTick();
-    const input = root.querySelector("input.lib-input");
+    const input = root.querySelector<HTMLInputElement>("input.lib-input")!;
     expect(input.value).toBe("");
-    const onChip = [...root.querySelectorAll(".ext-chip")].find((el) =>
+    const onChip = [...root.querySelectorAll<HTMLElement>(".ext-chip")].find((el) =>
       el.classList.contains("on"),
-    );
+    )!;
     expect(onChip.textContent).toContain("极高 320k");
     w.unmount();
   });
@@ -88,13 +89,13 @@ describe("SettingsModal 下载分类", () => {
   it("点击音质 chip → 写入 downloadSettings.defaultQuality", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("下载"),
-    );
+    )!;
     await navItem.click();
     await nextTick();
-    const chips = [...root.querySelectorAll(".ext-chip")];
+    const chips = [...root.querySelectorAll<HTMLElement>(".ext-chip")];
     await chips[2].click(); // 无损 FLAC
     await nextTick();
     expect(downloadSettings.defaultQuality).toBe("lossless");
@@ -106,13 +107,13 @@ describe("SettingsModal 下载分类", () => {
   it("下载目录输入 → 写入 downloadSettings.downloadDir", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("下载"),
-    );
+    )!;
     await navItem.click();
     await nextTick();
-    const input = root.querySelector("input.lib-input");
+    const input = root.querySelector<HTMLInputElement>("input.lib-input")!;
     input.value = "/Users/me/Music/Downloads";
     await input.dispatchEvent(new Event("input"));
     await nextTick();
@@ -123,14 +124,14 @@ describe("SettingsModal 下载分类", () => {
   it("下载限速输入（number）→ 写入 downloadSettings.maxSpeed（数字，非字符串）", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("下载"),
-    );
+    )!;
     await navItem.click();
     await nextTick();
     // 限速输入是第一个 type=number 的输入框（min=0 step=0.5）
-    const input = root.querySelector('input[type="number"]');
+    const input = root.querySelector<HTMLInputElement>('input[type="number"]')!;
     expect(input).toBeTruthy();
     expect(input.getAttribute("min")).toBe("0");
     expect(input.getAttribute("step")).toBe("0.5");
@@ -147,10 +148,10 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
   async function openDownloadTab() {
     const w = mount(SettingsModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const navItem = [...root.querySelectorAll(".nav-item")].find((el) =>
+    const root = document.body.querySelector<HTMLElement>(".modal")!;
+    const navItem = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
       el.textContent.includes("下载"),
-    );
+    )!;
     await navItem.click();
     await flushPromises(); // 等 refreshQuarkState 收尾（quarkBusy 复位，登录按钮才可点）
     await nextTick();
@@ -164,7 +165,7 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
     expect(downloadSettings.aria2Rpc).toBe("");
     expect(downloadSettings.aria2Secret).toBe("");
     // 品质 seg：MP3 320k 选中；引擎 seg：内置选中
-    const segBtns = [...root.querySelectorAll(".seg-btn")].map((el) => ({
+    const segBtns = [...root.querySelectorAll<HTMLElement>(".seg-btn")].map((el) => ({
       text: el.textContent.trim(),
       on: el.classList.contains("on"),
     }));
@@ -173,7 +174,7 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
     expect(segBtns).toContainEqual({ text: "内置", on: true });
     expect(segBtns).toContainEqual({ text: "aria2", on: false });
     // aria2 参数输入框隐藏（引擎非 aria2）
-    const inputs = [...root.querySelectorAll("input.lib-input")];
+    const inputs = [...root.querySelectorAll<HTMLInputElement>("input.lib-input")];
     expect(inputs.length).toBe(2); // 只有下载目录 + 下载限速
     expect(root.textContent).not.toContain("aria2 RPC");
     w.unmount();
@@ -181,18 +182,18 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
 
   it("点击 FLAC → 写入 downloadSettings.quarkQuality；切 aria2 → 显示 RPC/密钥输入框并可编辑", async () => {
     const { w, root } = await openDownloadTab();
-    const segBtns = [...root.querySelectorAll(".seg-btn")];
-    await segBtns.find((el) => el.textContent.trim() === "FLAC 无损").click();
+    const segBtns = [...root.querySelectorAll<HTMLElement>(".seg-btn")];
+    await segBtns.find((el) => el.textContent.trim() === "FLAC 无损")!.click();
     await nextTick();
     expect(downloadSettings.quarkQuality).toBe("flac");
-    await segBtns.find((el) => el.textContent.trim() === "aria2").click();
+    await segBtns.find((el) => el.textContent.trim() === "aria2")!.click();
     await nextTick();
     expect(downloadSettings.engine).toBe("aria2");
     // aria2 输入框出现（RPC + 密钥），并写入 settings
-    const inputs = [...root.querySelectorAll("input.lib-input")];
+    const inputs = [...root.querySelectorAll<HTMLInputElement>("input.lib-input")];
     expect(inputs.length).toBe(4); // 下载目录 + 下载限速 + RPC + 密钥
-    const rpc = inputs.find((el) => el.placeholder.includes("6800"));
-    const secret = inputs.find((el) => el.type === "password");
+    const rpc = inputs.find((el) => el.placeholder.includes("6800"))!;
+    const secret = inputs.find((el) => el.type === "password")!;
     rpc.value = "http://127.0.0.1:6800/jsonrpc";
     await rpc.dispatchEvent(new Event("input"));
     secret.value = "tok";
@@ -206,9 +207,9 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
   it("夸克账号：未登录 → 显示登录按钮；点击打开扫码登录弹窗", async () => {
     const { w, root } = await openDownloadTab();
     expect(root.textContent).toContain("未登录");
-    const loginBtn = [...root.querySelectorAll("button")].find((el) =>
+    const loginBtn = [...root.querySelectorAll<HTMLElement>("button")].find((el) =>
       el.textContent.trim().includes("登录夸克"),
-    );
+    )!;
     expect(loginBtn).toBeTruthy();
     await loginBtn.click();
     await nextTick();
@@ -219,7 +220,7 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
   it("夸克账号：已登录 → 显示昵称；点退出 → POST logout + 状态变未登录", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts = {}) => {
+      vi.fn(async (url: RequestInfo | URL, opts: RequestInit = {}) => {
         if (url === "/api/quark/login/state") {
           return { ok: true, json: async () => ({ logged_in: true, nickname: "夸克用户" }) };
         }
@@ -233,9 +234,9 @@ describe("SettingsModal 歌曲海下载设置（quarkQuality / 引擎 / aria2 / 
     const { w, root } = await openDownloadTab();
     await flushPromises();
     expect(root.textContent).toContain("已登录：夸克用户");
-    const logoutBtn = [...root.querySelectorAll("button")].find((el) =>
+    const logoutBtn = [...root.querySelectorAll<HTMLElement>("button")].find((el) =>
       el.textContent.trim().includes("退出登录"),
-    );
+    )!;
     expect(logoutBtn).toBeTruthy();
     await logoutBtn.click();
     await flushPromises();

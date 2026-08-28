@@ -5,15 +5,14 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.volume = 1;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  volume = 1;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -33,7 +32,9 @@ const { items, clearToasts } = await import("../composables/useToast.js").then((
 
 beforeEach(() => {
   // 快捷键默认值复位（防用例间录制值残留）
-  for (const s of SHORTCUTS) playbackSettings[s.settingKey] = s.defaultCode;
+  for (const s of SHORTCUTS) {
+    (playbackSettings as Record<string, unknown>)[s.settingKey] = s.defaultCode;
+  }
   clearToasts();
   // 弹窗 watch(open) 会触发 loadLibrary / loadLibrarySettings（fetch），stub 掉
   vi.stubGlobal(
@@ -50,17 +51,17 @@ afterEach(() => {
 async function openShortcutsTab() {
   const w = mount(SettingsModal, { props: { open: true } });
   await nextTick();
-  const root = document.body.querySelector(".modal");
-  const nav = [...root.querySelectorAll(".nav-item")].find((el) =>
+  const root = document.body.querySelector<HTMLElement>(".modal")!;
+  const nav = [...root.querySelectorAll<HTMLElement>(".nav-item")].find((el) =>
     el.textContent.includes("快捷键"),
-  );
+  )!;
   nav.click();
   await nextTick();
   return { w, root };
 }
 
 // 录制按键：capture 阶段监听在 window 上（onRecordKeydown）
-function press(code, opts = {}) {
+function press(code: string, opts: KeyboardEventInit = {}) {
   const ev = new KeyboardEvent("keydown", {
     code,
     key: opts.key || code,
@@ -75,19 +76,19 @@ function press(code, opts = {}) {
   return ev;
 }
 
-function rowOf(root, label) {
-  return [...root.querySelectorAll(".shortcut-item.editable")].find((el) =>
+function rowOf(root: HTMLElement, label: string): HTMLElement {
+  return [...root.querySelectorAll<HTMLElement>(".shortcut-item.editable")].find((el) =>
     el.textContent.includes(label),
-  );
+  )!;
 }
 
 describe("SettingsModal 快捷键 tab（任务 G）", () => {
   it("配置表全列表渲染（22 行），按 6 个分类分组，全部可录制", async () => {
     const { root, w } = await openShortcutsTab();
-    const rows = [...root.querySelectorAll(".shortcut-item.editable")];
+    const rows = [...root.querySelectorAll<HTMLElement>(".shortcut-item.editable")];
     expect(rows).toHaveLength(SHORTCUTS.length);
     // 每个分类一个 sub-title（分组标题）
-    const titles = [...root.querySelectorAll(".group-title.sub-title")];
+    const titles = [...root.querySelectorAll<HTMLElement>(".group-title.sub-title")];
     expect(titles).toHaveLength(SHORTCUT_CATEGORIES.length);
     // 分类标题顺序与配置表一致
     const catLabels = ["播放控制", "曲目", "音量", "跟唱", "搜索", "其他"];
@@ -97,7 +98,7 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     // 每个分类下行的数量与配置表一致
     for (const cat of SHORTCUT_CATEGORIES) {
       const expected = SHORTCUTS.filter((s) => s.category === cat.key).length;
-      const catEl = [...root.querySelectorAll(".shortcut-cat")].find((el) =>
+      const catEl = [...root.querySelectorAll<HTMLElement>(".shortcut-cat")].find((el) =>
         el.textContent.includes(
           cat.key === "playback"
             ? "播放控制"
@@ -111,7 +112,7 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
                     ? "搜索"
                     : "其他",
         ),
-      );
+      )!;
       expect(catEl.querySelectorAll(".shortcut-item.editable")).toHaveLength(expected);
     }
     // 行内容覆盖全部 labelKey（通过渲染文本抽查关键新项）
@@ -132,13 +133,13 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
   it("默认组合显示：⌘ 组合显示 ⌘ 前缀、普通键显示键名", async () => {
     const { root, w } = await openShortcutsTab();
     const prev = rowOf(root, "上一首");
-    expect(prev.querySelector("kbd").textContent).toBe("⌘←");
+    expect(prev.querySelector<HTMLElement>("kbd")!.textContent).toBe("⌘←");
     const mute = rowOf(root, "静音切换");
-    expect(mute.querySelector("kbd").textContent).toBe("M");
+    expect(mute.querySelector<HTMLElement>("kbd")!.textContent).toBe("M");
     const search = rowOf(root, "打开搜索");
-    expect(search.querySelector("kbd").textContent).toBe("⌘K");
+    expect(search.querySelector<HTMLElement>("kbd")!.textContent).toBe("⌘K");
     const settings = rowOf(root, "打开设置");
-    expect(settings.querySelector("kbd").textContent).toBe("⌘,");
+    expect(settings.querySelector<HTMLElement>("kbd")!.textContent).toBe("⌘,");
     w.unmount();
   });
 
@@ -152,7 +153,7 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     await nextTick();
     expect(playbackSettings.shortcutMute).toBe("KeyJ");
     expect(mute.classList.contains("recording")).toBe(false);
-    expect(mute.querySelector("kbd").textContent).toBe("J"); // 显示更新
+    expect(mute.querySelector<HTMLElement>("kbd")!.textContent).toBe("J"); // 显示更新
     w.unmount();
   });
 
@@ -163,7 +164,7 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     press("KeyT", { key: "t", metaKey: true });
     await nextTick();
     expect(playbackSettings.shortcutPrevTrack).toBe("Meta+KeyT");
-    expect(prev.querySelector("kbd").textContent).toBe("⌘T");
+    expect(prev.querySelector<HTMLElement>("kbd")!.textContent).toBe("⌘T");
     w.unmount();
   });
 
@@ -211,7 +212,7 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     playbackSettings.shortcutFav = "KeyJ";
     const { root, w } = await openShortcutsTab();
     const fav = rowOf(root, "收藏 / 取消收藏");
-    expect(fav.querySelector("kbd").textContent).toBe("J");
+    expect(fav.querySelector<HTMLElement>("kbd")!.textContent).toBe("J");
     w.unmount();
   });
 
@@ -236,7 +237,7 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     press("KeyQ", { key: "q" });
     await nextTick();
     expect(playbackSettings.searchKey).toBe("KeyQ");
-    expect(search.querySelector("kbd").textContent).toBe("Q");
+    expect(search.querySelector<HTMLElement>("kbd")!.textContent).toBe("Q");
     w.unmount();
   });
 
@@ -244,14 +245,14 @@ describe("SettingsModal 快捷键 tab（任务 G）", () => {
     const { root, w } = await openShortcutsTab();
     const settings = rowOf(root, "打开设置");
     // 默认组合显示 ⌘,
-    expect(settings.querySelector("kbd").textContent).toBe("⌘,");
+    expect(settings.querySelector<HTMLElement>("kbd")!.textContent).toBe("⌘,");
     // 录制 ⌘+逗号 → 存 Meta+Comma，显示 ⌘,
     settings.click();
     await nextTick();
     press("Comma", { key: ",", metaKey: true });
     await nextTick();
     expect(playbackSettings.shortcutOpenSettings).toBe("Meta+Comma");
-    expect(settings.querySelector("kbd").textContent).toBe("⌘,");
+    expect(settings.querySelector<HTMLElement>("kbd")!.textContent).toBe("⌘,");
     w.unmount();
   });
 });

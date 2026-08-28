@@ -12,14 +12,14 @@ const request = {
   created_at: new Date(2026, 7, 23, 14, 32, 0).toISOString(),
 };
 
-function mountModal(props = {}) {
+function mountModal(props: Record<string, unknown> = {}) {
   return mount(PairingConfirmModal, {
     props: { open: true, request, busy: false, ...props },
     attachTo: document.body,
   });
 }
 
-const card = () => document.body.querySelector(".pair-card");
+const card = () => document.body.querySelector<HTMLElement>(".pair-card")!;
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -36,16 +36,16 @@ describe("PairingConfirmModal", () => {
 
   it("点击批准 → emit approve；点击拒绝 → emit reject", async () => {
     const w = mountModal();
-    card().querySelector(".pair-approve").click();
+    card().querySelector<HTMLElement>(".pair-approve")!.click();
     expect(w.emitted("approve")).toBeTruthy();
-    card().querySelector(".pair-reject").click();
+    card().querySelector<HTMLElement>(".pair-reject")!.click();
     expect(w.emitted("reject")).toBeTruthy();
   });
 
   it("busy → 两个按钮均禁用（防重复提交）", () => {
     mountModal({ busy: true });
-    expect(card().querySelector(".pair-approve").disabled).toBe(true);
-    expect(card().querySelector(".pair-reject").disabled).toBe(true);
+    expect(card().querySelector<HTMLButtonElement>(".pair-approve")!.disabled).toBe(true);
+    expect(card().querySelector<HTMLButtonElement>(".pair-reject")!.disabled).toBe(true);
   });
 
   it("open=false 或 request=null → 不渲染弹窗", () => {
