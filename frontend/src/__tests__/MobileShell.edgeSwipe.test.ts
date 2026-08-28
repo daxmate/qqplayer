@@ -4,17 +4,16 @@
 //       其余分页屏左缘右滑 → 翻上一屏 / 播放器页可返回 / 纵向滑动不误触
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -23,7 +22,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -38,7 +37,8 @@ const lib = [
 ];
 
 // jsdom 无 TouchEvent，用原生 Event + 手写 touches/changedTouches 模拟
-function fireTouch(el, type, touches, changedTouches) {
+type TouchLike = { clientX: number; clientY: number };
+function fireTouch(el: Element, type: string, touches?: TouchLike[], changedTouches?: TouchLike[]) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   if (touches) Object.defineProperty(ev, "touches", { value: touches, configurable: true });
   if (changedTouches)
@@ -48,7 +48,7 @@ function fireTouch(el, type, touches, changedTouches) {
 }
 
 // 左缘横向滑动序列（from → to，clientY 固定 120 避免纵向干扰）
-async function edgeSwipe(wrapper, { from = 8, to = 130, steps = 4 } = {}) {
+async function edgeSwipe(wrapper: VueWrapper, { from = 8, to = 130, steps = 4 } = {}) {
   const el = wrapper.find(".mobile-shell").element;
   fireTouch(el, "touchstart", [{ clientX: from, clientY: 120 }]);
   for (let i = 1; i <= steps; i++) {
@@ -60,7 +60,7 @@ async function edgeSwipe(wrapper, { from = 8, to = 130, steps = 4 } = {}) {
 }
 
 // 分页容器普通区域横滑（非左缘起点）：左滑=下一页，右滑=上一页
-async function pagerSwipe(wrapper, { from = 220, to = 60, steps = 4 } = {}) {
+async function pagerSwipe(wrapper: VueWrapper, { from = 220, to = 60, steps = 4 } = {}) {
   const el = wrapper.find(".mp-pager").element;
   fireTouch(el, "touchstart", [{ clientX: from, clientY: 200 }]);
   for (let i = 1; i <= steps; i++) {
@@ -71,12 +71,14 @@ async function pagerSwipe(wrapper, { from = 220, to = 60, steps = 4 } = {}) {
   await flushPromises();
 }
 
-function edgeShift(wrapper) {
-  return wrapper.find(".mobile-shell").element.style.getPropertyValue("--edge-shift");
+function edgeShift(wrapper: VueWrapper) {
+  return (wrapper.find(".mobile-shell").element as HTMLElement).style.getPropertyValue(
+    "--edge-shift",
+  );
 }
 
 // 当前高亮圆点下标（0..3）
-function activeDot(wrapper) {
+function activeDot(wrapper: VueWrapper) {
   const dots = wrapper.findAll(".mp-dot");
   return dots.findIndex((d) => d.classes().includes("on"));
 }
@@ -103,9 +105,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openSongList(wrapper) {
+async function openSongList(wrapper: VueWrapper) {
   const rows = wrapper.findAll(".mh-row");
-  await rows.find((c) => c.text().includes("所有歌曲")).trigger("click");
+  await rows.find((c) => c.text().includes("所有歌曲"))!.trigger("click");
 }
 
 describe("MobileShell 边缘滑动返回", () => {

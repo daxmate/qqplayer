@@ -3,13 +3,12 @@
 //       （不向壳层 emit back，浮层状态上报 overlay）；standalone=true（独立页）保持原行为 emit back
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.paused = true;
-  }
+  src = "";
+  paused = true;
   play() {
     return Promise.resolve();
   }
@@ -57,19 +56,19 @@ describe("MobileBooks 分页屏模式（standalone=false）", () => {
   });
 
   it("打开阅读器 → 返回按钮出现 + overlay 上报；点返回关闭阅读器（不 emit back）", async () => {
-    const wrapper = mount(MobileBooks, { props: { standalone: false } });
+    const wrapper: VueWrapper = mount(MobileBooks, { props: { standalone: false } });
     await wrapper.find(".bs-stub").trigger("click");
     await flushPromises();
     expect(wrapper.find(".mb-reader-overlay").exists()).toBe(true);
     expect(wrapper.find(".mb-back").exists()).toBe(true);
-    expect(wrapper.emitted("overlay").at(-1)).toEqual([true]);
+    expect(wrapper.emitted("overlay")!.at(-1)).toEqual([true]);
     // 点返回：关闭阅读器，不向上 pop
     await wrapper.find(".mb-back").trigger("click");
     await flushPromises();
     expect(wrapper.find(".mb-reader-overlay").exists()).toBe(false);
     expect(wrapper.find(".mb-back").exists()).toBe(false);
     expect(wrapper.emitted("back")).toBeFalsy();
-    expect(wrapper.emitted("overlay").at(-1)).toEqual([false]);
+    expect(wrapper.emitted("overlay")!.at(-1)).toEqual([false]);
   });
 });
 

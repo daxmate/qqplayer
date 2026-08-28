@@ -2,29 +2,39 @@
 // 覆盖：左滑展开操作区 / 操作区收藏 / 操作区移除（songs=队列、playlist=歌单）/ 互斥展开 / 右滑收起 / 滑动后点击不播放
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { DOMWrapper } from "@vue/test-utils";
 
 // Sortable mock（歌单视图启用拖拽）
-const sortableMock = vi.hoisted(() => ({
-  create: vi.fn((el, opts) => {
-    sortableMock.onEnd = opts.onEnd;
+type SortEndEvent = { oldIndex: number; newIndex: number };
+interface SortableOptions {
+  onEnd?: (ev: SortEndEvent) => void;
+}
+const sortableMock = vi.hoisted(() => {
+  const m: {
+    create: ReturnType<typeof vi.fn>;
+    onEnd: ((ev: SortEndEvent) => void) | null;
+  } = {
+    create: vi.fn(),
+    onEnd: null,
+  };
+  m.create.mockImplementation((el: Element, opts: SortableOptions) => {
+    m.onEnd = opts.onEnd ?? null;
     return { destroy: vi.fn() };
-  }),
-  onEnd: null,
-}));
+  });
+  return m;
+});
 vi.mock("sortablejs", () => ({
   default: { create: sortableMock.create },
 }));
 
 // Audio stub
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -33,7 +43,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -51,7 +61,8 @@ const lib = [
 
 const playlist = { id: "p1", name: "我的歌单", songPaths: ["/lib/a.mp3", "/lib/c.mp3"] };
 
-function fireTouch(el, type, touches, changedTouches) {
+type TouchLike = { clientX: number; clientY: number };
+function fireTouch(el: Element, type: string, touches?: TouchLike[], changedTouches?: TouchLike[]) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   if (touches) Object.defineProperty(ev, "touches", { value: touches, configurable: true });
   if (changedTouches)
@@ -61,7 +72,7 @@ function fireTouch(el, type, touches, changedTouches) {
 }
 
 // 对某一行做横向滑动（dx 负 = 左滑露出操作区，正 = 右滑收起）
-async function swipeRow(rowEl, dx = -130) {
+async function swipeRow(rowEl: Element, dx = -130) {
   const startX = 200;
   fireTouch(rowEl, "touchstart", [{ clientX: startX, clientY: 40 }]);
   fireTouch(rowEl, "touchmove", [{ clientX: startX + dx, clientY: 40 }]);
@@ -69,7 +80,7 @@ async function swipeRow(rowEl, dx = -130) {
   await flushPromises();
 }
 
-function rowTransform(row) {
+function rowTransform(row: DOMWrapper<Element>) {
   return row.attributes("style") || "";
 }
 
@@ -119,7 +130,7 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
     expect(state.favorites).toContain("/lib/a.mp3");
     const fetchCalls = vi.mocked(fetch).mock.calls;
     expect(
-      fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt.method === "POST"),
+      fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt?.method === "POST"),
     ).toBe(true);
     expect(wrapper.findAll(".ml-wrap")[0].classes()).not.toContain("open"); // 收起
   });
@@ -149,7 +160,7 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
       fetchCalls.some(
         ([url, opt]) =>
           url === "/api/playlists/p1/songs/" + encodeURIComponent("/lib/a.mp3") &&
-          opt.method === "DELETE",
+          opt?.method === "DELETE",
       ),
     ).toBe(true);
     expect(useToast().items[0].text).toBe("已从歌单移除《雪の華》");
@@ -204,7 +215,7 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
     await wrapper.findAll(".ml-item")[1].trigger("click");
     const plays = wrapper.emitted("play");
     expect(plays).toBeTruthy();
-    expect(plays[0][0].path).toBe("/lib/b.mp3");
+    expect((plays![0][0] as { path: string }).path).toBe("/lib/b.mp3");
   });
 
   it("点击时的微小抖动位移（<20px 慢速）→ 不锁定不闪现，点击正常播放", async () => {
@@ -221,6 +232,6 @@ describe("MobileList 左滑操作（swipe-reveal）", () => {
     await wrapper.findAll(".ml-item")[0].trigger("click");
     const plays = wrapper.emitted("play");
     expect(plays).toBeTruthy();
-    expect(plays[0][0].path).toBe("/lib/a.mp3");
+    expect((plays![0][0] as { path: string }).path).toBe("/lib/a.mp3");
   });
 });

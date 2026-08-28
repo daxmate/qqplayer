@@ -7,18 +7,18 @@
 // 事件模拟沿用 MobileShell.edgeSwipe.test.js 的 fireTouch helper：原生 Event + 手写 touches。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
+import type { HorizontalSwipeOptions } from "../composables/useSwipe.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -27,7 +27,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -42,7 +42,8 @@ const songA = { id: "a", path: "/lib/a.mp3", name: "雪の華", artist: "中島�
 const songB = { id: "b", path: "/lib/b.mp3", name: "知足", artist: "五月天", album: "知足" };
 
 // jsdom 无 TouchEvent，用原生 Event + 手写 touches/changedTouches 模拟
-function fireTouch(el, type, touches, changedTouches) {
+type TouchLike = { clientX: number; clientY: number; screenY?: number };
+function fireTouch(el: Element, type: string, touches?: TouchLike[], changedTouches?: TouchLike[]) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   if (touches) Object.defineProperty(ev, "touches", { value: touches, configurable: true });
   if (changedTouches)
@@ -51,12 +52,12 @@ function fireTouch(el, type, touches, changedTouches) {
   return ev;
 }
 
-function touch(x, y) {
+function touch(x: number, y: number): TouchLike {
   return { clientX: x, clientY: y, screenY: y };
 }
 
 // 封面区横向滑动序列（from → to，clientY 固定 200 避免纵向干扰）
-function coverSwipeEl(wrapper, { from = 200, to = 60, steps = 4, y = 200 }) {
+function coverSwipeEl(wrapper: VueWrapper, { from = 200, to = 60, steps = 4, y = 200 } = {}) {
   const el = wrapper.find(".mp-cover-area").element;
   fireTouch(el, "touchstart", [touch(from, y)]);
   for (let i = 1; i <= steps; i++) {
@@ -67,7 +68,7 @@ function coverSwipeEl(wrapper, { from = 200, to = 60, steps = 4, y = 200 }) {
 }
 
 // 歌词区左划序列（从 kp-scroll 内部发起，模拟真实触点路径：事件会冒泡到 .mp-lyric-area）
-function lyricSwipeEl(wrapper, { from = 250, to = 90, steps = 4, y = 300 }) {
+function lyricSwipeEl(wrapper: VueWrapper, { from = 250, to = 90, steps = 4, y = 300 } = {}) {
   const el = wrapper.find(".mp-lyric-area .kp-scroll").element;
   fireTouch(el, "touchstart", [touch(from, y)]);
   for (let i = 1; i <= steps; i++) {
@@ -77,7 +78,7 @@ function lyricSwipeEl(wrapper, { from = 250, to = 90, steps = 4, y = 300 }) {
   fireTouch(el, "touchend", [], [touch(to, y)]);
 }
 
-function coverShift(wrapper) {
+function coverShift(wrapper: VueWrapper) {
   return wrapper.find(".mp-cover-area").attributes("style") || "";
 }
 
@@ -120,7 +121,7 @@ describe("MobilePlayer 封面区横向切歌", () => {
     await flushPromises();
     // 滑出动画（200ms）后切歌
     await vi.waitFor(() => expect(state.currentIndex).toBe(1));
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     // 封面 URL 变化 → 重定位到 +屏宽 → 下一帧滑入 0
     await new Promise((r) => requestAnimationFrame(r));
     expect(coverShift(wrapper)).not.toContain("translateX");
@@ -135,7 +136,7 @@ describe("MobilePlayer 封面区横向切歌", () => {
     expect(coverShift(wrapper)).toContain("translateX(1024px)"); // 滑出到右侧
     await flushPromises();
     await vi.waitFor(() => expect(state.currentIndex).toBe(0));
-    expect(state.currentSong.name).toBe("雪の華");
+    expect(state.currentSong!.name).toBe("雪の華");
   });
 
   it("位移不足（< 80px）→ 回弹不切歌，位移归零", async () => {
@@ -285,7 +286,7 @@ describe("MobilePlayer 歌词区左划 → 全歌词界面", () => {
 });
 
 describe("MobilePlayer 全歌词界面关闭", () => {
-  async function openFullLyric(wrapper) {
+  async function openFullLyric(wrapper: VueWrapper) {
     lyricSwipeEl(wrapper, { from: 250, to: 90 });
     await nextTick();
     expect(wrapper.find(".mp-full-lyric").exists()).toBe(true);
@@ -333,7 +334,10 @@ describe("MobilePlayer 全歌词界面关闭", () => {
 });
 
 describe("useHorizontalSwipe 参数化手势（useSwipe.js）", () => {
-  function mountHost(direction, opts = {}) {
+  function mountHost(
+    direction: "both" | "left" | "right",
+    opts: Partial<HorizontalSwipeOptions> = {},
+  ) {
     const host = document.createElement("div");
     document.body.appendChild(host);
     const el = document.createElement("div");

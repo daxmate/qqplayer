@@ -20,7 +20,7 @@ const overviewData = {
 };
 
 vi.mock("../utils/sync.js", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     syncNow: vi.fn(async () => ({ ok: true, enabled: true })),
@@ -31,11 +31,11 @@ vi.mock("../utils/sync.js", async (importOriginal) => {
     })),
     syncAll: vi.fn(async () => ({ ok: true, sent: true, missing: overviewData.missing })),
     wifiOnlyEnabled: vi.fn(() => true),
-    setWifiOnly: vi.fn((on) => on),
+    setWifiOnly: vi.fn((on: boolean) => on),
     autoUpdateEnabled: vi.fn(() => false),
-    setAutoUpdate: vi.fn((on) => on),
+    setAutoUpdate: vi.fn((on: boolean) => on),
     autoPrefetchEnabled: vi.fn(() => false),
-    setAutoPrefetch: vi.fn((on) => on),
+    setAutoPrefetch: vi.fn((on: boolean) => on),
     clearAssetsByType: vi.fn(() => 1),
     deleteOrphanAssets: vi.fn(() => true),
     waitAssetsDeleted: vi.fn(async () => []),
@@ -52,10 +52,18 @@ import {
 } from "../utils/sync.js";
 import MobileSync from "../components/mobile/MobileSync.vue";
 
+// vi.mock 替换后的 mock 函数（运行时即上述 vi.fn，此处仅类型收窄）
+const mockedSyncAll = vi.mocked(syncAll);
+const mockedSetWifiOnly = vi.mocked(setWifiOnly);
+const mockedSetAutoUpdate = vi.mocked(setAutoUpdate);
+const mockedSetAutoPrefetch = vi.mocked(setAutoPrefetch);
+const mockedComputeSyncOverview = vi.mocked(computeSyncOverview);
+const mockedFetchAssetsSizeDetailed = vi.mocked(fetchAssetsSizeDetailed);
+
 beforeEach(() => {
   vi.clearAllMocks();
-  computeSyncOverview.mockResolvedValue({ ...overviewData });
-  fetchAssetsSizeDetailed.mockResolvedValue({
+  mockedComputeSyncOverview.mockResolvedValue({ ...overviewData });
+  mockedFetchAssetsSizeDetailed.mockResolvedValue({
     total: 1000,
     byType: { audio: 400, covers: 100, lyric: 50, books: 300, dicts: 100, meta: 30, other: 20 },
   });
@@ -84,8 +92,8 @@ describe("MobileSync 负一屏同步中心", () => {
     expect(text).toContain("自动更新");
     expect(text).toContain("自动预取");
     // 挂载时拉了总览与存储
-    expect(computeSyncOverview).toHaveBeenCalled();
-    expect(fetchAssetsSizeDetailed).toHaveBeenCalled();
+    expect(mockedComputeSyncOverview).toHaveBeenCalled();
+    expect(mockedFetchAssetsSizeDetailed).toHaveBeenCalled();
   });
 
   it("存储细分：按类型显示占用（音频/封面/歌词/图书/词典 + 其他合计）", async () => {
@@ -115,14 +123,14 @@ describe("MobileSync 负一屏同步中心", () => {
     expect(toggles).toHaveLength(3);
     // 仅 Wi-Fi（默认开）：点击关
     await toggles[0].trigger("click");
-    expect(setWifiOnly).toHaveBeenCalledWith(false);
+    expect(mockedSetWifiOnly).toHaveBeenCalledWith(false);
     expect(wrapper.findAll(".msc-toggle-row .switch")[0].classes()).not.toContain("on");
     // 自动更新（默认关）：点击开
     await toggles[1].trigger("click");
-    expect(setAutoUpdate).toHaveBeenCalledWith(true);
+    expect(mockedSetAutoUpdate).toHaveBeenCalledWith(true);
     // 自动预取（默认关）：点击开
     await toggles[2].trigger("click");
-    expect(setAutoPrefetch).toHaveBeenCalledWith(true);
+    expect(mockedSetAutoPrefetch).toHaveBeenCalledWith(true);
   });
 
   it("主按钮：点击同步全部 → 调 syncAll + 刷新总览", async () => {
@@ -130,8 +138,8 @@ describe("MobileSync 负一屏同步中心", () => {
     await flushPromises();
     await wrapper.find(".msc-sync-all").trigger("click");
     await flushPromises();
-    expect(syncAll).toHaveBeenCalled();
-    expect(computeSyncOverview.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mockedSyncAll).toHaveBeenCalled();
+    expect(mockedComputeSyncOverview.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("返回按钮 → emit back", async () => {

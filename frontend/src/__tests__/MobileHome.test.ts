@@ -2,17 +2,16 @@
 // 智能视图入口已随列表化移除（图书/视频/有声书改为主层级分页屏）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper, DOMWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -21,7 +20,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -57,8 +56,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function rowByText(wrapper, text) {
-  return wrapper.findAll(".mh-row").find((c) => c.text().includes(text));
+function rowByText(wrapper: VueWrapper, text: string): DOMWrapper<Element> {
+  return wrapper.findAll(".mh-row").find((c) => c.text().includes(text))!;
 }
 
 describe("MobileHome 入口列表（一列 6 项，仅音乐）", () => {
@@ -85,7 +84,7 @@ describe("MobileHome 入口列表（一列 6 项，仅音乐）", () => {
     const row = rowByText(wrapper, "所有歌曲");
     expect(row.text()).toContain("2 首");
     await row.trigger("click");
-    const opens = wrapper.emitted("open");
+    const opens = wrapper.emitted("open")!;
     expect(opens[0][0]).toMatchObject({ name: "list", kind: "songs", title: "所有歌曲" });
   });
 
@@ -119,7 +118,7 @@ describe("MobileHome 入口列表（一列 6 项，仅音乐）", () => {
   it("入口行点击转发 open 事件（播放列表 → 分组列表）", async () => {
     const wrapper = mount(MobileHome);
     await rowByText(wrapper, "播放列表").trigger("click");
-    const opens = wrapper.emitted("open");
+    const opens = wrapper.emitted("open")!;
     expect(opens[0][0]).toMatchObject({ name: "list", kind: "playlists" });
   });
 });
@@ -141,7 +140,7 @@ describe("MobileHome 顶栏入口", () => {
 
 describe("MobileHome 打开文件", () => {
   it("打开文件：选择音频 → POST /api/import（FormData files）→ toast 实际导入数（skipped 合并）", async () => {
-    const fetchMock = vi.fn(async (url) => {
+    const fetchMock = vi.fn(async (url: string, opt: RequestInit) => {
       if (url === "/api/import") {
         return { ok: true, json: async () => ({ imported: 2, skipped: 1, errors: 0 }) };
       }
@@ -158,9 +157,12 @@ describe("MobileHome 打开文件", () => {
     await flushPromises();
     const importCall = fetchMock.mock.calls.find(([url]) => url === "/api/import");
     expect(importCall).toBeTruthy();
-    expect(importCall[1].method).toBe("POST");
-    expect(importCall[1].body).toBeInstanceOf(FormData);
-    expect(importCall[1].body.getAll("files").map((f) => f.name)).toEqual(["a.mp3", "b.mp3"]);
+    expect(importCall![1].method).toBe("POST");
+    expect(importCall![1].body).toBeInstanceOf(FormData);
+    expect((importCall![1].body as FormData).getAll("files").map((f) => (f as File).name)).toEqual([
+      "a.mp3",
+      "b.mp3",
+    ]);
     expect(useToast().items[0].text).toBe("已导入 2 首；跳过 1 首");
   });
 

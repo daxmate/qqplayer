@@ -5,14 +5,12 @@ import { mount, flushPromises } from "@vue/test-utils";
 
 // Audio stub
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -21,7 +19,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -36,7 +34,8 @@ const lib = [
   { id: "b", path: "/lib/b.mp3", name: "知足", artist: "五月天", album: "知足" },
 ];
 
-function fireTouch(el, type, touches, changedTouches) {
+type TouchLike = { clientX: number; clientY: number };
+function fireTouch(el: Element, type: string, touches?: TouchLike[], changedTouches?: TouchLike[]) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   if (touches) Object.defineProperty(ev, "touches", { value: touches, configurable: true });
   if (changedTouches)
@@ -45,7 +44,7 @@ function fireTouch(el, type, touches, changedTouches) {
   return ev;
 }
 
-async function swipeRow(rowEl, dx = -130) {
+async function swipeRow(rowEl: Element, dx = -130) {
   const startX = 200;
   fireTouch(rowEl, "touchstart", [{ clientX: startX, clientY: 40 }]);
   fireTouch(rowEl, "touchmove", [{ clientX: startX + dx, clientY: 40 }]);
@@ -93,7 +92,7 @@ describe("MobileSmartList 左滑操作（swipe-reveal）", () => {
     expect(state.favorites).toContain("/lib/a.mp3");
     const fetchCalls = vi.mocked(fetch).mock.calls;
     expect(
-      fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt.method === "POST"),
+      fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt?.method === "POST"),
     ).toBe(true);
     expect(wrapper.findAll(".msv-wrap")[0].classes()).not.toContain("open");
   });

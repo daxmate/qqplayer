@@ -1,15 +1,27 @@
 // MobileList 测试：移动端列表页（歌曲/收藏/歌单/艺术家/专辑/分组 + 搜索 + 拖拽排序）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper, DOMWrapper } from "@vue/test-utils";
 
 // Sortable mock：MobileList 在歌单视图启用拖拽（jsdom 无法真实创建）
-const sortableMock = vi.hoisted(() => ({
-  create: vi.fn((el, opts) => {
-    sortableMock.onEnd = opts.onEnd;
+type SortEndEvent = { oldIndex: number; newIndex: number };
+interface SortableOptions {
+  onEnd?: (ev: SortEndEvent) => void;
+}
+const sortableMock = vi.hoisted(() => {
+  const m: {
+    create: ReturnType<typeof vi.fn>;
+    onEnd: ((ev: SortEndEvent) => void) | null;
+  } = {
+    create: vi.fn(),
+    onEnd: null,
+  };
+  m.create.mockImplementation((el: Element, opts: SortableOptions) => {
+    m.onEnd = opts.onEnd ?? null;
     return { destroy: vi.fn() };
-  }),
-  onEnd: null,
-}));
+  });
+  return m;
+});
 vi.mock("sortablejs", () => ({
   default: {
     create: sortableMock.create,
@@ -18,14 +30,12 @@ vi.mock("sortablejs", () => ({
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -34,7 +44,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -119,7 +129,7 @@ describe("MobileList 歌曲列表（kind=songs）", () => {
     await wrapper.findAll(".ml-item")[1].trigger("click");
     const plays = wrapper.emitted("play");
     expect(plays).toBeTruthy();
-    expect(plays[0][0].path).toBe("/lib/b.mp3");
+    expect((plays![0][0] as { path: string }).path).toBe("/lib/b.mp3");
   });
 
   it("正在播放的歌曲行高亮 + 播放动画标记", () => {
@@ -169,7 +179,7 @@ describe("MobileList 歌曲列表（kind=songs）", () => {
     expect(state.favorites).toContain("/lib/a.mp3");
     const fetchCalls = vi.mocked(fetch).mock.calls;
     expect(
-      fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt.method === "POST"),
+      fetchCalls.some(([url, opt]) => url === "/api/favorites/toggle" && opt?.method === "POST"),
     ).toBe(true);
     // 已收藏 → 再点取消
     await wrapper.findAll(".ml-item")[0].find(".ml-heart").trigger("click");
@@ -254,7 +264,7 @@ describe("MobileList 分组列表（playlists/artists/albums）", () => {
     expect(rows[0].text()).toContain("我的歌单");
     expect(rows[0].text()).toContain("2 首");
     await rows[0].trigger("click");
-    const opens = wrapper.emitted("open");
+    const opens = wrapper.emitted("open")!;
     expect(opens[0][0]).toMatchObject({
       name: "list",
       kind: "playlist",
@@ -278,7 +288,7 @@ describe("MobileList 分组列表（playlists/artists/albums）", () => {
     expect(rows.length).toBe(3);
     // 五月天两张专辑
     const m = rows.find((r) => r.text().includes("后青春期的诗"));
-    expect(m.text()).toContain("1 首");
+    expect(m!.text()).toContain("1 首");
   });
 
   it("分组搜索按名称过滤", async () => {
@@ -358,12 +368,14 @@ describe("MobileList 歌单拖拽排序", () => {
     const listEl = wrapper.find(".ml-scroll").element;
     const wraps = wrapper.findAll(".ml-wrap");
     listEl.insertBefore(wraps[1].element, wraps[0].element);
-    sortableMock.onEnd({ oldIndex: 0, newIndex: 1 });
+    sortableMock.onEnd!({ oldIndex: 0, newIndex: 1 });
     await flushPromises();
     const fetchCalls = vi.mocked(fetch).mock.calls;
     const orderCall = fetchCalls.find(([url]) => url === "/api/playlists/p1/order");
     expect(orderCall).toBeTruthy();
-    expect(JSON.parse(orderCall[1].body)).toEqual({ paths: ["/lib/c.mp3", "/lib/a.mp3"] });
+    expect(JSON.parse(orderCall![1]!.body as unknown as string)).toEqual({
+      paths: ["/lib/c.mp3", "/lib/a.mp3"],
+    });
     expect(state.playlists[0].songPaths).toEqual(["/lib/c.mp3", "/lib/a.mp3"]);
   });
 
@@ -374,9 +386,9 @@ describe("MobileList 歌单拖拽排序", () => {
       payload: { playlist },
     });
     await flushPromises();
-    sortableMock.onEnd({ oldIndex: 0, newIndex: 0 });
+    sortableMock.onEnd!({ oldIndex: 0, newIndex: 0 });
     await flushPromises();
     const fetchCalls = vi.mocked(fetch).mock.calls;
-    expect(fetchCalls.some(([url]) => url.includes("/order"))).toBe(false);
+    expect(fetchCalls.some(([url]) => String(url).includes("/order"))).toBe(false);
   });
 });

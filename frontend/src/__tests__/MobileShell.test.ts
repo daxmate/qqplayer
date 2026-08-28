@@ -2,17 +2,16 @@
 // 集成测试：真实 mount MobileHome/MobileList/MobilePlayer/MiniPlayerBar
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -21,7 +20,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -59,13 +58,13 @@ afterEach(() => {
 });
 
 // 搜索按钮已改为打开全局搜索层（不导航），列表页入口改用「所有歌曲」行
-async function openSongList(wrapper) {
+async function openSongList(wrapper: VueWrapper) {
   const rows = wrapper.findAll(".mh-row");
-  await rows.find((c) => c.text().includes("所有歌曲")).trigger("click");
+  await rows.find((c) => c.text().includes("所有歌曲"))!.trigger("click");
 }
 
 // 播放器收起（顶栏收起按钮已删除 → 改为封面区下拉返回手势）
-async function pullDownToClose(wrapper) {
+async function pullDownToClose(wrapper: VueWrapper) {
   const area = wrapper.find(".mp-cover-area");
   await area.trigger("touchstart", { touches: [{ clientX: 100, clientY: 60 }] });
   await area.trigger("touchmove", { touches: [{ clientX: 100, clientY: 200 }] }); // dy=140 > 阈值
@@ -121,7 +120,7 @@ describe("MobileShell 页面栈导航", () => {
     await wrapper.findAll(".ml-item")[1].trigger("click");
     await flushPromises(); // playFromList 是 async（selectSong → loadLyric）
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     expect(state.isPlaying).toBe(true);
     expect(wrapper.find(".mobile-player").exists()).toBe(true);
     // 播放器内显示当前歌曲名
@@ -155,7 +154,7 @@ describe("MobileShell 页面栈导航", () => {
     const wrapper = mount(MobileShell);
     // 用文本定位「播放列表」行
     const rows = wrapper.findAll(".mh-row");
-    const playlistsRow = rows.find((c) => c.text().includes("播放列表"));
+    const playlistsRow = rows.find((c) => c.text().includes("播放列表"))!;
     await playlistsRow.trigger("click");
     expect(wrapper.find(".ml-group").exists()).toBe(true);
     expect(wrapper.find(".ml-title").text()).toBe("播放列表");

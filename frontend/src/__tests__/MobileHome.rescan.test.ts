@@ -2,17 +2,16 @@
 // 覆盖：点击触发 loadSongs（GET /api/songs）/ 进行中状态（转圈 + 禁用）/ 成功 toast「已刷新」/ 失败 toastError
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -21,7 +20,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -61,7 +60,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function rescanBtn(wrapper) {
+function rescanBtn(wrapper: VueWrapper) {
   return wrapper.find('.mh-icon-btn[title="重新扫描"]');
 }
 
@@ -72,7 +71,7 @@ describe("MobileHome 重新扫描曲库入口", () => {
   });
 
   it("点击 → 调 loadSongs（GET /api/songs）→ 完成 toast「已刷新」", async () => {
-    const fetchMock = vi.fn(async (url) => {
+    const fetchMock = vi.fn(async (url: string) => {
       if (url === "/api/songs") return { ok: true, json: async () => lib };
       return { ok: true, json: async () => ({ records: [] }) };
     });
@@ -90,10 +89,10 @@ describe("MobileHome 重新扫描曲库入口", () => {
   it("进行中状态：转圈动画 + 按钮禁用（请求未返回期间）", async () => {
     // 释放开关：释放前所有 fetch 挂起（记录 resolve），释放后立即返回
     let released = false;
-    const pending = [];
+    const pending: Array<{ url: string; resolve: (value: unknown) => void }> = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn((url) => {
+      vi.fn((url: string): Promise<unknown> => {
         if (released)
           return Promise.resolve({ ok: true, json: async () => (url === "/api/songs" ? lib : []) });
         return new Promise((resolve) => pending.push({ url, resolve }));
@@ -115,8 +114,8 @@ describe("MobileHome 重新扫描曲库入口", () => {
 
   it("进行中重复点击被忽略（只发一次 /api/songs）", async () => {
     let released = false;
-    const pending = [];
-    const fetchMock = vi.fn((url) => {
+    const pending: Array<{ url: string; resolve: (value: unknown) => void }> = [];
+    const fetchMock = vi.fn((url: string): Promise<unknown> => {
       if (released)
         return Promise.resolve({ ok: true, json: async () => (url === "/api/songs" ? lib : []) });
       return new Promise((resolve) => pending.push({ url, resolve }));

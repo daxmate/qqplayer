@@ -4,14 +4,12 @@ import { mount, flushPromises } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -20,7 +18,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -205,7 +203,7 @@ describe("MobileSmartList 加载/错误/交互", () => {
     await flushPromises();
     await wrapper.find(".msv-item").trigger("click");
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     expect(state.isPlaying).toBe(true);
     expect(wrapper.emitted("open-player")).toBeTruthy();
   });
@@ -242,7 +240,10 @@ describe("MobileSmartList 加载/错误/交互", () => {
   });
 
   it("kind 变化时重新拉取数据", async () => {
-    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ records: [] }) }));
+    const fetchSpy = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => ({ records: [] }),
+    }));
     vi.stubGlobal("fetch", fetchSpy);
     const wrapper = mount(MobileSmartList, { props: { kind: "recentPlayed" } });
     await flushPromises();

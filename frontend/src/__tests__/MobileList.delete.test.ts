@@ -6,14 +6,12 @@ import { mount, flushPromises } from "@vue/test-utils";
 
 // Audio stub（loadSongs 刷新链路可能触达 selectSong 相关分支）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -22,7 +20,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -40,12 +38,17 @@ const lib = [
 ];
 
 // 路由式 fetch mock：DELETE /api/library/songs → deleteResult；GET /api/songs → 刷新后的曲库
-let deleteResult = { deleted: 1, missing: [], errors: [] };
-let fetchMock;
+interface DeleteResult {
+  deleted: number;
+  missing: string[];
+  errors: Array<{ path: string; reason: string }>;
+}
+let deleteResult: DeleteResult = { deleted: 1, missing: [], errors: [] };
+let fetchMock: ReturnType<typeof vi.fn>;
 
 function installFetch() {
-  fetchMock = vi.fn(async (url, opt = {}) => {
-    if (url === "/api/library/songs" && opt.method === "DELETE") {
+  fetchMock = vi.fn(async (url: string, opt?: RequestInit) => {
+    if (url === "/api/library/songs" && opt?.method === "DELETE") {
       return { ok: true, json: async () => deleteResult };
     }
     if (url === "/api/songs") {
@@ -58,7 +61,8 @@ function installFetch() {
   vi.stubGlobal("fetch", fetchMock);
 }
 
-function fireTouch(el, type, touches, changedTouches) {
+type TouchLike = { clientX: number; clientY: number };
+function fireTouch(el: Element, type: string, touches?: TouchLike[], changedTouches?: TouchLike[]) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   if (touches) Object.defineProperty(ev, "touches", { value: touches, configurable: true });
   if (changedTouches)
@@ -67,7 +71,7 @@ function fireTouch(el, type, touches, changedTouches) {
   return ev;
 }
 
-async function swipeRow(rowEl, dx = -130) {
+async function swipeRow(rowEl: Element, dx = -130) {
   const startX = 200;
   fireTouch(rowEl, "touchstart", [{ clientX: startX, clientY: 40 }]);
   fireTouch(rowEl, "touchmove", [{ clientX: startX + dx, clientY: 40 }]);
@@ -157,11 +161,13 @@ describe("MobileList 左滑删除（移到废纸篓）", () => {
     // DELETE 请求形状正确
     const calls = vi.mocked(fetch).mock.calls;
     const delCall = calls.find(
-      ([url, opt]) => url === "/api/library/songs" && opt.method === "DELETE",
+      ([url, opt]) => url === "/api/library/songs" && opt?.method === "DELETE",
     );
     expect(delCall).toBeTruthy();
-    expect(JSON.parse(delCall[1].body)).toEqual({ paths: ["/lib/a.mp3"] });
-    expect(delCall[1].headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(delCall![1]!.body as unknown as string)).toEqual({ paths: ["/lib/a.mp3"] });
+    expect((delCall![1]!.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
 
     // 成功 toast
     expect(useToast().items[0].text).toBe("已删除《雪の華》");
@@ -203,8 +209,8 @@ describe("MobileList 左滑删除（移到废纸篓）", () => {
   });
 
   it("接口失败（HTTP 非 200）→ toastError，弹层关闭，不刷新", async () => {
-    fetchMock.mockImplementation(async (url, opt = {}) => {
-      if (url === "/api/library/songs" && opt.method === "DELETE") {
+    fetchMock.mockImplementation(async (url: string, opt?: RequestInit) => {
+      if (url === "/api/library/songs" && opt?.method === "DELETE") {
         return { ok: false, status: 500, json: async () => ({ detail: "服务器错误" }) };
       }
       return { ok: true, json: async () => ({}) };

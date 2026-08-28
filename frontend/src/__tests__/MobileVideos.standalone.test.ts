@@ -5,10 +5,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.paused = true;
-  }
+  src = "";
+  paused = true;
   play() {
     return Promise.resolve();
   }
@@ -60,13 +58,13 @@ describe("MobileVideos 分页屏模式（standalone=false）", () => {
     await flushPromises();
     expect(wrapper.find(".mv-player-overlay").exists()).toBe(true);
     expect(wrapper.find(".mv-back").exists()).toBe(true);
-    expect(wrapper.emitted("overlay").at(-1)).toEqual([true]);
+    expect(wrapper.emitted("overlay")!.at(-1)).toEqual([true]);
     await wrapper.find(".mv-back").trigger("click");
     await flushPromises();
     expect(wrapper.find(".mv-player-overlay").exists()).toBe(false);
     expect(wrapper.find(".mv-back").exists()).toBe(false);
     expect(wrapper.emitted("back")).toBeFalsy();
-    expect(wrapper.emitted("overlay").at(-1)).toEqual([false]);
+    expect(wrapper.emitted("overlay")!.at(-1)).toEqual([false]);
   });
 });
 
