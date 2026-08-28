@@ -4,17 +4,20 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
+import type { VueWrapper } from "@vue/test-utils";
+import type { Song } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -25,7 +28,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
   removeAttribute() {}
@@ -36,7 +39,7 @@ const Playlist = (await import("../components/Playlist.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
 const { useToast, clearToasts } = await import("../composables/useToast.js");
 
-const SONGS = [
+const SONGS: Song[] = [
   { id: "a", name: "A歌", artist: "五月天", path: "/a.mp3" },
   { id: "b", name: "B歌", artist: "高橋優", path: "/b.mp3" },
   { id: "c", name: "C歌", artist: "五月天", path: "/c.mp3" },
@@ -63,9 +66,9 @@ afterEach(() => {
   document.body.querySelectorAll(".add-menu, .am-backdrop").forEach((el) => el.remove());
 });
 
-const wrappers = [];
+const wrappers: VueWrapper[] = [];
 
-function mountSongs(songs = SONGS) {
+function mountSongs(songs: Song[] = SONGS) {
   state.songs = songs.map((s) => ({ ...s }));
   const wrapper = mount(Playlist);
   wrappers.push(wrapper);
@@ -80,24 +83,30 @@ function toastText() {
 
 // 让 .pl-list 是滚动容器、当前行在视口下方 → 点定位应把 scrollTop 滚到行顶
 // rowIdx：定位目标是第几行（EQ 在当前行上，测试常需指定）
-function stubScrollGeometry(wrapper, rowIdx = 0) {
-  const list = wrapper.find(".pl-list").element;
-  const row = wrapper.findAll(".pl-item")[rowIdx].element;
-  list.getBoundingClientRect = () => ({
+function stubScrollGeometry(wrapper: VueWrapper, rowIdx = 0) {
+  const list = wrapper.find(".pl-list").element as HTMLElement;
+  const row = wrapper.findAll(".pl-item")[rowIdx].element as HTMLElement;
+  vi.spyOn(list, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
     top: 0,
     bottom: 100,
     left: 0,
     right: 200,
     width: 200,
     height: 100,
+    toJSON: () => ({}),
   });
-  row.getBoundingClientRect = () => ({
+  vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 300,
     top: 300,
     bottom: 330,
     left: 0,
     right: 200,
     width: 200,
     height: 30,
+    toJSON: () => ({}),
   });
   Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
   list.scrollTop = 0;
@@ -133,23 +142,29 @@ describe("Playlist 定位当前播放", () => {
     state.currentIndex = 0;
     state.currentSong = SONGS[0];
     const wrapper = mountSongs();
-    const list = wrapper.find(".pl-list").element;
-    const row = wrapper.find(".pl-item").element;
-    list.getBoundingClientRect = () => ({
+    const list = wrapper.find(".pl-list").element as HTMLElement;
+    const row = wrapper.find(".pl-item").element as HTMLElement;
+    vi.spyOn(list, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
       top: 0,
       bottom: 100,
-      height: 100,
       left: 0,
       right: 200,
       width: 200,
+      height: 100,
+      toJSON: () => ({}),
     });
-    row.getBoundingClientRect = () => ({
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 20,
       top: 20,
       bottom: 50,
-      height: 30,
       left: 0,
       right: 200,
       width: 200,
+      height: 30,
+      toJSON: () => ({}),
     });
     Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
     list.scrollTop = 0;
@@ -206,23 +221,29 @@ describe("Playlist 定位当前播放", () => {
     state.currentIndex = 1;
     state.currentSong = SONGS[1];
     const wrapper = mountSongs();
-    const list = wrapper.find(".pl-list").element;
-    const row = wrapper.findAll(".pl-item")[1].element;
-    list.getBoundingClientRect = () => ({
+    const list = wrapper.find(".pl-list").element as HTMLElement;
+    const row = wrapper.findAll(".pl-item")[1].element as HTMLElement;
+    vi.spyOn(list, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
       top: 0,
       bottom: 100,
-      height: 100,
       left: 0,
       right: 200,
       width: 200,
+      height: 100,
+      toJSON: () => ({}),
     });
-    row.getBoundingClientRect = () => ({
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 300,
       top: 300,
       bottom: 330,
-      height: 30,
       left: 0,
       right: 200,
       width: 200,
+      height: 30,
+      toJSON: () => ({}),
     });
     Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
     list.scrollTop = 0;

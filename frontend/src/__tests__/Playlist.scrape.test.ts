@@ -2,17 +2,20 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
+import type { VueWrapper } from "@vue/test-utils";
+import type { Song } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -23,7 +26,7 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -35,7 +38,7 @@ const { scrapingSettings, SCRAPING_SETTINGS_DEFAULTS } =
   await import("../composables/useScrapingSettings.js");
 const { scrapeBatchState } = await import("../composables/useScrapeBatch.js");
 
-const lib = [
+const lib: Song[] = [
   { id: "a", path: "/lib/a.mp3", name: "A", artist: "X" },
   { id: "b", path: "/lib/b.mp3", name: "B", artist: "Y" },
 ];
@@ -54,7 +57,7 @@ function resetScrapeState() {
 function stubFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url) => {
+    vi.fn(async (url: RequestInfo | URL) => {
       if (url === "/api/tags/scrape-batch") {
         return {
           ok: true,
@@ -112,7 +115,7 @@ afterEach(() => {
     .forEach((el) => el.remove());
 });
 
-async function selectRows(wrapper, indices) {
+async function selectRows(wrapper: VueWrapper, indices: number[]) {
   for (const i of indices) {
     await wrapper.findAll(".pl-item")[i].trigger("click", { metaKey: true });
   }
@@ -147,10 +150,12 @@ describe("批量刮削调用链路", () => {
     await w.find('[data-testid="pl-multi-scrape"]').trigger("click");
     await flushPromises();
 
-    const fetchMock = vi.mocked(fetch);
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     const batchCalls = fetchMock.mock.calls.filter((c) => c[0] === "/api/tags/scrape-batch");
     expect(batchCalls).toHaveLength(1);
-    expect(JSON.parse(batchCalls[0][1].body)).toEqual({ paths: ["/lib/a.mp3", "/lib/b.mp3"] });
+    expect(JSON.parse((batchCalls[0][1] as RequestInit).body as string)).toEqual({
+      paths: ["/lib/a.mp3", "/lib/b.mp3"],
+    });
     // 结果面板打开（Teleport 到 body）
     expect(scrapeBatchState.open).toBe(true);
     await nextTick();
@@ -164,9 +169,9 @@ describe("批量刮削调用链路", () => {
 
   it("loading 态：按钮转圈显示「刮削中 N 首…」", async () => {
     scrapingSettings.batch_enabled = true;
-    let resolveBatch;
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockImplementation((url) => {
+    let resolveBatch!: (value: unknown) => void;
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation((url: string) => {
       if (url === "/api/tags/scrape-batch") {
         return new Promise((res) => {
           resolveBatch = res;
@@ -197,8 +202,8 @@ describe("批量刮削调用链路", () => {
 
   it("后端返回 enabled:false（未开启防御）→ 结果面板提示未启用", async () => {
     scrapingSettings.batch_enabled = true;
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockImplementation(async (url) => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async (url: string) => {
       if (url === "/api/tags/scrape-batch") {
         return {
           ok: true,

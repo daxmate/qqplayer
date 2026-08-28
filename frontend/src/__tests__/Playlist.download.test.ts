@@ -3,17 +3,19 @@
 // 下载中显示 Loader2 旋转；成功/失败 toast；本地歌不显示下载按钮。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -24,7 +26,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
   removeAttribute() {}
@@ -76,16 +78,16 @@ describe("Playlist 网络歌下载按钮", () => {
     expect(dlButtons).toHaveLength(1);
     // 下载按钮所在行是网络歌行
     const item = dlButtons[0].element.closest(".pl-item");
-    expect(item.textContent).toContain("晴天");
+    expect(item!.textContent).toContain("晴天");
     wrapper.unmount();
   });
 
   it("点击下载 → POST /api/online/download 参数正确（id/title/artist/level），成功 toast", async () => {
-    const calls = [];
+    const calls: Array<{ url: string; opts: RequestInit }> = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url, opts) => {
-        calls.push({ url: String(url), opts });
+      vi.fn(async (url: RequestInfo | URL, opts?: RequestInit) => {
+        calls.push({ url: String(url), opts: opts ?? {} });
         return {
           ok: true,
           status: 200,
@@ -100,7 +102,7 @@ describe("Playlist 网络歌下载按钮", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("/api/online/download");
     expect(calls[0].opts.method).toBe("POST");
-    expect(JSON.parse(calls[0].opts.body)).toEqual({
+    expect(JSON.parse(calls[0].opts.body as string)).toEqual({
       id: "123456",
       level: downloadSettings.defaultQuality,
       title: "晴天",
@@ -115,7 +117,7 @@ describe("Playlist 网络歌下载按钮", () => {
   });
 
   it("下载中显示 Loader2 旋转（busy 态），完成后恢复", async () => {
-    let resolveFetch;
+    let resolveFetch!: (value: unknown) => void;
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -155,14 +157,14 @@ describe("Playlist 网络歌下载按钮", () => {
     const toasts = useToast().items;
     const err = toasts.find((t) => t.type === "error");
     expect(err).toBeTruthy();
-    expect(err.text).toContain("下载失败");
-    expect(err.text).toContain("无法获取下载链接");
+    expect(err!.text).toContain("下载失败");
+    expect(err!.text).toContain("无法获取下载链接");
     wrapper.unmount();
   });
 
   it("下载中再次点击不重复请求（按 streamId 防重入）", async () => {
-    const calls = [];
-    let resolveFetch;
+    const calls: number[] = [];
+    let resolveFetch!: (value: unknown) => void;
     vi.stubGlobal(
       "fetch",
       vi.fn(

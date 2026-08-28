@@ -4,17 +4,20 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
+import type { VueWrapper } from "@vue/test-utils";
+import type { Song } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -25,7 +28,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
   removeAttribute() {}
@@ -33,11 +36,10 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 const Playlist = (await import("../components/Playlist.vue")).default;
-const { state } = await import("../composables/usePlayer.js");
-const { DRAG_SONG_TYPE } = await import("../composables/usePlayer.js");
+const { state, DRAG_SONG_TYPE } = await import("../composables/usePlayer.js");
 const Sortable = (await import("sortablejs")).default;
 
-const SONGS = [
+const SONGS: Song[] = [
   { id: "a", name: "A歌", artist: "五月天", path: "/a.mp3" },
   { id: "b", name: "B歌", artist: "高橋優", path: "/b.mp3" },
   { id: "c", name: "C歌", artist: "五月天", path: "/c.mp3" },
@@ -64,9 +66,9 @@ afterEach(() => {
   document.body.querySelectorAll(".add-menu, .am-backdrop").forEach((el) => el.remove());
 });
 
-const wrappers = [];
+const wrappers: VueWrapper[] = [];
 
-function mountSongs(songs = SONGS) {
+function mountSongs(songs: Song[] = SONGS) {
   state.songs = songs.map((s) => ({ ...s }));
   const wrapper = mount(Playlist);
   wrappers.push(wrapper);
@@ -100,7 +102,7 @@ describe("Playlist 队列拖拽排序（全部歌曲视图）", () => {
     const spy = vi.spyOn(Sortable, "create");
     const wrapper = mountSongs();
     await nextTick();
-    await wrapper.find(".pl-sort").setValue("name");
+    await wrapper.find<HTMLSelectElement>(".pl-sort").setValue("name");
     await nextTick();
     await nextTick();
     expect(wrapper.findAll(".pl-drag")).toHaveLength(3);
@@ -130,7 +132,7 @@ describe("Playlist 队列拖拽排序（全部歌曲视图）", () => {
     const wrapper = mountSongs();
     await nextTick();
     await wrapper.findAll(".pb-tab")[1].trigger("click"); // 歌手 tab
-    const card = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天");
+    const card = wrapper.findAll(".gr-card").find((c) => c.find(".gr-name").text() === "五月天")!;
     await card.trigger("click");
     await nextTick();
     await nextTick();
@@ -178,7 +180,7 @@ describe("Playlist 拖拽到歌单（dragstart 数据源）", () => {
     const dt = { setData: vi.fn(), effectAllowed: "" };
     // 手动 dispatch：拿到事件对象断言 defaultPrevented
     const evt = new Event("dragstart", { bubbles: true, cancelable: true });
-    evt.dataTransfer = dt;
+    Object.defineProperty(evt, "dataTransfer", { value: dt });
     wrapper.findAll(".pl-drag")[0].element.dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(true);
     expect(dt.setData).not.toHaveBeenCalled();

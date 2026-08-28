@@ -6,17 +6,20 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
+import type { VueWrapper } from "@vue/test-utils";
+import type { Song, Playlist } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -27,7 +30,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
   removeAttribute() {}
@@ -39,12 +42,12 @@ const Sidebar = (await import("../components/Sidebar.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
 const { useToast, clearToasts } = await import("../composables/useToast.js");
 
-const SONGS = [
+const SONGS: Song[] = [
   { id: "a", name: "A歌", artist: "五月天", path: "/a.mp3" },
   { id: "b", name: "B歌", artist: "高橋優", path: "/b.mp3" },
   { id: "c", name: "C歌", artist: "五月天", path: "/c.mp3" },
 ];
-const PLAYLISTS = [
+const PLAYLISTS: Playlist[] = [
   {
     id: "p1",
     name: "旅行",
@@ -57,20 +60,23 @@ const PLAYLISTS = [
 // —— 几何 stub：jsdom 的 getBoundingClientRect 恒为 0，且无 elementFromPoint，
 // —— 拖拽命中（列表/行/歌单项）全靠几何判断，测试按元素注入假 rect ——
 const realRect = Element.prototype.getBoundingClientRect;
-const rectMap = new WeakMap();
-Element.prototype.getBoundingClientRect = function () {
+const rectMap = new WeakMap<Element, DOMRect>();
+Element.prototype.getBoundingClientRect = function (this: Element) {
   const r = rectMap.get(this);
   return r || realRect.call(this);
 };
-function setRect(el, r) {
-  rectMap.set(el, { x: r.left, y: r.top, width: r.width, height: r.height, ...r });
+function setRect(
+  el: Element,
+  r: { left: number; top: number; right: number; bottom: number; width: number; height: number },
+) {
+  rectMap.set(el, { ...r, x: r.left, y: r.top } as DOMRect);
 }
 
 const ROW_H = 40; // 行高（行中心 = top + 20）
 const ROW_W = 400;
 
 // 给 .pl-item 与 .pl-list 注入纵向堆叠 rect（行中心 120/160/200…）
-function layoutRows(wrapper, top = 100) {
+function layoutRows(wrapper: VueWrapper, top = 100) {
   const rows = wrapper.findAll(".pl-item");
   rows.forEach((row, i) => {
     setRect(row.element, {
@@ -97,7 +103,7 @@ function layoutRows(wrapper, top = 100) {
 }
 
 // 给侧边栏歌单项注入右侧 rect（左缘 420，避开列表右缘 400）
-function layoutSidebar(wrapper, top = 100, left = 420) {
+function layoutSidebar(wrapper: VueWrapper, top = 100, left = 420) {
   const items = wrapper.findAll(".sb-item[data-playlist-id]");
   items.forEach((item, i) => {
     setRect(item.element, {
@@ -112,7 +118,7 @@ function layoutSidebar(wrapper, top = 100, left = 420) {
   return items;
 }
 
-const wrappers = [];
+const wrappers: VueWrapper[] = [];
 
 function mountBoth() {
   const pw = mount(Playlist, { attachTo: document.body });
@@ -128,13 +134,21 @@ function toastText() {
 }
 
 // pointer 事件工厂（主指针 id=1，左键）；坐标支持 (x, y) 或数组 [x, y]
-function ptr(type, x, y, over = {}) {
-  if (Array.isArray(x)) [x, y] = x;
+function ptr(type: string, x: number | number[], y?: number, over: Record<string, unknown> = {}) {
+  let px: number;
+  let py: number;
+  if (Array.isArray(x)) {
+    px = x[0];
+    py = x[1];
+  } else {
+    px = x;
+    py = y ?? 0;
+  }
   return new PointerEvent(type, {
     bubbles: true,
     cancelable: true,
-    clientX: x,
-    clientY: y,
+    clientX: px,
+    clientY: py,
     button: 0,
     pointerId: 1,
     ...over,
@@ -142,7 +156,7 @@ function ptr(type, x, y, over = {}) {
 }
 
 // 完整拖拽序列：handle 上按下 → 分步 move（超过 5px 阈值）→ 松手
-async function dragHandle(handle, from, to, steps = 5) {
+async function dragHandle(handle: Element, from: number[], to: number[], steps = 5) {
   handle.dispatchEvent(ptr("pointerdown", from[0], from[1]));
   for (let i = 1; i <= steps; i++) {
     const x = from[0] + ((to[0] - from[0]) * i) / steps;
@@ -153,7 +167,11 @@ async function dragHandle(handle, from, to, steps = 5) {
   await nextTick();
 }
 
-const okFetch = () => vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+const okFetch = () =>
+  vi.fn(async (_url: RequestInfo | URL, _opts?: RequestInit) => ({
+    ok: true,
+    json: async () => ({}),
+  }));
 
 beforeEach(() => {
   Object.assign(state, {
@@ -193,7 +211,11 @@ describe("壳内拖拽排序", () => {
     expect(state.songs.map((s) => s.name)).toEqual(["B歌", "A歌", "C歌"]);
     const put = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/queue/order"));
     expect(put).toBeTruthy();
-    expect(JSON.parse(put[1].body).paths).toEqual(["/b.mp3", "/a.mp3", "/c.mp3"]);
+    expect(JSON.parse((put![1] as RequestInit).body as string).paths).toEqual([
+      "/b.mp3",
+      "/a.mp3",
+      "/c.mp3",
+    ]);
   });
 
   it("全部歌曲视图：往下拖越过多行 → 插到末尾", async () => {
@@ -232,7 +254,11 @@ describe("壳内拖拽排序", () => {
     expect(state.playlists[0].songPaths).toEqual(["/a.mp3", "/c.mp3", "/b.mp3"]);
     const put = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/playlists/p1/order"));
     expect(put).toBeTruthy();
-    expect(JSON.parse(put[1].body).paths).toEqual(["/a.mp3", "/c.mp3", "/b.mp3"]);
+    expect(JSON.parse((put![1] as RequestInit).body as string).paths).toEqual([
+      "/a.mp3",
+      "/c.mp3",
+      "/b.mp3",
+    ]);
   });
 
   it("拖拽中源行跟随指针（transform 随位移更新，松手还原）", async () => {
@@ -240,7 +266,7 @@ describe("壳内拖拽排序", () => {
     await nextTick();
     layoutRows(pw);
     const handle = pw.findAll(".pl-drag")[0].element;
-    const row0 = pw.findAll(".pl-item")[0].element;
+    const row0 = pw.findAll(".pl-item")[0].element as HTMLElement;
     handle.dispatchEvent(ptr("pointerdown", [10, 120]));
     document.body.dispatchEvent(ptr("pointermove", [10, 145])); // 25px > 阈值
     expect(row0.classList.contains("pl-drag-source")).toBe(true);
@@ -360,7 +386,7 @@ describe("壳内拖拽边界", () => {
     handle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await nextTick();
     expect(state.currentIndex).toBe(0);
-    expect(state.currentSong.name).toBe("A歌");
+    expect(state.currentSong!.name).toBe("A歌");
   });
 
   it("拖拽（超阈值）松手 → 抑制 click，不误触发行点击播放", async () => {
@@ -452,7 +478,7 @@ describe("壳内拖拽边界", () => {
     await nextTick();
     layoutRows(pw);
     const handle = pw.findAll(".pl-drag")[0].element;
-    const row0 = pw.findAll(".pl-item")[0].element;
+    const row0 = pw.findAll(".pl-item")[0].element as HTMLElement;
     handle.dispatchEvent(ptr("pointerdown", [10, 120]));
     document.body.dispatchEvent(ptr("pointermove", [10, 140]));
     expect(row0.style.transform).toBe("translateY(20px)");
@@ -470,7 +496,7 @@ describe("壳内拖拽边界", () => {
     await nextTick();
     layoutRows(pw);
     const handle = pw.findAll(".pl-drag")[0].element;
-    const row0 = pw.findAll(".pl-item")[0].element;
+    const row0 = pw.findAll(".pl-item")[0].element as HTMLElement;
     handle.dispatchEvent(ptr("pointerdown", [10, 120]));
     document.body.dispatchEvent(ptr("pointermove", [10, 140]));
     expect(row0.classList.contains("pl-drag-source")).toBe(true);

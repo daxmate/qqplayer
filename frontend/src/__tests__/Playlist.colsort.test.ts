@@ -3,16 +3,16 @@
 // 切列重置方向、与工具条 select 联动、列头点击不触发行点击
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import type { VueWrapper, DOMWrapper } from "@vue/test-utils";
+import type { Song } from "../composables/usePlayer.js";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -31,16 +31,15 @@ const SONGS = [
   { id: "b", name: "B歌", artist: "Z歌手", duration: 300 },
   { id: "a", name: "A歌", artist: "M歌手", duration: 90 },
   { id: "c", name: "C歌", artist: "A歌手", duration: 200 },
-];
+] as unknown as Song[];
 
-const colNames = () => wrapper.findAll(".pl-name").map((n) => n.text());
-const colNameBtn = () => wrapper.find('[data-testid="pl-col-name"]');
-const colArtistBtn = () => wrapper.find('[data-testid="pl-col-artist"]');
-const colDurBtn = () => wrapper.find('[data-testid="pl-col-duration"]');
-const arrow = (btn) => btn.find(".pl-col-arrow");
-const isOn = (btn) => btn.classes().includes("on");
-
-let wrapper;
+let wrapper: VueWrapper | null = null;
+const colNames = () => wrapper!.findAll(".pl-name").map((n) => n.text());
+const colNameBtn = () => wrapper!.find('[data-testid="pl-col-name"]');
+const colArtistBtn = () => wrapper!.find('[data-testid="pl-col-artist"]');
+const colDurBtn = () => wrapper!.find('[data-testid="pl-col-duration"]');
+const arrow = (btn: DOMWrapper<Element>) => btn.find(".pl-col-arrow");
+const isOn = (btn: DOMWrapper<Element>) => btn.classes().includes("on");
 
 beforeEach(() => {
   Object.assign(state, {
@@ -101,7 +100,7 @@ describe("Playlist 列头点击排序", () => {
     expect(isOn(colNameBtn())).toBe(false);
     expect(arrow(colNameBtn()).exists()).toBe(false);
     // select 同步回 default
-    expect(wrapper.find(".pl-sort").element.value).toBe("default");
+    expect(wrapper!.find<HTMLSelectElement>(".pl-sort").element.value).toBe("default");
   });
 
   it("点「歌手」→ 按歌手升序；切列后方向重置为升序", async () => {
@@ -132,11 +131,11 @@ describe("Playlist 列头点击排序", () => {
   it("工具条 select 与列头联动：选歌手 → 列头激活；选默认 → 取消激活", async () => {
     state.songs = [...SONGS];
     wrapper = mount(Playlist);
-    await wrapper.find(".pl-sort").setValue("artist");
+    await wrapper!.find<HTMLSelectElement>(".pl-sort").setValue("artist");
     expect(isOn(colArtistBtn())).toBe(true);
     expect(arrow(colArtistBtn()).text()).toBe("↑");
     expect(colNames()).toEqual(["C歌", "A歌", "B歌"]);
-    await wrapper.find(".pl-sort").setValue("default");
+    await wrapper!.find<HTMLSelectElement>(".pl-sort").setValue("default");
     expect(isOn(colArtistBtn())).toBe(false);
     expect(arrow(colArtistBtn()).exists()).toBe(false);
     expect(colNames()).toEqual(["B歌", "A歌", "C歌"]);
@@ -149,7 +148,7 @@ describe("Playlist 列头点击排序", () => {
     await colNameBtn().trigger("click"); // name 降序
     expect(arrow(colNameBtn()).text()).toBe("↓");
     // 用 select 重新选「按标题」→ 方向重置为升序
-    await wrapper.find(".pl-sort").setValue("name");
+    await wrapper!.find<HTMLSelectElement>(".pl-sort").setValue("name");
     expect(arrow(colNameBtn()).text()).toBe("↑");
     expect(colNames()).toEqual(["A歌", "B歌", "C歌"]);
   });
@@ -166,8 +165,8 @@ describe("Playlist 列头点击排序", () => {
     state.songs = [...SONGS];
     wrapper = mount(Playlist);
     await colNameBtn().trigger("click"); // A歌(原索引1) 排到第一
-    await wrapper.findAll(".pl-item")[0].trigger("click");
+    await wrapper!.findAll(".pl-item")[0].trigger("click");
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("A歌");
+    expect(state.currentSong!.name).toBe("A歌");
   });
 });
