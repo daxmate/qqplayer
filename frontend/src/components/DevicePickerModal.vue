@@ -15,11 +15,11 @@
         <div v-else class="dp-list">
           <button
             v-for="d in devices"
-            :key="d.device_id"
+            :key="d.device_id ?? ''"
             class="dp-item"
             :class="{ on: pickedId === d.device_id }"
-            :data-testid="'dp-device-' + d.device_id"
-            @click="pickedId = d.device_id"
+            :data-testid="'dp-device-' + (d.device_id ?? '')"
+            @click="pickedId = d.device_id ?? ''"
           >
             <Smartphone :size="15" class="dp-item-icon" />
             <span class="dp-item-main">
@@ -50,7 +50,7 @@ import { formatBytes, formatLastSeen } from "../utils/deviceCommands.js";
 
 /** 推送目标设备（GET /api/sync/devices → devices[] 的宽松视图） */
 interface PickerDevice {
-  device_id: string;
+  device_id?: string;
   device_name?: string;
   last_seen?: string;
   total?: number;

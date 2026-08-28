@@ -448,7 +448,7 @@ function onSearchPick(item: { kind: string; payload: { artist?: string; album?: 
   nextTick(() => {
     const type = item.kind === "artist" ? "artists" : "albums";
     const value = item.kind === "artist" ? item.payload.artist : item.payload.album;
-    playlistRef.value?.openBrowse(type, value);
+    playlistRef.value?.openBrowse(type, value ?? "");
   });
 }
 

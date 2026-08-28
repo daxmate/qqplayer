@@ -4,6 +4,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { nextTick } from "vue";
 import { flushPromises } from "@vue/test-utils";
 import { mount, type VueWrapper } from "@vue/test-utils";
+import type { LyricLine } from "../composables/playerState.js";
 
 // amll LyricPlayer 依赖 pixi（jsdom 下 ESM 互操作报错）；面板测试只关心行为，mock 掉组件
 // 数据通过 data-lines 属性透出，供测试断言；enable-* 三特效以 data-* 透出（props 绑定断言）
@@ -63,7 +64,7 @@ globalThis.ResizeObserver = FakeResizeObserver;
 const LyricPanel = (await import("../components/LyricPanel.vue")).default;
 const { state, lyricSettings, toggleZh } = await import("../composables/usePlayer.js");
 
-const LYRIC = [
+const LYRIC: LyricLine[] = [
   { type: "sec", name: "主歌1" },
   { type: "line", s: 0, e: 10, text: ["君が", "kimi ga", "你"] },
   { type: "line", s: 10, e: 20, text: ["好き", "suki", "喜欢"] },

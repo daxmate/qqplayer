@@ -564,11 +564,11 @@ const CTX_EVENTS: Array<[string, (e: CustomEvent) => void]> = [
 ];
 
 function bindCtxEvents() {
-  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn as EventListener);
+  for (const [name, fn] of CTX_EVENTS) window.addEventListener(name, fn as (evt: Event) => void);
 }
 
 function unbindCtxEvents() {
-  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn as EventListener);
+  for (const [name, fn] of CTX_EVENTS) window.removeEventListener(name, fn as (evt: Event) => void);
 }
 
 // ============ 定位：覆盖桌面播放列表面板（.main .playlist 的网格位置） ============
