@@ -11,8 +11,24 @@
 //   - stiffness（刚度）：越大回弹越快，170~220 区间是"轻快跟手"的歌词手感
 //   - damping（阻尼）：越大越不弹；damping >= 2*sqrt(stiffness) 时临界/过阻尼（不振荡）
 
+/** 弹簧参数（mass=1 归一化）；缺省值见 solveSpring 解构默认 */
+export interface SpringParams {
+  soft?: boolean; // 强制过阻尼（用于 Seek/间奏等"不该弹"的场景）
+  stiffness?: number; // 刚度：越大回弹越快
+  damping?: number; // 阻尼：越大越不弹；>= 2*sqrt(stiffness) 时临界/过阻尼
+  mass?: number; // 质量（默认 1 归一化）
+}
+
+/** 弹簧求解器：位置→时间的函数（t 为秒） */
+type SpringSolver = (t: number) => number;
+
 export class Spring {
-  constructor(position = 0, params = {}) {
+  target: number;
+  params: SpringParams;
+  time: number;
+  solver: SpringSolver;
+
+  constructor(position = 0, params: SpringParams = {}) {
     this.target = position;
     this.params = { stiffness: 180, damping: 26, ...params };
     this.time = 0;
@@ -21,14 +37,14 @@ export class Spring {
   }
 
   /** 立即把弹簧瞬移到某个位置（无动画） */
-  setPosition(pos) {
+  setPosition(pos: number) {
     this.target = pos;
     this.time = 0;
     this.solver = () => pos;
   }
 
   /** 设定新目标，弹簧从当前位置自然过渡过去 */
-  setTarget(pos, params = {}) {
+  setTarget(pos: number, params: SpringParams = {}) {
     if (params.stiffness || params.damping) {
       this.updateParams(params);
     }
@@ -37,13 +53,13 @@ export class Spring {
     this._resetSolver();
   }
 
-  updateParams(params) {
+  updateParams(params: SpringParams) {
     this.params = { ...this.params, ...params };
     this._resetSolver();
   }
 
   /** 推进 delta 秒，返回当前位置 */
-  update(delta) {
+  update(delta: number): number {
     this.time += delta;
     if (this.arrived()) {
       // 到位后冻结：直接钉在目标上，停止后续计算
@@ -54,14 +70,14 @@ export class Spring {
   }
 
   /** 是否已稳定到达目标（位置差 + 速度 + 加速度都≈0） */
-  arrived() {
+  arrived(): boolean {
     return (
       Math.abs(this.target - this.solver(this.time)) < 0.01 &&
       Math.abs(this._velocity(this.time)) < 0.01
     );
   }
 
-  get current() {
+  get current(): number {
     return this.solver(this.time);
   }
 
@@ -77,7 +93,7 @@ export class Spring {
   }
 
   /** 数值微分求速度（h=1ms，对歌词滚动足够精确） */
-  _velocity(t) {
+  _velocity(t: number): number {
     const h = 0.001;
     return (this.solver(t + h) - this.solver(t - h)) / (2 * h);
   }
@@ -89,7 +105,12 @@ export class Spring {
  * 否则欠阻尼：带一次振荡后收敛（Apple Music 滚动那种轻微回弹）。
  * soft=true 强制过阻尼（用于 Seek/间奏等"不该弹"的场景）。
  */
-function solveSpring(from, velocity, to, params = {}) {
+function solveSpring(
+  from: number,
+  velocity: number,
+  to: number,
+  params: SpringParams = {},
+): SpringSolver {
   const { soft = false, stiffness = 180, damping = 26, mass = 1 } = params;
   const delta = to - from;
 
@@ -120,13 +141,12 @@ function solveSpring(from, velocity, to, params = {}) {
  * 歌词滚动的弹簧参数策略（借鉴 amll getPosYSpringPolicy）：
  * 行间隔越大（慢歌），弹簧越软、滚得越从容；行间隔小（快歌）则更硬更跟手。
  * Seek/间奏/首尾行用慢参数（过阻尼，不弹）。
- *
- * @param {object} opts
- * @param {boolean} opts.isSeeking 是否跳转中
- * @param {number|undefined} opts.intervalMs 当前行与上一行的时间差（ms），首尾行传 undefined
  */
-export function getLyricSpringPolicy({ isSeeking = false, intervalMs } = {}) {
-  const SLOW = { stiffness: 90, damping: 15 }; // 过阻尼（90 < (15/2)²=56.25? 否 → 实际欠阻尼，但很软）
+export function getLyricSpringPolicy({
+  isSeeking = false,
+  intervalMs,
+}: { isSeeking?: boolean; intervalMs?: number } = {}): SpringParams {
+  const SLOW: SpringParams = { stiffness: 90, damping: 15 }; // 过阻尼（90 < (15/2)²=56.25? 否 → 实际欠阻尼，但很软）
 
   if (isSeeking || intervalMs == null) return { ...SLOW, soft: true };
 

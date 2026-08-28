@@ -9,16 +9,16 @@
 
 const REVEAL_THRESHOLD = 40; // 下拉触发位移（px），对齐系统下拉刷新手感
 
-let touchStartY = null;
-let scroller = null; // touchstart 时缓存的滚动容器（同一手势内 target 稳定）
+let touchStartY: number | null = null;
+let scroller: Element | null = null; // touchstart 时缓存的滚动容器（同一手势内 target 稳定）
 let revealed = false;
 let installed = false; // 幂等：重复 install 不叠加监听
 
 /// 最近的可滚动祖先（overflow-y: auto/scroll/overlay），找不到则回退到页面滚动元素。
 /// 只判断 overflow 样式——移动端滚动容器固定且内容超高，scrollHeight/clientHeight
 /// 在测试环境（jsdom）不可靠，这里不依赖它。
-function scrollableAncestor(el) {
-  let node = el && el.nodeType === 1 ? el : null;
+function scrollableAncestor(el: EventTarget | null): Element | null {
+  let node: Element | null = el && (el as Node).nodeType === 1 ? (el as Element) : null;
   while (node && node !== document.body && node !== document.documentElement) {
     if (/(auto|scroll|overlay)/.test(getComputedStyle(node).overflowY)) return node;
     node = node.parentElement;
@@ -26,7 +26,7 @@ function scrollableAncestor(el) {
   return document.scrollingElement;
 }
 
-function onTouchStart(e) {
+function onTouchStart(e: TouchEvent) {
   const t = e.touches && e.touches[0];
   if (!t) return;
   touchStartY = t.clientY;
@@ -34,9 +34,9 @@ function onTouchStart(e) {
   revealed = false;
 }
 
-function onTouchMove(e) {
+function onTouchMove(e: TouchEvent) {
   // 移动端播放页打开时，顶部下拉由播放页自己的返回手势接管，不再召唤原生状态条
-  if (window.__qqpPlayerOpen) return;
+  if ((window as Window & { __qqpPlayerOpen?: boolean }).__qqpPlayerOpen) return;
   if (touchStartY == null || revealed || !scroller) return;
   // 滚动容器不在顶部（已滚出内容）→ 本次手势作废，不再触发
   if (scroller.scrollTop > 0) {
@@ -49,7 +49,7 @@ function onTouchMove(e) {
   if (dy > REVEAL_THRESHOLD) {
     revealed = true;
     try {
-      window.qqplayerIosBridge.postMessage({ cmd: "pullRevealStatusBar" });
+      window.qqplayerIosBridge!.postMessage!({ cmd: "pullRevealStatusBar" });
     } catch {
       /* 桥异常静默（浏览器控制台测试环境无此对象） */
     }
@@ -62,7 +62,7 @@ function onTouchEnd() {
 }
 
 /// 安装全局下拉监听（幂等）。返回卸载函数（壳内页面常驻，实际很少调用）。
-export function installPullRevealStatusBar() {
+export function installPullRevealStatusBar(): () => void {
   if (typeof window === "undefined" || !window.qqplayerIosBridge || installed) return () => {};
   installed = true;
   document.addEventListener("touchstart", onTouchStart, { passive: true });
