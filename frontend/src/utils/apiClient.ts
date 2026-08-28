@@ -30,19 +30,51 @@ import {
 const TOKEN_KEY = "qqplayer.token";
 const SERVER_KEY = "qqplayer.server";
 
+// ---------- 类型（宽松边界：data 为 unknown，调用方自行断言；字段与 JS 原实现一一对应） ----------
+interface ApiResponse {
+  ok: boolean;
+  status: number;
+  data?: unknown;
+  message?: string;
+  fromCache?: boolean;
+  offline?: boolean;
+  network?: boolean;
+  response?: Response;
+  /** 离线降级读缓存（旧数据优于无数据）标记 */
+  degraded?: boolean;
+}
+
+interface ApiOptions {
+  url: string;
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+  cache?: { ttl?: number; offline?: boolean };
+  /** 跳过缓存读（仍写缓存）——库变更后的强制刷新用 */
+  force?: boolean;
+  /** 返回原始 Response（大文件/二进制下载，不解析 JSON、不缓存） */
+  raw?: boolean;
+  /** 关闭 401 特判（夸克登录 401 语义不同） */
+  skip401?: boolean;
+  /** 超时 ms（默认 10000） */
+  timeout?: number;
+  signal?: AbortSignal;
+}
+
 // ---------- 配置 ----------
 // iOS 壳注入优先级：localStorage（② 定案）→ window.qqplayerIosBridge（file:// 下
 // localStorage 不可靠，Swift 侧把 server/token 直接嵌入桥对象，见 WebShellView.injectServer）
-function bridgeValue(key) {
+function bridgeValue(key: string): string {
   try {
     const b = typeof window !== "undefined" ? window.qqplayerIosBridge : null;
-    return b && typeof b[key] === "string" ? b[key] : "";
+    const v = b ? (b as Record<string, unknown>)[key] : null;
+    return typeof v === "string" ? v : "";
   } catch {
     return "";
   }
 }
 
-function baseURL() {
+function baseURL(): string {
   try {
     return localStorage.getItem(SERVER_KEY) || bridgeValue("server") || "";
   } catch {
@@ -50,7 +82,7 @@ function baseURL() {
   }
 }
 
-function authToken() {
+function authToken(): string {
   try {
     return localStorage.getItem(TOKEN_KEY) || bridgeValue("token") || "";
   } catch {
@@ -58,7 +90,7 @@ function authToken() {
   }
 }
 
-function clearToken() {
+function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY);
   } catch {
@@ -71,7 +103,7 @@ function clearToken() {
  * iOS 壳（file:// 加载前端）里 <img src="/api/cover…"> 等无法自动解析相对路径（会变成
  * file:///api/…），统一经此转换；桌面同源环境 qqplayer.server 未设置时原样返回，行为零变化。
  */
-export function resolveServerUrl(path) {
+export function resolveServerUrl(path: string): string {
   if (!path || typeof path !== "string") return path;
   if (/^https?:\/\//i.test(path) || path.startsWith("data:")) return path;
   const base = baseURL();
@@ -88,11 +120,11 @@ export function resolveServerUrl(path) {
 
 // ---------- 在线状态（离线模式事件） ----------
 let offline = false;
-const offlineListeners = new Set();
-const unauthorizedListeners = new Set();
+const offlineListeners = new Set<(offline: boolean) => void>();
+const unauthorizedListeners = new Set<() => void>();
 
 /** 设备级断网（navigator.onLine=false：Wi-Fi/蜂窝全断）——WKWebView 反映系统网络状态 */
-function deviceOffline() {
+function deviceOffline(): boolean {
   try {
     return typeof navigator !== "undefined" && navigator.onLine === false;
   } catch {
@@ -103,23 +135,23 @@ function deviceOffline() {
 /** 当前是否处于离线模式（设备断网 或 网络请求失败降级；恢复在线自动退出）。
  *  断网时所有主机请求都应跳过（本地优先原则，2026-08-27 用户明确）：
  *  歌词/封面/同步等不再发起网络请求，直接走本地。 */
-export function isOffline() {
+export function isOffline(): boolean {
   return offline || deviceOffline();
 }
 
 /** 订阅离线/恢复在线切换：cb(offline: boolean)；返回取消订阅函数 */
-export function onOfflineChange(cb) {
+export function onOfflineChange(cb: (offline: boolean) => void): () => void {
   offlineListeners.add(cb);
   return () => offlineListeners.delete(cb);
 }
 
 /** 订阅配对失效事件（401 清 token 后触发）；返回取消订阅函数 */
-export function onUnauthorized(cb) {
+export function onUnauthorized(cb: () => void): () => void {
   unauthorizedListeners.add(cb);
   return () => unauthorizedListeners.delete(cb);
 }
 
-function setOffline(v) {
+function setOffline(v: boolean): void {
   if (offline === v) return;
   offline = v;
   // 离线 → 启动恢复探测（30s 定时 + window online 事件）；恢复 → 停止。
@@ -136,7 +168,7 @@ function setOffline(v) {
 }
 
 /** 测试用：复位模块级状态（离线标志 + 监听器 + 挂起定时器 + 探测状态） */
-export function resetApiClientState() {
+export function resetApiClientState(): void {
   offline = false;
   offlineListeners.clear();
   unauthorizedListeners.clear();
@@ -159,10 +191,10 @@ export function resetApiClientState() {
 // hostReachable 是「探测状态」，offline 是「结果状态」：探测失败 → offline=true 全局
 // 短路（请求不发、不挂起）；探测成功 → setOffline(false) 自动恢复。
 
-let hostReachable = "unknown"; // "unknown" | "online" | "offline"
-let probeInFlight = null; // 并发探测合并（复用同一 Promise）
-let recoveryTimer = null; // offline 期间 30s 恢复探测 interval
-let onlineHandler = null; // window online 事件句柄（设备网络恢复 → 立即重探）
+let hostReachable: "unknown" | "online" | "offline" = "unknown"; // "unknown" | "online" | "offline"
+let probeInFlight: Promise<boolean> | null = null; // 并发探测合并（复用同一 Promise）
+let recoveryTimer: ReturnType<typeof setInterval> | null = null; // offline 期间 30s 恢复探测 interval
+let onlineHandler: (() => void) | null = null; // window online 事件句柄（设备网络恢复 → 立即重探）
 
 /** 探测超时（ms）：快速失败，绝不等待系统 TCP 超时 */
 export const HOST_PROBE_TIMEOUT_MS = 2500;
@@ -171,11 +203,11 @@ export const HOST_PROBE_TIMEOUT_MS = 2500;
 export const HOST_RECOVERY_PROBE_MS = 30000;
 
 /** 当前主机可达性状态：'unknown' | 'online' | 'offline' */
-export function getHostReachable() {
+export function getHostReachable(): "unknown" | "online" | "offline" {
   return hostReachable;
 }
 
-function startRecoveryProbe() {
+function startRecoveryProbe(): void {
   // window online 事件（设备网络恢复 → 立即探测；浏览器环境，测试无 window 跳过）
   if (typeof window !== "undefined" && !onlineHandler) {
     onlineHandler = () => {
@@ -189,7 +221,7 @@ function startRecoveryProbe() {
   }, HOST_RECOVERY_PROBE_MS);
 }
 
-function stopRecoveryProbe() {
+function stopRecoveryProbe(): void {
   if (recoveryTimer) {
     clearInterval(recoveryTimer);
     recoveryTimer = null;
@@ -203,9 +235,9 @@ function stopRecoveryProbe() {
  * 任何 HTTP 响应（含 401/404/500，只要主机回了话）都证明主机可达；
  * 仅无响应 / 超时 / 网络错误判离线。
  * 幂等：并发探测合并（inFlight 复用同一 Promise）。
- * @returns {Promise<boolean>} 探测是否成功
+ * @returns 探测是否成功
  */
-export async function probeHost() {
+export async function probeHost(): Promise<boolean> {
   if (probeInFlight) return probeInFlight;
   probeInFlight = (async () => {
     let ok = false;
@@ -235,9 +267,17 @@ export async function probeHost() {
 // 壳环境（window.qqplayerIosBridge 存在）下请求改走 postMessage → 原生 URLSession → 回传。
 // 返回结构对齐 fetch Response 子集（ok/status/text/json），下游 apiClient 逻辑零改动。
 let nativeReqSeq = 0;
-const nativePending = new Map();
+const nativePending = new Map<number, (status: number, bodyText: string) => void>();
 
-function nativeHttpAvailable() {
+/** iOS 原生网络桥响应（fetch Response 子集；仅 file:// 壳环境使用） */
+interface NativeHttpResponse {
+  ok: boolean;
+  status: number;
+  text: () => Promise<string>;
+  json: () => Promise<unknown>;
+}
+
+function nativeHttpAvailable(): boolean {
   try {
     if (typeof window === "undefined") return false;
     // 仅 file:// 页面需要网络桥（http 页面 fetch 正常，走标准浏览器 + CORS）；
@@ -249,7 +289,11 @@ function nativeHttpAvailable() {
   }
 }
 
-function nativeHttpFetch(url, init, timeoutMs) {
+function nativeHttpFetch(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<NativeHttpResponse> {
   return new Promise((resolve, reject) => {
     const id = ++nativeReqSeq;
     const timer = setTimeout(() => {
@@ -275,7 +319,8 @@ function nativeHttpFetch(url, init, timeoutMs) {
       });
     });
     try {
-      window.qqplayerIosBridge.postMessage({
+      // 非空断言：nativeHttpAvailable() 已确认桥存在且 postMessage 可调；运行时若缺仍抛错走 catch
+      window.qqplayerIosBridge!.postMessage!({
         cmd: "http",
         id,
         url,
@@ -291,7 +336,7 @@ function nativeHttpFetch(url, init, timeoutMs) {
   });
 }
 
-function fetchWithTimeout(url, init, timeout) {
+function fetchWithTimeout(url: string, init: RequestInit, timeout: number): Promise<Response> {
   if (!timeout || timeout <= 0) return fetch(url, init);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
@@ -299,7 +344,9 @@ function fetchWithTimeout(url, init, timeout) {
 }
 
 // 错误体尽力解析（res.json 可能不存在或非 JSON）
-async function extractBody(res) {
+async function extractBody(
+  res: { json?: () => Promise<unknown> } | null | undefined,
+): Promise<unknown> {
   try {
     if (typeof res?.json !== "function") return null;
     return await res.json();
@@ -308,12 +355,16 @@ async function extractBody(res) {
   }
 }
 
-function errorMessage(data, res) {
+function errorMessage(
+  data: unknown,
+  res: { statusText?: string; status?: number } | null | undefined,
+): string {
   if (typeof data === "string" && data) return data;
+  const d = data as { detail?: string; error?: string; message?: string } | null | undefined;
   return (
-    data?.detail ||
-    data?.error ||
-    data?.message ||
+    d?.detail ||
+    d?.error ||
+    d?.message ||
     res?.statusText ||
     (res?.status ? `HTTP ${res.status}` : "网络连接失败")
   );
@@ -321,29 +372,30 @@ function errorMessage(data, res) {
 
 /**
  * 统一请求入口。
- * @param {object} opts
- * @param {string} opts.url 相对路径（如 /api/songs），baseURL 自动前缀
- * @param {string} [opts.method="GET"]
- * @param {*} [opts.body] JSON 对象（自动 stringify）或 FormData（原样透传）
- * @param {object} [opts.headers] 附加请求头（覆盖默认）
- * @param {{ttl?:number, offline?:boolean}} [opts.cache] 声明式缓存：ttl 秒；offline 允许网络失败时降级读缓存
- * @param {boolean} [opts.force] 跳过缓存读（仍写缓存）——库变更后的强制刷新用
- * @param {boolean} [opts.raw] 返回原始 Response（大文件/二进制下载，不解析 JSON、不缓存）
- * @param {boolean} [opts.skip401] 关闭 401 特判（夸克登录 401 语义不同）
- * @param {number} [opts.timeout] 超时 ms（默认 10000——断网/服务器不可达时快速失败触发离线降级，
+ * @param opts.url 相对路径（如 /api/songs），baseURL 自动前缀
+ * @param opts.method 默认 "GET"
+ * @param opts.body JSON 对象（自动 stringify）或 FormData（原样透传）
+ * @param opts.headers 附加请求头（覆盖默认）
+ * @param opts.cache 声明式缓存：ttl 秒；offline 允许网络失败时降级读缓存
+ * @param opts.force 跳过缓存读（仍写缓存）——库变更后的强制刷新用
+ * @param opts.raw 返回原始 Response（大文件/二进制下载，不解析 JSON、不缓存）
+ * @param opts.skip401 关闭 401 特判（夸克登录 401 语义不同）
+ * @param opts.timeout 超时 ms（默认 10000——断网/服务器不可达时快速失败触发离线降级，
  *   避免歌词/封面/同步挂起等系统 TCP 超时（30s+）；局域网请求 10s 内足够）
  */
-export async function api({
-  url,
-  method = "GET",
-  body,
-  headers,
-  cache,
-  force,
-  raw,
-  skip401,
-  timeout = 10000,
-} = {}) {
+export async function api(
+  {
+    url,
+    method = "GET",
+    body,
+    headers,
+    cache,
+    force,
+    raw,
+    skip401,
+    timeout = 10000,
+  }: ApiOptions = {} as ApiOptions,
+): Promise<ApiResponse> {
   const isGet = method === "GET" || method === "HEAD";
   const cacheKey = "GET:" + url;
 
@@ -378,8 +430,8 @@ export async function api({
   }
 
   // 2. 组装请求
-  const init = { method };
-  const h = { ...(headers || {}) };
+  const init: RequestInit = { method };
+  const h: Record<string, string> = { ...(headers || {}) };
   if (body !== undefined && !(body instanceof FormData)) {
     h["Content-Type"] = "application/json";
   }
@@ -389,7 +441,7 @@ export async function api({
   if (body !== undefined) init.body = body instanceof FormData ? body : JSON.stringify(body);
 
   // 3. 网络请求（失败 → 离线降级）
-  let res;
+  let res: Response | NativeHttpResponse | null | undefined;
   try {
     res = nativeHttpAvailable()
       ? await nativeHttpFetch(baseURL() + url, init, timeout)
@@ -415,7 +467,7 @@ export async function api({
       ok: false,
       status: 0,
       data: null,
-      message: (err && err.message) || "网络连接失败",
+      message: (err as { message?: string } | null | undefined)?.message || "网络连接失败",
       network: true,
     };
   }
@@ -454,7 +506,7 @@ export async function api({
 
   // 6. 成功：恢复在线 + 写缓存
   if (offline) setOffline(false);
-  if (raw) return { ok: true, status: res.status, response: res, network: false };
+  if (raw) return { ok: true, status: res.status, response: res as Response, network: false };
   const data = await extractBody(res);
   if (isGet && cache) {
     if (data !== null && data !== undefined) {
@@ -465,22 +517,41 @@ export async function api({
 }
 
 // ---------- 便捷方法 ----------
-export const apiGet = (url, opts = {}) => api({ url, ...opts });
-export const apiPost = (url, body, opts = {}) => api({ url, method: "POST", body, ...opts });
-export const apiPut = (url, body, opts = {}) => api({ url, method: "PUT", body, ...opts });
-export const apiPatch = (url, body, opts = {}) => api({ url, method: "PATCH", body, ...opts });
-export const apiDelete = (url, opts = {}) => api({ url, method: "DELETE", ...opts });
+export const apiGet = (
+  url: string,
+  opts: Omit<ApiOptions, "url" | "method"> = {},
+): Promise<ApiResponse> => api({ url, ...opts });
+// body 可选：运行时本就允许无请求体的 POST（如 /api/pairing/request/.../approve 无 body）
+export const apiPost = (
+  url: string,
+  body?: unknown,
+  opts: Omit<ApiOptions, "url" | "method" | "body"> = {},
+): Promise<ApiResponse> => api({ url, method: "POST", body, ...opts });
+export const apiPut = (
+  url: string,
+  body?: unknown,
+  opts: Omit<ApiOptions, "url" | "method" | "body"> = {},
+): Promise<ApiResponse> => api({ url, method: "PUT", body, ...opts });
+export const apiPatch = (
+  url: string,
+  body?: unknown,
+  opts: Omit<ApiOptions, "url" | "method" | "body"> = {},
+): Promise<ApiResponse> => api({ url, method: "PATCH", body, ...opts });
+export const apiDelete = (
+  url: string,
+  opts: Omit<ApiOptions, "url" | "method"> = {},
+): Promise<ApiResponse> => api({ url, method: "DELETE", ...opts });
 
 /** 失效某 URL 的 GET 缓存（写成功后调用，保证下次读新鲜） */
-export function invalidate(url) {
+export function invalidate(url: string): Promise<void> {
   return delCache("GET:" + url);
 }
 
 // ---------- 写路径 dirty 队列（本地优先） ----------
-let flushTimer = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 防抖触发队列回放（多次入队合并；队列空时无操作） */
-export function scheduleFlush(delay = 300) {
+export function scheduleFlush(delay = 300): void {
   if (flushTimer) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
     flushTimer = null;
@@ -492,11 +563,11 @@ export function scheduleFlush(delay = 300) {
  * 回放 dirty 队列到 apiClient：成功清队、失败保留（下次入队 / 启动时再试）。
  * 串行回放保证顺序（歌单增删等有先后依赖）。返回 {flushed, kept}。
  */
-export async function flushPendingOps() {
+export async function flushPendingOps(): Promise<{ flushed: number; kept: number }> {
   const ops = await getPendingOps();
   if (!ops.length) return { flushed: 0, kept: 0 };
   let flushed = 0;
-  const kept = [];
+  const kept: number[] = [];
   for (const entry of ops) {
     try {
       const r = await api({ url: entry.op.url, method: entry.op.method, body: entry.payload });
@@ -519,9 +590,17 @@ export async function flushPendingOps() {
  *   2. 立即尝试同步
  *   3. 成功 → 清队；网络失败 → 保留队列（离线语义，本地状态不回滚）；
  *      HTTP 拒绝 → 清队（服务端为准，调用方自行回滚本地状态）
- * @returns {"ok"|"queued"|"rejected"}
+ * @returns "ok" | "queued" | "rejected"
  */
-export async function writeLocal({ url, method = "POST", body }) {
+export async function writeLocal({
+  url,
+  method = "POST",
+  body,
+}: {
+  url: string;
+  method?: string;
+  body?: unknown;
+}): Promise<"ok" | "queued" | "rejected"> {
   const id = await enqueuePendingOp({ url, method }, body);
   const r = await api({ url, method, body });
   if (r.ok) {
