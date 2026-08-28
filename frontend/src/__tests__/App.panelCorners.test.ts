@@ -11,7 +11,7 @@ const style = styleMatch ? styleMatch[1] : "";
 // 规范化：去掉注释和空白，方便断言
 const compact = style.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
 
-function ruleFor(selector) {
+function ruleFor(selector: string) {
   // 在规范化的样式中定位 "selector" 出现位置，取其后第一个 {...} 块
   const sel = selector.startsWith(".") ? selector : "." + selector;
   const idx = compact.indexOf(sel);

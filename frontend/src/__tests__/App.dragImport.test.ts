@@ -8,14 +8,12 @@ installMatchMedia(false); // 初始桌面布局；返回值不需要（本文件
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -24,7 +22,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -66,7 +64,7 @@ afterEach(() => {
 });
 
 // 构造带 dataTransfer 的 window 事件（jsdom 的 DragEvent 不支持 dataTransfer 赋值）
-function fireFileEvent(type, files) {
+function fireFileEvent(type: string, files: File[]) {
   const ev = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(ev, "dataTransfer", { value: { types: ["Files"], files } });
   window.dispatchEvent(ev);
@@ -106,12 +104,14 @@ describe("App 拖拽导入遮罩", () => {
     await flushPromises();
 
     expect(wrapper.find(".drag-overlay").exists()).toBe(false);
-    const fetchMock = globalThis.fetch;
+    const fetchMock = vi.mocked(globalThis.fetch);
     const importCall = fetchMock.mock.calls.find(([url]) => url === "/api/import");
     expect(importCall).toBeTruthy();
-    expect(importCall[1].method).toBe("POST");
-    expect(importCall[1].body).toBeInstanceOf(FormData);
-    expect(importCall[1].body.getAll("files").map((f) => f.name)).toEqual(["a.mp3"]);
+    const [, init] = importCall!;
+    expect(init!.method).toBe("POST");
+    const body = init!.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.getAll("files").map((f) => (f as File).name)).toEqual(["a.mp3"]);
     const { items } = useToast();
     expect(items[0].type).toBe("success");
     expect(items[0].text).toBe("已导入 1 首");

@@ -20,20 +20,24 @@ vi.mock("../components/NoConnectionView.vue", () => ({
 }));
 
 // ---------- 真实实现（绕过 mock，供 1/2 组） ----------
-const { isShellUnpaired } = await vi.importActual("../composables/usePairingState.js");
-const RealNoConnectionView = (await vi.importActual("../components/NoConnectionView.vue")).default;
+const { isShellUnpaired } = await vi.importActual<
+  typeof import("../composables/usePairingState.js")
+>("../composables/usePairingState.js");
+const RealNoConnectionView = (
+  await vi.importActual<typeof import("../components/NoConnectionView.vue")>(
+    "../components/NoConnectionView.vue",
+  )
+).default;
 
 // ---------- App 组基础设施（必须在 import App 前注册，同 App.mobile.test.js） ----------
 installMatchMedia(false); // 初始桌面布局（stub matchMedia，供 useMobileViewport 模块加载时读取）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -42,7 +46,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -51,13 +55,13 @@ const App = (await import("../App.vue")).default;
 const { state } = await import("../composables/usePlayer.js");
 
 // jsdom（vitest 4）无 localStorage → 手写 stub（同 sync.test.js 风格）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {

@@ -6,14 +6,12 @@ import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -30,13 +28,13 @@ const Cover = (await import("../components/Cover.vue")).default;
 const { state, uiSettings, UI_SETTINGS_KEY } = await import("../composables/usePlayer.js");
 
 // localStorage stub（持久化断言用）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
 };
@@ -111,11 +109,11 @@ describe("showCover 显示封面开关", () => {
     localStorage.removeItem(UI_SETTINGS_KEY);
     uiSettings.showCover = false;
     await nextTick(); // settingsSync deep watch → 写透本地缓存
-    const saved = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY));
+    const saved = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY)!);
     expect(saved.showCover).toBe(false);
     uiSettings.showCover = true;
     await nextTick();
-    const saved2 = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY));
+    const saved2 = JSON.parse(localStorage.getItem(UI_SETTINGS_KEY)!);
     expect(saved2.showCover).toBe(true);
   });
 });

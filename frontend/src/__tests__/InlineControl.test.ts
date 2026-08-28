@@ -5,7 +5,21 @@ import { mount } from "@vue/test-utils";
 import { nextTick, ref } from "vue";
 import InlineControl from "../components/InlineControl.vue";
 
-function makeEntry(overrides) {
+// 测试用 entry 结构（对齐 InlineControl.vue 的 props.entry 运行时形状）
+interface TestEntry {
+  type: string;
+  labelKey: string;
+  keywords: string[];
+  get: () => unknown;
+  set: (v: unknown) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: Array<{ value: string; labelKey: string }>;
+  placeholder?: string;
+}
+
+function makeEntry(overrides: Partial<TestEntry> = {}): TestEntry & Record<string, unknown> {
   return {
     type: "toggle",
     labelKey: "settings.resumeLast",
@@ -63,7 +77,7 @@ describe("InlineControl", () => {
     expect(range.attributes("step")).toBe("1");
     expect(w.find(".ic-value").text()).toBe("3");
 
-    range.element.value = "5";
+    (range.element as HTMLInputElement).value = "5";
     await range.trigger("input");
     expect(entry.set).toHaveBeenCalledWith(5);
     await nextTick();

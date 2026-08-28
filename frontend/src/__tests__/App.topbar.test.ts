@@ -9,14 +9,12 @@ installMatchMedia(false); // 初始桌面布局
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
   play() {
     this.paused = false;
     this.listeners["play"]?.();
@@ -25,7 +23,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -91,7 +89,7 @@ describe("App 顶栏按钮图标+文字", () => {
     const settingsBtn = wrapper
       .findAll(".gear-btn")
       .find((b) => b.find(".gear-label").exists() && b.find(".gear-label").text() === "设置");
-    expect(settingsBtn.find("svg").exists()).toBe(true);
+    expect(settingsBtn!.find("svg").exists()).toBe(true);
 
     wrapper.unmount();
   });
@@ -105,7 +103,7 @@ describe("App 顶栏按钮图标+文字", () => {
     const settingsBtn = wrapper
       .findAll(".gear-btn")
       .find((b) => b.find(".gear-label").exists() && b.find(".gear-label").text() === "设置");
-    expect(settingsBtn.attributes("title")).toBe("设置");
+    expect(settingsBtn!.attributes("title")).toBe("设置");
 
     wrapper.unmount();
   });
@@ -117,9 +115,9 @@ describe("App 顶栏按钮图标+文字", () => {
 
     const tabs = wrapper.findAll(".mode-tabs .tab");
     const musicTab = tabs.find((b) => b.text().includes("音乐"));
-    expect(musicTab.classes()).toContain("on");
-    expect(tabs.find((b) => b.text().includes("图书")).classes()).not.toContain("on");
-    expect(tabs.find((b) => b.text().includes("视频")).classes()).not.toContain("on");
+    expect(musicTab!.classes()).toContain("on");
+    expect(tabs.find((b) => b.text().includes("图书"))!.classes()).not.toContain("on");
+    expect(tabs.find((b) => b.text().includes("视频"))!.classes()).not.toContain("on");
 
     wrapper.unmount();
   });
