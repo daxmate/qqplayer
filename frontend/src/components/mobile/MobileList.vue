@@ -188,7 +188,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import Sortable from "sortablejs";
@@ -218,6 +218,7 @@ import { useSwipeReveal } from "../../composables/useSwipe.js";
 import { deleteSongs } from "../../composables/useDeleteSong.js";
 import { coverVisible } from "../../composables/useCoverGuard.ts";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../../composables/useCoverURL.js";
+import type { Song, Playlist } from "../../composables/usePlayer.js";
 
 const props = defineProps({
   kind: { type: String, required: true }, // songs | favorites | playlist | artist | album | playlists | artists | albums
@@ -238,20 +239,55 @@ const query = ref("");
 // 未知值归一化（与 Playlist.vue 一致）
 const UNKNOWN_ARTIST = t("mobile.unknown.artist");
 const UNKNOWN_ALBUM = t("mobile.unknown.album");
-const norm = (v, fallback) => (v && v.trim ? v.trim() : "") || fallback;
+const norm = (v: string | null | undefined, fallback: string): string =>
+  (v && v.trim ? v.trim() : "") || fallback;
+
+/** 歌曲行（songRows 元素）；song.path 按 string 处理（运行时原样透传，网络歌 path=null，见 rowSong） */
+type SongRow = { song: Song & { path: string }; i: number };
+
+/** 行 song 类型归一：模板消费方（:key/swipe/收藏/封面）均按 string 处理；
+ *  运行时值不变（网络歌 path=null 原样透传），仅满足类型检查；
+ *  用断言而非展开拷贝，保持 computed 依赖足迹不变（不深追踪 song 字段） */
+const rowSong = (song: Song): Song & { path: string } => song as Song & { path: string };
+
+/** 专辑分组聚合（groupRows albums 分支中间态） */
+interface AlbumGroup {
+  album: string;
+  artists: Set<string>;
+  count: number;
+  coverPath: string | null;
+}
+
+/** 分组入口行（playlists/artists/albums 三类的下一层入口）；coverPath/coverKey 非专辑行为空 */
+interface GroupEntry {
+  key: string;
+  name: string;
+  subtitle: string;
+  coverPath: string | null;
+  coverKey: string;
+  entry: { name: "list"; kind: string; title: string; payload: Record<string, unknown> };
+}
 
 // 分组入口数据（playlists/artists/albums 三类的下一层入口）
-const groupEntries = {
+const groupEntries: {
+  playlists: (p: Playlist) => GroupEntry;
+  artists: (name: string, count: number) => GroupEntry;
+  albums: (g: AlbumGroup & { artist: string }) => GroupEntry;
+} = {
   playlists: (p) => ({
     key: "p:" + p.id,
     name: p.name,
     subtitle: t("mobile.count.song", { n: (p.songPaths || []).length }),
+    coverPath: null,
+    coverKey: "",
     entry: { name: "list", kind: "playlist", title: p.name, payload: { playlist: p } },
   }),
   artists: (name, count) => ({
     key: "a:" + name,
     name,
     subtitle: t("mobile.count.song", { n: count }),
+    coverPath: null,
+    coverKey: "",
     entry: { name: "list", kind: "artist", title: name, payload: { artist: name } },
   }),
   albums: (g) => ({
@@ -265,30 +301,30 @@ const groupEntries = {
 };
 
 // ============ 歌曲列表（按 kind 计算） ============
-const songRows = computed(() => {
+const songRows = computed<SongRow[]>(() => {
   switch (props.kind) {
     case "songs":
-      return state.songs.map((song, i) => ({ song, i }));
+      return state.songs.map((song, i) => ({ song: rowSong(song), i }));
     case "favorites":
       return state.songs
-        .map((song, i) => ({ song, i }))
-        .filter(({ song }) => isFavorite(song.path));
+        .map((song, i) => ({ song: rowSong(song), i }))
+        .filter(({ song }) => isFavorite(song.path || ""));
     case "playlist": {
-      const pl = props.payload?.playlist;
+      const pl = props.payload?.playlist as Playlist | undefined;
       if (!pl) return [];
-      const byPath = new Map(state.songs.map((s, i) => [s.path, { song: s, i }]));
-      return (pl.songPaths || []).map((path) => byPath.get(path)).filter(Boolean);
+      const byPath = new Map(state.songs.map((s, i) => [s.path, { song: rowSong(s), i }]));
+      return (pl.songPaths || []).map((path) => byPath.get(path)).filter((r): r is SongRow => !!r);
     }
     case "artist": {
       const name = props.payload?.artist;
       return state.songs
-        .map((song, i) => ({ song, i }))
+        .map((song, i) => ({ song: rowSong(song), i }))
         .filter(({ song }) => norm(song.artist, UNKNOWN_ARTIST) === name);
     }
     case "album": {
       const album = props.payload?.album;
       return state.songs
-        .map((song, i) => ({ song, i }))
+        .map((song, i) => ({ song: rowSong(song), i }))
         .filter(({ song }) => norm(song.album, UNKNOWN_ALBUM) === album);
     }
     default:
@@ -312,7 +348,7 @@ const groupRows = computed(() => {
       .sort((a, b) => a.name.localeCompare(b.name, "zh"));
   }
   if (props.kind === "albums") {
-    const m = new Map();
+    const m = new Map<string, AlbumGroup>();
     for (const s of state.songs) {
       const album = norm(s.album, UNKNOWN_ALBUM);
       const artist = norm(s.artist, UNKNOWN_ARTIST);
@@ -414,21 +450,21 @@ watch(
 );
 
 // ============ 行点击 ============
-function onPlay(song) {
+function onPlay(song: Song) {
   emit("play", song);
 }
-function onGroup(g) {
+function onGroup(g: GroupEntry) {
   emit("open", g.entry);
 }
 
 // ============ 左滑操作（swipe-reveal：收藏 / 移除） ============
 // 事件委托挂在 .ml-scroll 上（passive: false，横向判定后才 preventDefault，不抢纵向滚动）
-const listEl = ref(null);
+const listEl = ref<HTMLElement | null>(null);
 const swipe = useSwipeReveal(listEl, { rowSelector: ".ml-item" });
 const { isOpen, isDragging, rowTransform, consumeSwipe } = swipe;
 
 // 点击行：刚滑完的点击忽略；已展开的行点击 = 收起；否则播放
-function onRowClick(song, i, path) {
+function onRowClick(song: Song, i: number, path: string) {
   if (consumeSwipe(path)) return;
   if (isOpen(path)) {
     swipe.close();
@@ -438,23 +474,23 @@ function onRowClick(song, i, path) {
 }
 
 // 操作区收藏：与行内小红心同一函数（乐观更新），静默不打扰
-async function actFavorite(path) {
+async function actFavorite(path: string) {
   await toggleFavorite(path);
   swipe.close();
 }
 
 // 操作区移除：跟随视图语义（与桌面 Playlist.removeItem 一致）——歌单视图移除自歌单，其余移除自队列
-async function actRemove(song) {
+async function actRemove(song: Song) {
   try {
     if (props.kind === "playlist") {
-      await removeFromPlaylist(props.payload.playlist.id, song.path);
+      await removeFromPlaylist(props.payload.playlist.id, song.path || "");
     } else {
       const idx = findSongIndex(song);
       if (idx >= 0) removeFromQueue(idx);
     }
     showToast(t("mobile.list.removed"));
   } catch (e) {
-    toastError(e.message);
+    toastError((e as Error).message);
   }
   swipe.close();
 }
@@ -462,10 +498,10 @@ async function actRemove(song) {
 // 操作区删除：曲库删除（移到废纸篓 + 删磁盘文件）。
 // 流程：点删除 → 弹确认层防误触 → DELETE /api/library/songs → toast 结果 → loadSongs 刷新曲库
 // （播放中/队列由桌面任务负责清理；loadSongs 刷新后共享 state 自动一致）
-const confirmSong = ref(null);
+const confirmSong = ref<Song | null>(null);
 const deleting = ref(false);
 
-function actDelete(song) {
+function actDelete(song: Song) {
   confirmSong.value = song;
   swipe.close();
 }
@@ -480,7 +516,7 @@ async function doDelete() {
   if (!song || deleting.value) return;
   deleting.value = true;
   try {
-    const result = await deleteSongs([song.path]);
+    const result = await deleteSongs([song.path!]); // 删除按钮仅在 song.path 存在时渲染（模板 v-if），此处恒非空
     const failed = (result.missing || []).length + (result.errors || []).length;
     if ((result.deleted || 0) > 0) {
       showToast(
@@ -495,7 +531,7 @@ async function doDelete() {
     confirmSong.value = null;
     await loadSongs({ force: true }); // 刷新曲库列表（与桌面同一链路）
   } catch (e) {
-    toastError(e.message);
+    toastError((e as Error).message);
     confirmSong.value = null;
   } finally {
     deleting.value = false;
@@ -503,7 +539,7 @@ async function doDelete() {
 }
 
 // 搜索入口自动聚焦（首页顶栏搜索 → 进入列表页直接开键盘输入）
-const searchInput = ref(null);
+const searchInput = ref<HTMLInputElement | null>(null);
 onMounted(() => {
   if (props.payload?.focusSearch) searchInput.value?.focus();
 });
@@ -512,7 +548,7 @@ onMounted(() => {
 // 仅在歌单视图 + 未搜索时启用（可见集 = 歌单全量，排序不丢歌；与桌面 Playlist 同规则）
 // listEl 已在左滑操作节声明（useSwipeReveal 事件委托与 Sortable 共用同一滚动容器）
 const canReorder = computed(() => props.kind === "playlist" && !query.value.trim());
-let sortable = null;
+let sortable: Sortable | null = null;
 
 function setupSortable() {
   sortable?.destroy();
@@ -525,7 +561,11 @@ function setupSortable() {
     supportPointer: true, // pointer 事件统一触摸/鼠标
     onEnd: ({ oldIndex, newIndex }) => {
       if (oldIndex === newIndex || !props.payload?.playlist) return;
-      const paths = [...listEl.value.querySelectorAll(".ml-item")].map((el) => el.dataset.path);
+      const el = listEl.value;
+      if (!el) return;
+      const paths = [...el.querySelectorAll<HTMLElement>(".ml-item")].map(
+        (node) => node.dataset.path,
+      );
       setPlaylistOrder(props.payload.playlist.id, paths).catch((e) => toastError(e.message));
     },
   });
@@ -539,7 +579,7 @@ onBeforeUnmount(() => sortable?.destroy());
 // coverOk/markCoverError 由 useCoverURL 提供（本组件与 MobileSmartList 共用）
 
 // 歌手首字母色块（与 Playlist.vue 一致）
-function hashBg(name) {
+function hashBg(name: string) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   const hue = h % 360;

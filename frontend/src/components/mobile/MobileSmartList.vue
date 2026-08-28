@@ -85,7 +85,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronLeft, Music2, Heart, Trash2 } from "@lucide/vue";
@@ -105,8 +105,11 @@ import {
   loadSmartView,
   playSmartRow,
   fmtSmartSub,
+  type SmartViewRow,
+  type SmartViewKind,
 } from "../../composables/useSmartViews.js";
 import { useCoverURL, COVER_CACHE_FIRST_N } from "../../composables/useCoverURL.js";
+import type { Song } from "../../composables/usePlayer.js";
 
 const { t } = useI18n();
 
@@ -119,8 +122,13 @@ const props = defineProps({
 });
 const emit = defineEmits(["close", "open-player"]);
 
-const meta = computed(() => SMART_VIEWS[props.kind] || SMART_VIEWS.recentAdded);
-const rows = computed(() => smartViewState.rows);
+const meta = computed(() => SMART_VIEWS[props.kind as SmartViewKind] || SMART_VIEWS.recentAdded);
+// 行类型：song.path 按 string 处理（网络歌可能为 null；模板消费方均按 string，运行时原样透传）
+type SmartViewRowLike = SmartViewRow & { song: Song & { path: string } };
+// 行 path 类型归一（运行时原样透传，行为零变化）：保持 null 原值，仅满足类型检查
+const rows = computed(() =>
+  smartViewState.rows.map((r) => ({ ...r, song: { ...r.song, path: r.song.path as string } })),
+);
 const loading = computed(() => smartViewState.loading);
 const error = computed(() => smartViewState.error);
 
@@ -143,15 +151,15 @@ watch(
   { immediate: true },
 );
 
-function isCurrent(row) {
+function isCurrent(row: SmartViewRowLike) {
   return state.currentSong && row.song.path === state.currentSong.path;
 }
-function sub(row) {
+function sub(row: SmartViewRowLike) {
   return fmtSmartSub(row);
 }
 
 // 点击行：刚滑完的点击忽略；已展开的行点击 = 收起；否则播放并打开全屏播放器（与 MobileShell.playFromList 一致）
-function onRowClick(row) {
+function onRowClick(row: SmartViewRowLike) {
   const path = row.song.path;
   if (consumeSwipe(path)) return;
   if (isOpen(path)) {
@@ -169,19 +177,19 @@ const swipe = useSwipeReveal(listEl, { rowSelector: ".msv-item" });
 const { isOpen, isDragging, rowTransform, consumeSwipe } = swipe;
 
 // 操作区收藏：与列表页同一函数（乐观更新），静默不打扰
-async function actFavorite(path) {
+async function actFavorite(path: string) {
   await toggleFavorite(path);
   swipe.close();
 }
 
 // 操作区移除：智能视图行对应队列歌曲 → 从队列移除（与桌面非歌单视图语义一致）
-async function actRemove(row) {
+async function actRemove(row: SmartViewRowLike) {
   try {
     const idx = findSongIndex(row.song);
     if (idx >= 0) removeFromQueue(idx);
     showToast(t("mobile.list.removed"));
   } catch (e) {
-    toastError(e.message);
+    toastError((e as Error).message);
   }
   swipe.close();
 }
@@ -189,7 +197,7 @@ async function actRemove(row) {
 // 进入视图时拉取数据（切换 kind 重新拉取）
 watch(
   () => props.kind,
-  (k) => loadSmartView(k),
+  (k) => loadSmartView(k as SmartViewKind),
   { immediate: true },
 );
 

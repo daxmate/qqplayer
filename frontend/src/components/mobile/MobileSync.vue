@@ -384,7 +384,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -427,6 +427,67 @@ import {
   setAutoUpdate,
 } from "../../utils/sync.js";
 
+// ============ 本地类型（sync.ts 内部类型未导出，按同形「宽松视图」声明，运行时零变化） ============
+interface PlaylistLike {
+  id: string;
+  name: string;
+  songPaths?: string[];
+}
+interface SongLike {
+  path?: string;
+  name?: string;
+  artist?: string;
+}
+interface BookLike {
+  id?: string;
+  title?: string;
+  author?: string;
+}
+interface DictLike {
+  path?: string;
+  name?: string;
+  title?: string;
+}
+interface DownloadItemLike {
+  url: string;
+  path: string;
+  sha256: string;
+  size: number;
+  name?: string;
+}
+interface SyncOverviewLike {
+  missing?: { audio: number; covers: number; books: number; dicts: number };
+  updateCount?: number;
+  orphanSize?: number;
+  orphans?: { path: string; size: number }[];
+  assets?: { path?: string; sha256?: string; size?: number }[];
+}
+interface AssetsSizeDataLike {
+  total?: number;
+  byType?: Record<string, number>;
+}
+/** 下载面板行：SyncDownloadEntry + path（path 是 map key；模板按字符串消费，网络/未知时可能缺失） */
+interface SyncDlEntry {
+  path?: string;
+  name: string;
+  status: string;
+  received: number;
+  total: number;
+  error: string;
+  url: string;
+  sha256: string;
+  size: number;
+}
+interface DictRow {
+  dict: DictLike;
+  item: DownloadItemLike;
+}
+interface StorageRow {
+  key: string;
+  labelKey: string;
+  bytes: number;
+}
+
 defineEmits(["back"]);
 defineProps({
   // 嵌入式面板模式（负一屏设置区）：隐藏自身头部（返回/标题/上次同步时间），由 MobileSettings 统一头部提供
@@ -441,7 +502,7 @@ const lastSyncText = computed(() => {
 
 // ---------- 主按钮 / 总览（缺失 + 可更新徽标 / 孤儿 / 存储） ----------
 const syncBusy = ref(false); // 批量下载动作进行中（按钮禁用，防重复提交）
-const overview = ref(null); // computeSyncOverview 结果
+const overview = ref<SyncOverviewLike | null>(null); // computeSyncOverview 结果
 const missingTotal = computed(() => {
   const m = overview.value?.missing;
   if (!m) return 0;
@@ -471,13 +532,13 @@ async function onSyncAll() {
 }
 
 // ---------- 音乐 / 图书（自 SettingsModal 同步 tab 迁移） ----------
-const playlists = ref([]); // /api/playlists 列表（歌单下拉）
+const playlists = ref<PlaylistLike[]>([]); // /api/playlists 列表（歌单下拉）
 const syncPlaylistId = ref("");
-const allSongs = ref([]); // /api/songs 本地歌曲（手动选择面板数据）
-const allBooks = ref([]); // /api/books 列表（手动选择面板数据）
+const allSongs = ref<SongLike[]>([]); // /api/songs 本地歌曲（手动选择面板数据）
+const allBooks = ref<BookLike[]>([]); // /api/books 列表（手动选择面板数据）
 const picker = ref(""); // '' | 'songs' | 'books'（内联多选面板）
 const pickerSearch = ref("");
-const pickerSelected = ref([]); // songs: path[]；books: id[]
+const pickerSelected = ref<string[]>([]); // songs: path[]；books: id[]
 
 const filteredSongs = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase();
@@ -533,7 +594,9 @@ async function syncSelectedPlaylist() {
   syncBusy.value = true;
   try {
     const [pr, sr] = await Promise.all([apiGet("/api/playlists"), apiGet("/api/songs")]);
-    const pl = ((pr.ok && pr.data && pr.data.playlists) || []).find((p) => p.id === pid);
+    const pl = ((pr.ok && pr.data && pr.data.playlists) || []).find(
+      (p: PlaylistLike) => p.id === pid,
+    );
     if (!pl) {
       toastFetchFailed();
       return;
@@ -577,7 +640,7 @@ async function syncAllBooks() {
   }
 }
 
-async function openPicker(which) {
+async function openPicker(which: "songs" | "books") {
   if (picker.value === which) {
     picker.value = "";
     return;
@@ -603,9 +666,11 @@ async function openPicker(which) {
 
 function togglePickerAll() {
   const isSongs = picker.value === "songs";
-  const list = isSongs ? filteredSongs.value : filteredBooks.value;
+  const list = (isSongs ? filteredSongs.value : filteredBooks.value) as Array<{
+    [k: string]: unknown;
+  }>;
   const key = isSongs ? "path" : "id";
-  const ids = list.map((x) => x[key]);
+  const ids = list.map((x) => x[key] as string);
   if (!ids.length) return;
   const hasAll = ids.every((x) => pickerSelected.value.includes(x));
   if (hasAll) {
@@ -617,7 +682,7 @@ function togglePickerAll() {
 
 async function downloadPickedSongs() {
   if (syncBusy.value) return;
-  const picked = allSongs.value.filter((s) => pickerSelected.value.includes(s.path));
+  const picked = allSongs.value.filter((s) => pickerSelected.value.includes(s.path!)); // 面板数据加载时已过滤 path 缺失
   if (!picked.length) return;
   syncBusy.value = true;
   try {
@@ -634,7 +699,7 @@ async function downloadPickedSongs() {
 
 async function downloadPickedBooks() {
   if (syncBusy.value) return;
-  const picked = allBooks.value.filter((b) => pickerSelected.value.includes(b.id));
+  const picked = allBooks.value.filter((b) => pickerSelected.value.includes(b.id!)); // 面板数据加载时已过滤 id 缺失
   if (!picked.length) return;
   syncBusy.value = true;
   try {
@@ -647,12 +712,12 @@ async function downloadPickedBooks() {
 }
 
 // ---------- 词典区 ----------
-const dicts = ref([]); // manifest dicts 条目
-const dictItems = ref([]); // assetForDict 产物 [{path,url,sha256,size}]
+const dicts = ref<DictLike[]>([]); // manifest dicts 条目
+const dictItems = ref<DownloadItemLike[]>([]); // assetForDict 产物 [{path,url,sha256,size}]
 
 // dict 条目与下载项按下标配对（assetForDict 过滤 null 时同步过滤）
-const dictRows = computed(() => {
-  const rows = [];
+const dictRows = computed<DictRow[]>(() => {
+  const rows: DictRow[] = [];
   const ds = dicts.value;
   for (let i = 0; i < ds.length; i++) {
     const item = dictItems.value[i];
@@ -661,7 +726,7 @@ const dictRows = computed(() => {
   return rows;
 });
 
-async function loadDicts() {
+async function loadDicts(): Promise<DictLike[]> {
   let dictsCache = await getCache("sync:dicts");
   if (!Array.isArray(dictsCache) || !dictsCache.length) {
     try {
@@ -677,10 +742,12 @@ async function loadDicts() {
 async function refreshDicts() {
   const ds = await loadDicts();
   dicts.value = ds;
-  dictItems.value = (await Promise.all(ds.map((d) => assetForDict(d)))).filter(Boolean);
+  dictItems.value = (await Promise.all(ds.map((d) => assetForDict(d)))).filter(
+    (it): it is DownloadItemLike => !!it,
+  );
 }
 
-function dictStatus(item) {
+function dictStatus(item: DownloadItemLike) {
   const e = syncDownloads[item.path];
   return e ? e.status : "";
 }
@@ -729,7 +796,7 @@ async function downloadAllDicts() {
   }
 }
 
-async function deleteDict(item) {
+async function deleteDict(item: DownloadItemLike) {
   if (syncBusy.value) return;
   const n = clearAssetsByType("dicts", [{ path: item.path }]);
   if (!n) {
@@ -761,7 +828,7 @@ const downloadSummary = computed(() => {
   const done = downloadStats.value.done;
   return { total, done, pct: total ? Math.min(100, Math.round((done / total) * 100)) : 0 };
 });
-const activeList = computed(() =>
+const activeList = computed<SyncDlEntry[]>(() =>
   Object.values(syncDownloads).filter((d) => d.status === "downloading"),
 );
 
@@ -771,19 +838,19 @@ function retryAllFailed() {
   }
 }
 
-function statusLabel(status) {
+function statusLabel(status: string) {
   const key = "settings.syncStatus" + status.charAt(0).toUpperCase() + status.slice(1);
   const text = t(key);
   return text === key ? status : text;
 }
 
-function dlPercent(d) {
+function dlPercent(d: SyncDlEntry) {
   if (!d.total) return 0;
   return Math.min(100, Math.round((d.received / d.total) * 100));
 }
 
 // ---------- 存储管理（按类型细分 + 清理） ----------
-const storage = ref(null); // fetchAssetsSizeDetailed 结果
+const storage = ref<AssetsSizeDataLike | null>(null); // fetchAssetsSizeDetailed 结果
 const STORAGE_TYPES = [
   { key: "audio", labelKey: "mobile.syncCenter.typeAudio" },
   { key: "covers", labelKey: "mobile.syncCenter.typeCovers" },
@@ -792,16 +859,16 @@ const STORAGE_TYPES = [
   { key: "dicts", labelKey: "mobile.syncCenter.typeDicts" },
 ];
 const storageRows = computed(() => {
-  const byType = storage.value?.byType || {};
+  const byType = (storage.value?.byType || {}) as Record<string, number>;
   return STORAGE_TYPES.map((s) => ({ ...s, bytes: byType[s.key] || 0 }));
 });
 const otherBytes = computed(() => {
-  const byType = storage.value?.byType || {};
+  const byType = (storage.value?.byType || {}) as Record<string, number>;
   return (byType.meta || 0) + (byType.other || 0);
 });
 const storageTotal = computed(() => storage.value?.total || 0);
 
-function formatBytes(bytes) {
+function formatBytes(bytes: number) {
   if (!bytes || bytes < 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
@@ -817,7 +884,7 @@ async function refreshStorage() {
   storage.value = await fetchAssetsSizeDetailed();
 }
 
-async function clearType(row) {
+async function clearType(row: StorageRow) {
   if (syncBusy.value) return;
   const assets = overview.value?.assets || [];
   const n = clearAssetsByType(row.key, assets);
@@ -828,7 +895,7 @@ async function clearType(row) {
 }
 
 const clearAllArmed = ref(false); // 两段式确认（WKWebView 不支持 window.confirm，沿用内联确认态）
-let clearAllArmTimer = null;
+let clearAllArmTimer: ReturnType<typeof setTimeout> | null = null;
 function toggleClearAll() {
   if (!clearAllArmed.value) {
     clearAllArmed.value = true;
@@ -844,7 +911,7 @@ function toggleClearAll() {
 
 // ---------- 清理未引用 ----------
 const orphanArmed = ref(false);
-let orphanArmTimer = null;
+let orphanArmTimer: ReturnType<typeof setTimeout> | null = null;
 async function cleanOrphans() {
   if (!orphanArmed.value) {
     orphanArmed.value = true;
@@ -880,7 +947,7 @@ function togglePrefetch() {
 // ---------- 下载完成 → 自动刷新存储占用 ----------
 // 存储区在进入页面/手动刷新时取值；下载中的 .part 不计入（完成才显示）。
 // 监听状态变化：有条目 done/failed（终态）→ 防抖刷新存储区，下载完用户立即可见占用。
-let storageRefreshTimer = null;
+let storageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
   () =>
     Object.values(syncDownloads)
