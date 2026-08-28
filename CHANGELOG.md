@@ -5,7 +5,7 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [1.0.0] - 2026-08-28
+## [1.0.0-rc.2] - 2026-08-28
 
 ### 🎯 架构改造 P0-P3 全部落地（2026-08-27 ~ 08-28，行为零变化）
 
