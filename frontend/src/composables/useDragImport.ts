@@ -7,32 +7,39 @@ import { apiPost } from "../utils/apiClient.js";
 import i18n from "../locales/i18n.js";
 
 // 音频扩展名白名单（大小写不敏感）
-export const AUDIO_EXTENSIONS = ["mp3", "flac", "m4a", "wav", "ogg", "aac", "opus"];
+export const AUDIO_EXTENSIONS: string[] = ["mp3", "flac", "m4a", "wav", "ogg", "aac", "opus"];
 
 // 模块级单例状态（与 useToast 同模式：跨组件共享，测试可读取/重置）
-const dragCount = ref(0); // 拖入计数：enter +1 / leave -1，归零才隐藏（避免子元素抖动）
-const uploading = ref(false); // 上传中：禁用重复拖入
+const dragCount = ref<number>(0); // 拖入计数：enter +1 / leave -1，归零才隐藏（避免子元素抖动）
+const uploading = ref<boolean>(false); // 上传中：禁用重复拖入
 
-export const dragVisible = computed(() => dragCount.value > 0);
+export const dragVisible = computed<boolean>(() => dragCount.value > 0);
 export const dragUploading = uploading;
 
-export function isAudioFile(file) {
+/** 导入响应：{ imported, skipped, errors }（POST /api/import 返回） */
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: number;
+}
+
+export function isAudioFile(file: { name?: string } | null | undefined): boolean {
   const name = String(file?.name || "");
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   return AUDIO_EXTENSIONS.includes(ext);
 }
 
-export function filterAudioFiles(files) {
+export function filterAudioFiles(files: FileList | File[] | null | undefined): File[] {
   return Array.from(files || []).filter(isAudioFile);
 }
 
 // 是否文件拖拽（文本/链接拖入不触发遮罩与导入）
-export function isFileDrag(e) {
+export function isFileDrag(e: DragEvent | null | undefined): boolean {
   return Array.from(e?.dataTransfer?.types || []).includes("Files");
 }
 
 // 上传：FormData 多值 files → POST /api/import → { imported, skipped, errors }
-export async function uploadFiles(files) {
+export async function uploadFiles(files: File[]): Promise<ImportResult> {
   const fd = new FormData();
   for (const f of files) fd.append("files", f);
   const r = await apiPost("/api/import", fd);
@@ -41,7 +48,7 @@ export async function uploadFiles(files) {
 }
 
 // 导入 + toast：成功「已导入 n 首」（skipped/errors 非空合并提示），失败 toastError
-export async function importFiles(files) {
+export async function importFiles(files: File[]): Promise<void> {
   if (uploading.value) return;
   uploading.value = true;
   try {
@@ -59,19 +66,19 @@ export async function importFiles(files) {
 }
 
 // ---------- 拖拽事件处理（内部导出，便于单元测试） ----------
-export function handleDragEnter() {
+export function handleDragEnter(): void {
   dragCount.value++;
 }
 
-export function handleDragLeave() {
+export function handleDragLeave(): void {
   if (dragCount.value > 0) dragCount.value--; // 防止 leave 比 enter 多时计数为负
 }
 
-export function handleDragOver(e) {
+export function handleDragOver(e: DragEvent): void {
   e.preventDefault(); // 不阻止则浏览器默认打开文件
 }
 
-export async function handleDrop(e) {
+export async function handleDrop(e: DragEvent): Promise<void> {
   e.preventDefault();
   dragCount.value = 0;
   const files = filterAudioFiles(e.dataTransfer?.files);
@@ -83,16 +90,16 @@ export async function handleDrop(e) {
 }
 
 // 挂载 window 级拖拽监听（App.vue onMounted 调用），返回卸载函数
-export function setupDragImport() {
-  const onEnter = (e) => {
+export function setupDragImport(): () => void {
+  const onEnter = (e: DragEvent) => {
     if (isFileDrag(e)) handleDragEnter();
   };
-  const onOver = (e) => {
+  const onOver = (e: DragEvent) => {
     if (isFileDrag(e)) handleDragOver(e);
   };
   // dragleave 时 dataTransfer.types 常为空，不能按 isFileDrag 过滤，只做递减
   const onLeave = () => handleDragLeave();
-  const onDrop = (e) => {
+  const onDrop = (e: DragEvent) => {
     if (isFileDrag(e)) handleDrop(e);
   };
 
@@ -112,7 +119,7 @@ export function setupDragImport() {
 }
 
 // 重置状态（测试用）
-export function resetDragState() {
+export function resetDragState(): void {
   dragCount.value = 0;
   uploading.value = false;
 }

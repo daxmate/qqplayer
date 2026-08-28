@@ -27,14 +27,14 @@ export const LYRIC_MIN_HARD = 160; // 手动模式歌词硬保护（px，拖不�
 export const CENTER_GAP = 12; // .center 列 gap（px，与 App.vue 样式保持同步）
 
 // 测量值：center 容器高度（ResizeObserver）+ 视口高度（window resize）
-export const centerH = ref(0);
-export const vh = ref(0);
+export const centerH = ref<number>(0);
+export const vh = ref<number>(0);
 
 // 手动模式（有记忆固定值）？
-export const isManual = computed(() => uiSettings.coverSize > 0);
+export const isManual = computed<boolean>(() => uiSettings.coverSize > 0);
 
 // 自适应尺寸：保底歌词 ≥220px；未测量（首帧/测试/无布局）→ 340 兜底 ≈ CSS 默认 min(46vh,340px)
-export const adaptiveSize = computed(() => {
+export const adaptiveSize = computed<number>(() => {
   if (vh.value <= 0 || centerH.value <= 0) return COVER_DEFAULT;
   const cap = Math.min(vh.value * 0.46, COVER_DEFAULT);
   const lyricCap = centerH.value - LYRIC_MIN_ADAPTIVE - CENTER_GAP;
@@ -42,25 +42,25 @@ export const adaptiveSize = computed(() => {
 });
 
 // 手动模式硬保护上限：歌词区 ≥160px（centerH 未测量时不限制，首帧 CSS 兜底）
-const manualCap = computed(() => {
+const manualCap = computed<number>(() => {
   if (centerH.value <= 0) return COVER_MAX;
   return Math.max(COVER_MIN, Math.min(COVER_MAX, centerH.value - LYRIC_MIN_HARD - CENTER_GAP));
 });
 
 // ---------- 拖拽状态 ----------
-export const dragging = ref(false);
-export const dragSize = ref(null); // 拖拽中实时尺寸（null = 非拖拽）
+export const dragging = ref<boolean>(false);
+export const dragSize = ref<number | null>(null); // 拖拽中实时尺寸（null = 非拖拽）
 let dragStartY = 0;
 let dragStartSize = 0;
 
-function onPointerMove(e) {
+function onPointerMove(e: PointerEvent): void {
   const delta = dragStartY - e.clientY; // 向上拖 = 封面变大
   dragSize.value = Math.round(
     Math.max(COVER_MIN, Math.min(dragStartSize + delta, manualCap.value)),
   );
 }
 
-function endDrag() {
+function endDrag(): void {
   // 松手才提交：dragSize 落进 uiSettings → settingsSync watch 写透 localStorage + 防抖 PUT
   if (dragSize.value != null) uiSettings.coverSize = dragSize.value;
   dragSize.value = null;
@@ -74,7 +74,7 @@ function endDrag() {
   }
 }
 
-export function startCoverDrag(e) {
+export function startCoverDrag(e: { clientY: number; preventDefault: () => void }): void {
   if (!coverVisible("large") || dragging.value) return;
   dragging.value = true;
   dragStartY = e.clientY;
@@ -91,7 +91,7 @@ export function startCoverDrag(e) {
 }
 
 // 渲染用有效封面尺寸（px）：拖拽中实时值 > 手动固定（含硬保护 clamp）> 自适应
-export const coverSizePx = computed(() => {
+export const coverSizePx = computed<number>(() => {
   if (dragging.value && dragSize.value != null) return dragSize.value;
   if (isManual.value) {
     return Math.max(COVER_MIN, Math.min(uiSettings.coverSize, manualCap.value));
@@ -100,19 +100,19 @@ export const coverSizePx = computed(() => {
 });
 
 // 恢复默认：清记忆值 → 回自适应模式
-export function resetCoverSize() {
+export function resetCoverSize(): void {
   uiSettings.coverSize = 0;
 }
 
 // 测量挂载：RO 量 center 高度 + resize 量视口；返回卸载函数
-export function observeCoverArea(el) {
+export function observeCoverArea(el: HTMLElement | null): () => void {
   if (!el || typeof window === "undefined") return () => {};
   vh.value = window.innerHeight;
   const updateVh = () => {
     vh.value = window.innerHeight;
   };
   window.addEventListener("resize", updateVh);
-  let ro = null;
+  let ro: ResizeObserver | null = null;
   const measure = () => {
     centerH.value = el.clientHeight;
   };

@@ -14,7 +14,41 @@ import { reactive } from "vue";
 import { apiPost } from "../utils/apiClient.js";
 import i18n from "../locales/i18n.js";
 
-export const scrapeBatchState = reactive({
+/** 单条刮削结果状态：written 成功 / skipped 跳过 / failed 失败 */
+export type ScrapeStatus = "written" | "skipped" | "failed";
+
+/** 单条刮削结果（reason 缺失时面板归入「其他」分组） */
+export interface ScrapeBatchResult {
+  path: string;
+  status: ScrapeStatus;
+  reason?: string;
+  written?: string[];
+  candidates?: number;
+}
+
+/** 汇总统计（后端返回字段缺失/非数字时前端回落 0） */
+export interface ScrapeBatchSummary {
+  total: number;
+  written: number;
+  skipped: number;
+  failed: number;
+}
+
+/** 批量刮削请求体：多选批量 paths | 一键整库 mode */
+export type ScrapeBatchPayload = { paths: string[] } | { mode: "library" };
+
+/** 结果面板共享状态 */
+export interface ScrapeBatchState {
+  open: boolean; // 结果面板开关
+  loading: boolean; // 请求进行中
+  enabled: boolean; // 后端是否允许批量刮削（false → 面板提示去设置开启）
+  truncated: boolean; // 明细被截断（结果太多只返回部分）
+  results: ScrapeBatchResult[]; // [{path,status,reason,written,candidates}]
+  summary: ScrapeBatchSummary;
+  error: string; // 请求级错误（非空时面板显示错误态，不展示明细）
+}
+
+export const scrapeBatchState = reactive<ScrapeBatchState>({
   open: false, // 结果面板开关
   loading: false, // 请求进行中
   enabled: true, // 后端是否允许批量刮削（false → 面板提示去设置开启）
@@ -24,11 +58,11 @@ export const scrapeBatchState = reactive({
   error: "", // 请求级错误（非空时面板显示错误态，不展示明细）
 });
 
-export function openScrapeResult() {
+export function openScrapeResult(): void {
   scrapeBatchState.open = true;
 }
 
-export function closeScrapeResult() {
+export function closeScrapeResult(): void {
   scrapeBatchState.open = false;
 }
 
@@ -36,7 +70,7 @@ export function closeScrapeResult() {
  * 执行批量刮削：payload = {paths: [...]} 或 {mode: "library"}
  * 完成后打开结果面板（enabled=false / 错误也打开，面板内提示）。
  */
-export async function runScrapeBatch(payload) {
+export async function runScrapeBatch(payload: ScrapeBatchPayload): Promise<void> {
   if (scrapeBatchState.loading) return;
   scrapeBatchState.loading = true;
   scrapeBatchState.error = "";
@@ -66,7 +100,8 @@ export async function runScrapeBatch(payload) {
     };
     scrapeBatchState.open = true;
   } catch (e) {
-    scrapeBatchState.error = (e && e.message) || i18n.global.t("scrape.batchError");
+    const err = e as Error | null | undefined;
+    scrapeBatchState.error = err?.message || i18n.global.t("scrape.batchError");
     scrapeBatchState.open = true;
   } finally {
     scrapeBatchState.loading = false;
