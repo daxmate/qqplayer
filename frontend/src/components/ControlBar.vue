@@ -62,7 +62,7 @@
         <button v-if="!collapsed" class="btn" :title="t('control.prevLine')" @click="prevLine">
           <StepBack :size="17" />
         </button>
-        <button class="btn play" :title="t('control.playPause')" @click="togglePlay">
+        <button class="btn play ctrl-play" :title="t('control.playPause')" @click="togglePlay">
           <Pause v-if="state.isPlaying" :size="21" />
           <Play v-else :size="21" />
         </button>
@@ -70,7 +70,7 @@
           <StepForward :size="17" />
         </button>
         <button
-          class="btn"
+          class="btn ctrl-speed"
           :class="{ on: state.speed !== 1.0 }"
           :title="t('control.speed')"
           @click="cycleSpeed"
@@ -78,12 +78,16 @@
           <Gauge :size="15" />
           {{ state.speed }}x
         </button>
-        <button class="btn on" :title="t('control.exitKaraoke')" @click="switchMode('continuous')">
+        <button
+          class="btn on ctrl-mic"
+          :title="t('control.exitKaraoke')"
+          @click="switchMode('continuous')"
+        >
           <Mic :size="15" />
           {{ t("control.karaoke") }}
         </button>
         <button
-          class="btn"
+          class="btn ctrl-loop"
           :class="{ on: state.abLoop || state.karaokeLoop }"
           :disabled="!state.karaokeOn"
           :title="loopTitle"
@@ -160,15 +164,24 @@
           @input="onVolume"
         />
       </div>
-      <!-- 收起态信息按钮：点开显示提示气泡（上滑或点气泡展开） -->
-      <button
-        v-if="collapsed"
-        class="btn ctrl-info-btn"
-        :title="t('control.expandHint')"
-        @click="tipOpen = !tipOpen"
-      >
-        <Info :size="15" />
-      </button>
+      <!-- 收起态：歌词编辑（铅笔）+ 信息按钮（提示气泡）——信息按钮放编辑按钮旁边 -->
+      <template v-if="collapsed">
+        <button
+          class="btn song-edit-btn ctrl-edit-btn"
+          :title="t('tags.editTitle')"
+          data-testid="song-edit-btn"
+          @click="tagEditorOpen = true"
+        >
+          <Pencil :size="14" />
+        </button>
+        <button
+          class="btn ctrl-info-btn"
+          :title="t('control.expandHint')"
+          @click="tipOpen = !tipOpen"
+        >
+          <Info :size="15" />
+        </button>
+      </template>
     </div>
 
     <!-- 当前歌曲信息 -->
@@ -773,6 +786,32 @@ function fmt(t: number) {
 /* 收起时更紧凑：30px 顶部留白是桌面 collapse-btn 用的，移动端隐藏了该按钮 */
 .controls.collapsible.collapsed {
   padding-top: 10px;
+}
+/* 收起态按钮排序：倍速 | 播放 跟唱 | 单句 · 编辑 信息（flex order，仅收起态生效） */
+.controls.collapsed .ctrl-speed {
+  order: 1;
+}
+.controls.collapsed .ctrl-play {
+  order: 2;
+}
+.controls.collapsed .ctrl-mic {
+  order: 3;
+}
+.controls.collapsed .ctrl-loop {
+  order: 4;
+}
+.controls.collapsed .ctrl-edit-btn {
+  order: 5;
+}
+.controls.collapsed .ctrl-info-btn {
+  order: 6;
+}
+/* 收起态编辑按钮：紧凑小按钮（覆盖 .btn-row .btn 的宽度规则） */
+.controls.collapsed .btn.ctrl-edit-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
 }
 /* 收起态信息小按钮：与 .btn 同尺寸风格，颜色偏 text3，hover 提亮 */
 .ctrl-info-btn {

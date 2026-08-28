@@ -124,6 +124,7 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     expect(w.find(".song-line").exists()).toBe(true);
     // 收起态专属元素不存在
     expect(w.find(".ctrl-info-btn").exists()).toBe(false);
+    expect(w.find(".ctrl-edit-btn").exists()).toBe(false);
     expect(w.find(".ctrl-tip").exists()).toBe(false);
     w.unmount();
   });
@@ -150,8 +151,15 @@ describe("ControlBar 折叠（karaoke + collapsible）", () => {
     expect(btnByTitle(w, "变速")).toBeTruthy();
     expect(btnByTitle(w, "退出跟唱")).toBeTruthy();
     expect(loopBtn(w)).toBeTruthy();
-    // 收起态信息按钮出现
+    // 收起态按钮排序 class：倍速/播放/跟唱/循环 + 编辑/信息（flex order 视觉排序，jsdom 不布局只验证 class）
+    expect(w.find(".ctrl-speed").exists()).toBe(true);
+    expect(w.find(".ctrl-play").exists()).toBe(true);
+    expect(w.find(".ctrl-mic").exists()).toBe(true);
+    expect(w.find(".ctrl-loop").exists()).toBe(true);
+    expect(w.find(".ctrl-edit-btn").exists()).toBe(true);
     expect(w.find(".ctrl-info-btn").exists()).toBe(true);
+    // 收起态编辑按钮（铅笔）可点开标签编辑弹窗
+    expect(w.find('[data-testid="song-edit-btn"]').exists()).toBe(true);
     w.unmount();
   });
 
