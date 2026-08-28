@@ -29,9 +29,9 @@ describe("键盘快捷键", () => {
     return call ? call[1] : null;
   }
 
-  function fire(handler, code, target = {}) {
+  function fire(handler: unknown, code: string, target: Record<string, unknown> = {}) {
     const ev = { code, target, preventDefault: vi.fn() };
-    handler(ev);
+    (handler as (ev: unknown) => void)(ev);
     return ev;
   }
 
@@ -91,7 +91,7 @@ describe("键盘快捷键", () => {
 
   it("node 环境（无 window）安装安全返回", () => {
     const orig = globalThis.window;
-    globalThis.window = undefined;
+    (globalThis as { window: Window | undefined }).window = undefined;
     try {
       const un = setupKeyboardShortcuts();
       expect(typeof un).toBe("function");
@@ -101,7 +101,7 @@ describe("键盘快捷键", () => {
   });
 
   // 跟唱句跳转（默认 N 下一句 / P 上一句，仅跟唱模式生效，键位可配置）
-  const K_LRC = [
+  const K_LRC: Array<{ type: "line"; s: number; e: number; text: string[] }> = [
     { type: "line", s: 0, e: 10, text: ["第一句"] },
     { type: "line", s: 10, e: 20, text: ["第二句"] },
   ];
@@ -189,7 +189,12 @@ describe("快捷键配置表（任务 G）", () => {
   }
 
   // mods：{ metaKey, ctrlKey, altKey, shiftKey } 覆盖默认 false
-  function fire(handler, code, target = {}, mods = {}) {
+  function fire(
+    handler: unknown,
+    code: string,
+    target: Record<string, unknown> = {},
+    mods: Record<string, boolean> = {},
+  ) {
     const ev = {
       code,
       target,
@@ -200,14 +205,14 @@ describe("快捷键配置表（任务 G）", () => {
       shiftKey: false,
       ...mods,
     };
-    handler(ev);
+    (handler as (ev: unknown) => void)(ev);
     return ev;
   }
 
   it("配置表覆盖全部快捷键（22 项），默认值与持久化字段一致", () => {
     expect(SHORTCUTS).toHaveLength(22);
     for (const s of SHORTCUTS) {
-      expect(playbackSettings[s.settingKey]).toBe(s.defaultCode);
+      expect(playbackSettings[s.settingKey as keyof typeof playbackSettings]).toBe(s.defaultCode);
       expect(s.id && s.labelKey && s.category && s.defaultCode).toBeTruthy();
     }
     // 分类覆盖 6 组（设置弹窗分组渲染顺序）
@@ -227,7 +232,9 @@ describe("快捷键配置表（任务 G）", () => {
 
   it("PLAYBACK_SETTINGS_DEFAULTS 包含全部快捷键字段", () => {
     for (const s of SHORTCUTS) {
-      expect(PLAYBACK_SETTINGS_DEFAULTS[s.settingKey]).toBe(s.defaultCode);
+      expect(
+        PLAYBACK_SETTINGS_DEFAULTS[s.settingKey as keyof typeof PLAYBACK_SETTINGS_DEFAULTS],
+      ).toBe(s.defaultCode);
     }
   });
 
@@ -488,7 +495,7 @@ describe("setupPlayerActions（迷你窗控制指令消费）", () => {
     vi.useRealTimers();
   });
 
-  function stubActions(actions) {
+  function stubActions(actions: Array<{ action: string; value?: number | string | null }>) {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {

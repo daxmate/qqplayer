@@ -93,7 +93,7 @@ describe("removeFromQueue", () => {
     expect(state.songs.map((s) => s.name)).toEqual(["A", "C"]);
     expect(state.currentIndex).toBe(1);
     await new Promise((r) => setTimeout(r, 0));
-    expect(state.currentSong.name).toBe("C");
+    expect(state.currentSong!.name).toBe("C");
   });
 
   it("移除最后一首：切到新的最后一首", async () => {
@@ -104,7 +104,7 @@ describe("removeFromQueue", () => {
     expect(state.songs.map((s) => s.name)).toEqual(["A", "B"]);
     expect(state.currentIndex).toBe(1);
     await new Promise((r) => setTimeout(r, 0));
-    expect(state.currentSong.name).toBe("B");
+    expect(state.currentSong!.name).toBe("B");
   });
 
   it("移除当前歌之前的歌：索引前移", async () => {
@@ -166,8 +166,8 @@ describe("removeFromQueue 撤销（toast + 原位恢复）", () => {
     expect(items).toHaveLength(1);
     expect(items[0].text).toContain("B");
     expect(items[0].duration).toBe(5000);
-    expect(items[0].action.label).toBe("撤销");
-    items[0].action.onClick();
+    expect(items[0].action!.label).toBe("撤销");
+    items[0].action!.onClick();
     expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C", "D"]);
     expect(state.currentIndex).toBe(2); // C 仍是当前歌（索引顺延）
   });
@@ -179,9 +179,9 @@ describe("removeFromQueue 撤销（toast + 原位恢复）", () => {
     removeFromQueue(2); // 移除 D → [A,C]
     const { items } = useToast();
     expect(items).toHaveLength(2);
-    items[1].action.onClick(); // 撤销 D（原 index 2）→ [A,C,D]
+    items[1].action!.onClick(); // 撤销 D（原 index 2）→ [A,C,D]
     expect(state.songs.map((s) => s.name)).toEqual(["A", "C", "D"]);
-    items[0].action.onClick(); // 撤销 B（原 index 1）→ [A,B,C,D]
+    items[0].action!.onClick(); // 撤销 B（原 index 1）→ [A,B,C,D]
     expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C", "D"]);
   });
 
@@ -191,9 +191,9 @@ describe("removeFromQueue 撤销（toast + 原位恢复）", () => {
     removeFromQueue(3); // 移除 D → [A,B,C]
     removeFromQueue(1); // 移除 B → [A,C]
     const { items } = useToast();
-    items[1].action.onClick(); // 撤销 B（index 1）→ [A,B,C]
+    items[1].action!.onClick(); // 撤销 B（index 1）→ [A,B,C]
     expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C"]);
-    items[0].action.onClick(); // 撤销 D（原 index 3 越界）→ clamp 到末尾
+    items[0].action!.onClick(); // 撤销 D（原 index 3 越界）→ clamp 到末尾
     expect(state.songs.map((s) => s.name)).toEqual(["A", "B", "C", "D"]);
   });
 
@@ -202,7 +202,7 @@ describe("removeFromQueue 撤销（toast + 原位恢复）", () => {
     state.currentIndex = 0;
     removeFromQueue(0);
     const { items } = useToast();
-    items[0].action.onClick();
+    items[0].action!.onClick();
     const after = useToast().items;
     expect(after).toHaveLength(2); // 移除 toast + 已恢复 toast
     expect(after[1].text).toContain("已恢复");
@@ -316,9 +316,9 @@ describe("歌单", () => {
     await addToPlaylist("p1", "/a.mp3");
     expect(isInPlaylist("p1", "/a.mp3")).toBe(true);
     // 已在歌单 → 不发请求（去重）
-    const before = fetch.mock.calls.length;
+    const before = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
     await addToPlaylist("p1", "/a.mp3");
-    expect(fetch.mock.calls.length).toBe(before);
+    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(before);
     expect(fetch).toHaveBeenCalledWith(
       "/api/playlists/p1/songs",
       expect.objectContaining({ method: "POST" }),
@@ -368,7 +368,7 @@ describe("歌单", () => {
     expect(items[0].duration).toBe(5000);
     expect(items[0].action).toBeTruthy();
     // 点撤销 → POST /api/playlists/p1/songs 加回
-    items[0].action.onClick();
+    items[0].action!.onClick();
     await new Promise((r) => setTimeout(r, 0));
     expect(isInPlaylist("p1", "/a.mp3")).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -471,10 +471,12 @@ describe("队列拖拽排序 reorderQueue / persistQueueOrder（任务 A 第三�
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
     vi.stubGlobal("fetch", fetchMock);
     await persistQueueOrder();
-    const call = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/queue/order"));
+    const call = (
+      fetchMock.mock.calls as unknown as Array<[string, { method: string; body: string }]>
+    ).find(([u]) => String(u).includes("/api/queue/order"));
     expect(call).toBeTruthy();
-    expect(call[1].method).toBe("PUT");
-    expect(JSON.parse(call[1].body).paths).toEqual(["/a.mp3", "stream:9", "/b.mp3"]);
+    expect(call![1].method).toBe("PUT");
+    expect(JSON.parse(call![1].body).paths).toEqual(["/a.mp3", "stream:9", "/b.mp3"]);
   });
 
   it("persistQueueOrder：非 200 → 抛错（调用方 toast）", async () => {

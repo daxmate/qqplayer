@@ -340,7 +340,7 @@ describe("loadSongs", () => {
   it("拉取歌曲列表并自动选中第一首", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url) => ({
+      vi.fn(async () => ({
         ok: true,
         json: async () => [
           { path: "/a.mp3", name: "A" },
@@ -351,7 +351,7 @@ describe("loadSongs", () => {
     await loadSongs();
     expect(state.songs).toHaveLength(2);
     expect(state.currentIndex).toBe(0);
-    expect(state.currentSong.path).toBe("/a.mp3");
+    expect(state.currentSong!.path).toBe("/a.mp3");
     expect(fetch).toHaveBeenCalledWith("/api/songs", expect.anything());
   });
 
