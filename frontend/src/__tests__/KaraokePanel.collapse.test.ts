@@ -137,4 +137,20 @@ describe("KaraokePanel 顶部信息按钮（showInfoBtn 常驻）", () => {
     expect(w.find(".kp-tip").exists()).toBe(false);
     w.unmount();
   });
+
+  it("定位锚点：.kp-head / .karaoke-panel 样式含 position: relative（气泡不飘到视口外）", () => {
+    // jsdom 不加载 SFC scoped 样式（computed style 恒为 static），直接断言源码防回滚
+    const src = (
+      import.meta.glob("../components/KaraokePanel.vue", {
+        query: "?raw",
+        import: "default",
+        eager: true,
+      }) as Record<string, string>
+    )["../components/KaraokePanel.vue"];
+    expect(src).toBeTruthy();
+    const kpHead = src.match(/\.kp-head\s*\{[^}]*\}/)?.[0] || "";
+    const panel = src.match(/\.karaoke-panel\s*\{[^}]*\}/)?.[0] || "";
+    expect(kpHead).toMatch(/position:\s*relative/);
+    expect(panel).toMatch(/position:\s*relative/);
+  });
 });

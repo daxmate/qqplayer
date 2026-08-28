@@ -326,6 +326,7 @@ watch(
   background: var(--card);
   border-radius: 16px;
   border: 1px solid var(--border);
+  position: relative; /* 双保险：气泡 absolute 的兜底定位锚点 */
 }
 .kp-head {
   display: flex;
@@ -336,6 +337,7 @@ watch(
   font-weight: 700;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative; /* 信息气泡定位锚点（缺它气泡会定位到视口外） */
 }
 .kp-title {
   display: inline-flex;
