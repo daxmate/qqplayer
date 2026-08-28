@@ -95,7 +95,7 @@ describe("coverToDataURL：小图直接 base64（不解码）", () => {
     vi.stubGlobal("FileReader", FakeFileReader);
     vi.stubGlobal("Image", FakeImage);
 
-    const m = await import("../utils/coverDataURL.js?t=small" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=small" + Date.now());
     const out = await m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x");
 
     expect(out).toBe("data:image/png;base64,100");
@@ -116,7 +116,7 @@ describe("coverToDataURL：大图 canvas 缩放重编码", () => {
     vi.stubGlobal("Image", FakeImage);
     // 1600x1200 → maxSize 800 → scale 0.5 → 800x600
 
-    const m = await import("../utils/coverDataURL.js?t=big" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=big" + Date.now());
     const out = await m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x", {
       maxSize: 800,
       quality: 0.82,
@@ -139,7 +139,7 @@ describe("coverToDataURL：大图 canvas 缩放重编码", () => {
     vi.stubGlobal("Image", FakeImage);
     FakeImage.behavior = { fail: false, naturalWidth: 400, naturalHeight: 300 }; // 已小于 maxSize
 
-    const m = await import("../utils/coverDataURL.js?t=noscale" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=noscale" + Date.now());
     const out = await m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x");
 
     expect(out).toBe("data:image/png;base64," + String(blob.size));
@@ -154,7 +154,7 @@ describe("coverToDataURL：失败路径全部 reject", () => {
       "fetch",
       vi.fn(async () => ({ ok: false, status: 404, statusText: "Not Found" })),
     );
-    const m = await import("../utils/coverDataURL.js?t=notok" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=notok" + Date.now());
     await expect(m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x")).rejects.toThrow(
       "cover fetch failed: 404",
     );
@@ -165,7 +165,7 @@ describe("coverToDataURL：失败路径全部 reject", () => {
       "fetch",
       vi.fn(async () => Promise.reject(new Error("network down"))),
     );
-    const m = await import("../utils/coverDataURL.js?t=netfail" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=netfail" + Date.now());
     await expect(m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x")).rejects.toThrow(
       "network down",
     );
@@ -178,7 +178,7 @@ describe("coverToDataURL：失败路径全部 reject", () => {
     vi.stubGlobal("Image", FakeImage);
     FakeImage.behavior.fail = true;
 
-    const m = await import("../utils/coverDataURL.js?t=badimg" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=badimg" + Date.now());
     await expect(m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x")).rejects.toThrow(
       "image decode failed",
     );
@@ -191,7 +191,7 @@ describe("coverToDataURL：失败路径全部 reject", () => {
     vi.stubGlobal("Image", FakeImage);
     toDataURLSpy.mockReturnValue("data:,");
 
-    const m = await import("../utils/coverDataURL.js?t=noctx" + Math.random());
+    const m = await import("../utils/coverDataURL.js?t=noctx" + Date.now());
     await expect(m.coverToDataURL("http://127.0.0.1:17888/api/cover?path=x")).rejects.toThrow(
       "canvas toDataURL failed",
     );
