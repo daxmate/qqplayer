@@ -5,14 +5,13 @@ import { mount } from "@vue/test-utils";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   play() {
     this.paused = false;
     return Promise.resolve();
@@ -33,6 +32,14 @@ const { clearToasts, useToast } = await import("../composables/useToast.js");
 const toastItems = useToast().items; // 全局 toast 单例状态（reactive）
 
 const SONG = { path: "/music/安静.mp3", name: "安静", artist: "周杰伦", album: "范特西" };
+
+/** DOM 查询辅助（测试内 querySelector 可空 → 非空断言 + 元素类型化；运行时行为不变） */
+function q<T extends Element = HTMLElement>(root: Element, sel: string): T {
+  return root.querySelector(sel) as T;
+}
+function qa(root: Element, sel: string): HTMLElement[] {
+  return [...root.querySelectorAll(sel)] as HTMLElement[];
+}
 
 // 契约 mock（后端 /api/tags* 并行开发中，联调待合并后验证）
 const SCRAPE_RES = {
@@ -74,19 +81,29 @@ const SAVE_RES = {
 
 // 注意：用 vi.stubGlobal（不用 vi.spyOn）——spyOn 的 mock 不会被 unstubAllGlobals 还原，
 // 同一文件内多次 mockFetch 会串测试（旧 mock 的 calls 污染后续断言）
-function mockFetch({ scrape, save, songs, settings, albumYear } = {}) {
-  const mock = vi.fn(async (url, opts) => {
+function mockFetch(
+  opts: {
+    scrape?: () => Promise<unknown>;
+    save?: () => Promise<unknown>;
+    albumYear?: () => Promise<unknown>;
+    songs?: unknown;
+    settings?: (() => Promise<unknown>) | Record<string, unknown>;
+  } = {},
+) {
+  const { scrape, save, songs, settings, albumYear } = opts;
+  // 第二参不注解（保持 calls 元素为宽松类型；测试侧用 mock.calls[i][1].body 直取 JSON）
+  const mock = vi.fn(async (url: string, optsReq) => {
     const u = String(url);
-    if (u.includes("/api/tags/scrape") && opts?.method === "POST") {
+    if (u.includes("/api/tags/scrape") && optsReq?.method === "POST") {
       return scrape ? scrape() : Promise.resolve({ ok: true, json: async () => SCRAPE_RES });
     }
-    if (u.includes("/api/tags/album-year") && opts?.method === "POST") {
+    if (u.includes("/api/tags/album-year") && optsReq?.method === "POST") {
       // 默认 {year: null}：不改变表单（存量测试点选网易云候选后 year 仍为空）
       return albumYear
         ? albumYear()
         : Promise.resolve({ ok: true, json: async () => ({ year: null }) });
     }
-    if (u.includes("/api/tags") && opts?.method === "POST") {
+    if (u.includes("/api/tags") && optsReq?.method === "POST") {
       return save ? save() : Promise.resolve({ ok: true, json: async () => SAVE_RES });
     }
     if (u.includes("/api/library/settings")) {
@@ -117,7 +134,7 @@ function mockFetch({ scrape, save, songs, settings, albumYear } = {}) {
   return mock;
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 10));
+const tick = () => new Promise<void>((r) => setTimeout(r, 10));
 
 beforeEach(() => {
   Object.assign(state, {
@@ -140,14 +157,14 @@ describe("TagEditorModal 渲染", () => {
     mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector(".modal")!;
     expect(root).toBeTruthy();
-    const inputs = root.querySelectorAll(".field-input");
+    const inputs = root.querySelectorAll<HTMLInputElement>(".field-input");
     expect(inputs[0].value).toBe("安静");
     expect(inputs[1].value).toBe("周杰伦");
     expect(inputs[2].value).toBe("范特西");
     // 未选候选时封面预览 = 本地 /api/cover
-    const img = root.querySelector(".cover-preview img");
+    const img = q(root, ".cover-preview img");
     expect(img.getAttribute("src")).toBe("/api/cover?path=" + encodeURIComponent(SONG.path));
     w.unmount();
   });
@@ -158,12 +175,12 @@ describe("TagEditorModal 自动刮削", () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
+    root = document.body.querySelector(".modal")!;
     // 请求体：{ path: 当前歌曲绝对路径 }
-    const scrapeCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/scrape"));
+    const scrapeCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/scrape"))!;
     expect(scrapeCall).toBeTruthy();
     expect(JSON.parse(scrapeCall[1].body)).toEqual({ path: SONG.path });
     // 两组候选渲染：网易云 2 条（含时长）+ MusicBrainz 1 条
@@ -207,17 +224,17 @@ describe("TagEditorModal 自动刮削", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
+    root = document.body.querySelector(".modal")!;
     // 两个独立分组容器（并列兄弟），每组标题 + 自己的行
     const groups = root.querySelectorAll(".candidates > .cand-group");
     expect(groups.length).toBe(2);
-    expect(groups[0].querySelector(".cand-group-title").textContent).toBe("网易云");
+    expect(q(groups[0], ".cand-group-title").textContent).toBe("网易云");
     expect(groups[0].querySelectorAll('[data-testid="cand-netease"]').length).toBe(2);
     expect(groups[0].querySelectorAll('[data-testid="cand-musicbrainz"]').length).toBe(0);
-    expect(groups[1].querySelector(".cand-group-title").textContent).toBe("MusicBrainz");
+    expect(q(groups[1], ".cand-group-title").textContent).toBe("MusicBrainz");
     expect(groups[1].querySelectorAll('[data-testid="cand-musicbrainz"]').length).toBe(1);
     expect(groups[1].querySelectorAll('[data-testid="cand-netease"]').length).toBe(0);
     // 全量行数与分组内一致（不重复渲染）
@@ -239,10 +256,10 @@ describe("TagEditorModal 自动刮削", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
+    root = document.body.querySelector(".modal")!;
     expect(root.querySelector('[data-testid="cand-empty-netease"]')).toBeTruthy();
     expect(root.querySelector('[data-testid="cand-empty-musicbrainz"]')).toBeTruthy();
     w.unmount();
@@ -254,30 +271,30 @@ describe("TagEditorModal 点选填充", () => {
     mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
+    root = document.body.querySelector(".modal")!;
     // 点第一条网易云（带 cover）
-    root.querySelectorAll('[data-testid="cand-netease"]')[0].click();
+    qa(root, '[data-testid="cand-netease"]')[0].click();
     await nextTick();
-    const inputs = root.querySelectorAll(".field-input");
+    const inputs = root.querySelectorAll<HTMLInputElement>(".field-input");
     expect(inputs[0].value).toBe("安静 (Live)");
     expect(inputs[1].value).toBe("周杰伦");
     expect(inputs[2].value).toBe("无与伦比 演唱会");
-    const img = root.querySelector(".cover-preview img");
+    const img = q(root, ".cover-preview img");
     expect(img.getAttribute("src")).toBe("https://p1.music.126.net/cover1.jpg");
     w.unmount();
   });
 });
 
 describe("TagEditorModal 网易云候选惰性补年份", () => {
-  const clickNetease = async (root) => {
-    root.querySelector('[data-testid="scrape-btn"]').click();
+  const clickNetease = async (root: Element) => {
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root.querySelector('[data-testid="cand-netease"]').click();
+    q(root, '[data-testid="cand-netease"]').click();
     await tick();
-    return document.body.querySelector(".modal");
+    return document.body.querySelector(".modal")!;
   };
 
   it("点选网易云候选（有 id、表单 year 空）→ 触发 album-year → 成功后 form.year 填入", async () => {
@@ -286,13 +303,13 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = await clickNetease(document.body.querySelector(".modal"));
+    const root = await clickNetease(document.body.querySelector(".modal")!);
     // 请求体：{ song_id: 候选 id }（第一条网易云候选 id=123）
-    const ayCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/album-year"));
+    const ayCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/album-year"))!;
     expect(ayCall).toBeTruthy();
     expect(JSON.parse(ayCall[1].body)).toEqual({ song_id: "123" });
     // 年份填入表单（String）
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2018");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("2018");
     w.unmount();
   });
 
@@ -302,11 +319,11 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = await clickNetease(document.body.querySelector(".modal"));
+    const root = await clickNetease(document.body.querySelector(".modal")!);
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/album-year"))).toBe(
       true,
     );
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("");
     // 无错误 toast（静默失败；全局 toast 单例为空）
     expect(toastItems.length).toBe(0);
     w.unmount();
@@ -316,8 +333,8 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
     mockFetch(); // 默认 album-year 返回 {year: null}
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = await clickNetease(document.body.querySelector(".modal"));
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
+    const root = await clickNetease(document.body.querySelector(".modal")!);
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("");
     // 无 toast（静默失败）
     expect(toastItems.length).toBe(0);
     w.unmount();
@@ -327,17 +344,17 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="cand-musicbrainz"]').click();
+    root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="cand-musicbrainz"]').click();
     await tick();
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/album-year"))).toBe(
       false,
     );
     // MusicBrainz 候选自带 year=2001 → 正常填充
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2001");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("2001");
     w.unmount();
   });
 
@@ -355,11 +372,11 @@ describe("TagEditorModal 网易云候选惰性补年份", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = await clickNetease(document.body.querySelector(".modal"));
+    const root = await clickNetease(document.body.querySelector(".modal")!);
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/tags/album-year"))).toBe(
       false,
     );
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2001");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("2001");
     w.unmount();
   });
 });
@@ -369,17 +386,17 @@ describe("TagEditorModal 保存", () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
-    root.querySelectorAll('[data-testid="cand-netease"]')[0].click();
+    root = document.body.querySelector(".modal")!;
+    qa(root, '[data-testid="cand-netease"]')[0].click();
     await nextTick();
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     expect(saveCall).toBeTruthy();
     expect(JSON.parse(saveCall[1].body)).toEqual({
       path: SONG.path,
@@ -399,16 +416,16 @@ describe("TagEditorModal 保存", () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    const inputs = root.querySelectorAll(".field-input");
+    const root = document.body.querySelector(".modal")!;
+    const inputs = root.querySelectorAll<HTMLInputElement>(".field-input");
     inputs[0].value = "我自己改的歌名";
     inputs[0].dispatchEvent(new Event("input"));
     await nextTick();
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     expect(JSON.parse(saveCall[1].body)).toEqual({
       path: SONG.path,
       title: "我自己改的歌名",
@@ -427,12 +444,12 @@ describe("TagEditorModal 保存", () => {
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="save-btn"]').click();
+    const root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     // 当前播放歌曲 path/名称更新为新值
-    expect(state.currentSong.path).toBe(SAVE_RES.newPath);
-    expect(state.currentSong.name).toBe("安静 (Live)");
+    expect(state.currentSong!.path).toBe(SAVE_RES.newPath);
+    expect(state.currentSong!.name).toBe("安静 (Live)");
     // audio.src 未被触碰（保持播放不中断）
     expect(audio.src).toBe("");
     // loadSongs 刷新列表（GET /api/songs），并保留当前选中
@@ -456,8 +473,8 @@ describe("TagEditorModal 保存", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="save-btn"]').click();
+    const root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     // 错误 toast（全局 ToastContainer）
     const toasts = mount(ToastContainer, { global: { stubs: { teleport: true } } });
@@ -468,7 +485,7 @@ describe("TagEditorModal 保存", () => {
     // 弹窗未关闭、状态未动
     expect(w.emitted("close")).toBeFalsy();
     expect(document.body.querySelector(".modal")).toBeTruthy();
-    expect(state.currentSong.path).toBe(SONG.path);
+    expect(state.currentSong!.path).toBe(SONG.path);
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/songs"))).toBe(false);
     w.unmount();
   });
@@ -486,12 +503,12 @@ describe("TagEditorModal 扩展字段（year/genre/track/album_artist）", () =>
     };
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector(".modal")!;
     expect(root.querySelectorAll(".field-input").length).toBe(7);
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("1999");
-    expect(root.querySelector('[data-testid="field-genre"]').value).toBe("流行");
-    expect(root.querySelector('[data-testid="field-track"]').value).toBe("5");
-    expect(root.querySelector('[data-testid="field-albumartist"]').value).toBe("周杰伦");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("1999");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-genre"]').value).toBe("流行");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-track"]').value).toBe("5");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-albumartist"]').value).toBe("周杰伦");
     w.unmount();
   });
 
@@ -499,29 +516,25 @@ describe("TagEditorModal 扩展字段（year/genre/track/album_artist）", () =>
     mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
+    root = document.body.querySelector(".modal")!;
     // 候选副信息：网易云不带 year/genre 不显示；MusicBrainz 带 → · 2001 · 流行
-    const mbSub = root
-      .querySelectorAll('[data-testid="cand-musicbrainz"]')[0]
-      .querySelector(".cand-sub");
+    const mbSub = q(qa(root, '[data-testid="cand-musicbrainz"]')[0], ".cand-sub");
     expect(mbSub.textContent).toContain("· 范特西");
     expect(mbSub.textContent).toContain("· 2001");
     expect(mbSub.textContent).toContain("· 流行");
-    const neSub = root
-      .querySelectorAll('[data-testid="cand-netease"]')[0]
-      .querySelector(".cand-sub");
+    const neSub = q(qa(root, '[data-testid="cand-netease"]')[0], ".cand-sub");
     expect(neSub.textContent).not.toContain("2001");
     // 点选 MusicBrainz → 新字段填充（含 track/album_artist）
-    root.querySelector('[data-testid="cand-musicbrainz"]').click();
+    q(root, '[data-testid="cand-musicbrainz"]').click();
     await nextTick();
-    root = document.body.querySelector(".modal");
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("2001");
-    expect(root.querySelector('[data-testid="field-genre"]').value).toBe("流行");
-    expect(root.querySelector('[data-testid="field-track"]').value).toBe("3");
-    expect(root.querySelector('[data-testid="field-albumartist"]').value).toBe("周杰伦");
+    root = document.body.querySelector(".modal")!;
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("2001");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-genre"]').value).toBe("流行");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-track"]').value).toBe("3");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-albumartist"]').value).toBe("周杰伦");
     w.unmount();
   });
 
@@ -529,16 +542,16 @@ describe("TagEditorModal 扩展字段（year/genre/track/album_artist）", () =>
     mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    let root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="scrape-btn"]').click();
+    let root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="scrape-btn"]').click();
     await tick();
-    root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="cand-netease"]').click();
+    root = document.body.querySelector(".modal")!;
+    q(root, '[data-testid="cand-netease"]').click();
     await nextTick();
-    expect(root.querySelector('[data-testid="field-year"]').value).toBe("");
-    expect(root.querySelector('[data-testid="field-genre"]').value).toBe("");
-    expect(root.querySelector('[data-testid="field-track"]').value).toBe("");
-    expect(root.querySelector('[data-testid="field-albumartist"]').value).toBe("");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-year"]').value).toBe("");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-genre"]').value).toBe("");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-track"]').value).toBe("");
+    expect(q<HTMLInputElement>(root, '[data-testid="field-albumartist"]').value).toBe("");
     w.unmount();
   });
 
@@ -546,21 +559,23 @@ describe("TagEditorModal 扩展字段（year/genre/track/album_artist）", () =>
     const fetchMock = mockFetch();
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="field-year"]').value = "1995";
-    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
-    root.querySelector('[data-testid="field-track"]').value = "3";
-    root.querySelector('[data-testid="field-track"]').dispatchEvent(new Event("input"));
-    root.querySelector('[data-testid="field-genre"]').value = "流行";
-    root.querySelector('[data-testid="field-genre"]').dispatchEvent(new Event("input"));
-    root.querySelector('[data-testid="field-albumartist"]').value = "  周杰伦  ";
-    root.querySelector('[data-testid="field-albumartist"]').dispatchEvent(new Event("input"));
+    const root = document.body.querySelector(".modal")!;
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').value = "1995";
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    q<HTMLInputElement>(root, '[data-testid="field-track"]').value = "3";
+    q<HTMLInputElement>(root, '[data-testid="field-track"]').dispatchEvent(new Event("input"));
+    q<HTMLInputElement>(root, '[data-testid="field-genre"]').value = "流行";
+    q<HTMLInputElement>(root, '[data-testid="field-genre"]').dispatchEvent(new Event("input"));
+    q<HTMLInputElement>(root, '[data-testid="field-albumartist"]').value = "  周杰伦  ";
+    q<HTMLInputElement>(root, '[data-testid="field-albumartist"]').dispatchEvent(
+      new Event("input"),
+    );
     await nextTick();
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     const body = JSON.parse(saveCall[1].body);
     expect(body.year).toBe(1995); // 数字类型（非字符串）
     expect(body.track).toBe(3);
@@ -576,7 +591,7 @@ describe("TagEditorModal 自动刮削（autoScrape prop）", () => {
     const w = mount(TagEditorModal, { props: { open: true, autoScrape: true } });
     await nextTick();
     await tick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector(".modal")!;
     const scrapeCalls = fetchMock.mock.calls.filter(([u]) =>
       String(u).includes("/api/tags/scrape"),
     );
@@ -603,9 +618,9 @@ describe("TagEditorModal 自动刮削（autoScrape prop）", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true, autoScrape: true } });
     await tick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector(".modal")!;
     expect(root.querySelector(".scrape-error")).toBeTruthy();
-    expect(root.querySelector('[data-testid="save-btn"]').disabled).toBe(false);
+    expect(q<HTMLButtonElement>(root, '[data-testid="save-btn"]').disabled).toBe(false);
     w.unmount();
   });
 
@@ -617,22 +632,22 @@ describe("TagEditorModal 自动刮削（autoScrape prop）", () => {
       props: { open: true, autoScrape: true, song: target },
     });
     await nextTick();
-    const root = document.body.querySelector(".modal");
+    const root = document.body.querySelector(".modal")!;
     // 表单显示目标歌曲
-    const inputs = root.querySelectorAll(".field-input");
+    const inputs = root.querySelectorAll<HTMLInputElement>(".field-input");
     expect(inputs[0].value).toBe("别首");
-    expect(root.querySelector(".head-sub").textContent).toContain("别首");
+    expect(q(root, ".head-sub").textContent).toContain("别首");
     // 自动刮削用目标 path
-    const scrapeCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/scrape"));
+    const scrapeCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/tags/scrape"))!;
     expect(JSON.parse(scrapeCall[1].body)).toEqual({ path: "/music/别首.mp3" });
     // 保存用目标 path；改名更新只发生在编辑目标 === 当前播放时（这里不是 → 不动 currentSong）
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     expect(JSON.parse(saveCall[1].body).path).toBe("/music/别首.mp3");
-    expect(state.currentSong.path).toBe(SONG.path); // 当前播放未被改写
+    expect(state.currentSong!.path).toBe(SONG.path); // 当前播放未被改写
     w.unmount();
   });
 });
@@ -651,15 +666,15 @@ describe("TagEditorModal enabled_fields 提交过滤", () => {
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
     await tick(); // 等 GET /api/library/settings 落缓存（enabled_fields 提交过滤依赖）
-    const root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="field-year"]').value = "1995";
-    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    const root = document.body.querySelector(".modal")!;
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').value = "1995";
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').dispatchEvent(new Event("input"));
     await nextTick();
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     const body = JSON.parse(saveCall[1].body);
     expect(body).toEqual({
       path: SONG.path,
@@ -679,15 +694,15 @@ describe("TagEditorModal enabled_fields 提交过滤", () => {
     const fetchMock = mockFetch(); // 默认 settings.enabled_fields = []
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="field-year"]').value = "1995";
-    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    const root = document.body.querySelector(".modal")!;
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').value = "1995";
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').dispatchEvent(new Event("input"));
     await nextTick();
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     const body = JSON.parse(saveCall[1].body);
     expect(body.year).toBe(1995);
     expect(body.album).toBe("范特西");
@@ -701,15 +716,15 @@ describe("TagEditorModal enabled_fields 提交过滤", () => {
     });
     const w = mount(TagEditorModal, { props: { open: true } });
     await nextTick();
-    const root = document.body.querySelector(".modal");
-    root.querySelector('[data-testid="field-year"]').value = "1995";
-    root.querySelector('[data-testid="field-year"]').dispatchEvent(new Event("input"));
+    const root = document.body.querySelector(".modal")!;
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').value = "1995";
+    q<HTMLInputElement>(root, '[data-testid="field-year"]').dispatchEvent(new Event("input"));
     await nextTick();
-    root.querySelector('[data-testid="save-btn"]').click();
+    q(root, '[data-testid="save-btn"]').click();
     await tick();
     const saveCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).endsWith("/api/tags") && o?.method === "POST",
-    );
+    )!;
     const body = JSON.parse(saveCall[1].body);
     expect(body.year).toBe(1995);
     expect(body.album).toBe("范特西"); // 未限制 → 全部提交

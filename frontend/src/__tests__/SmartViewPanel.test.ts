@@ -1,18 +1,20 @@
 // SmartViewPanel 组件测试（桌面智能视图面板：渲染/空态/加载/错误/点击播放）
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper, DOMWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -23,7 +25,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
 }
@@ -42,7 +44,7 @@ const lib = [
   { id: "c", path: "/lib/c.mp3", name: "温柔", artist: "五月天", album: "愛情萬歲" },
 ];
 
-const wrappers = []; // 统一登记：断言失败也卸载，避免旧实例残留 window 监听（ctx 事件会串到新测试）
+const wrappers: VueWrapper[] = []; // 统一登记：断言失败也卸载，避免旧实例残留 window 监听（ctx 事件会串到新测试）
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -79,7 +81,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mountPanel(kind) {
+function mountPanel(kind: string) {
   const wrapper = mount(SmartViewPanel, {
     props: { kind },
     global: { stubs: { teleport: true } }, // teleport 内容内联渲染，便于断言
@@ -88,29 +90,29 @@ function mountPanel(kind) {
   return wrapper;
 }
 
-function fetchReturning(body) {
+function fetchReturning(body: unknown) {
   return vi.fn(async () => ({ ok: true, json: async () => body }));
 }
 
 // 右键第 index 行 → 浏览器自定义菜单展开（@contextmenu.prevent → openCtxMenu）
-async function rclick(wrapper, index, x = 120, y = 180) {
+async function rclick(wrapper: VueWrapper, index: number, x = 120, y = 180) {
   await wrapper.findAll(".sv-item")[index].trigger("contextmenu", { clientX: x, clientY: y });
   await nextTick();
 }
 
 // teleport 被 stub 后菜单内联渲染在 wrapper 内（不在 document.body），用 wrapper 查询
-const menuEl = (wrapper) =>
+const menuEl = (wrapper: VueWrapper): Element | null =>
   wrapper.find(".ctx-menu").exists() ? wrapper.find(".ctx-menu").element : null;
 
-function menuItem(wrapper, text) {
+function menuItem(wrapper: VueWrapper, text: string): DOMWrapper<Element> | undefined {
   const btns = [...wrapper.findAll(".ctx-item")];
   return btns.find((b) => b.text().trim() === text) || btns.find((b) => b.text().includes(text));
 }
 
 // addMenu / dt-modal 同样内联在 wrapper 内
-const addMenuEl = (wrapper) =>
+const addMenuEl = (wrapper: VueWrapper): Element | null =>
   wrapper.find(".add-menu").exists() ? wrapper.find(".add-menu").element : null;
-const deleteModalEl = (wrapper) =>
+const deleteModalEl = (wrapper: VueWrapper): Element | null =>
   wrapper.find(".dt-modal").exists() ? wrapper.find(".dt-modal").element : null;
 
 describe("SmartViewPanel（桌面）", () => {
@@ -169,7 +171,7 @@ describe("SmartViewPanel（桌面）", () => {
   });
 
   it("加载中显示加载提示", async () => {
-    let resolveFetch;
+    let resolveFetch: (v: unknown) => void = () => {};
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -208,7 +210,7 @@ describe("SmartViewPanel（桌面）", () => {
     await flushPromises();
     await wrapper.find(".sv-item").trigger("click");
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     expect(state.isPlaying).toBe(true);
   });
 
@@ -248,7 +250,7 @@ describe("SmartViewPanel 拖拽到侧栏歌单", () => {
   it("浏览器：行 dragstart → 写 DRAG_SONG_TYPE + effectAllowed=copy，浮层 pointer-events 放行后恢复", async () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
-    const panel = wrapper.find(".sv-panel").element;
+    const panel = wrapper.find(".sv-panel").element as HTMLElement;
     const dt = { setData: vi.fn(), effectAllowed: "" };
     await wrapper.findAll(".sv-item")[0].trigger("dragstart", { dataTransfer: dt });
     expect(dt.setData).toHaveBeenCalledWith(DRAG_SONG_TYPE, "/lib/a.mp3");
@@ -265,7 +267,8 @@ describe("SmartViewPanel 拖拽到侧栏歌单", () => {
     await flushPromises();
     const dt = { setData: vi.fn(), effectAllowed: "" };
     const evt = new Event("dragstart", { bubbles: true, cancelable: true });
-    evt.dataTransfer = dt;
+    // jsdom 的 Event 无 dataTransfer 属性 → 直接挂 own property（组件按 e.dataTransfer 读取）
+    Object.defineProperty(evt, "dataTransfer", { value: dt });
     wrapper.findAll(".sv-item")[0].element.dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(true);
     expect(dt.setData).not.toHaveBeenCalled();
@@ -373,17 +376,31 @@ describe("SmartViewPanel 拖拽到侧栏歌单", () => {
 
 // —— 几何 stub（jsdom getBoundingClientRect 恒 0，壳内拖拽命中全靠几何，同 Playlist.shellDrag.test.js 模式）——
 const realRect = Element.prototype.getBoundingClientRect;
-const rectMap = new WeakMap();
-Element.prototype.getBoundingClientRect = function () {
+const rectMap = new WeakMap<Element, DOMRect>();
+Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
   const r = rectMap.get(this);
   return r || realRect.call(this);
 };
-function setRect(el, r) {
-  rectMap.set(el, { x: r.left, y: r.top, width: r.width, height: r.height, ...r });
+function setRect(
+  el: Element,
+  r: { top: number; bottom: number; left: number; right: number; height: number; width: number },
+) {
+  // 壳内拖拽只读 top/bottom/left/right/width/height；不用 new DOMRect（其属性只有 getter，
+  // Object.assign 会抛错）→ 直接构普通对象 + 断言（只读访问语义不变）
+  rectMap.set(el, {
+    x: r.left,
+    y: r.top,
+    width: r.width,
+    height: r.height,
+    top: r.top,
+    bottom: r.bottom,
+    left: r.left,
+    right: r.right,
+  } as DOMRect);
 }
 
 // pointer 事件工厂（主指针 id=1，左键）；坐标支持 (x, y) 或数组 [x, y]
-function ptr(type, x, y, over = {}) {
+function ptr(type: string, x: number | number[], y?: number, over: Record<string, unknown> = {}) {
   if (Array.isArray(x)) [x, y] = x;
   return new PointerEvent(type, {
     bubbles: true,
@@ -401,7 +418,7 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     await flushPromises();
     await rclick(wrapper, 0);
     expect(menuEl(wrapper)).toBeTruthy();
-    const text = menuEl(wrapper).textContent;
+    const text = menuEl(wrapper)!.textContent;
     expect(text).toContain("播放");
     expect(text).toContain("下一首播放");
     expect(text).toContain("收藏");
@@ -417,18 +434,18 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 0);
-    expect(menuEl(wrapper).textContent).not.toContain("进歌手");
-    expect(menuEl(wrapper).textContent).not.toContain("进专辑");
+    expect(menuEl(wrapper)!.textContent).not.toContain("进歌手");
+    expect(menuEl(wrapper)!.textContent).not.toContain("进专辑");
   });
 
   it("播放 → selectSong + play（与 Playlist 同行为）", async () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 1); // 右键 知足（lib[1]）
-    menuItem(wrapper, "播放").trigger("click");
+    menuItem(wrapper, "播放")!.trigger("click");
     await nextTick();
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("知足");
+    expect(state.currentSong!.name).toBe("知足");
     expect(state.isPlaying).toBe(true);
     expect(menuEl(wrapper)).toBeFalsy(); // 菜单已关闭
   });
@@ -439,11 +456,11 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     await wrapper.findAll(".sv-item")[0].trigger("click"); // 播 雪の華
     await nextTick();
     await rclick(wrapper, 2); // 右键 温柔
-    menuItem(wrapper, "下一首播放").trigger("click");
+    menuItem(wrapper, "下一首播放")!.trigger("click");
     await nextTick();
     expect(state.songs.map((s) => s.name)).toEqual(["雪の華", "温柔", "知足"]);
     expect(state.currentIndex).toBe(1);
-    expect(state.currentSong.name).toBe("温柔");
+    expect(state.currentSong!.name).toBe("温柔");
   });
 
   it("收藏 → toggleFavorite（可再取消）", async () => {
@@ -451,12 +468,12 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 0);
-    menuItem(wrapper, "收藏").trigger("click");
+    menuItem(wrapper, "收藏")!.trigger("click");
     await nextTick();
     expect(state.favorites).toContain("/lib/a.mp3");
     // 再右键同一行 → 菜单变「取消收藏」
     await rclick(wrapper, 0);
-    menuItem(wrapper, "取消收藏").trigger("click");
+    menuItem(wrapper, "取消收藏")!.trigger("click");
     await nextTick();
     expect(state.favorites).not.toContain("/lib/a.mp3");
   });
@@ -475,9 +492,9 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 0, 300, 200);
-    menuItem(wrapper, "加歌单").trigger("click");
+    menuItem(wrapper, "加歌单")!.trigger("click");
     await nextTick();
-    const am = addMenuEl(wrapper);
+    const am = addMenuEl(wrapper)!;
     expect(am).toBeTruthy();
     expect(am.textContent).toContain("日语歌");
     await wrapper.find(".add-menu .am-item").trigger("click");
@@ -498,27 +515,28 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 1); // 右键 知足
-    menuItem(wrapper, "移到废纸篓").trigger("click");
+    menuItem(wrapper, "移到废纸篓")!.trigger("click");
     await nextTick();
-    const modal = deleteModalEl(wrapper);
+    const modal = deleteModalEl(wrapper)!;
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain("将删除 1 首歌");
     await wrapper.find(".dt-modal .dt-btn.danger").trigger("click");
     await flushPromises();
-    const delCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/library/songs"));
+    const delCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/library/songs"))!;
     expect(JSON.parse(delCall[1].body).paths).toEqual(["/lib/b.mp3"]);
     // 刷新曲库：loadSongs 拉 /api/songs
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/songs"))).toBe(true);
   });
 
   it("进歌手 → 关闭面板 + 派发 qqplayer:open-browse（App 转 Playlist 分组浏览）", async () => {
-    const seen = [];
-    const onBrowse = (e) => seen.push(e.detail);
+    const seen: Array<{ type: string; value: string }> = [];
+    const onBrowse = (e: Event) =>
+      seen.push((e as CustomEvent<{ type: string; value: string }>).detail);
     window.addEventListener("qqplayer:open-browse", onBrowse);
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 0); // 右键 雪の華（中島美嘉）
-    menuItem(wrapper, "进歌手").trigger("click");
+    menuItem(wrapper, "进歌手")!.trigger("click");
     await nextTick();
     expect(seen).toEqual([{ type: "artist", value: "中島美嘉" }]);
     expect(wrapper.emitted("close")).toBeTruthy();
@@ -526,13 +544,14 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
   });
 
   it("进专辑 → 派发 qqplayer:open-browse(type=album)", async () => {
-    const seen = [];
-    const onBrowse = (e) => seen.push(e.detail);
+    const seen: Array<{ type: string; value: string }> = [];
+    const onBrowse = (e: Event) =>
+      seen.push((e as CustomEvent<{ type: string; value: string }>).detail);
     window.addEventListener("qqplayer:open-browse", onBrowse);
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 0);
-    menuItem(wrapper, "进专辑").trigger("click");
+    menuItem(wrapper, "进专辑")!.trigger("click");
     await nextTick();
     expect(seen).toEqual([{ type: "album", value: "雪の華" }]);
     window.removeEventListener("qqplayer:open-browse", onBrowse);
@@ -544,7 +563,7 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     window.dispatchEvent(new CustomEvent("qqplayer:ctx-play", { detail: { path: "/lib/c.mp3" } }));
     await nextTick();
     expect(state.currentIndex).toBe(2);
-    expect(state.currentSong.name).toBe("温柔");
+    expect(state.currentSong!.name).toBe("温柔");
     expect(state.isPlaying).toBe(true);
   });
 
@@ -556,7 +575,7 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
       new CustomEvent("qqplayer:ctx-deletesong", { detail: { path: "/lib/b.mp3" } }),
     );
     await nextTick();
-    const modal = deleteModalEl(wrapper);
+    const modal = deleteModalEl(wrapper)!;
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain("将删除 1 首歌");
   });
@@ -572,7 +591,7 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
       }),
     );
     await nextTick();
-    const am = addMenuEl(wrapper);
+    const am = addMenuEl(wrapper)!;
     expect(am).toBeTruthy();
     await wrapper.find(".add-menu .am-item").trigger("click");
     await flushPromises();
@@ -580,8 +599,9 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
   });
 
   it("壳菜单事件 qqplayer:ctx-goartist → 派发 open-browse + 关闭面板", async () => {
-    const seen = [];
-    const onBrowse = (e) => seen.push(e.detail);
+    const seen: Array<{ type: string; value: string }> = [];
+    const onBrowse = (e: Event) =>
+      seen.push((e as CustomEvent<{ type: string; value: string }>).detail);
     window.addEventListener("qqplayer:open-browse", onBrowse);
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
@@ -622,18 +642,18 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     const wrapper = mountPanel("recentAdded");
     await flushPromises();
     await rclick(wrapper, 0); // 右键 雪の華
-    menuItem(wrapper, "编辑标签/刮削").trigger("click");
+    menuItem(wrapper, "编辑标签/刮削")!.trigger("click");
     await nextTick();
     await flushPromises(); // autoScrape fetch 链路
     // 弹窗打开（teleport stub 内联在 wrapper 内），编辑目标 = 被右键歌曲
     const modal = wrapper.find(".modal.tag-modal");
     expect(modal.exists()).toBe(true);
-    expect(modal.find(".field-input").element.value).toBe("雪の華");
+    expect((modal.find(".field-input").element as HTMLInputElement).value).toBe("雪の華");
     expect(modal.find('[data-testid="field-albumartist"]').exists()).toBe(true); // 7 字段表单
     // autoScrape：POST /api/tags/scrape 带被右键歌曲 path
     const scrapeCall = fetchMock.mock.calls.find(
       ([u, o]) => String(u).includes("/api/tags/scrape") && o?.method === "POST",
-    );
+    )!;
     expect(scrapeCall).toBeTruthy();
     expect(JSON.parse(scrapeCall[1].body)).toEqual({ path: "/lib/a.mp3" });
     expect(wrapper.findAll('[data-testid="cand-netease"]').length).toBe(1);
@@ -662,7 +682,7 @@ describe("SmartViewPanel 右键菜单（浏览器 ContextMenu）", () => {
     await flushPromises();
     const modal = wrapper.find(".modal.tag-modal");
     expect(modal.exists()).toBe(true);
-    expect(modal.find(".field-input").element.value).toBe("知足");
+    expect((modal.find(".field-input").element as HTMLInputElement).value).toBe("知足");
   });
 
   it("Esc 关闭右键菜单（不关闭面板）", async () => {

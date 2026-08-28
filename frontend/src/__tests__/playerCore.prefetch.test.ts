@@ -11,20 +11,22 @@
 //     assetStatus 回执（含 autoPrefetch 门控下载）全链路真实跑，事件经 mock 的
 //     onNativeEvent 注入——与 iOS 壳真实行为一致
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { Song } from "../composables/usePlayer.js";
 
 // Audio stub：playerCore 模块加载即 new Audio()（audioEq/audioBare）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, Array<() => void>> = {};
+
   constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
-  set src(v) {
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
@@ -39,10 +41,10 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     (this.listeners[ev] = this.listeners[ev] || []).push(fn);
   }
-  removeEventListener(ev, fn) {
+  removeEventListener(ev: string, fn: () => void) {
     const arr = this.listeners[ev] || [];
     const i = arr.indexOf(fn);
     if (i >= 0) arr.splice(i, 1);
@@ -52,13 +54,13 @@ vi.stubGlobal("Audio", FakeAudio);
 
 // jsdom（vitest 4）无 localStorage → 手写 stub（同 syncAssets.test.js 风格；
 // autoPrefetch 开关判定依赖）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -69,11 +71,32 @@ function clearLs() {
   for (const k of Object.keys(lsStore)) delete lsStore[k];
 }
 
+/** 原生 Audio 代理 stub 形状（对齐 nativeAudioBridge createNativeAudioProxy 返回） */
+interface FakeNativeProxy {
+  _src: string;
+  currentTime: number;
+  volume: number;
+  muted: boolean;
+  playbackRate: number;
+  paused: boolean;
+  ended: boolean;
+  duration: number;
+  playCalls: number;
+  src: string;
+  listeners: Record<string, Array<(e: unknown) => void>>;
+  play(): Promise<void>;
+  pause(): void;
+  load(): void;
+  removeAttribute(attr: string): void;
+  addEventListener(ev: string, fn: (e: unknown) => void): void;
+  removeEventListener(ev: string, fn: (e: unknown) => void): void;
+}
+
 // ---------- mock：nativeAudioBridge（原生播放语义代理 + 事件订阅/发消息） ----------
 const bridgeMock = vi.hoisted(() => {
-  const handlers = new Map(); // name → Set<fn>
-  let proxy = null;
-  const makeProxy = () => {
+  const handlers = new Map<string, Set<(e: unknown) => void>>(); // name → Set<fn>
+  let proxy: FakeNativeProxy | null = null;
+  const makeProxy = (): FakeNativeProxy => {
     const p = {
       _src: "",
       currentTime: 0,
@@ -83,8 +106,9 @@ const bridgeMock = vi.hoisted(() => {
       paused: true,
       ended: false,
       duration: 0,
-      listeners: {},
       playCalls: 0,
+      src: "", // 运行时经 defineProperty 换成 get/set，先占位满足接口
+      listeners: {} as Record<string, Array<(e: unknown) => void>>,
       play() {
         this.paused = false;
         this.playCalls += 1;
@@ -94,23 +118,23 @@ const bridgeMock = vi.hoisted(() => {
         this.paused = true;
       },
       load() {},
-      removeAttribute(attr) {
+      removeAttribute(attr: string) {
         if (attr === "src") this._src = "";
       },
-      addEventListener(ev, fn) {
+      addEventListener(ev: string, fn: (e: unknown) => void) {
         (this.listeners[ev] = this.listeners[ev] || []).push(fn);
       },
-      removeEventListener(ev, fn) {
+      removeEventListener(ev: string, fn: (e: unknown) => void) {
         const arr = this.listeners[ev] || [];
         const i = arr.indexOf(fn);
         if (i >= 0) arr.splice(i, 1);
       },
     };
     Object.defineProperty(p, "src", {
-      get() {
+      get(this: FakeNativeProxy) {
         return this._src;
       },
-      set(v) {
+      set(this: FakeNativeProxy, v: string) {
         this._src = v ? String(v) : "";
       },
     });
@@ -124,36 +148,43 @@ const bridgeMock = vi.hoisted(() => {
       if (!proxy) proxy = makeProxy();
       return proxy;
     }),
-    onNativeEvent: vi.fn((name, fn) => {
+    onNativeEvent: vi.fn((name: string, fn: (e: unknown) => void) => {
       if (!handlers.has(name)) handlers.set(name, new Set());
-      handlers.get(name).add(fn);
+      handlers.get(name)!.add(fn);
       return () => {
         handlers.get(name)?.delete(fn);
       };
     }),
     registerRemoteCommandHandler: vi.fn(),
     registerNativeSongChangedHandler: vi.fn(),
-    resolveNativeUrl: vi.fn((url) => url),
+    resolveNativeUrl: vi.fn((url: string) => url),
     // 模拟真实 nativeSendMetadata 行为：coverOverride 优先，空则 song.coverUrl / 远程兑底
     // （与 nativeAudioBridge.js 同款逻辑；本环境无 server base → 远程兜底返回相对路径）
-    nativeSendMetadata: vi.fn((song, coverOverride = "") => {
-      let cover = coverOverride;
-      if (!cover && song) {
-        if (song.coverUrl) cover = song.coverUrl;
-        else if (song.path) cover = "/api/cover?path=" + encodeURIComponent(song.path);
-      }
-      return cover;
-    }),
+    nativeSendMetadata: vi.fn(
+      (
+        song: { coverUrl?: string; path?: string | null } | null | undefined,
+        coverOverride = "",
+      ) => {
+        let cover = coverOverride;
+        if (!cover && song) {
+          if (song.coverUrl) cover = song.coverUrl;
+          else if (song.path) cover = "/api/cover?path=" + encodeURIComponent(song.path);
+        }
+        return cover;
+      },
+    ),
     // 与 nativeAudioBridge.js resolveCoverURL 同款逻辑（playerCore 封面解析用）
-    resolveCoverURL: vi.fn((song) => {
-      if (!song) return "";
-      if (song.coverUrl) return song.coverUrl;
-      if (song.path) return "/api/cover?path=" + encodeURIComponent(song.path);
-      return "";
-    }),
-    getProxy: () => proxy,
+    resolveCoverURL: vi.fn(
+      (song: { coverUrl?: string; path?: string | null } | null | undefined) => {
+        if (!song) return "";
+        if (song.coverUrl) return song.coverUrl;
+        if (song.path) return "/api/cover?path=" + encodeURIComponent(song.path);
+        return "";
+      },
+    ),
+    getProxy: (): FakeNativeProxy | null => proxy,
     /** 模拟原生侧回推事件 */
-    emit(name, payload) {
+    emit(name: string, payload: unknown) {
       const set = handlers.get(name);
       if (!set) return;
       for (const fn of [...set]) {
@@ -184,7 +215,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
 // setAutoPrefetch 等）走真实实现——maybePrefetchAsset 全链路（哈希/assetStatus 回执）
 // 保持真实跑，既有用例行为不变。
 vi.mock("../utils/sync.js", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import("../utils/sync.js")>();
   return {
     ...actual,
     cachedCoverURL: vi.fn(),
@@ -194,7 +225,7 @@ vi.mock("../utils/sync.js", async (importOriginal) => {
 
 // coverDataURL 换可控 vi.fn：默认 identity（原样返回 URL）——既有用例期望封面 URL 透传；
 // resolveCoverForMetadata 新用例里用 mockResolvedValue/mockRejectedValue 注入 data URL/失败。
-const coverToDataURLMock = vi.fn(async (url) => url);
+const coverToDataURLMock = vi.fn(async (url: string) => url);
 vi.mock("../utils/coverDataURL.js", () => ({
   coverToDataURL: coverToDataURLMock,
 }));
@@ -203,12 +234,17 @@ vi.mock("../utils/coverDataURL.js", () => ({
 const playerMod = await import("../composables/usePlayer.js");
 const sync = await import("../utils/sync.js");
 
+// sync.js 部分 mock 后的可控 vi.fn 视图（mock 是运行时替换，静态类型仍是真实签名 →
+// 经 vi.mocked 取 Mock 类型，.mockReset/.mockResolvedValue 才能过类型检查）
+const cachedCoverURLMock = vi.mocked(sync.cachedCoverURL);
+const cacheCoverMock = vi.mocked(sync.cacheCover);
+
 const { state, maybePrefetchAsset, resolveCoverForMetadata } = playerMod;
 
 /** 等待异步链排空（assetForSong 哈希 / ensureAsset 回执结算 / 批量下载 flush）
  *  jsdom 下 crypto.subtle.digest 完成比 setTimeout(0) 慢，给 30ms 余量 */
 function flush() {
-  return new Promise((r) => setTimeout(r, 30));
+  return new Promise<void>((r) => setTimeout(r, 30));
 }
 
 function resetProxy() {
@@ -260,7 +296,7 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("已下载：hasAsset 回执 localURL → 切本地播放（续播 + loadedmetadata 后 seek 保留进度）", async () => {
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     const remoteSrc = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
@@ -268,9 +304,9 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
     proxy.paused = false; // wasPlaying
     proxy.currentTime = 42;
 
-    const p = maybePrefetchAsset(state.currentSong); // 真实调用点传 state.currentSong（响应式代理）
+    const p = maybePrefetchAsset(state.currentSong!); // 真实调用点传 state.currentSong（响应式代理）
     await flush(); // assetForSong（哈希）完成后 hasAsset 已发出
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     expect(hasAssetCall).toBeTruthy(); // 总是查本地资产（不再被 autoPrefetch 挡在门外）
     const { path, requestId } = hasAssetCall[0];
     expect(path).toMatch(/^audio\//);
@@ -288,16 +324,16 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("未下载：保持远程播放，autoPrefetch 默认关不发下载（只查不下载）", async () => {
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     const song = { path: "/Music/b.flac", name: "B" };
     state.currentSong = song;
     const remoteSrc = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fb.flac";
     proxy._src = remoteSrc;
     proxy.paused = true;
 
-    const p = maybePrefetchAsset(state.currentSong);
+    const p = maybePrefetchAsset(state.currentSong!);
     await flush();
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     expect(hasAssetCall).toBeTruthy();
     bridgeMock.emit("assetStatus", {
       requestId: hasAssetCall[0].requestId,
@@ -314,16 +350,16 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
 
   it("autoPrefetch 开启 + 未下载：发 syncDownload，但源仍保持远程（不阻塞）", async () => {
     sync.setAutoPrefetch(true);
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     const song = { path: "/Music/c.mp3", name: "C" };
     state.currentSong = song;
     const remoteSrc = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fc.mp3";
     proxy._src = remoteSrc;
     proxy.paused = true;
 
-    const p = maybePrefetchAsset(state.currentSong);
+    const p = maybePrefetchAsset(state.currentSong!);
     await flush();
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     bridgeMock.emit("assetStatus", {
       requestId: hasAssetCall[0].requestId,
       path: hasAssetCall[0].path,
@@ -339,14 +375,14 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("回执到达时已切歌：不切本地源（同一首歌校验）", async () => {
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     state.currentSong = { path: "/Music/a.mp3", name: "A" };
     proxy._src = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
 
-    const p = maybePrefetchAsset(state.currentSong); // 传当前歌引用
+    const p = maybePrefetchAsset(state.currentSong!); // 传当前歌引用
     await flush();
     state.currentSong = { path: "/Music/other.mp3", name: "Other" }; // 回执到达前已切歌
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     bridgeMock.emit("assetStatus", {
       requestId: hasAssetCall[0].requestId,
       path: hasAssetCall[0].path,
@@ -360,7 +396,7 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("已下载且新歌未播（currentTime=0）：切本地不从残留位置 seek（修复 2026-08-25 尾部播放）", async () => {
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     // 换源后镜像清零：新歌还没开始播，currentTime=0（修复前残留上一首进度会污染这里）
@@ -368,9 +404,9 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
     proxy.paused = true;
     proxy.currentTime = 0;
 
-    const p = maybePrefetchAsset(state.currentSong);
+    const p = maybePrefetchAsset(state.currentSong!);
     await flush();
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     const { path, requestId } = hasAssetCall[0];
     bridgeMock.emit("assetStatus", {
       requestId,
@@ -388,16 +424,16 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("已下载 + resumeAt（restoreLastPlayed 断点续播）：切本地后 seek 到断点而不是从 0 开始", async () => {
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     proxy._src = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
     proxy.paused = true;
     proxy.currentTime = 0; // 还没开始播（换源清零）
 
-    const p = maybePrefetchAsset(state.currentSong, { resumeAt: 120 }); // 断点 120s
+    const p = maybePrefetchAsset(state.currentSong!, { resumeAt: 120 }); // 断点 120s
     await flush();
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     const { path, requestId } = hasAssetCall[0];
     bridgeMock.emit("assetStatus", {
       requestId,
@@ -416,16 +452,16 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("resumeAt 超过 duration：clamp 到 duration-0.5（防 seek 越界立即 ended = 直接跳过）", async () => {
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     proxy._src = "http://192.168.1.50:17627/api/audio?path=%2FMusic%2Fa.mp3";
     proxy.paused = true;
     proxy.currentTime = 0;
 
-    const p = maybePrefetchAsset(state.currentSong, { resumeAt: 9999 }); // 远超时长
+    const p = maybePrefetchAsset(state.currentSong!, { resumeAt: 9999 }); // 远超时长
     await flush();
-    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset");
+    const hasAssetCall = bridgeMock.post.mock.calls.find((c) => c[0].cmd === "hasAsset")!;
     const { path, requestId } = hasAssetCall[0];
     bridgeMock.emit("assetStatus", {
       requestId,
@@ -448,7 +484,7 @@ describe("maybePrefetchAsset：播放本地资产优先（iOS 壳）", () => {
   });
 
   it("无 path 的流媒体条目：不触发资产查询", async () => {
-    await maybePrefetchAsset({ type: "stream", streamId: "s1", name: "S" });
+    await maybePrefetchAsset({ type: "stream", streamId: "s1", name: "S" } as Song);
     expect(bridgeMock.post).not.toHaveBeenCalled();
   });
 });
@@ -462,8 +498,8 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     bridgeMock.nativeSendMetadata.mockClear();
     bridgeMock.resolveCoverURL.mockClear();
     coverToDataURLMock.mockClear();
-    sync.cachedCoverURL.mockReset();
-    sync.cacheCover.mockReset();
+    cachedCoverURLMock.mockReset();
+    cacheCoverMock.mockReset();
     Object.assign(state, {
       songs: [],
       currentIndex: -1,
@@ -495,7 +531,7 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     bridgeMock.nativeSendMetadata.mockClear(); // 清掉 immediate 触发（null）的一次
     try {
       const local = "http://127.0.0.1:17888/native-assets/audio/abc.m4a";
-      sync.cachedCoverURL.mockResolvedValue(local);
+      cachedCoverURLMock.mockResolvedValue(local);
       const song = { path: "/Music/a.mp3", name: "A", artist: "X", album: "Y" };
       state.currentSong = song;
       await flush();
@@ -510,7 +546,7 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     const unsub = playerMod.setupMediaSession();
     bridgeMock.nativeSendMetadata.mockClear();
     try {
-      sync.cachedCoverURL.mockResolvedValue(null);
+      cachedCoverURLMock.mockResolvedValue(null);
       const song = { path: "/Music/b.flac", name: "B" };
       state.currentSong = song;
       await flush();
@@ -518,7 +554,7 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
       //（原生收到的 coverUrl 与旧链路 resolveCoverURL 计算值相同，行为不变）
       const remote = "/api/cover?path=%2FMusic%2Fb.flac";
       expect(bridgeMock.nativeSendMetadata).toHaveBeenLastCalledWith(song, remote);
-      expect(bridgeMock.nativeSendMetadata.mock.results.at(-1).value).toBe(remote);
+      expect(bridgeMock.nativeSendMetadata.mock.results.at(-1)!.value).toBe(remote);
       expect(sync.cacheCover).toHaveBeenCalledWith("/Music/b.flac");
     } finally {
       unsub();
@@ -530,8 +566,8 @@ describe("setupMediaSession（iOS 分支）：封面本地优先（CarPlay 封�
     await flush(); // immediate 触发（null）的异步壳先结算，再清计数
     bridgeMock.nativeSendMetadata.mockClear();
     try {
-      let resolveFirst;
-      sync.cachedCoverURL
+      let resolveFirst: (v: string) => void = () => {};
+      cachedCoverURLMock
         .mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)))
         .mockResolvedValue("http://127.0.0.1:17888/native-assets/audio/second.m4a");
       const song1 = { path: "/Music/a.mp3", name: "A" };
@@ -562,8 +598,8 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
     bridgeMock.isNativePlayback.mockReturnValue(true);
     bridgeMock.resolveCoverURL.mockClear();
     coverToDataURLMock.mockClear();
-    sync.cachedCoverURL.mockReset();
-    sync.cacheCover.mockReset();
+    cachedCoverURLMock.mockReset();
+    cacheCoverMock.mockReset();
     Object.assign(state, {
       songs: [],
       currentIndex: -1,
@@ -593,7 +629,7 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     const local = "http://127.0.0.1:17888/native-assets/audio/a.m4a";
-    sync.cachedCoverURL.mockResolvedValue(local);
+    cachedCoverURLMock.mockResolvedValue(local);
     coverToDataURLMock.mockResolvedValue("data:image/jpeg;base64,local");
 
     const cover = await resolveCoverForMetadata(song, () => true);
@@ -608,7 +644,7 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     const local = "http://127.0.0.1:17888/native-assets/audio/a.m4a";
-    sync.cachedCoverURL.mockResolvedValue(local);
+    cachedCoverURLMock.mockResolvedValue(local);
     coverToDataURLMock.mockRejectedValue(new Error("fetch failed"));
 
     const cover = await resolveCoverForMetadata(song, () => true);
@@ -619,7 +655,7 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
   it("未缓存：cacheCover 触发 + 远程 URL 转 data URL", async () => {
     const song = { path: "/Music/b.flac", name: "B" };
     state.currentSong = song;
-    sync.cachedCoverURL.mockResolvedValue(null);
+    cachedCoverURLMock.mockResolvedValue(null);
     coverToDataURLMock.mockResolvedValue("data:image/jpeg;base64,remote");
 
     const cover = await resolveCoverForMetadata(song, () => true);
@@ -633,7 +669,7 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
   it("未缓存 + 远程转换失败：兑底远程 URL（原生异步路径，锁屏仍正常）", async () => {
     const song = { path: "/Music/b.flac", name: "B" };
     state.currentSong = song;
-    sync.cachedCoverURL.mockResolvedValue(null);
+    cachedCoverURLMock.mockResolvedValue(null);
     coverToDataURLMock.mockRejectedValue(new Error("bad"));
 
     const cover = await resolveCoverForMetadata(song, () => true);
@@ -645,7 +681,7 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
   it("isCurrent 返回 false（第一次 await 后已切歌）→ 返回 null", async () => {
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
-    sync.cachedCoverURL.mockResolvedValue("http://127.0.0.1:17888/native-assets/audio/a.m4a");
+    cachedCoverURLMock.mockResolvedValue("http://127.0.0.1:17888/native-assets/audio/a.m4a");
 
     const cover = await resolveCoverForMetadata(song, () => false);
 
@@ -657,8 +693,8 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
     const song = { path: "/Music/a.mp3", name: "A" };
     state.currentSong = song;
     const local = "http://127.0.0.1:17888/native-assets/audio/a.m4a";
-    sync.cachedCoverURL.mockResolvedValue(local);
-    let resolveConvert;
+    cachedCoverURLMock.mockResolvedValue(local);
+    let resolveConvert: (v: string) => void = () => {};
     coverToDataURLMock.mockImplementationOnce(() => new Promise((r) => (resolveConvert = r)));
 
     let current = song; // 模拟 state.currentSong 的当前歌引用（转换期间被切走）
@@ -672,7 +708,7 @@ describe("resolveCoverForMetadata：封面转 data URL（CarPlay 即时刷新）
 
   it("无 path（流媒体/空歌）：直接返回空串，不查询缓存", async () => {
     const cover = await resolveCoverForMetadata(
-      { type: "stream", coverUrl: "https://img.example.com/c.jpg" },
+      { type: "stream", coverUrl: "https://img.example.com/c.jpg" } as Song,
       () => state.currentSong,
     );
     expect(cover).toBe("");

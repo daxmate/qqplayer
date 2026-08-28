@@ -3,18 +3,20 @@
 //      已在歌单 → toast「已在」不重复添加；非歌曲拖拽（文件/文本）不响应；dragend 全局清理高亮。
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
+import type { VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 // Audio stub（jsdom 无 Audio 实现，必须在 import usePlayer 前注册）
 class FakeAudio {
-  static instances = [];
+  static instances: FakeAudio[] = [];
+  src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, (() => void) | undefined> = {};
+
   constructor() {
-    this.src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
     FakeAudio.instances.push(this);
   }
   play() {
@@ -25,7 +27,7 @@ class FakeAudio {
   pause() {
     this.paused = true;
   }
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     this.listeners[ev] = fn;
   }
   removeAttribute() {}
@@ -63,7 +65,7 @@ afterEach(() => {
   wrappers.splice(0).forEach((w) => w.unmount());
 });
 
-const wrappers = [];
+const wrappers: VueWrapper[] = [];
 
 function mountSidebar() {
   const wrapper = mount(Sidebar);
@@ -78,20 +80,20 @@ function toastText() {
 }
 
 // 歌单项 DOM（按歌单名 title 定位）
-const plItem = (wrapper, name) => wrapper.find(`[title="${name}"]`);
+const plItem = (wrapper: VueWrapper, name: string) => wrapper.find(`[title="${name}"]`);
 
 // 歌曲拖拽的 dataTransfer 假对象
-function songDataTransfer(path) {
+function songDataTransfer(path: string) {
   return {
     types: [DRAG_SONG_TYPE],
-    getData: vi.fn((type) => (type === DRAG_SONG_TYPE ? path : "")),
+    getData: vi.fn((type: string) => (type === DRAG_SONG_TYPE ? path : "")),
     dropEffect: "",
   };
 }
 
 // 文件拖拽（系统文件导入）的 dataTransfer：应被忽略
 function fileDataTransfer() {
-  return { types: ["Files"], getData: vi.fn(() => ""), dropEffect: "" };
+  return { types: ["Files"], getData: vi.fn((_type: string) => ""), dropEffect: "" };
 }
 
 describe("Sidebar 拖拽加歌单", () => {
@@ -138,7 +140,7 @@ describe("Sidebar 拖拽加歌单", () => {
     });
     await flushPromises(); // 本地优先写：入队（IndexedDB）→ 同步 → 清队，多跳微任务后 toast
     const pl = state.playlists.find((p) => p.id === "p2");
-    expect(pl.songPaths).toEqual(["/a.mp3"]);
+    expect(pl!.songPaths).toEqual(["/a.mp3"]);
     expect(toastText()).toContain("已加入歌单「日语歌」");
     // 高亮已清理
     expect(plItem(wrapper, "日语歌").classes()).not.toContain("sb-drop");
@@ -154,7 +156,7 @@ describe("Sidebar 拖拽加歌单", () => {
       dataTransfer: songDataTransfer("/b.mp3"),
     });
     await nextTick();
-    expect(state.playlists.find((p) => p.id === "p1").songPaths).toEqual(["/b.mp3"]);
+    expect(state.playlists.find((p) => p.id === "p1")!.songPaths).toEqual(["/b.mp3"]);
     expect(toastText()).toContain("已在歌单「旅行」中");
     expect(toastText()).not.toContain("已加入");
   });
@@ -163,7 +165,7 @@ describe("Sidebar 拖拽加歌单", () => {
     const wrapper = mountSidebar();
     await plItem(wrapper, "日语歌").trigger("drop", { dataTransfer: fileDataTransfer() });
     await nextTick();
-    expect(state.playlists.find((p) => p.id === "p2").songPaths).toEqual([]);
+    expect(state.playlists.find((p) => p.id === "p2")!.songPaths).toEqual([]);
     expect(toastText()).toBe("");
   });
 
@@ -178,7 +180,7 @@ describe("Sidebar 拖拽加歌单", () => {
     });
     await flushPromises(); // 本地优先写：入队 → 同步被拒 → 回滚 + 抛错，多跳微任务后 toast
     // addToPlaylist 乐观更新后回滚
-    expect(state.playlists.find((p) => p.id === "p2").songPaths).toEqual([]);
+    expect(state.playlists.find((p) => p.id === "p2")!.songPaths).toEqual([]);
     expect(toastText()).toContain("加入歌单失败");
   });
 

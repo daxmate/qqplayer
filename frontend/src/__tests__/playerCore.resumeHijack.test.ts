@@ -12,15 +12,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Audio stub：playerCore 模块加载即 new Audio()（audioEq/audioBare）
 class FakeAudio {
-  constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
-  set src(v) {
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, Array<() => void>> = {};
+
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
@@ -35,10 +34,10 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     (this.listeners[ev] = this.listeners[ev] || []).push(fn);
   }
-  removeEventListener(ev, fn) {
+  removeEventListener(ev: string, fn: () => void) {
     const arr = this.listeners[ev] || [];
     const i = arr.indexOf(fn);
     if (i >= 0) arr.splice(i, 1);
@@ -46,13 +45,13 @@ class FakeAudio {
 }
 vi.stubGlobal("Audio", FakeAudio);
 
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -63,13 +62,32 @@ function clearLs() {
   for (const k of Object.keys(lsStore)) delete lsStore[k];
 }
 
+/** 原生 Audio 代理 stub 形状（对齐 nativeAudioBridge createNativeAudioProxy 返回） */
+interface FakeNativeProxy {
+  _src: string;
+  currentTime: number;
+  volume: number;
+  muted: boolean;
+  playbackRate: number;
+  paused: boolean;
+  ended: boolean;
+  duration: number;
+  listeners: Record<string, Array<(e: unknown) => void>>;
+  play(): Promise<void>;
+  pause(): void;
+  load(): void;
+  removeAttribute(attr: string): void;
+  addEventListener(ev: string, fn: (e: unknown) => void): void;
+  removeEventListener(ev: string, fn: (e: unknown) => void): void;
+}
+
 // ---------- mock：nativeAudioBridge（与 prefetch.test.js 同款，但 src setter 对齐
 // 真实代理的换源清零语义——nativeAudioBridge.js src setter 会清 nativeState
 // currentTime/duration/ended，2026-08-25 3e73bc7 防御；测试要复现真实时序必须一致） ----------
 const bridgeMock = vi.hoisted(() => {
-  const handlers = new Map();
-  let proxy = null;
-  const makeProxy = () => {
+  const handlers = new Map<string, Set<(e: unknown) => void>>();
+  let proxy: FakeNativeProxy | null = null;
+  const makeProxy = (): FakeNativeProxy => {
     const p = {
       _src: "",
       currentTime: 0,
@@ -79,7 +97,7 @@ const bridgeMock = vi.hoisted(() => {
       paused: true,
       ended: false,
       duration: 0,
-      listeners: {},
+      listeners: {} as Record<string, Array<(e: unknown) => void>>,
       play() {
         this.paused = false;
         return Promise.resolve();
@@ -88,23 +106,23 @@ const bridgeMock = vi.hoisted(() => {
         this.paused = true;
       },
       load() {},
-      removeAttribute(attr) {
+      removeAttribute(attr: string) {
         if (attr === "src") this._src = "";
       },
-      addEventListener(ev, fn) {
+      addEventListener(ev: string, fn: (e: unknown) => void) {
         (this.listeners[ev] = this.listeners[ev] || []).push(fn);
       },
-      removeEventListener(ev, fn) {
+      removeEventListener(ev: string, fn: (e: unknown) => void) {
         const arr = this.listeners[ev] || [];
         const i = arr.indexOf(fn);
         if (i >= 0) arr.splice(i, 1);
       },
     };
     Object.defineProperty(p, "src", {
-      get() {
+      get(this: FakeNativeProxy) {
         return this._src;
       },
-      set(v) {
+      set(this: FakeNativeProxy, v: string) {
         this._src = v ? String(v) : "";
         if (v) {
           // 对齐真实代理：换源即清零进度/时长镜像（残留进度不得污染新歌）
@@ -124,22 +142,22 @@ const bridgeMock = vi.hoisted(() => {
       if (!proxy) proxy = makeProxy();
       return proxy;
     }),
-    onNativeEvent: vi.fn((name, fn) => {
+    onNativeEvent: vi.fn((name: string, fn: (e: unknown) => void) => {
       if (!handlers.has(name)) handlers.set(name, new Set());
-      handlers.get(name).add(fn);
+      handlers.get(name)!.add(fn);
       return () => {
         handlers.get(name)?.delete(fn);
       };
     }),
     registerRemoteCommandHandler: vi.fn(),
     registerNativeSongChangedHandler: vi.fn(),
-    resolveNativeUrl: vi.fn((url) => url),
+    resolveNativeUrl: vi.fn((url: string) => url),
     nativeSendMetadata: vi.fn(),
     resolveCoverURL: vi.fn(() => ""),
-    getProxy: () => proxy,
+    getProxy: (): FakeNativeProxy | null => proxy,
     /** 模拟原生侧 loadedmetadata 到达 → 代理监听器触发（与真实 emit 同语义：
      *  nativeAudioBridge 先更新 nativeState.duration 镜像再 emit） */
-    fireLoadedMetadata(duration) {
+    fireLoadedMetadata(duration: number) {
       if (proxy) {
         proxy.duration = duration;
       }
@@ -171,7 +189,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
 // 实现但测试不注入 assetStatus 回执 → maybePrefetchAsset 停留在等待（fire-and-forget，
 // 不影响 selectSong 主流程；本测试聚焦 loadedMetaHandler 劫持路径）
 vi.mock("../utils/sync.js", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import("../utils/sync.js")>();
   return {
     ...actual,
     cachedCoverURL: vi.fn().mockResolvedValue(null),
@@ -179,7 +197,7 @@ vi.mock("../utils/sync.js", async (importOriginal) => {
   };
 });
 
-const coverToDataURLMock = vi.fn(async (url) => url);
+const coverToDataURLMock = vi.fn(async (url: string) => url);
 vi.mock("../utils/coverDataURL.js", () => ({
   coverToDataURL: coverToDataURLMock,
 }));
@@ -221,7 +239,7 @@ describe("selectSong 恢复播放断点监听器", () => {
     const p = selectSong(0, { resumeAt: 57.5, record: false });
     bridgeMock.fireLoadedMetadata(239); // 恢复歌加载完成
     await p;
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     expect(proxy.currentTime).toBe(57.5);
   });
 
@@ -230,7 +248,7 @@ describe("selectSong 恢复播放断点监听器", () => {
     const p1 = selectSong(0, { resumeAt: 57.5, record: false });
     bridgeMock.fireLoadedMetadata(239);
     await p1;
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     expect(proxy.currentTime).toBe(57.5);
 
     // 2. 自然切歌（autoPlay，无 resumeAt）
@@ -247,7 +265,7 @@ describe("selectSong 恢复播放断点监听器", () => {
 
   it("连续切歌：每首都不带旧断点（多轮循环安全）", async () => {
     await selectSong(0, { resumeAt: 57.5, record: false });
-    const proxy = bridgeMock.getProxy();
+    const proxy = bridgeMock.getProxy()!;
     // 多轮自然切歌，每轮都在 loadLyric 完成前注入 loadedmetadata
     for (let i = 1; i < SONGS.length; i++) {
       const p = selectSong(i, { autoPlay: true, record: false });

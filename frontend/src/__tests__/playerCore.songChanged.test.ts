@@ -8,15 +8,14 @@ import { describe, it, expect, vi } from "vitest";
 
 // Audio stub：playerCore 模块加载即 new Audio()（audioEq/audioBare），jsdom 无 Audio
 class FakeAudio {
-  constructor() {
-    this._src = "";
-    this.currentTime = 0;
-    this.playbackRate = 1;
-    this.paused = true;
-    this.duration = 0;
-    this.listeners = {};
-  }
-  set src(v) {
+  _src = "";
+  currentTime = 0;
+  playbackRate = 1;
+  paused = true;
+  duration = 0;
+  listeners: Record<string, Array<() => void>> = {};
+
+  set src(v: string) {
     this._src = v;
     if (v) this.currentTime = 0;
   }
@@ -31,10 +30,10 @@ class FakeAudio {
     this.paused = true;
   }
   removeAttribute() {}
-  addEventListener(ev, fn) {
+  addEventListener(ev: string, fn: () => void) {
     (this.listeners[ev] = this.listeners[ev] || []).push(fn);
   }
-  removeEventListener(ev, fn) {
+  removeEventListener(ev: string, fn: () => void) {
     const arr = this.listeners[ev] || [];
     const i = arr.indexOf(fn);
     if (i >= 0) arr.splice(i, 1);
@@ -43,13 +42,13 @@ class FakeAudio {
 vi.stubGlobal("Audio", FakeAudio);
 
 // jsdom（vitest 4）无 localStorage → 手写 stub（playerCore 模块加载期读取）
-const lsStore = {};
+const lsStore: Record<string, string> = {};
 const localStorageStub = {
-  getItem: (k) => (k in lsStore ? lsStore[k] : null),
-  setItem: (k, v) => {
+  getItem: (k: string) => (k in lsStore ? lsStore[k] : null),
+  setItem: (k: string, v: string) => {
     lsStore[k] = String(v);
   },
-  removeItem: (k) => {
+  removeItem: (k: string) => {
     delete lsStore[k];
   },
   clear: () => {
@@ -66,7 +65,7 @@ vi.mock("../composables/nativeAudioBridge.js", () => ({
   registerNativeSongChangedHandler: vi.fn(),
   nativeSendMetadata: vi.fn(),
   resolveCoverURL: vi.fn(),
-  resolveNativeUrl: vi.fn((url) => url),
+  resolveNativeUrl: vi.fn((url: string) => url),
   nativePost: vi.fn(),
   onNativeEvent: vi.fn(),
 }));
