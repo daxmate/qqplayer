@@ -315,12 +315,17 @@ async function download(item: OnlineItem, opts: { noLoginPrompt?: boolean } = {}
       return;
     }
     // 网易云：现有逻辑不变
-    const res = await apiPost("/api/online/download", {
-      id: item.id,
-      level: downloadSettings.defaultQuality,
-      title: item.title,
-      artist: item.artist,
-    });
+    const res = await apiPost(
+      "/api/online/download",
+      {
+        id: item.id,
+        level: downloadSettings.defaultQuality,
+        title: item.title,
+        artist: item.artist,
+      },
+      // 下载是同步等 aria2 落盘的长请求（一首歌 30s+），默认 10s 超时会误报失败
+      { timeout: 600000 },
+    );
     if (!res.ok) {
       const data = res.data || {};
       throw new Error(data.error || "");

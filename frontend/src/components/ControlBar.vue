@@ -351,12 +351,17 @@ async function downloadCurrent() {
   if (!song || !id || downloadingId.value !== null) return;
   downloadingId.value = id;
   try {
-    const res = await apiPost("/api/online/download", {
-      id,
-      level: downloadSettings.defaultQuality,
-      title: song.name,
-      artist: song.artist || "",
-    });
+    const res = await apiPost(
+      "/api/online/download",
+      {
+        id,
+        level: downloadSettings.defaultQuality,
+        title: song.name,
+        artist: song.artist || "",
+      },
+      // 下载是同步等 aria2 落盘的长请求（一首歌 30s+），默认 10s 超时会误报失败
+      { timeout: 600000 },
+    );
     if (!res.ok) {
       const data = (res.data || {}) as Record<string, unknown>;
       throw new Error(String(data.error || data.message || ""));

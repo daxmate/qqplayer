@@ -79,7 +79,9 @@ export async function runScrapeBatch(payload: ScrapeBatchPayload): Promise<void>
   scrapeBatchState.results = [];
   scrapeBatchState.summary = { total: 0, written: 0, skipped: 0, failed: 0 };
   try {
-    const r = await apiPost("/api/tags/scrape-batch", payload);
+    // 批量刮削（paths 多选 / mode=library 整库）后端逐首处理，每首多源查询 + 防限流 sleep，
+    // 整批可能耗时数分钟——默认 10s 超时必然误报失败，显式给 30 分钟
+    const r = await apiPost("/api/tags/scrape-batch", payload, { timeout: 1800000 });
     if (!r.ok) {
       const data = r.data || {};
       scrapeBatchState.error =

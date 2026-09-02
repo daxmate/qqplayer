@@ -349,7 +349,9 @@ async function scrape() {
   netease.value = [];
   musicbrainz.value = [];
   try {
-    const res = await apiPost("/api/tags/scrape", { path: song.value.path });
+    // 刮削是多源同步请求（网易云 + MusicBrainz 降级链 + 封面 fallback，实测 15s+），
+    // 默认 10s 超时会误报“刮削失败”——显式给 120s
+    const res = await apiPost("/api/tags/scrape", { path: song.value.path }, { timeout: 120000 });
     if (!res.ok) throw new Error(t("tags.scrapeFailed"));
     const data = res.data || {};
     scrapeQuery.value = data.query || "";
@@ -387,7 +389,7 @@ function pick(item: ScrapeCandidate, source: string) {
 // 成功且 year 非空 → 填表单（String）；失败/无数据 → 静默忽略（catch 不报错）
 async function fetchAlbumYear(songId: string | number) {
   try {
-    const res = await apiPost("/api/tags/album-year", { song_id: songId });
+    const res = await apiPost("/api/tags/album-year", { song_id: songId }, { timeout: 30000 });
     if (!res.ok) return;
     const year = res.data && res.data.year;
     if (year) form.year = String(year);

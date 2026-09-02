@@ -454,6 +454,7 @@ async function downloadOnline(item: SearchResult) {
   try {
     const isGequhai = onlineSource.value === "gequhai";
     // 歌曲海下载 401 = 夸克未登录（非配对失效），skip401 关闭特判
+    // timeout 600000：下载是同步等 aria2/httpx 落盘的长请求（一首歌 30s+），默认 10s 超时会误报失败
     const res = await apiPost(
       isGequhai ? "/api/gequhai/download" : "/api/online/download",
       isGequhai
@@ -464,7 +465,7 @@ async function downloadOnline(item: SearchResult) {
             title: p.title || item.title,
             artist: p.artist || "",
           },
-      { skip401: isGequhai },
+      { skip401: isGequhai, timeout: 600000 },
     );
     if (res.status === 401 && isGequhai) {
       pendingDownload.value = item; // 登录成功后自动重试
