@@ -1,13 +1,11 @@
 # QQPlayer Swift lint 配置（保守：禁用结构性/命名类规则，只保留纯质量问题检查）
 # 代码里大量单字母变量（闭包参数 t/g/v 等）是既有风格，不动；force_cast/force_try
-# 在 dict_events.swift / test 里是刻意用法（JSON 序列化），禁用避免误报。
+# 在测试里是刻意用法（JSON 序列化），禁用避免误报。
 
 included:
-  - desktop/macOS
   - mobile/ios/Sources
 
 excluded:
-  - desktop/macOS/build
   - mobile/ios/build
   - mobile/ios/QQPlayer.xcodeproj
 

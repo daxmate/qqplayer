@@ -8,7 +8,7 @@
 #   - desktop/Windows/src-tauri/Cargo.lock        （lockfile 包版本）
 #   - desktop/Windows/package.json / package-lock.json（壳 npm 包版本）
 #   - frontend/package.json                       （前端 npm 包版本）
-# 注意：make-dmg.sh / desktop/macOS/build.sh 不在此列——它们运行时直接读 VERSION 文件。
+# 注意：macOS 壳打包链已移除（2026-09-07，见 qqplayer-swift）；其余构建器只认各自文件里的版本号。
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

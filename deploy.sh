@@ -193,18 +193,4 @@ else
     fi
 fi
 
-# 7. 编译安装桌面壳（代码有更新时一并部署；运行中的 app 下次启动才用新壳）
-if [ "$RESTART_ONLY" = "1" ]; then
-  echo "── 跳过桌面壳编译（--start 快速重启模式）"
-else
-  echo "── 编译安装桌面壳"
-  if [ -f desktop/macOS/build.sh ]; then
-    if ./desktop/macOS/build.sh --install >/dev/null 2>&1; then
-      echo "✅ 桌面壳已更新（/Applications/QQPlayer.app），重启 QQPlayer.app 生效"
-    else
-      echo "⚠️ 桌面壳编译安装失败（不影响后端服务），手动排查: cd desktop/macOS && ./build.sh --install"
-    fi
-  else
-    echo "── 跳过：desktop/macOS/build.sh 不存在"
-  fi
-fi
+# 7. macOS 桌面壳已退役（2026-09-07，迁移至 qqplayer-swift Swift 原生版）——本步移除

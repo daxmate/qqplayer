@@ -2,7 +2,7 @@
 
 > 2026-08-27 P2-A 审计补充：**菜单机制本就共享**（ContextMenu.vue 已是单一组件），本次不改代码，只补文档。
 > 目标：说清「浏览器自定义菜单 ↔ 壳桥接 ↔ 原生 NSMenu」三层如何协作，以及为什么移动端没有菜单。
-> 关联：`docs/ios-bridge-protocol.md`（桥契约）、`frontend/src/composables/useNativeCtxMenu.js`（桥接实现）、`desktop/macOS/main.swift`（壳侧注入）。
+> 关联：`docs/ios-bridge-protocol.md`（桥契约）、`frontend/src/composables/useNativeCtxMenu.js`（桥接实现）；macOS 壳侧实现已随壳迁移至 qqplayer-swift（2026-09-07 壳移除）。
 
 ## 一、三层结构总览
 
@@ -35,7 +35,7 @@
   `.sb-item[data-playlist-id]`），组装上下文经 `"native"` 通道上报 `ctxState`（上下文无变化去重不重发），并安装
   全局 API `window.__qqCtxMenu.*`；菜单点击 → evaluateJavaScript 调该 API → 派发 `qqplayer:ctx-*` window 事件。
   浏览器环境（无 `window.qqplayerNative`）init 直接返回，零监听、零影响。
-- **③ 壳侧原生 NSMenu**：`desktop/macOS/main.swift`。`willOpenMenu` 按最新 `ctxState` 的 kind（song / playlist / nil）
+- **③ 壳侧原生 NSMenu**（macOS 壳已迁移 qqplayer-swift，2026-09-07）：`willOpenMenu` 按最新 `ctxState` 的 kind（song / playlist / nil）
   注入应用菜单项（播放/下一首播放/收藏/加歌单/删除/编辑标签/去歌手/去专辑…）；kind 为 nil（空白区右键）或上下文过期
   → 不注入，保留系统菜单。点击动作统一 `callJS("window.__qqCtxMenu?.xxx()")` 回前端（失败静默）。
 
@@ -57,5 +57,5 @@
 2. 浏览器菜单：改 ContextMenu.vue 的按钮 + emit；触发方（Playlist / SmartViewPanel）`@ctx-*` 接动作。
 3. 壳内菜单：useNativeCtxMenu.js 的 ctxTarget 组装 + `__qqCtxMenu` API + 派发事件；
    触发方加对应 `qqplayer:ctx-*` 监听（**必须**与浏览器动作同实现，禁止另写逻辑）。
-4. 壳侧注入：desktop/macOS/main.swift `insertCtxMenuItems` 加 NSMenuItem + `callJS` 对应 API。
+4. 壳侧注入（macOS 壳已迁移 qqplayer-swift）：`insertCtxMenuItems` 加 NSMenuItem + `callJS` 对应 API。
 5. 浏览器右键行为回归：无壳环境 `contextmenu` 自定义菜单正常；壳环境 NSMenu 注入、点击动作与浏览器一致。
