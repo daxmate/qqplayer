@@ -5,6 +5,29 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### ⚙️ 前端全量 TypeScript 化（2026-08-28，行为零变化）
+
+- **源码与测试全量 js→ts（40 个 refactor 提交）**：核心模块先行（`apiClient` / `cacheDb` / `coverDataURL` / `settingsSync` / `parseLrc` / `useCoverURL` 等），composables 54 个全部 TS 化，随后组件（search / settings / mobile / player / shell）、main / setup 入口、locales 与全部 vitest 测试文件迁移完毕
+- eslint 补 `argsIgnorePattern`（测试 mock 参数下划线化）；设置 / 封面契约测试路径同步 `.js→.ts`；coverDataURL 动态 import 缓存破坏测试修复
+
+### 📱 移动端跟唱交互调整（2026-08-28）
+
+- karaoke 控制区可折叠：收起态重排为四键（播放 / 跟唱居中，倍速 / 单句循环分列两侧），不再遮挡歌词
+- 跟唱功能说明按钮常驻并移至顶部歌词库旁；信息气泡定位锚点缺失修复（此前可能渲染到视口外、点击无提示）
+- 退出跟唱自动清理 AB 循环 / 单句循环标注
+
+### 🐛 修复：下载 / 刮削长请求超时误报失败（2026-09-02）
+
+- 根因：apiClient 默认 10s 超时，而下载是同步等 aria2 落盘的长请求（单首 30s+）、刮削多源候选实测 15s+——前端 abort 报「失败」时后端线程仍在执行、文件实际已下载成功
+- 按后端实际耗时显式放宽：下载 600s / 单首刮削 120s / 补年份 30s / 批量刮削 1800s
+
+### ⚙️ 移除 macOS 桌面壳（2026-09-07）
+
+- 删除 `desktop/macOS`（xcodegen Swift 壳）与 `packaging/make-dmg.sh`（dmg 打包链），CI 的 backend-macos job 整体退役——macOS 桌面版已迁移至 Swift 原生版（独立仓库 `qqplayer-swift`），本仓库不再提供 macOS 桌面壳
+- 保留：`desktop/Windows`（Tauri 2）、`mobile/ios`（伴侣壳，清理待排期）、`packaging/build-backend.sh`
+
 ## [1.0.0-rc.2] - 2026-08-28
 
 ### 🎯 架构改造 P0-P3 全部落地（2026-08-27 ~ 08-28，行为零变化）
