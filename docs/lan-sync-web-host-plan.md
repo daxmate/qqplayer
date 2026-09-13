@@ -69,9 +69,9 @@ class SyncService:
 
 | # | 内容 | 验收 | 状态 |
 | --- | --- | --- | --- |
-| M1 | 协议底座：deviceid / frame / crypto（身份+握手+派生+AEAD） | pytest 单测（含 RFC 向量）+ 与 Swift 生成向量逐字节比对 | 进行中 |
-| M2 | 会话状态机（host）：hello / pair_request / 批准 / ready / 业务帧转发 | 内存回环端到端：Python 参考客户端完成配对进入 ready | 进行中 |
-| M3 | 服务层 + TCP 监听 + mDNS 广播 + 身份/信任表持久化 | 本地起服务，`_qqplayer-sync._tcp` 可被 `dns-sd -B` 看到 | 进行中 |
+| M1 | 协议底座：deviceid / frame / crypto（身份+握手+派生+AEAD） | pytest 单测（含 RFC 向量）+ 与 Swift 生成向量逐字节比对 | ✅ 已完成（2026-09-14，含 Swift 向量逐字节比对） |
+| M2 | 会话状态机（host）：hello / pair_request / 批准 / ready / 业务帧转发 | 内存回环端到端：Python 参考客户端完成配对进入 ready | ✅ 已完成（2026-09-14，回环端到端真 TCP） |
+| M3 | 服务层 + TCP 监听 + mDNS 广播 + 身份/信任表持久化 | 本地起服务，`_qqplayer-sync._tcp` 可被 `dns-sd -B` 看到 | ✅ 已完成（2026-09-14，mDNS 冒烟 dns-sd + zeroconf 双工具可见；真机 M5） |
 | M4 | FastAPI 路由 + Vue 同步页（身份/QR/批准卡/设备列表） | 接口自测 + 前端构建通过；UI 验收交用户 | 待做 |
 | M5 | **真机验收**：iPhone 扫 web 版 QR 完成配对（用户操作） | 用户真机 | 待做 |
 | M6 | 内容同步：manifest(10/11) / 内容清单(15/16) / 拉取(12/13) / 推送(14+4/5/6) | 待 M5 后按能力矩阵推进 | 规划中 |
