@@ -73,6 +73,8 @@ class EventType(str, Enum):
     PAIR_RESULT = "pair_result"
     DEVICE = "device"
     ERROR = "error"
+    #: 推送（S3a）编排事件：状态迁移 + 逐条发送进度（载荷见 `push.LibraryPushRun.status`）
+    PUSH = "push"
 
 
 @dataclass(frozen=True, slots=True)

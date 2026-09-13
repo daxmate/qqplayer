@@ -44,6 +44,7 @@ from .models import (
     SyncPhase,
     SyncSessionConfig,
 )
+from .push import LibraryPushRun, PushError
 from .qr import NoncePool, encode_qr_payload, make_qr_payload, new_session_nonce
 from .server import SyncServer, safe_device_name
 from .session import HostSession, PendingPairRequest
@@ -59,6 +60,8 @@ TRUST_FILE = "lansync_devices.json"
 IDENTITY_FILE_MODE = 0o600
 #: 事件环形缓冲容量（UI 轮询游标滞后时的可回溯条数）
 EVENT_BUFFER_SIZE = 512
+#: 保留的推送运行实例上限（终态运行可继续用 `push_status` 查询，超出按最早终态淘汰）
+MAX_PUSH_RUNS = 32
 
 
 class IdentityStoreError(Exception):
@@ -171,6 +174,7 @@ class SyncService:
         self._events: deque[SyncEvent] = deque(maxlen=EVENT_BUFFER_SIZE)
         self._seq = 0
         self._request_sessions: dict[str, HostSession] = {}
+        self._push_runs: dict[str, LibraryPushRun] = {}
         self._application_frame_handler = on_application_frame
         config = session_config if session_config is not None else SyncSessionConfig()
         if config.display_name is None:
@@ -203,6 +207,8 @@ class SyncService:
         await self._server.stop()
         self._nonces.clear()
         self._request_sessions.clear()
+        for run in list(self._push_runs.values()):
+            run.handle_session_closed()
 
     # ---------------------------------------------------------------- 状态
 
@@ -346,6 +352,79 @@ class SyncService:
             self._emit(EventType.DEVICE, {"peer_id": peer_id, "action": "removed"})
         return removed
 
+    # ---------------------------------------------------------------- 推送
+
+    def push_selection(self, peer_id: str, selection: Any = None) -> str:
+        """发起一次「推送到设备」（S3a），返回 `run_id`。
+
+        选择集 = `Collection` 或线上字典 `{"kind": "all"|"playlists"|"tracks", "ids": [...]}`；
+        歌单标识含保留命名空间 `@favorites` / `@smart:*`（语义见 `library_sources`）。
+        流程：请求对端 manifest → 推送方向对账 → 发推送声明（帧 14）→ 等对端点名
+        （帧 12）→ 交取文件应答器逐条推送 → 收尾。
+
+        该设备无就绪会话 / 选择集非法 → :class:`~app.lansync.push.PushError`。
+        """
+        session = self._ready_session(peer_id)
+        if session is None:
+            raise PushError(f"该设备无就绪会话，无法推送：{peer_id}")
+        run = LibraryPushRun(session, selection=selection, on_event=self._handle_push_event)
+        self._register_push_run(run)
+        try:
+            run.start()
+        except PushError:
+            self._prune_push_runs()
+            raise
+        return run.run_id
+
+    def push_status(self, run_id: str) -> dict[str, Any]:
+        """推送状态 / 账目（未知 `run_id` → 空字典）。
+
+        键：`state` / `selection` / `planned` / `skipped` / `completed` / `failed` +
+        各计数 + `sentBytes` / `totalBytes`（见 `LibraryPushRun.status`）。
+        """
+        run = self._push_runs.get(run_id)
+        return run.status() if run is not None else {}
+
+    def cancel_push(self, run_id: str) -> bool:
+        """取消一次推送（已终态 / 未知 `run_id` → False）。"""
+        run = self._push_runs.get(run_id)
+        if run is None:
+            return False
+        return run.cancel()
+
+    def _ready_session(self, peer_id: str) -> HostSession | None:
+        """该设备当前就绪的会话（未就绪 / 未连接 → None）。"""
+        for session in self._server.sessions:
+            if session.peer_device_id == peer_id and session.is_ready:
+                return session
+        return None
+
+    def _register_push_run(self, run: LibraryPushRun) -> None:
+        """登记推送运行（超上限时优先淘汰最早终态的运行）。"""
+        self._push_runs[run.run_id] = run
+        self._prune_push_runs()
+
+    def _prune_push_runs(self) -> None:
+        """把推送运行表收敛到上限：先淘汰终态（最早在前），仍超则淘汰最早登记者。"""
+        while len(self._push_runs) > MAX_PUSH_RUNS:
+            obsolete = next((key for key, run in self._push_runs.items() if run.is_terminal), None)
+            if obsolete is None:
+                obsolete = next(iter(self._push_runs))
+            self._push_runs.pop(obsolete, None)
+
+    def _route_push_frame(self, session: HostSession, frame_type: int, payload: bytes) -> bool:
+        """把业务帧交给该会话上未终态的推送运行；已被消费 → True。"""
+        for run in list(self._push_runs.values()):
+            if run.session_id != session.session_id or run.is_terminal:
+                continue
+            if run.handle_application_frame(frame_type, payload):
+                return True
+        return False
+
+    def _handle_push_event(self, event: dict[str, Any]) -> None:
+        """推送运行的事件 → 应用级事件（`EventType.PUSH`，UI 按游标轮询）。"""
+        self._emit(EventType.PUSH, dict(event))
+
     # ---------------------------------------------------------------- 事件
 
     def events_since(self, cursor: int) -> tuple[int, list[dict[str, Any]]]:
@@ -378,10 +457,13 @@ class SyncService:
         )
 
     def _handle_closed(self, session: HostSession, reason: CloseReason) -> None:
-        """会话关闭 → 事件（含原因）+ 清理该会话的配对请求。"""
+        """会话关闭 → 事件（含原因）+ 清理该会话的配对请求与推送运行。"""
         self._request_sessions = {
             key: value for key, value in self._request_sessions.items() if value is not session
         }
+        for run in list(self._push_runs.values()):
+            if run.session_id == session.session_id:
+                run.handle_session_closed()
         self._emit(
             EventType.SESSION,
             {
@@ -402,7 +484,12 @@ class SyncService:
     def _handle_application_frame(
         self, session: HostSession, frame_type: int, payload: bytes
     ) -> None:
-        """ready 后业务帧 → 转交应用层接入口（未注入则忽略）。"""
+        """ready 后业务帧 → 先给本会话在跑的推送运行（消费即止），否则转交应用层接入口。
+
+        未注入接入口时本层只做内部路由（既有语义不变）。
+        """
+        if self._route_push_frame(session, frame_type, payload):
+            return
         if self._application_frame_handler is None:
             return
         try:
