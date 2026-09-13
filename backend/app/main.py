@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db, state
 from app.middleware import register_auth_middleware
 from app.routers import include_routers
-from app.services import mdns
+from app.services import lansync_host, mdns
 from app.services import settings as settings_service
 from app.services.library_scan import _lyric_cleanup_loop, init_library
 
@@ -64,9 +64,13 @@ LOGGING_CONFIG = {
 async def _lifespan(app: FastAPI):
     """启动时挂后台任务：mDNS 广播（iOS 发现）+ 每周一 03:00 清理孤儿手动歌词（均不阻塞启动）"""
     mdns_handle = await mdns.start()
+    # 局域网同步 Host（S2）：起 TCP 监听 + mDNS 广播。容错口径同 mdns ——
+    # zeroconf 缺失/端口被占/监听失败只记 warning，绝不拖垮后端启动（lansync_host 内处理）
+    await lansync_host.start_service()
     if state.LYRIC_CLEANUP_ENABLED:
         asyncio.get_running_loop().create_task(_lyric_cleanup_loop())
     yield
+    await lansync_host.stop_service()
     await mdns.stop(mdns_handle)
 
 

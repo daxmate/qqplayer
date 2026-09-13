@@ -9,6 +9,7 @@ from . import (
     debuglog,
     dict,
     favorites,
+    lansync,
     library,
     lyrics,
     media,
@@ -48,6 +49,7 @@ _ROUTER_MODULES = (
     commands,
     debuglog,
     ping,
+    lansync,
 )
 
 
