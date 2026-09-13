@@ -123,6 +123,11 @@
               <ShortcutsSettingsPanel />
             </section>
 
+            <!-- ============ 局域网同步（S2 · web Host 侧） ============ -->
+            <section v-else-if="tab === 'lansync'" class="settings-scroll">
+              <LanSyncSettingsPanel />
+            </section>
+
             <!-- ============ 配对（iOS 壳隐藏） ============ -->
             <section v-else-if="tab === 'pairing'" class="settings-scroll">
               <PairingSettings />
@@ -222,6 +227,7 @@ import ShortcutsSettingsPanel from "./settings/ShortcutsSettingsPanel.vue";
 import SyncSettingsPanel from "./settings/SyncSettingsPanel.vue";
 import ScrapeSettingsPanel from "./settings/ScrapeSettingsPanel.vue";
 import LibrarySettingsPanel from "./settings/LibrarySettingsPanel.vue";
+import LanSyncSettingsPanel from "./settings/LanSyncSettingsPanel.vue";
 import { entriesByCategory } from "../settingsIndex";
 import pkg from "../../package.json";
 

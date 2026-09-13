@@ -3,6 +3,7 @@ export default {
   settings: {
     category: {
       pairing: "Pairing",
+      lansync: "LAN Sync",
       scrape: "Scraping",
     },
     cookiesFromBrowser: "Cookie source browser",

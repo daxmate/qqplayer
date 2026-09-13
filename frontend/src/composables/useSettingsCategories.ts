@@ -17,6 +17,7 @@ import {
   Video,
   Keyboard,
   Smartphone,
+  Wifi,
   Info,
 } from "@lucide/vue";
 import { isPairingEnabled } from "./usePairingConfirm.js";
@@ -39,6 +40,7 @@ export function getSettingsCategories(): SettingsCategory[] {
     { key: "sync", labelKey: "settings.category.sync", icon: RefreshCw },
     { key: "video", labelKey: "settings.category.video", icon: Video },
     { key: "shortcuts", labelKey: "settings.category.shortcuts", icon: Keyboard },
+    { key: "lansync", labelKey: "settings.category.lansync", icon: Wifi },
     { key: "pairing", labelKey: "settings.category.pairing", icon: Smartphone },
     { key: "about", labelKey: "settings.category.about", icon: Info },
   ];

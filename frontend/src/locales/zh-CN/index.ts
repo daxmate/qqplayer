@@ -22,6 +22,7 @@ import queue from "./queue.js";
 import books from "./books.js";
 import videos from "./videos.js";
 import scrape from "./scrape.js";
+import lansync from "./lansync.js";
 
 export default {
   ...common,
@@ -45,4 +46,5 @@ export default {
   ...books,
   ...videos,
   ...scrape,
+  ...lansync,
 };

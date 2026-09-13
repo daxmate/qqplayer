@@ -20,6 +20,7 @@ export default {
       ui: "界面",
       shortcuts: "快捷键",
       pairing: "配对",
+      lansync: "局域网同步",
       about: "关于",
     },
 

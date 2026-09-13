@@ -56,10 +56,12 @@ describe("SettingsModal 配对分类", () => {
     w.unmount();
   });
 
-  it("导航包含完整分类（含配对，共 11 项）", async () => {
+  it("导航包含完整分类（含配对与局域网同步，共 12 项）", async () => {
     const w = mount(SettingsModal, { props: { open: true } });
     await flushPromises();
-    expect(navItems().length).toBe(11);
+    expect(navItems().length).toBe(12);
+    // 局域网同步（S2 · web Host 侧）与老 companion「配对」是两条独立链路，导航各占一项
+    expect(navItems().some((n) => n.textContent.includes("局域网同步"))).toBe(true);
     w.unmount();
   });
 });

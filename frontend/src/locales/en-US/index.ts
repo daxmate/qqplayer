@@ -11,6 +11,7 @@ import tags from "./tags.js";
 import scrape from "./scrape.js";
 import mobile from "./mobile.js";
 import search from "./search.js";
+import lansync from "./lansync.js";
 
 export default {
   ...books,
@@ -22,6 +23,7 @@ export default {
   ...playlist,
   ...tags,
   ...scrape,
+  ...lansync,
   ...mobile,
   ...search,
 };
