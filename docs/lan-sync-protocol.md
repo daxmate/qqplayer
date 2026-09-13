@@ -65,6 +65,14 @@ web QQPlayer（Host / 服务端，本仓库）      iOS QQPlayer（Client / 移�
 4. 握手超时：host 在 `waitingForPeerHello` / `waitingForPairRequest` 阶段挂 `handshakeTimeout`（缺省 10s）；
    `waitingForPairApproval` / `waitingForPairResponse` **不挂超时**（等人工决定）。
 
+**⚠️ 签名字节不可复现（2026-09-14 web 端实现实测）**：Apple CryptoKit 的 Ed25519 是 **hedged** 变体 ——
+同一密钥、同一消息两次签名结果不同（`swiftc` 实测 `s1 != s2`，且都与本仓库向量里的 `signature_b64` 不同，
+三者互相验签全部通过）。因此：
+
+- 跨语言向量比对**只能比对签名输入的字节与验签结果，不能比对签名字节**（`tools/lansync-vectors` 即按此口径）；
+- 本端（web）签名是确定性 RFC8032（字节正确性由 RFC8032 §7.1 官方向量锁定）；
+  iOS 侧用标准 Ed25519 验签语义，能验通任何合法签名（含本端确定性签名），互操作不受影响。
+
 ## 3. 配对流程（QR 为主，手输为备）
 
 ### 3.1 QR 载荷（Host 生成并展示）
