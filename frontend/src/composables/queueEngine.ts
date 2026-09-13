@@ -109,8 +109,8 @@ export function removeFromQueue(index: number) {
 // 变速档位（playbackEngine.cycleSpeed/stepSpeed 共用；原 playerCore 中位于本段之前）
 export const SPEEDS = [0.75, 1.0, 1.25];
 
-// 洗牌队列：歌曲索引排列（随机模式用；只读导出——mediaSession 原生切歌跟随 /
-// songChangedTargetIndex 传参；写入仅限本模块，跨域写经 setShufflePos）
+// 洗牌队列：歌曲索引排列（随机模式用；只读导出——songChangedTargetIndex 传参；
+// 写入仅限本模块，跨域写经 setShufflePos）
 export let shuffleQueue: number[] = [];
 let shufflePos = -1; // 当前歌曲在队列中的位置
 // 播放历史栈（歌曲索引），随机模式"上一首"回退用（只读导出——playbackEngine prevSong 读/弹）
@@ -183,8 +183,7 @@ export function _resetPlayMode() {
   playHistory = [];
 }
 
-// 原生切歌跟随（mediaSession 用）：同步洗牌队列位置（原直接写 shufflePos；
-// 跨域只读 import 不能赋值，收敛为 setter）
+// 洗牌队列位置 setter（跨域只读 import 不能赋值，收敛为 setter）
 export function setShufflePos(pos: number) {
   shufflePos = pos;
 }
@@ -589,7 +588,6 @@ export function dbgLog(ev: string, data?: Record<string, unknown> | null) {
 
 // songChanged 对齐索引（纯逻辑，vitest 可测）：普通模式 index 直接映射；
 // shuffle 模式经 shuffleQueue 映射（index 是播放顺序中的位置）；越界/空队列返回 -1
-// （songChanged 的 index 是原生 queue 快照位置，快照由 nativeSyncQueue 按同一顺序同步）
 export function songChangedTargetIndex(
   playMode: string,
   index: number,

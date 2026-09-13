@@ -147,7 +147,7 @@ const CACHE_SCHEMA_VERSION = 3;
 let syncInFlight = false;
 
 /**
- * 拉取桌面 manifest 并缓存元数据集合（syncNow / syncAll 共用）。
+ * 拉取桌面 manifest 并缓存元数据集合（syncNow 调用）。
  * @returns {Promise<{ok:boolean, changed?:boolean, version?:string, manifest?:object, message?:string}>}
  */
 async function fetchAndCacheManifest(): Promise<ManifestResult> {

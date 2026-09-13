@@ -163,14 +163,7 @@ try {
     e.preventDefault();
     var href = a.getAttribute('href') || '';
     if (/[.](mp3|m4a|wav|ogg|aac)([?#]|$)/i.test(href)) {
-      // iOS 壳：postMessage 原生 AVPlayer 播放（iOS 26 WKWebView 里 HTMLAudioElement
-      // 会弹系统媒体播放器 UI；原生直接出声无界面）。浏览器回退 HTMLAudioElement。
-      try {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.qqplayerIos) {
-          window.webkit.messageHandlers.qqplayerIos.postMessage({ cmd: "playAudio", url: href });
-          return;
-        }
-      } catch (e) {}
+      // 词典音频试听：HTMLAudioElement（iOS 壳 WKWebView 原生 AVPlayer 分支随壳退役移除，2026-09-13）
       var audio = new Audio(href);
       var p = audio.play();
       if (p && p.catch) p.catch(function () {});
