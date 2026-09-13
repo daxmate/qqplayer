@@ -15,7 +15,9 @@ from Crypto.Hash import SHA256
 from Crypto.Protocol.KDF import HKDF
 from Crypto.Cipher import ChaCha20_Poly1305
 
-P = "/Users/dax/codes/qqplayer/.worktrees/lansync-vectors/tools/lansync-vectors/vectors.json"
+from pathlib import Path
+
+P = str(Path(__file__).resolve().parent / "vectors.json")
 V = json.load(open(P))
 b64 = lambda s: base64.b64decode(s)
 b32 = lambda b: base64.b32encode(b).decode().rstrip("=")
