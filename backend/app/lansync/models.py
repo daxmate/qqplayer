@@ -75,6 +75,9 @@ class EventType(str, Enum):
     ERROR = "error"
     #: 推送（S3a）编排事件：状态迁移 + 逐条发送进度（载荷见 `push.LibraryPushRun.status`）
     PUSH = "push"
+    #: 拉取（S3b）编排事件：对端清单页（`action: "preview"`）+ 状态迁移 + 逐条接收进度
+    #: （载荷见 `pull.LibraryPullRun.status` 与 `pull.PeerLibraryPage.to_payload`）
+    PULL = "pull"
 
 
 @dataclass(frozen=True, slots=True)

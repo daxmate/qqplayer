@@ -38,6 +38,7 @@ from typing import Any
 from .crypto import CryptoError, Identity
 from .deviceid import formatted
 from .filetransfer import DEFAULT_ACK_TIMEOUT
+from .locallib import SCOPE_TRACKS
 from .models import (
     PROTOCOL_VERSION,
     CloseReason,
@@ -47,6 +48,7 @@ from .models import (
     SyncPhase,
     SyncSessionConfig,
 )
+from .pull import DEFAULT_PAGE_LIMIT, LibraryPullRun, PeerLibraryBrowser, PullError
 from .push import LibraryPushRun, PushError
 from .qr import NoncePool, encode_qr_payload, make_qr_payload, new_session_nonce
 from .server import SyncServer, safe_device_name
@@ -65,6 +67,8 @@ IDENTITY_FILE_MODE = 0o600
 EVENT_BUFFER_SIZE = 512
 #: 保留的推送运行实例上限（终态运行可继续用 `push_status` 查询，超出按最早终态淘汰）
 MAX_PUSH_RUNS = 32
+#: 保留的拉取运行实例上限（口径同 `MAX_PUSH_RUNS`）
+MAX_PULL_RUNS = 32
 
 
 class IdentityStoreError(Exception):
@@ -184,6 +188,9 @@ class SyncService:
         #: 推送 ack 超时定时器（run_id → 句柄；每轮等待重挂一次）
         self._push_timers: dict[str, Any] = {}
         self._push_ack_timeout = float(push_ack_timeout)
+        #: 拉取运行（key = run_id）与对端清单浏览器（key = session_id）
+        self._pull_runs: dict[str, LibraryPullRun] = {}
+        self._browsers: dict[str, PeerLibraryBrowser] = {}
         self._application_frame_handler = on_application_frame
         config = session_config if session_config is not None else SyncSessionConfig()
         if config.display_name is None:
@@ -220,6 +227,9 @@ class SyncService:
             self._cancel_push_ack_timer(run_id)
         for run in list(self._push_runs.values()):
             run.handle_session_closed()
+        for run in list(self._pull_runs.values()):
+            run.handle_session_closed()
+        self._browsers.clear()
 
     # ---------------------------------------------------------------- 状态
 
@@ -498,6 +508,115 @@ class SyncService:
             self._arm_push_ack_timer(run)
         self._emit(EventType.PUSH, dict(event))
 
+    # ---------------------------------------------------------------- 拉取
+
+    def pull_preview(
+        self,
+        peer_id: str,
+        scope: str | None = None,
+        query: str | None = None,
+        offset: int = 0,
+        limit: int = DEFAULT_PAGE_LIMIT,
+    ) -> dict[str, Any]:
+        """浏览对端内容清单（帧 15/16，§13）：发一页请求，返回本端请求描述。
+
+        对端清单**异步**到达（帧 16）：本方法不阻塞，只发请求并返回
+        `{"request_id", "scope", "offset", "limit"}`；页面经 `events_since` 以
+        `EventType.PULL` / `action: "preview"` 事件返回（条目 + 曲库摘要，键同 §13.3，
+        另含 `playlistCount` / `trackCount` 计数字段）。
+
+        `scope` 缺省 = `tracks`（点名拉取的默认视图；`playlists` 取歌单清单）；
+        非法 scope 由对端回空清单 + `total: 0`（§13.4.2，不断会话）。
+        该设备无就绪会话 → :class:`~app.lansync.pull.PullError`。
+        """
+        session = self._ready_session(peer_id)
+        if session is None:
+            raise PullError(f"该设备无就绪会话，无法浏览：{peer_id}")
+        resolved_scope = scope or SCOPE_TRACKS
+        browser = self._browser_for(session)
+        request_id = browser.request(scope=resolved_scope, query=query, offset=offset, limit=limit)
+        return {
+            "request_id": request_id,
+            "scope": resolved_scope,
+            "offset": int(offset),
+            "limit": int(limit),
+        }
+
+    def pull_selection(self, peer_id: str, relative_paths: Any = None) -> str:
+        """发起一次「从设备拉取」（S3b），返回 `run_id`。
+
+        点名集合 = 对端曲库口径的相对路径列表（`None` = 对端全库）。流程：请求对端
+        manifest（帧 10）→ 拉取方向对账（缺 / 内容不同才取）→ 发 `sync_fetch_request`
+        （帧 12）点名 → 收文件帧（4/5/6，落 `曲库根/.sync-incoming/` → SHA-256 校验 →
+        认领 → 原子移入目标相对路径 → 导入本端曲库）→ 收结果帧（帧 13）收尾。
+
+        该设备无就绪会话 / 发送失败 → :class:`~app.lansync.pull.PullError`。
+        """
+        session = self._ready_session(peer_id)
+        if session is None:
+            raise PullError(f"该设备无就绪会话，无法拉取：{peer_id}")
+        run = LibraryPullRun(
+            session, relative_paths=relative_paths, on_event=self._handle_pull_event
+        )
+        self._register_pull_run(run)
+        try:
+            run.start()
+        except PullError:
+            self._prune_pull_runs()
+            raise
+        return run.run_id
+
+    def pull_status(self, run_id: str) -> dict[str, Any]:
+        """拉取状态 / 账目（未知 `run_id` → 空字典）。
+
+        键：`state` / `selection` / `requested` / `unchanged` / `completed` / `failed`
+        + 各计数 + `receivedBytes` / `totalBytes`（见 `LibraryPullRun.status`）。
+        """
+        run = self._pull_runs.get(run_id)
+        return run.status() if run is not None else {}
+
+    def cancel_pull(self, run_id: str) -> bool:
+        """取消一次拉取（已终态 / 未知 `run_id` → False）。"""
+        run = self._pull_runs.get(run_id)
+        if run is None:
+            return False
+        return run.cancel()
+
+    def _browser_for(self, session: HostSession) -> PeerLibraryBrowser:
+        """该会话的对端清单浏览器（一连接一实例；会话关闭即丢弃）。"""
+        browser = self._browsers.get(session.session_id)
+        if browser is None:
+            browser = PeerLibraryBrowser(session, on_event=self._handle_pull_event)
+            self._browsers[session.session_id] = browser
+        return browser
+
+    def _register_pull_run(self, run: LibraryPullRun) -> None:
+        """登记拉取运行（超上限时优先淘汰最早终态的运行）。"""
+        self._pull_runs[run.run_id] = run
+        self._prune_pull_runs()
+
+    def _prune_pull_runs(self) -> None:
+        """把拉取运行表收敛到上限：先淘汰终态（最早在前），仍超则淘汰最早登记者。"""
+        while len(self._pull_runs) > MAX_PULL_RUNS:
+            obsolete = next((key for key, run in self._pull_runs.items() if run.is_terminal), None)
+            if obsolete is None:
+                obsolete = next(iter(self._pull_runs))
+            self._pull_runs.pop(obsolete, None)
+
+    def _route_pull_frame(self, session: HostSession, frame_type: int, payload: bytes) -> bool:
+        """把业务帧交给该会话上未终态的拉取运行 / 对端清单浏览器；已被消费 → True。"""
+        for run in list(self._pull_runs.values()):
+            if run.session_id != session.session_id or run.is_terminal:
+                continue
+            if run.handle_application_frame(frame_type, payload):
+                return True
+        browser = self._browsers.get(session.session_id)
+        return browser is not None and browser.handle_application_frame(frame_type, payload)
+
+    def _handle_pull_event(self, event: dict[str, Any]) -> None:
+        """拉取运行 / 浏览器的回调 → 应用级事件（`EventType.PULL`，UI 按游标轮询）。"""
+        self._emit(EventType.PULL, dict(event))
+
     # ---------------------------------------------------------------- 事件
 
     def events_since(self, cursor: int) -> tuple[int, list[dict[str, Any]]]:
@@ -530,7 +649,7 @@ class SyncService:
         )
 
     def _handle_closed(self, session: HostSession, reason: CloseReason) -> None:
-        """会话关闭 → 事件（含原因）+ 清理该会话的配对请求与推送运行。"""
+        """会话关闭 → 事件（含原因）+ 清理该会话的配对请求与推送 / 拉取运行。"""
         self._request_sessions = {
             key: value for key, value in self._request_sessions.items() if value is not session
         }
@@ -538,6 +657,10 @@ class SyncService:
             if run.session_id == session.session_id:
                 run.handle_session_closed()
                 self._cancel_push_ack_timer(run_id)
+        for run in list(self._pull_runs.values()):
+            if run.session_id == session.session_id:
+                run.handle_session_closed()
+        self._browsers.pop(session.session_id, None)
         self._emit(
             EventType.SESSION,
             {
@@ -558,11 +681,14 @@ class SyncService:
     def _handle_application_frame(
         self, session: HostSession, frame_type: int, payload: bytes
     ) -> None:
-        """ready 后业务帧 → 先给本会话在跑的推送运行（消费即止），否则转交应用层接入口。
+        """ready 后业务帧 → 先给本会话在跑的推送 / 拉取运行（消费即止），再给对端清单
+        浏览器，否则转交应用层接入口。
 
         未注入接入口时本层只做内部路由（既有语义不变）。
         """
         if self._route_push_frame(session, frame_type, payload):
+            return
+        if self._route_pull_frame(session, frame_type, payload):
             return
         if self._application_frame_handler is None:
             return
