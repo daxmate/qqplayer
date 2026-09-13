@@ -2,8 +2,10 @@
 
 为 iOS companion 同步（ops 游标查询 / 多端并发写 / last-write-wins 合并）提供数据库底座：
 favorites / playlists(+playlist_songs) / playback_events / reading_progress / ops / commands /
-device_assets 表 + kv_store 统一 KV 表（queue_order / network_songs / books / annotations /
-vocab / pairing 六个 JSON 域，各一个 key，value 整份 JSON）。
+device_assets 表 + track_fingerprints 指纹缓存表（局域网同步 S2：相对路径 → 音频字节
+SHA-256，惰性计算 + 落库，见 app/lansync/locallib.py）+ kv_store 统一 KV 表
+（queue_order / network_songs / books / annotations / vocab / pairing 六个 JSON 域，
+各一个 key，value 整份 JSON）。
 settings.json（P0 设置真源） / quark_cookies.json / 大文件 仍走原 JSON 存储，不迁。
 
 设计约定：
@@ -103,8 +105,19 @@ CREATE TABLE IF NOT EXISTS kv_store (
     value TEXT NOT NULL,                    -- 整份 JSON 字符串
     ts    TEXT NOT NULL DEFAULT ''          -- 最近写入时间（ISO，调试/同步版本依据用）
 );
+-- 局域网同步（S2）内容指纹缓存：相对曲库根路径 → 音频文件字节 SHA-256（小写 hex）。
+-- 为什么单独一张表：web 端曲库是**文件系统扫描**结果（没有 songs 表），跨端身份键
+-- 需要落库缓存以免每次同步全库重算；size/mtime_ms 是缓存失效依据（任一变化 → 重算）。
+CREATE TABLE IF NOT EXISTS track_fingerprints (
+    relative_path TEXT PRIMARY KEY,         -- POSIX 分隔，相对曲库根（对账键同口径）
+    content_hash  TEXT NOT NULL,            -- SHA-256 小写 hex
+    size          INTEGER NOT NULL DEFAULT 0,
+    mtime_ms      INTEGER NOT NULL DEFAULT 0,  -- 文件 mtime（毫秒 since 1970）
+    updated_at    TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist ON playlist_songs(playlist_id, position);
 CREATE INDEX IF NOT EXISTS idx_playback_ts ON playback_events(ts);
+CREATE INDEX IF NOT EXISTS idx_track_fingerprints_hash ON track_fingerprints(content_hash);
 CREATE INDEX IF NOT EXISTS idx_ops_cursor ON ops(id);
 CREATE INDEX IF NOT EXISTS idx_commands_pending ON commands(status, device_id);
 CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at);
@@ -969,3 +982,74 @@ def device_assets_all() -> dict[str, dict]:
             "assets_updated_at": r["updated_at"],
         }
     return out
+
+
+# ============ track_fingerprints（局域网同步 S2：内容指纹缓存） ============
+# 相对曲库根路径 → 音频文件字节 SHA-256（小写 hex）。惰性计算 + 落库，size/mtime_ms
+# 为缓存失效依据。web 端曲库是文件系统扫描结果（无 songs 表），故独立成表。
+def track_fingerprints_load() -> dict[str, dict]:
+    """全部指纹缓存：相对路径 → {content_hash, size, mtime_ms}（惰性指纹链路读侧）"""
+    _ensure_ready()
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT relative_path, content_hash, size, mtime_ms FROM track_fingerprints"
+        ).fetchall()
+    return {
+        r["relative_path"]: {
+            "content_hash": r["content_hash"],
+            "size": int(r["size"]),
+            "mtime_ms": int(r["mtime_ms"]),
+        }
+        for r in rows
+    }
+
+
+def track_fingerprint_get(relative_path: str) -> dict | None:
+    """单条指纹缓存；未指纹返回 None（单文件惰性路径用）"""
+    _ensure_ready()
+    with _session() as conn:
+        row = conn.execute(
+            "SELECT content_hash, size, mtime_ms FROM track_fingerprints WHERE relative_path = ?",
+            (relative_path,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "content_hash": row["content_hash"],
+        "size": int(row["size"]),
+        "mtime_ms": int(row["mtime_ms"]),
+    }
+
+
+def track_fingerprints_upsert(rows: list[dict]) -> int:
+    """批量写入/更新指纹（单事务原子写；返回写入条数）。
+
+    每条 = {relative_path, content_hash, size, mtime_ms}；relative_path / content_hash
+    为空串的条目跳过（缓存里不存在「空指纹」态——尚未指纹就是没有行）。
+    与其它写路径共用 _write_lock，避免与重扫 / 迁移并发写冲突。
+    """
+    _ensure_ready()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    items = [
+        (
+            str(r.get("relative_path", "")),
+            str(r.get("content_hash", "")),
+            int(r.get("size", 0) or 0),
+            int(r.get("mtime_ms", 0) or 0),
+            now,
+        )
+        for r in rows
+        if str(r.get("relative_path", "")) and str(r.get("content_hash", ""))
+    ]
+    if not items:
+        return 0
+    with _write_lock, _session() as conn:
+        conn.executemany(
+            "INSERT INTO track_fingerprints "
+            "(relative_path, content_hash, size, mtime_ms, updated_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(relative_path) DO UPDATE SET "
+            "content_hash=excluded.content_hash, size=excluded.size, "
+            "mtime_ms=excluded.mtime_ms, updated_at=excluded.updated_at",
+            items,
+        )
+    return len(items)
