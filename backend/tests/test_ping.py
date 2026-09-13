@@ -1,6 +1,6 @@
 """主机可达性探测端点测试：GET /api/ping → {"ok": true}；鉴权白名单（免鉴权）。
 
-背景（契约 docs/host-reachability.md）：iOS 壳启动探测（probeHost）与恢复探测
+背景（契约 docs/host-reachability.md）：伴侣端启动探测（probeHost）与恢复探测
 都打 /api/ping——探测时 token 可能无效/过期/未配对，不因 401 误判主机离线；
 带 token 的请求同样接受。本文件专项测「免鉴权」：显式开启鉴权
 （conftest 默认关闭），以非 localhost 来源验证白名单。

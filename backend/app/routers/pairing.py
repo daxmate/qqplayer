@@ -1,7 +1,7 @@
 """移动端配对路由：/api/pairing/*（companion 配对 API，白名单免鉴权）。
 
 - POST   /api/pairing/request              发起配对（限流）
-- GET    /api/pairing/pending              待确认请求（桌面壳 1-2s 轮询）
+- GET    /api/pairing/pending              待确认请求（伴侣端 / 浏览器 1-2s 轮询）
 - POST   /api/pairing/request/:id/approve  确认 → 生成 token（SHA-256 哈希落盘）
 - POST   /api/pairing/request/:id/reject   拒绝
 - GET    /api/pairing/request/:id/status   查询状态（approved 时附 token，仅一次）

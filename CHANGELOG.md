@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### 🧹 退役 iOS 伴侣壳（2026-09-13）
+
+- **移除 `mobile/ios` 全部 Swift 壳代码**（19 个源文件 + 12 个测试 + 工程配置 + 图标资源，53 个跟踪文件）：iOS 已由 Swift 原生版（独立仓库 `qqplayer-swift`）承接；macOS 壳已于 2026-09-07 移除，本仓库不再提供任何 Swift 壳
+- 连带退役：CI `swift` job（swiftlint + swiftformat + xcodebuild test）、根目录 `.swiftlint.yml` / `.swiftformat`、`scripts/link-ios-www.sh`（www → dist 符号链接）、`deploy.sh` 的 iOS 资源链接 + xcodegen 步骤、git hooks `post-checkout` / `post-merge`（自动 xcodegen）、`.gitignore` 壳条目
+- **前端 iOS 壳桥接层清除**（死代码，浏览器与 Tauri 壳行为零变化）：`nativeAudioBridge` / `usePullRevealStatusBar` / `usePairingState` 删除，`qqplayerIosBridge` 相关分支（音频原生代理、顶部状态条下拉、未连接引导页、配对确认轮询判定等）及相关测试一并移除；`useNativeReaderBridge` 只去掉 iOS 专属部分（其余继续服务 Tauri 壳）
+- 保留：`window.qqplayerNative` 标记与全部分支（Windows / Linux Tauri 壳在用，非死代码）、`useNativeCtxMenu` / `useShellDrag` / `useShellBridge`（Tauri 右键菜单 · 拖拽 · 三端桥）
+- 文档：`docs/ios-bridge-protocol.md` / `docs/ios-bridge-contract.json` / `docs/ios-sync-contract.md`（Swift 双壳 Web↔原生契约，macOS 壳 2026-09-07 已亡、iOS 壳本次亡）删除；`docs/host-reachability.md` / `docs/settings-architecture.md` / `docs/ui-context-menu.md` 与 README / PLANNING 口径同步更新
+- 保留：移动端布局（`components/mobile/*`，视口 <1024px 响应式）、Windows / Linux Tauri 壳及其 `qqplayerNative` 分支、配对与同步 API + 前端数据层（今后由主机端与伴侣端复用）
+
 ### ⚙️ 前端全量 TypeScript 化（2026-08-28，行为零变化）
 
 - **源码与测试全量 js→ts（40 个 refactor 提交）**：核心模块先行（`apiClient` / `cacheDb` / `coverDataURL` / `settingsSync` / `parseLrc` / `useCoverURL` 等），composables 54 个全部 TS 化，随后组件（search / settings / mobile / player / shell）、main / setup 入口、locales 与全部 vitest 测试文件迁移完毕

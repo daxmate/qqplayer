@@ -99,7 +99,7 @@ _player_actions: list[dict] = []
 _player_actions_lock = threading.Lock()
 # 合法指令白名单（防止任意指令注入）
 _PLAYER_ACTIONS = {"togglePlay", "play", "pause", "next", "prev", "seek", "volume"}
-# 迷你窗运行状态：Swift 壳启动/退出时上报，主页面轮询点亮顶栏开关
+# 迷你窗运行状态：桌面壳（Windows / Linux Tauri）启动/退出时上报，主页面轮询点亮顶栏开关
 _mini_status: dict = {"running": False}
 _mini_status_lock = threading.Lock()
 

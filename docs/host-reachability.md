@@ -58,17 +58,14 @@ flushPendingOps（dirty 队列回放）。列表/封面刷新由各模块自行�
 - `ensureCommandPolling()`：`isOffline()` 时不启动 interval。
 - `pollCommands()` / `reportAssets()`：开头 `isOffline()` 短路返回。
 
-## 状态条（iOS 原生）
+## 状态条（iOS 原生）—— 已随 iOS 壳退役（2026-09-13）
 
-- 前端新增桥命令 `hostStatus`：`{online: bool}`（offline 变化时发送；
-  启动探测完成时发一次）。
-- iOS `WebShellView` 处理 `hostStatus` → 通知 RootView。
-- `RootView` 状态条三态：
-  - server != nil 且 online → 绿点「已连接 xxx」（现状）
-  - server != nil 且 offline → 灰点「离线（主机不可达）」（**新增**，替代误导性的"已连接"）
-  - server == nil → 灰点「未连接桌面端」（现状）
-- 桥契约 `docs/ios-bridge-contract.json` 增加 `hostStatus` 命令（Web→Native），
-  双端契约测试（前端 iosBridgeContract.test.js + iOS BridgeContractTests.swift）同步。
+原实现：前端发桥命令 `hostStatus`（`{online: bool}`）→ `WebShellView` → `RootView` 三态状态条
+（已连接 / 离线（主机不可达）/ 未连接）；桥契约 `docs/ios-bridge-contract.json` 与双端契约测试
+已随壳一起移除。
+
+可达性探测本身（`probeHost` / `GET /api/ping` / 离线短路 + 恢复补同步）仍有效，保留在
+`frontend/src/utils/apiClient.ts`；上一节「启动动作 gate」照旧。
 
 ## 后端
 
@@ -81,4 +78,4 @@ flushPendingOps（dirty 队列回放）。列表/封面刷新由各模块自行�
   列表/已下载歌/封面/歌词全部可用。
 - 恢复局域网（主机回来）：30s 内自动转「已连接」+ 自动补一次同步，无需重启。
 - 有局域网正常启动：行为与现状一致（探测成功 → 正常同步）。
-- 前端 `pnpm test` 全绿；后端 pytest 全绿；iOS xcodebuild test 全绿。
+- 前端 `pnpm test` 全绿；后端 pytest 全绿。

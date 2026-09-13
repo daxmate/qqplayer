@@ -159,7 +159,7 @@ def api_player_actions_get():
 
 @router.post("/api/mini/status")
 def api_mini_status_post(body: dict):
-    """迷你窗 Swift 壳上报运行状态（启动 running=true，退出 running=false）"""
+    """迷你窗桌面壳（Windows / Linux Tauri）上报运行状态（启动 running=true，退出 running=false）"""
     running = body.get("running")
     if not isinstance(running, bool):
         return {"ok": False, "reason": "running_required"}

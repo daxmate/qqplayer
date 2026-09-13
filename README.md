@@ -1,6 +1,6 @@
 # 🎵 QQPlayer 小千千
 
-本地音乐播放器 + 跟唱练习器 + 有声书阅读器。FastAPI + Vue 3 + Vite，桌面（macOS / Windows）+ 移动端（iOS 伴侣）多端覆盖。
+本地音乐播放器 + 跟唱练习器 + 有声书阅读器。FastAPI + Vue 3 + Vite，Windows 桌面壳 + Linux / NAS 主机端 + 手机浏览器移动布局（iOS / macOS 为独立 Swift 原生版，见下）。
 
 <p align="center">
   <img src="docs/screenshot.png" width="32%" alt="连播模式"/>
@@ -32,7 +32,7 @@
 - **词典模块**：MDX/MDD 词典导入（本地路径或上传）、激活 / 启停管理；@@@LINK 词条跳转、词条内音频点击播放、COCA 词频标注；iCloud dataless 占位容错（清晰提示先在 Finder 下载）
 - **AI 歌词对齐**：歌词指定弹窗粘贴纯歌词 → 本地 Qwen3-ForcedAligner 生成时间戳（`backend/scripts/lyric-align`）→ 填入 LRC 编辑框确认保存
 - **macOS 桌面版**：已迁移至 Swift 原生版（独立仓库 `qqplayer-swift`）；本仓库不再提供 macOS 桌面壳（2026-09-07 移除）
-- **iOS 伴侣壳（iPhone / iPad）**：mDNS 自动发现 + 配对（主机名稳定，主机换 IP 不失效）；同步收藏 / 歌单 / 播放统计 / 阅读进度 / 词典（增量操作，后台批量下载）；下载离线播放（断网可用，封面 / 歌词离线缓存）；锁屏 / 线控媒体控制由原生后台执行（锁屏 next / prev / play / pause / seek 立即生效，不依赖挂起的 WebView）；CarPlay 封面支持；跟唱 / 阅读 / 词典全功能——移动端跟唱控制区可折叠收起（播放 / 跟唱居中，倍速 / 单句循环分列两侧），功能说明按钮常驻顶部歌词库旁，退出跟唱自动清理 AB / 单句循环标注
+- **iOS 版**：已迁移至 Swift 原生版（独立仓库 `qqplayer-swift`）；本仓库的 iOS 伴侣壳（SwiftUI + WKWebView 套壳）已于 2026-09-13 移除
 - **Windows 壳（Tauri 2）**：桌面体验与 macOS 对齐，x64 / arm64 双架构，与 macOS 同版本线发布
 - **播放视觉化**：6 种频谱样式（条 / 圆环 / 波形 / 脉冲 / 镜像 / 粒子）+ 封面取色氛围背景 + 控制栏迷你频谱
 - **曲库管理增强**：歌曲移到废纸篓（右键 / ⌘·Ctrl 多选批量 / 移动端左滑，自动清理歌单与收藏引用）、列头点击排序、歌曲行拖拽进歌单、播放队列顺序拖拽持久化
@@ -85,17 +85,13 @@ pnpm install
 pnpm dev        # 开发服务器（代理 /api 到 17627）
 pnpm build      # 构建到 ../dist（后端直接托管）
 
-# iOS 壳（mobile/ios/，SwiftUI + WKWebView）
-./mobile/ios/build.sh            # 模拟器包（前端构建 → xcodegen → xcodebuild）
-./mobile/ios/build.sh --device   # 真机包（需签名配置）
-
 # Windows 壳（desktop/Windows/，Tauri 2）
 cd desktop/Windows
 pnpm install
 pnpm tauri build
 ```
 
-**架构现状（2026-08）**：前端设置体系单一事实源（`settingsIndex.ts` 注册表驱动渲染，新增设置只改一处）；播放内核按域拆分（playerState/audioEngine/queueEngine/playbackEngine/shortcuts/mediaSession/miniControl 全 TS）；iOS 桥契约单一事实源（`docs/ios-bridge-contract.json` + 双端契约测试）；存储归一 SQLite（`kv_store` 统一 KV 表，同步按白名单）；巨型组件已拆（Playlist/Reader/SettingsModal 均 <1300 行）；前端已全量 TypeScript 化（composables 54 个 + 组件 / 入口 / locales / 测试，2026-08-28 完成，行为零变化）。
+**架构现状（2026-08）**：前端设置体系单一事实源（`settingsIndex.ts` 注册表驱动渲染，新增设置只改一处）；播放内核按域拆分（playerState/audioEngine/queueEngine/playbackEngine/shortcuts/mediaSession/miniControl 全 TS）；存储归一 SQLite（`kv_store` 统一 KV 表，同步按白名单）；巨型组件已拆（Playlist/Reader/SettingsModal 均 <1300 行）；前端已全量 TypeScript 化（composables 54 个 + 组件 / 入口 / locales / 测试，2026-08-28 完成，行为零变化）。
 
 ## 测试 / 质量
 
@@ -177,8 +173,8 @@ kimi ga mae ni tsuki atte ita hito no koto
 | `PUT /api/playlists/{id}/order` | 歌单整体重排 |
 | `POST /api/now-playing` / `GET /api/now-playing` | 当前播放状态上报（桌面歌词）/ 轮询 |
 | `GET/PUT /api/desktop-lyric/settings` | 桌面歌词设置 |
-| `POST /api/pairing/request`、`GET /api/pairing/pending`、`POST /api/pairing/request/{id}/approve\|reject`、`GET /api/pairing/request/{id}/status` | 设备配对（iOS 伴侣，免鉴权） |
-| `GET /api/sync/manifest`、`GET/POST /api/sync/ops`、`GET /api/sync/dicts/file` | iOS 同步（清单 / 增量操作游标 / 词典文件） |
+| `POST /api/pairing/request`、`GET /api/pairing/pending`、`POST /api/pairing/request/{id}/approve\|reject`、`GET /api/pairing/request/{id}/status` | 设备配对（伴侣端，免鉴权） |
+| `GET /api/sync/manifest`、`GET/POST /api/sync/ops`、`GET /api/sync/dicts/file` | 同步（清单 / 增量操作游标 / 词典文件） |
 | `POST /api/tags/scrape` | 标签刮削候选（网易云 + MusicBrainz recording，封面 fallback 链） |
 | `POST /api/tags` | 写入歌曲标签 + 统一改名（mutagen，原子写盘） |
 | `GET/POST /api/books`、`POST /api/books/import`、`GET /api/books/{bid}/file|cover|progress`、`DELETE /api/books/{bid}` | 电子书书架（导入 / 列表 / 文件 / 封面 / 进度 / 删除） |

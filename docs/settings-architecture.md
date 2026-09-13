@@ -1,7 +1,7 @@
 # 设置体系架构与接线规范（P0 重构后）
 
 > 2026-08-27 架构审计 P0 落地后的**唯一权威文档**。目标：**新增一个设置只改一处**（`settingsIndex.ts`），渲染 / 搜索 / 持久化 / 类型检查自动生效。
-> 关联：`docs/ios-bridge-protocol.md`（桥契约）、`docs/ios-sync-contract.md`（同步契约）。
+> 关联：`docs/cover-resolution.md`（封面解析契约）、`docs/host-reachability.md`（主机可达性契约）。原 `docs/ios-bridge-protocol.md` / `docs/ios-sync-contract.md`（Web↔原生桥与同步契约）随 iOS 壳 2026-09-13 退役已移除。
 
 ## 一、架构总览（五层 → 单定义源 + 契约）
 
@@ -98,7 +98,7 @@ cd backend && pytest tests/test_settings_contract.py -q
 ## 五、跨端改动接线规范（审计报告原文，P0 起立规矩）
 
 1. **新设置**：只改 `settingsIndex.ts` 一处 → 渲染/搜索/持久化/类型检查自动生效（本规范全部内容）
-2. **新桥命令**（Web↔原生）：`docs/ios-bridge-protocol.md` 契约文件加一行 + 两端实现 + 契约测试绿
+2. **新契约**（跨端/跨模块）：先写契约文档（如 `docs/cover-resolution.md`、`docs/host-reachability.md`）+ 两端实现 + 契约测试绿（原 Web↔原生桥契约随 iOS 壳退役移除）
 3. **新页面/组件**：走现有挂载点（桌面三栏 / 移动分页 / 模式 tab），不另起炉灶
 4. **跨端功能**（前端+壳+后端）：先出接线图（数据流 + 契约点），review 通过再动手
 5. **行为零变化原则**：任何重构 commit 附带"测试全绿 + 无功能变更"声明，与功能 commit 分开

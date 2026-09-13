@@ -72,7 +72,8 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="music-player", lifespan=_lifespan)
 
-# iOS 壳 file:// 页面（origin=null）访问局域网 API 需要 CORS 放行；
+# 局域网伴侣端 / 非同源页面访问 API 需要 CORS 放行（origin=null 的 file:// 页面原属 iOS 壳，
+# 壳 2026-09-13 退役后保留放行，兼容移动浏览器与第三方客户端）；
 # 鉴权由 pairing 中间件兜底（localhost 免鉴权 + Bearer token），公开 API 仅配对/发现。
 app.add_middleware(
     CORSMiddleware,

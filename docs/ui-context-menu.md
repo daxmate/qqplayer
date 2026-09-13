@@ -2,7 +2,7 @@
 
 > 2026-08-27 P2-A 审计补充：**菜单机制本就共享**（ContextMenu.vue 已是单一组件），本次不改代码，只补文档。
 > 目标：说清「浏览器自定义菜单 ↔ 壳桥接 ↔ 原生 NSMenu」三层如何协作，以及为什么移动端没有菜单。
-> 关联：`docs/ios-bridge-protocol.md`（桥契约）、`frontend/src/composables/useNativeCtxMenu.js`（桥接实现）；macOS 壳侧实现已随壳迁移至 qqplayer-swift（2026-09-07 壳移除）。
+> ⚠️ 2026-09-13：桌面壳与 iOS 壳均已退役（macOS 2026-09-07、iOS 2026-09-13），桥接实现（`useNativeCtxMenu`）与桥契约文档（`docs/ios-bridge-protocol.md`）已随之移除。本文「壳桥接 / 原生 NSMenu」两层为历史记录，当前实际生效的只有浏览器自定义菜单一层（`ContextMenu.vue`）。
 
 ## 一、三层结构总览
 

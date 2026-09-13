@@ -88,28 +88,6 @@ if [ "$RESTART_ONLY" = "0" ]; then
   fi
 fi
 
-# 3.5 同步前端产物 → iOS 壳资源（符号链接，零拷贝：dist 更新后 www 自动最新；
-#     注意：已安装的 app 不受影响，需重新编译安装才生效；失败不阻断服务器部署）
-if [ "$RESTART_ONLY" = "0" ] && [ -d mobile/ios ]; then
-  echo "── 链接前端 → iOS 壳资源 (mobile/ios/Resources/www)"
-  if "$(dirname "$0")/scripts/link-ios-www.sh"; then
-    echo "    ✅ iOS 壳资源链接就绪（下次编译 iOS app 自动用最新前端）"
-  else
-    echo "    ⚠️ iOS 壳资源链接失败（不影响服务器部署；build.sh 编译时会重试）"
-  fi
-  # 重新生成 Xcode 工程文件：.xcodeproj 不入库（gitignore），拉新代码后新增/删除的
-  # Swift 文件不会被旧工程收录，手动 Xcode 编译会报“找不到类型”——这里自动 xcodegen。
-  if command -v xcodegen >/dev/null 2>&1; then
-    if (cd mobile/ios && xcodegen generate >/dev/null 2>&1); then
-      echo "    ✅ Xcode 工程已重新生成 (xcodegen)"
-    else
-      echo "    ⚠️ xcodegen generate 失败（可手动：cd mobile/ios && xcodegen generate）"
-    fi
-  else
-    echo "    ⚠️ 未安装 xcodegen（brew install xcodegen；或手动：cd mobile/ios && xcodegen generate）"
-  fi
-fi
-
 # 4. 确保 launchd 托管（plist 缺失时自动创建并加载）
 # 之前出现过 plist 丢失导致 pkill 后服务无人拉起的故障，这里做自愈：
 # 检测 ~/Library/LaunchAgents/com.daxmate.qqplayer.plist，不存在则创建，再确保已加载
@@ -193,4 +171,4 @@ else
     fi
 fi
 
-# 7. macOS 桌面壳已退役（2026-09-07，迁移至 qqplayer-swift Swift 原生版）——本步移除
+# 7. 桌面/移动端壳均已退役（macOS 2026-09-07、iOS 2026-09-13，均迁移至 qqplayer-swift Swift 原生版）——本步移除

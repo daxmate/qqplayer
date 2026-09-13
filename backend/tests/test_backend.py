@@ -1521,7 +1521,7 @@ def test_api_player_action_seek_volume_validation():
 
 
 def test_api_mini_status_roundtrip():
-    """迷你窗运行状态：Swift 壳上报 → GET 返回；非 bool 拒绝"""
+    """迷你窗运行状态：桌面壳上报 → GET 返回；非 bool 拒绝"""
     assert client.post("/api/mini/status", json={"running": True}).status_code == 200
     assert client.get("/api/mini/status").json() == {"running": True}
     assert client.post("/api/mini/status", json={"running": False}).status_code == 200
