@@ -135,11 +135,6 @@ export default {
     syncPrefetch: "Auto Prefetch",
     syncPrefetchDesc: "Check and download the current song when it plays (off by default)",
     syncFetchFailed: "Failed to fetch data, please try again later",
-    // Sync center entry (iOS shell: SettingsModal sync tab → MobileSync)
-    openSyncCenter: "Open Sync Center",
-    openSyncCenterDesc:
-      "Swipe right from the left edge of the home screen: offline downloads, update checks, storage management, dicts and Wi-Fi switch",
-    openSyncCenterGo: "Open",
     // Device management panel (desktop admin: device command queue + iOS asset list)
     devicePanelTitle: "Devices",
     devicePanelDesc:

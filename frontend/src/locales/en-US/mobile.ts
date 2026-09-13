@@ -86,56 +86,5 @@ export default {
       fullLyric: "Full Lyrics",
       backToPlayer: "Back to Player",
     },
-    // Negative-screen sync center (MobileSync)
-    syncCenter: {
-      title: "Sync Center",
-      syncAll: "Sync All",
-      syncAllDesc:
-        "One-tap: download missing music (audio + covers), books and dicts; refresh stale lyrics; apply updates when auto-update is on",
-      syncAllDone: "Sync done, downloading {n} files",
-      // Reader annotations + vocab
-      readerData: "Annotations & Vocabulary",
-      readerDataLabel: "Highlights / Bookmarks / Notes & Vocabulary",
-      readerDataDesc:
-        "Synced automatically with the manifest (merged per-book / per-word, local additions kept); no file downloads",
-      readerDataGo: "Sync Now",
-      readerDataSynced: "{books} books annotated · {vocab} words",
-      readerDataEmpty: "No annotations or vocabulary yet",
-      // Dicts
-      dicts: "Dictionaries",
-      dictsDesc:
-        "Download dictionaries for offline use (local-first in the reader); per-item download / delete",
-      dictAll: "Download All Dicts",
-      dictEmpty: "No dictionaries",
-      dictDelete: "Delete",
-      dictDeleted: "Dictionary file deleted",
-      dictsUpToDate: "All dictionaries are up to date",
-      // Storage breakdown
-      typeAudio: "Audio",
-      typeCovers: "Covers",
-      typeLyric: "Lyrics",
-      typeBooks: "Books",
-      typeDicts: "Dicts",
-      typeOther: "Other (meta etc.)",
-      clearType: "Clear",
-      cleared: "Cleared {n} files",
-      clearedAll: "All offline assets cleared",
-      nothingToClear: "Nothing to clear",
-      // Orphan cleanup
-      orphans: "Clean Up Unreferenced",
-      orphansDesc:
-        "Local assets no longer in the manifest (leftovers from old versions / deleted tracks)",
-      orphansFree: "{size} can be freed",
-      orphansEmpty: "No unreferenced files",
-      orphansGo: "Clean Up",
-      orphansConfirmGo: "Confirm clean up?",
-      orphansCleared: "Freed {size}",
-      // Switches
-      wifiOnly: "Wi-Fi Only",
-      wifiOnlyDesc: "Hold asset downloads on cellular (on by default)",
-      autoUpdate: "Auto Update",
-      autoUpdateDesc:
-        "After syncing, update downloaded assets whose content changed (off by default)",
-    },
   },
 };

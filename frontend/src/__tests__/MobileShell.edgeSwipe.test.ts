@@ -139,11 +139,11 @@ describe("MobileShell 边缘滑动返回", () => {
     expect(edgeShift(wrapper)).toBe(""); // 从未跟手
   });
 
-  it("分页第 0 屏（音乐页）左缘右滑 → 打开负一屏设置区（默认同步面板）", async () => {
+  it("分页第 0 屏（音乐页）左缘右滑 → 打开负一屏设置区（默认设置面板）", async () => {
     const wrapper = mount(MobileShell); // stack = [main]，page 0
     await edgeSwipe(wrapper, { from: 8, to: 150 });
     expect(wrapper.find(".ms-page").exists()).toBe(true); // MobileSettings
-    expect(wrapper.find(".msc-page").exists()).toBe(true); // 同步面板（MobileSync embedded）
+    expect(wrapper.find(".modal-mask.embedded").exists()).toBe(true); // 默认面板（界面，SettingsModal 嵌入式）
     expect(wrapper.find(".mh-page").exists()).toBe(false);
     expect(edgeShift(wrapper)).toBe("0px");
   });

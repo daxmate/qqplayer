@@ -111,9 +111,9 @@ describe("App 布局切换（isMobile 响应式）", () => {
     await flushPromises();
     await wrapper.find('.mh-icon-btn[title="设置"]').trigger("click");
     await flushPromises();
-    // MobileShell 内部进入负一屏设置区（同步面板），不再 Teleport 桌面弹窗
+    // MobileShell 内部进入负一屏设置区（默认设置面板），不再 Teleport 桌面弹窗
     expect(wrapper.find(".ms-page").exists()).toBe(true);
-    expect(wrapper.find(".msc-page").exists()).toBe(true);
+    expect(wrapper.find(".modal-mask.embedded").exists()).toBe(true);
     expect(document.body.querySelector(".modal")).toBeFalsy();
     wrapper.unmount();
   });

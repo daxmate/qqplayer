@@ -78,7 +78,7 @@
 
             <!-- ============ 同步（iOS 壳 → 负一屏同步中心入口；非 iOS 保留现状） ============ -->
             <section v-else-if="tab === 'sync'" class="settings-scroll">
-              <SyncSettingsPanel :embedded="embedded" @open-sync="onOpenSync" />
+              <SyncSettingsPanel />
             </section>
 
             <!-- ============ 刮削 ============ -->
@@ -232,7 +232,7 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
   initialTab: { type: String, default: "ui" },
 });
-const emit = defineEmits(["close", "open-sync"]);
+const emit = defineEmits(["close"]);
 
 const { t } = useI18n();
 
@@ -299,11 +299,6 @@ watch(
 
 function close() {
   emit("close");
-}
-
-// 同步中心入口（iOS 壳负一屏）：面板内部按钮 → 容器转发给父组件
-function onOpenSync() {
-  emit("open-sync");
 }
 
 // 嵌入式模式遮罩点击不关闭（无遮罩语义）；弹窗模式保持点遮罩关闭

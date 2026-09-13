@@ -15,11 +15,9 @@
       </button>
     </header>
 
-    <!-- 面板区：同步面板复用 MobileSync（embedded 隐藏自身头部）；其余设置面板用 SettingsModal 嵌入式渲染对应 tab -->
+    <!-- 面板区：设置分类面板用 SettingsModal 嵌入式渲染对应 tab（同步中心面板已随 iOS 壳退役移除） -->
     <div class="ms-body">
-      <MobileSync v-if="panel === 'sync'" key="ms-panel-sync" embedded />
       <SettingsModal
-        v-else
         :key="'ms-panel-' + panel"
         :open="true"
         :embedded="true"
@@ -53,21 +51,20 @@ import { ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Menu, ChevronLeft } from "@lucide/vue";
 import { getSettingsCategories } from "../../composables/useSettingsCategories.js";
-import MobileSync from "./MobileSync.vue";
 import SettingsModal from "../SettingsModal.vue";
 
 defineEmits(["back"]);
 const { t } = useI18n();
 
-// 当前面板：'sync'（复用 MobileSync 作为同步面板）| 其余 settings tab key（SettingsModal 嵌入式渲染）
-const panel = ref("sync");
 const drawerOpen = ref(false);
 // 每次实例创建时求值（isPairingEnabled 非响应式，模块级缓存会过期）
 const categories = computed(() => getSettingsCategories());
+// 当前面板：设置分类 key（SettingsModal 嵌入式渲染对应 tab），默认第一项
+const panel = ref(categories.value[0]?.key ?? "");
 
 const activeLabelKey = computed(() => {
   const c = categories.value.find((c) => c.key === panel.value);
-  return c ? c.labelKey : "settings.category.sync";
+  return c ? c.labelKey : "settings.title";
 });
 
 function selectPanel(key: string) {

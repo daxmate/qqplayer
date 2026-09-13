@@ -94,15 +94,12 @@ function pop() {
   if (stack.value.length > 1) stack.value.pop();
 }
 
-// 音乐页齿轮 / SettingsModal「打开同步中心」→ 负一屏设置区（默认同步面板）
+// 音乐页齿轮 → 负一屏设置区
 function openSettings() {
   push({ name: "settings" });
 }
-function openSyncCenter() {
-  openSettings();
-}
 
-defineExpose({ push, openSyncCenter, openSettings });
+defineExpose({ push, openSettings });
 
 // ============ 分页容器（栈底 main） ============
 // 分页屏内阅读器/视频播放器浮层开关（pager 上报；浮层打开时禁边缘滑动）

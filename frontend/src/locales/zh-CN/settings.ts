@@ -227,10 +227,6 @@ export default {
     syncPrefetch: "自动预取",
     syncPrefetchDesc: "播放歌曲时自动检查并下载该歌曲（默认关闭）",
     syncFetchFailed: "获取数据失败，请稍后重试",
-    // 负一屏同步中心入口（iOS 壳：SettingsModal 同步 tab → MobileSync）
-    openSyncCenter: "打开同步中心",
-    openSyncCenterDesc: "首页左缘右滑进入：离线资产下载、更新检测、存储管理、词典与 Wi-Fi 开关",
-    openSyncCenterGo: "打开",
     // 设备管理面板（桌面端管理端：设备指令队列 + iOS 资产清单）
     devicePanelTitle: "设备管理",
     devicePanelDesc: "管理已配对 iOS 设备的离线资产：推送下载、远程删除、查看指令状态",

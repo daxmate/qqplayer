@@ -1,26 +1,9 @@
-<!-- 同步设备面板（SettingsModal 拆分 · P3）：iOS 壳负一屏同步中心入口 + 桌面端设备管理面板
-  整段由容器 sync section 搬入（含 open-sync 分支与设备/指令历史区块、删除资产确认弹窗）；
-  embedded prop 由容器透传（嵌入式负一屏模式显示设备管理面板）；面板挂载时拉取
-  设备清单 + 指令历史（与拆分前容器 watch(tab) 语义一致）；sync-* 专属样式 scoped。 -->
+<!-- 同步设备面板（SettingsModal 拆分 · P3）：桌面端设备管理面板
+  由容器 sync section 搬入（设备/指令历史区块、删除资产确认弹窗；原 iOS 壳「打开同步中心」入口
+  随壳与负一屏同步中心面板退役移除，2026-09-13）；面板挂载时拉取设备清单 + 指令历史
+  （与拆分前容器 watch(tab) 语义一致）；sync-* 专属样式 scoped。 -->
 <template>
-  <template v-if="!embedded && isNative && isMobile">
-    <div class="group">
-      <div class="group-title">
-        <RefreshCw :size="13" />
-        {{ t("settings.sync") }}
-      </div>
-      <div class="setting-item">
-        <div class="setting-label">{{ t("settings.openSyncCenter") }}</div>
-        <div class="setting-desc">{{ t("settings.openSyncCenterDesc") }}</div>
-        <div class="setting-control">
-          <button class="btn primary" @click="$emit('open-sync')">
-            {{ t("settings.openSyncCenterGo") }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </template>
-  <div v-else class="group">
+  <div class="group">
     <div class="group-title">
       <MonitorSmartphone :size="13" />
       {{ t("settings.devicePanelTitle") }}
@@ -174,18 +157,8 @@ import {
   formatLastSeen,
 } from "../../utils/deviceCommands.js";
 import { showToast } from "../../composables/useToast.js";
-import { isMobile } from "../../composables/useMobileViewport.js";
-
-defineProps({
-  // 嵌入式面板模式（iOS 壳负一屏）：显示设备管理面板；弹窗模式 + 原生 iOS 壳显示同步中心入口
-  embedded: { type: Boolean, default: false },
-});
-defineEmits(["open-sync"]);
 
 const { t } = useI18n();
-
-// 原生壳环境（Swift 主窗口 WKWebView 注入 window.qqplayerNative）
-const isNative = typeof window !== "undefined" && !!(window as any).qqplayerNative;
 
 // ============ 设备管理面板（sync tab · 桌面端管理端） ============
 // 设备指令队列（写指令让 iOS 推送下载/远程删除）+ 可见 iOS 资产清单。
