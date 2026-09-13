@@ -1,6 +1,7 @@
 // 壳内配对确认（usePairingConfirm）
-// 桌面壳（macOS Swift / Windows Tauri / 浏览器开发环境）轮询后端待确认配对请求，
-// 发现新请求 → 弹确认框（PairingConfirmModal）；iOS 壳是发起方，不启用。
+// 主机端（Windows Tauri 壳 / 浏览器开发环境）轮询后端待确认配对请求，
+// 发现新请求 → 弹确认框（PairingConfirmModal）。
+//（iOS 壳是配对发起方、不启用轮询；壳 2026-09-13 退役后前端只剩主机端 → 恒启用。）
 //
 // 后端 API（白名单免鉴权，见 backend/app/routers/pairing.py）：
 //   GET  /api/pairing/pending → {requests: [{request_id, device_name, device_type, created_at}]}
@@ -52,16 +53,13 @@ const seenIds = new Set<string>(); // 已见过（含已处理）的 request_id�
 let timer: ReturnType<typeof setInterval> | null = null; // 轮询定时器
 
 /**
- * 桌面壳判断：非 iOS 壳（无 window.qqplayerIosBridge）启用轮询。
- * 覆盖：macOS/Windows 壳（无该桥）+ 浏览器开发环境（方便联调，无桥也启用）。
- * iOS 壳（qqplayerIosBridge 存在）不启用——iOS 是发起方，不需要确认自己的请求。
+ * 配对确认轮询开关：恒启用（iOS 壳 2026-09-13 退役）。
+ * 原判据为「非 iOS 壳（无 iOS 桥）才启用」——iOS 是发起方，
+ * 不需要确认自己发起的请求；壳退役后前端只剩 Tauri 壳与浏览器（都是配对请求的
+ * 接收方）→ 恒启用，与改造前这两者的行为一致。
  */
 export function isPairingEnabled(): boolean {
-  try {
-    return typeof window === "undefined" || !window.qqplayerIosBridge;
-  } catch {
-    return true;
-  }
+  return true;
 }
 
 /** 单次轮询：拉 pending → 新请求入队 → 空闲时弹下一个 */

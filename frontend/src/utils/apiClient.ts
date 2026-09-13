@@ -64,31 +64,19 @@ interface ApiOptions {
 }
 
 // ---------- 配置 ----------
-// iOS 壳注入优先级：localStorage（② 定案）→ window.qqplayerIosBridge（file:// 下
-// localStorage 不可靠，Swift 侧把 server/token 直接嵌入桥对象，见 WebShellView.injectServer）
-function bridgeValue(key: string): string {
+function baseURL(): string {
   try {
-    const b = typeof window !== "undefined" ? window.qqplayerIosBridge : null;
-    const v = b ? (b as Record<string, unknown>)[key] : null;
-    return typeof v === "string" ? v : "";
+    return localStorage.getItem(SERVER_KEY) || "";
   } catch {
     return "";
   }
 }
 
-function baseURL(): string {
-  try {
-    return localStorage.getItem(SERVER_KEY) || bridgeValue("server") || "";
-  } catch {
-    return bridgeValue("server");
-  }
-}
-
 function authToken(): string {
   try {
-    return localStorage.getItem(TOKEN_KEY) || bridgeValue("token") || "";
+    return localStorage.getItem(TOKEN_KEY) || "";
   } catch {
-    return bridgeValue("token");
+    return "";
   }
 }
 
@@ -244,9 +232,11 @@ export async function probeHost(): Promise<boolean> {
   probeInFlight = (async () => {
     let ok = false;
     try {
-      const res = nativeHttpAvailable()
-        ? await nativeHttpFetch(baseURL() + "/api/ping", { method: "GET" }, HOST_PROBE_TIMEOUT_MS)
-        : await fetchWithTimeout(baseURL() + "/api/ping", { method: "GET" }, HOST_PROBE_TIMEOUT_MS);
+      const res = await fetchWithTimeout(
+        baseURL() + "/api/ping",
+        { method: "GET" },
+        HOST_PROBE_TIMEOUT_MS,
+      );
       // 任何合法 Response（ok boolean / status number）都算主机在线
       ok = !!res && (typeof res.ok === "boolean" || typeof res.status === "number");
     } catch {
@@ -265,78 +255,6 @@ export async function probeHost(): Promise<boolean> {
 }
 
 // ---------- 请求核心 ----------
-// iOS 原生网络桥：WKWebView 的 file:// 页面禁止 fetch http://（跨 scheme 跨源硬限制），
-// 壳环境（window.qqplayerIosBridge 存在）下请求改走 postMessage → 原生 URLSession → 回传。
-// 返回结构对齐 fetch Response 子集（ok/status/text/json），下游 apiClient 逻辑零改动。
-let nativeReqSeq = 0;
-const nativePending = new Map<number, (status: number, bodyText: string) => void>();
-
-/** iOS 原生网络桥响应（fetch Response 子集；仅 file:// 壳环境使用） */
-interface NativeHttpResponse {
-  ok: boolean;
-  status: number;
-  text: () => Promise<string>;
-  json: () => Promise<unknown>;
-}
-
-function nativeHttpAvailable(): boolean {
-  try {
-    if (typeof window === "undefined") return false;
-    // 仅 file:// 页面需要网络桥（http 页面 fetch 正常，走标准浏览器 + CORS）；
-    // 2026-08-22 换路：壳改本地 http server 加载后，此分支不再触发
-    if (window.location.protocol !== "file:") return false;
-    return !!(window.qqplayerIosBridge && window.qqplayerIosBridge.postMessage);
-  } catch {
-    return false;
-  }
-}
-
-function nativeHttpFetch(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<NativeHttpResponse> {
-  return new Promise((resolve, reject) => {
-    const id = ++nativeReqSeq;
-    const timer = setTimeout(() => {
-      if (nativePending.has(id)) {
-        nativePending.delete(id);
-        reject(new TypeError("网络请求超时"));
-      }
-    }, timeoutMs || 30000);
-    nativePending.set(id, (status, bodyText) => {
-      clearTimeout(timer);
-      const ok = status >= 200 && status < 300;
-      resolve({
-        ok,
-        status,
-        text: async () => bodyText,
-        json: async () => {
-          try {
-            return JSON.parse(bodyText);
-          } catch {
-            return null;
-          }
-        },
-      });
-    });
-    try {
-      // 非空断言：nativeHttpAvailable() 已确认桥存在且 postMessage 可调；运行时若缺仍抛错走 catch
-      window.qqplayerIosBridge!.postMessage!({
-        cmd: "http",
-        id,
-        url,
-        method: init.method || "GET",
-        headers: init.headers || {},
-        body: typeof init.body === "string" ? init.body : null,
-      });
-    } catch (e) {
-      nativePending.delete(id);
-      clearTimeout(timer);
-      reject(e);
-    }
-  });
-}
 
 function fetchWithTimeout(url: string, init: RequestInit, timeout: number): Promise<Response> {
   if (!timeout || timeout <= 0) return fetch(url, init);
@@ -443,11 +361,9 @@ export async function api(
   if (body !== undefined) init.body = body instanceof FormData ? body : JSON.stringify(body);
 
   // 3. 网络请求（失败 → 离线降级）
-  let res: Response | NativeHttpResponse | null | undefined;
+  let res: Response | null | undefined;
   try {
-    res = nativeHttpAvailable()
-      ? await nativeHttpFetch(baseURL() + url, init, timeout)
-      : await fetchWithTimeout(baseURL() + url, init, timeout);
+    res = await fetchWithTimeout(baseURL() + url, init, timeout);
   } catch (err) {
     if (isGet && cache?.offline) {
       // 网络失败：读缓存（含过期——离线时旧数据优于无数据）

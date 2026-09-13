@@ -2,7 +2,7 @@
 //
 // audioEq/audioBare/audio 元素、均衡器音频图（Web Audio）、音量、切歌淡入淡出、
 // 音频事件绑定。
-// 依赖方向：仅 playerState / useEq / nativeAudioBridge（单向，无循环）。
+// 依赖方向：仅 playerState / useEq（单向，无循环）。
 //
 // 循环依赖处理（与原始 playerCore.js 的行为零变化）：
 //   - 音频事件回调涉及播放会话/跟唱/媒体键同步 → 经 registerAudioEventHooks 由
@@ -13,7 +13,6 @@
 import { watch } from "vue";
 import { state, playbackSettings } from "./playerState.ts";
 import { EQ_BANDS, EQ_PRESETS, registerEqGraphApplier } from "./useEq.js";
-import { isNativePlayback, createNativeAudioProxy } from "./nativeAudioBridge.js";
 
 // 音频元素统一视图（HTMLAudioElement 与 iOS 原生 Audio 语义代理的共同形状；
 // 事件回调参数一律 unknown，需要字段时最小化 as）
@@ -43,13 +42,9 @@ export type AudioEventListener = (e: unknown) => void;
 // WebKit 中 createMediaElementSource 接管后变速（尤其 0.75 减速）走缺陷链路会卡顿，
 // 且元素被接管后无法归还（规范限制）→ 变速时切到裸元素走原生媒体管线（流畅），
 // 回 1.0 切回图元素（EQ 照常）。audio 为当前活动元素引用（live binding，其他模块自动跟随）。
-// iOS 原生壳（window.qqplayerIosBridge 存在）：audio = Audio 语义代理（转发 AVPlayer），
-// 双元素/Web Audio 图均不参与（原生管线），桌面浏览器行为完全不变。
 export const audioEq: PlayerAudioLike = new Audio() as unknown as PlayerAudioLike;
 export const audioBare: PlayerAudioLike = new Audio() as unknown as PlayerAudioLike;
-export let audio: PlayerAudioLike = isNativePlayback()
-  ? (createNativeAudioProxy() as unknown as PlayerAudioLike)
-  : audioEq;
+export let audio: PlayerAudioLike = audioEq;
 audio.preload = "auto";
 audioBare.preload = "auto";
 // 包装 play：每次播放前确保 Web Audio 图就绪（懒创建 + resume，autoplay policy 需要用户手势）
@@ -84,8 +79,6 @@ let swappingAudio = false;
 // 1.0 → audioEq（Web Audio 图，EQ/频谱生效）。
 // 切换瞬间有短暂中断（~100ms：pause → src/seek → play），变速是主动操作，可接受。
 function swapAudioElement(next: PlayerAudioLike) {
-  // iOS 原生播放：双元素切换不参与（变速走 AVPlayer rate），保持 audio=代理不变
-  if (isNativePlayback()) return;
   if (next === audio) return;
   const cur = audio;
   const wasPlaying = !cur.paused;
@@ -197,7 +190,6 @@ export function getVolumeDebugInfo() {
     stateVolume: state.volume,
     stateMuted: state.muted,
     audioIsEq: audio === audioEq,
-    isNative: isNativePlayback(),
   };
 }
 // 验收/自动化钩子：window.__qqVolDebug()（壳内或 Playwright 验证音量链路）
@@ -400,5 +392,3 @@ function bindAudioEvents(el: PlayerAudioLike) {
 }
 bindAudioEvents(audioEq);
 bindAudioEvents(audioBare);
-// iOS 原生播放：事件绑到 Audio 代理（原生 timeupdate/playing/paused/ended 驱动同一套 UI 逻辑）
-if (isNativePlayback()) bindAudioEvents(audio);

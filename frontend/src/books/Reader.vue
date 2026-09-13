@@ -148,9 +148,7 @@
         </div>
       </Transition>
 
-      <!-- 选中工具栏（选区上方/下方悬浮，iBooks 式：顶行五色点 + U，下方功能列表）；Swift 壳内隐藏（壳用系统右键菜单，见 installNativeMenuApi），浏览器照旧 -->
-      <!-- iOS：全屏透明遮罩实现“菜单外点击关闭”（iframe 触摸事件在 WKWebView 不可靠，原生遮罩最稳） -->
-      <div v-if="toolbar.visible && isIOSShell" class="reader-toolbar-scrim" @click="hideToolbar" />
+      <!-- 选中工具栏（选区上方/下方悬浮，iBooks 式：顶行五色点 + U，下方功能列表）；壳内隐藏（壳用系统右键菜单，见 installNativeMenuApi），浏览器照旧 -->
       <SelectionToolbar
         v-if="toolbar.visible && !isNativeShell"
         :x="toolbar.x"
@@ -256,7 +254,6 @@ import type { Book, Rendition, Location, NavItem } from "epubjs";
 import type { BookView } from "./types";
 import { saveBookProgress } from "./api";
 import { api } from "../utils/apiClient.js";
-import { assetForBook, ensureAsset, localAssetHTTPURL, syncEnabled } from "../utils/sync.js";
 import ReaderSettingsPanel from "./ReaderSettingsPanel.vue";
 import SelectionToolbar from "./SelectionToolbar.vue";
 import HighlightMenu from "./HighlightMenu.vue";
@@ -290,10 +287,9 @@ const loading = ref(true);
 const errorMsg = ref("");
 const tocOpen = ref(false);
 
-// ============ Swift 壳桥接（useNativeReaderBridge：window.qqplayerNative 注入时启用；浏览器内全部静默 no-op） ============
+// ============ 壳桥接（useNativeReaderBridge：window.qqplayerNative 注入时启用；浏览器内全部静默 no-op） ============
 const {
   isNativeShell,
-  isIOSShell,
   inNativeShell,
   postReaderState,
   selectionHasHighlight,
@@ -391,26 +387,19 @@ const {
   apply: () => applyReaderSettings(),
 });
 
-// ============ 翻页 / 点击热区 / 滑动（useReaderNavigation：epubjs 翻页 + 左右 22% 热区 + iOS 滑动翻页） ============
-const {
-  prevPage,
-  nextPage,
-  getCurrentContents,
-  attachTapHandlers,
-  detachTapHandlers,
-  subscribeSwipe,
-  unsubscribeSwipe,
-} = useReaderNavigation({
-  renditionRef,
-  containerRef,
-  bodyRef,
-  annotations,
-  hlMenu,
-  closeHighlightMenu,
-  // 晚绑定：useSelectionToolbar 随后创建，调用点全部在运行时
-  getToolbar: () => toolbar,
-  hideToolbar: () => hideToolbar(),
-});
+// ============ 翻页 / 点击热区 / 滑动（useReaderNavigation：epubjs 翻页 + 左右 22% 热区） ============
+const { prevPage, nextPage, getCurrentContents, attachTapHandlers, detachTapHandlers } =
+  useReaderNavigation({
+    renditionRef,
+    containerRef,
+    bodyRef,
+    annotations,
+    hlMenu,
+    closeHighlightMenu,
+    // 晚绑定：useSelectionToolbar 随后创建，调用点全部在运行时
+    getToolbar: () => toolbar,
+    hideToolbar: () => hideToolbar(),
+  });
 
 // ============ 选中工具栏（useSelectionToolbar：选区状态 + 轮询 + 工具栏动作） ============
 const {
@@ -624,24 +613,8 @@ function teardown() {
   bookRef.value = null;
 }
 
-/** 获取 EPUB 二进制：iOS 壳优先本地资产（已下载 → 本地 HTTP 读取，离线可用；
- *  未下载 → 远程加载 + 后台触发下载，下次打开秒开）；桌面/浏览器走远程，零变化。
- *  ensureAsset 默认「只查不下载」（autoPrefetch 关），阅读器链路显式 download:true
- *  保持既有「打开即后台下载」语义（播放链路的下载判断不受影响）。 */
+/** 获取 EPUB 二进制（远程获取）。 */
 async function loadBookBuffer() {
-  if (syncEnabled()) {
-    try {
-      const item = await assetForBook(props.book);
-      const localURL = item ? await ensureAsset(item, { download: true }) : null;
-      const httpURL = localAssetHTTPURL(localURL);
-      if (httpURL) {
-        const resp = await fetch(httpURL); // 本地 server 无鉴权，裸 fetch
-        if (resp.ok) return await resp.arrayBuffer();
-      }
-    } catch {
-      /* 本地读取失败回退远程 */
-    }
-  }
   const resp = await api({ url: props.book.fileUrl, raw: true });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return await resp.response!.arrayBuffer();
@@ -720,8 +693,6 @@ onMounted(() => {
   postReaderState(true, ""); // 壳：Reader 激活初始状态（无选区）
   loadReaderSettings();
   loadBook();
-  // iOS 原生滑动翻页（UISwipeGestureRecognizer → native swipe 事件 → 翻页；useReaderNavigation 订阅）
-  subscribeSwipe();
 });
 
 onBeforeUnmount(() => {
@@ -730,8 +701,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("mousedown", onWindowMouseDown, true);
   stopSelPolling();
   uninstallNativeMenuApi();
-  unsubscribeSwipe();
-  postReaderState(false, ""); // 壳：Reader 已卸载（hasSelection:false, text:"")
+  postReaderState(false, ""); // 壳：Reader 已卸载（hasSelection:false, text:""）
   teardown();
 });
 </script>
@@ -867,12 +837,6 @@ onBeforeUnmount(() => {
 }
 /* iOS 选区工具栏遮罩：全屏透明，点任意处关工具栏（iframe 触摸事件在 WKWebView 不可靠，
    用父文档遮罩实现“菜单外点击关闭”；z-index 低于工具栏 hl-menu 的 10） */
-.reader-toolbar-scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 9;
-  background: transparent;
-}
 /* 目录抽屉 */
 .reader-toc-mask {
   position: absolute;

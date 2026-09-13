@@ -2,13 +2,11 @@
  * 阅读器翻页 / 点击热区 / 滑动（useReaderNavigation）——从 Reader.vue 拆出（P3 拆分，行为零变化）。
  *
  * 职责：prev/next 翻页（epubjs rendition）、点击热区（iframe 内 mousedown/click 按坐标
- * 判左右 22% 翻页，拖选/链接/选区不翻页）、高亮点击反查（findMarkAt → openHighlightMenu）、
- * iOS 原生滑动翻页事件订阅（UISwipeGestureRecognizer → native swipe 事件）。
+ * 判左右 22% 翻页，拖选/链接/选区不翻页）、高亮点击反查（findMarkAt → openHighlightMenu）。
  */
 import type { Ref, ShallowRef } from "vue";
 import type { Rendition } from "epubjs";
 import type { BookAnnotations } from "../books/types";
-import { onNativeEvent } from "./nativeAudioBridge.js";
 
 /** 点击高亮菜单状态（useAnnotations.hlMenu 的结构） */
 interface HighlightMenuState {
@@ -98,9 +96,6 @@ export function useReaderNavigation(options: {
     tapDownX = e.clientX;
     tapDownY = e.clientY;
   }
-
-  /** iOS 原生滑动翻页事件订阅（UISwipeGestureRecognizer → native swipe 事件；onMounted 注册，onBeforeUnmount 取消） */
-  let unsubSwipe: (() => void) | null = null;
 
   /**
    * 命中检测：epub.js marks 渲染在父文档的 SVG overlay（marks-pane，pointer-events:none），
@@ -200,19 +195,6 @@ export function useReaderNavigation(options: {
   }
 
   /** iOS 原生滑动翻页事件订阅（UISwipeGestureRecognizer → native swipe 事件；onMounted 注册，onBeforeUnmount 取消） */
-  function subscribeSwipe() {
-    unsubSwipe = onNativeEvent("swipe", (payload: { dir?: string }) => {
-      if (options.getToolbar().visible) options.hideToolbar();
-      if (options.hlMenu.visible) options.closeHighlightMenu();
-      if (payload?.dir === "left") nextPage();
-      else if (payload?.dir === "right") prevPage();
-    });
-  }
-
-  function unsubscribeSwipe() {
-    unsubSwipe?.();
-    unsubSwipe = null;
-  }
 
   return {
     prevPage,
@@ -220,7 +202,5 @@ export function useReaderNavigation(options: {
     getCurrentContents,
     attachTapHandlers,
     detachTapHandlers,
-    subscribeSwipe,
-    unsubscribeSwipe,
   };
 }

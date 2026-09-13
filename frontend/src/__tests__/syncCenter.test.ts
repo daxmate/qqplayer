@@ -59,14 +59,6 @@ vi.mock("../utils/apiClient.js", () => apiMock);
 // ---------- 被测模块 ----------
 import * as sync from "../utils/sync.js";
 
-/** 桥消息下载项宽松视图（测试侧仅读 path/sha256/size/wifiOnly） */
-interface TestDownloadItem {
-  path: string;
-  sha256?: string;
-  size?: number;
-  wifiOnly?: boolean;
-}
-
 // jsdom（vitest 4）无 localStorage → 手写 stub
 const lsStore: Record<string, string> = {};
 const localStorageStub = {
@@ -87,18 +79,10 @@ function clearLs() {
 
 async function setNativeEnv() {
   window.qqplayerNative = true;
-  window.qqplayerIosBridge = { postMessage: vi.fn() };
 }
 
 function clearNativeEnv() {
   delete window.qqplayerNative;
-  delete window.qqplayerIosBridge;
-}
-
-/** 最新一次指定 cmd 的桥消息 */
-function lastMsg(cmd: string) {
-  const calls = bridgeMock.post.mock.calls.filter((c) => c[0] && c[0].cmd === cmd);
-  return calls.length ? calls[calls.length - 1][0] : null;
 }
 
 beforeEach(() => {
@@ -140,81 +124,6 @@ async function dictPathOf(dict: Parameters<typeof sync.assetForDict>[0]) {
   const item = await sync.assetForDict(dict);
   return item!.path;
 }
-
-const manifest = {
-  version: "20260826-1200",
-  songs: [songV1, songB],
-  books: [book1],
-  dicts: [dict1],
-  playlists: [],
-  favorites: [],
-};
-
-describe("fetchAssetIndex：assetIndex 命令 + 回执", () => {
-  it("回执 push('assetIndex',{assets}) → resolve(assets)", async () => {
-    await setNativeEnv();
-    const p = sync.fetchAssetIndex();
-    expect(bridgeMock.post).toHaveBeenCalledWith({ cmd: "assetIndex" });
-    const assets = [{ path: "audio/x.m4a", sha256: "h1", size: 10 }];
-    bridgeMock.emit("assetIndex", { assets });
-    await expect(p).resolves.toEqual(assets);
-  });
-
-  it("原生无回执：超时 resolve([])，不挂起", async () => {
-    vi.useFakeTimers();
-    await setNativeEnv();
-    const p = sync.fetchAssetIndex();
-    vi.advanceTimersByTime(sync.ASSET_INDEX_TIMEOUT_MS + 10);
-    await expect(p).resolves.toEqual([]);
-    // 迟到回执：忽略（已结算）
-    bridgeMock.emit("assetIndex", { assets: [{ path: "audio/x.m4a" }] });
-    vi.advanceTimersByTime(0);
-  });
-
-  it("非原生环境：立即 resolve([])，不发消息", async () => {
-    await expect(sync.fetchAssetIndex()).resolves.toEqual([]);
-    expect(bridgeMock.post).not.toHaveBeenCalled();
-  });
-});
-
-describe("fetchAssetsSizeDetailed：assetsSize 回执扩展 byType", () => {
-  it("回执 {total, byType} → resolve 完整明细", async () => {
-    await setNativeEnv();
-    const p = sync.fetchAssetsSizeDetailed();
-    bridgeMock.emit("assetsSize", {
-      total: 1000,
-      byType: { audio: 400, covers: 100, lyric: 50, books: 300, dicts: 100, meta: 30, other: 20 },
-    });
-    const r = (await p)!;
-    expect(r.total).toBe(1000);
-    expect(r.byType!.audio).toBe(400);
-    expect(r.byType!.lyric).toBe(50);
-  });
-
-  it("旧壳只回 total：resolve {total, byType:{}}（不抛）", async () => {
-    await setNativeEnv();
-    const p = sync.fetchAssetsSizeDetailed();
-    bridgeMock.emit("assetsSize", { total: 999 });
-    const r = (await p)!;
-    expect(r.total).toBe(999);
-    expect(r.byType).toEqual({});
-  });
-
-  it("超时 / 非原生 → resolve(null)；fetchAssetsSize 仍只回数字", async () => {
-    // 非原生：立即 resolve(null)
-    await expect(sync.fetchAssetsSize()).resolves.toBeNull();
-    await expect(sync.fetchAssetsSizeDetailed()).resolves.toBeNull();
-    // 原生 + 原生无回执：超时 resolve(null)
-    vi.useFakeTimers();
-    await setNativeEnv();
-    const p = sync.fetchAssetsSizeDetailed();
-    vi.advanceTimersByTime(sync.ASSETS_SIZE_TIMEOUT_MS + 10);
-    await expect(p).resolves.toBeNull();
-    const p2 = sync.fetchAssetsSize();
-    vi.advanceTimersByTime(sync.ASSETS_SIZE_TIMEOUT_MS + 10);
-    await expect(p2).resolves.toBeNull();
-  });
-});
 
 describe("computeUpdateList：可更新判定 + 首次注册表空策略", () => {
   it("注册表为空（老版本升级）→ 全部视为最新，返回 []", async () => {
@@ -313,223 +222,13 @@ describe("computeOrphanAssets：期望集 diff 本地注册表", () => {
   });
 });
 
-describe("assetForSong 带 sha256 / applyUpdates", () => {
-  it("assetForSong：manifest 条目带 sha256 → 下载项 sha256 用真实值", async () => {
-    const item = (await sync.assetForSong(songV1))!;
-    expect(item.sha256).toBe(songV1.sha256);
-    expect(item.path).toMatch(/^audio\/[0-9a-f]{64}\.mp3$/);
-    // 老清单缺 sha256 → 空串（兼容旧行为）
-    const legacy = (await sync.assetForSong({ path: "/Music/x.mp3", size: 1 }))!;
-    expect(legacy.sha256).toBe("");
-  });
-
-  it("applyUpdates：可更新项重建音频下载项（真实 sha256）→ syncAssets", async () => {
-    await setNativeEnv();
-    const list = await sync.computeUpdateList(
-      [songV2],
-      [{ path: await audioPathOf(songV1), sha256: songV1.sha256, size: 100 }],
-    );
-    expect(list).toHaveLength(1);
-    const sent = await sync.applyUpdates(list);
-    expect(sent).toBe(true);
-    const msg = lastMsg("syncDownload");
-    expect(msg).toBeTruthy();
-    const audio = msg.items.find((i: TestDownloadItem) => i.path.startsWith("audio/"));
-    const cover = msg.items.find((i: TestDownloadItem) => i.path.startsWith("covers/"));
-    expect(audio.sha256).toBe(songV2.sha256); // 真实内容哈希
-    expect(cover).toBeUndefined(); // 封面未过期：不重建封面项（sha256 空 + 已存在会恒过，无需重下）
-    expect(audio.wifiOnly).toBe(true);
-  });
-
-  it("applyUpdates：封面过期项 → 先 deleteAssets 删旧封面 + 下载项带 manifest cover_size", async () => {
-    await setNativeEnv();
-    const songWithCover = {
-      ...songV2,
-      cover_source: "file",
-      cover_path: "cover.jpg",
-      cover_size: 999,
-      cover_mtime: 111,
-    };
-    const coverPath = await coverPathOf(songWithCover.path);
-    const list = await sync.computeUpdateList(
-      [songWithCover],
-      [
-        { path: await audioPathOf(songV1), sha256: songV1.sha256, size: 100 },
-        { path: coverPath, sha256: "", size: 500 }, // 旧封面 size 不同 → 过期
-      ],
-    );
-    expect(list.find((u) => u.kind === "cover")).toBeTruthy();
-    const sent = await sync.applyUpdates(list);
-    expect(sent).toBe(true);
-    // 先删旧封面（不删则原生 hasAsset 命中旧文件直接 done）
-    const del = lastMsg("deleteAssets");
-    expect(del.paths).toContain(coverPath);
-    // 下载项：音频带真实 sha256，封面带 manifest cover_size（原生 size 校验）
-    const msg = lastMsg("syncDownload");
-    const audio = msg.items.find((i: TestDownloadItem) => i.path.startsWith("audio/"));
-    const cover = msg.items.find((i: TestDownloadItem) => i.path.startsWith("covers/"));
-    expect(audio.sha256).toBe(songWithCover.sha256);
-    expect(cover.size).toBe(999);
-  });
-
-  it("applyUpdates：空列表 → false 不发消息", async () => {
-    expect(await sync.applyUpdates([])).toBe(false);
-    expect(await sync.applyUpdates(null)).toBe(false);
-    expect(bridgeMock.post).not.toHaveBeenCalled();
-  });
-});
-
-describe("syncAll：一键拉全（缺失下载 + 更新门控 + 歌词失效）", () => {
-  it("缺失统计 + 下载（音频/封面/图书/词典）；自动更新关 → 不应用更新", async () => {
-    await setNativeEnv();
-    apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifest });
-    // 本地注册表：只有 a.mp3 的音频（缺封面/书/词典/b.flac）
-    const audioA = await audioPathOf(songV1);
-    const p = sync.syncAll();
-    bridgeMock.emit("assetIndex", {
-      assets: [{ path: audioA, sha256: songV1.sha256, size: 100 }],
-    });
-    const r = await p;
-    expect(r.ok).toBe(true);
-    // 缺失：b 音频+封面、a 封面、书、词典 = 5 项
-    expect(r.missing).toEqual({ audio: 1, covers: 2, books: 1, dicts: 1 });
-    const msg = lastMsg("syncDownload");
-    expect(msg.items).toHaveLength(5);
-    expect(msg.items.every((i: TestDownloadItem) => i.wifiOnly === true)).toBe(true);
-    // 自动更新默认关：a.mp3 已本地且 sha 相同，无更新项
-    expect(r.updateCount).toBe(0);
-  });
-
-  it("自动更新开 + 本地 sha 与 manifest 不同 → 同步后自动应用更新", async () => {
-    await setNativeEnv();
-    sync.setAutoUpdate(true);
-    apiMock.apiGet.mockResolvedValue({ ok: true, status: 200, data: manifest });
-    const audioA = await audioPathOf(songV1);
-    const coverA = await coverPathOf(songV1.path);
-    const audioB = await audioPathOf(songB);
-    const book = await bookPathOf(book1);
-    const dict = await dictPathOf(dict1);
-    const p = sync.syncAll();
-    bridgeMock.emit("assetIndex", {
-      assets: [
-        { path: audioA, sha256: "old-hash", size: 100 }, // sha 与 manifest 不同 → 可更新
-        { path: coverA, sha256: "c1", size: 10 },
-        { path: audioB, sha256: songB.sha256, size: 200 },
-        { path: book, sha256: "b1", size: 1000 },
-        { path: dict, sha256: "d1", size: 500 },
-      ],
-    });
-    const r = await p;
-    expect(r.ok).toBe(true);
-    expect(r.updateCount).toBe(1); // 只有 a.mp3 音频可更新
-    // 下载消息含缺失项 + 更新项（audioA 以新 sha 重新下载）
-    const msgs = bridgeMock.post.mock.calls
-      .filter((c) => c[0] && c[0].cmd === "syncDownload")
-      .map((c) => c[0]);
-    const updateMsg = msgs.find((m) =>
-      m.items.some((i: TestDownloadItem) => i.path === audioA && i.sha256 === songV1.sha256),
-    );
-    expect(updateMsg).toBeTruthy();
-  });
-
-  it("manifest 拉取失败 → {ok:false, message}，不发下载", async () => {
-    await setNativeEnv();
-    apiMock.apiGet.mockResolvedValue({ ok: false, status: 500, message: "boom" });
-    const p = sync.syncAll();
-    bridgeMock.emit("assetIndex", { assets: [] }); // Promise.all 需要 assetIndex 也结算
-    const r = await p;
-    expect(r.ok).toBe(false);
-    expect(r.message).toBe("boom");
-    // assetIndex 查询命令允许发出（Promise.all 并行）；不得有下载/删除消息
-    expect(lastMsg("syncDownload")).toBeNull();
-    expect(lastMsg("deleteAssets")).toBeNull();
-  });
-
-  it("桌面浏览器：no-op 返回 {enabled:false}", async () => {
-    const r = await sync.syncAll();
-    expect(r).toEqual({ enabled: false, ok: false });
-    expect(apiMock.apiGet).not.toHaveBeenCalled();
-  });
-});
-
-describe("歌词失效判定（mock nativeMetaLoad 链路）", () => {
-  const songWithLyric = { path: "/Music/a.mp3", name: "A", lyric_mtime: 111 };
-
-  it("recordLyricMtimes：写 syncMeta（song path → lyric_mtime）", async () => {
-    await setNativeEnv();
-    const p = sync.recordLyricMtimes([songWithLyric]);
-    // 先读旧记录（文件缺失 → json null）
-    const loadMsg = lastMsg("metaLoad");
-    expect(loadMsg.kind).toBe("syncMeta");
-    bridgeMock.emit("metaLoaded", { requestId: loadMsg.requestId, kind: "syncMeta", json: null });
-    await p;
-    const msg = lastMsg("metaSave");
-    expect(msg.kind).toBe("syncMeta");
-    expect(JSON.parse(msg.json)).toEqual({ "/Music/a.mp3": 111 });
-  });
-
-  it("detectStaleLyrics：mtime 变了 → 返回该歌曲；未变 → 空", async () => {
-    await setNativeEnv();
-    // 先记录基线（metaSave syncMeta {path: 111}）
-    let p: Promise<unknown> = sync.recordLyricMtimes([songWithLyric]);
-    let loadMsg = lastMsg("metaLoad");
-    bridgeMock.emit("metaLoaded", { requestId: loadMsg.requestId, kind: "syncMeta", json: null });
-    await p;
-    const saveMsg = lastMsg("metaSave");
-    // mtime 变了（111 → 222）：检测到失效
-    p = sync.detectStaleLyrics([{ ...songWithLyric, lyric_mtime: 222 }]);
-    loadMsg = lastMsg("metaLoad");
-    bridgeMock.emit("metaLoaded", {
-      requestId: loadMsg.requestId,
-      kind: "syncMeta",
-      json: saveMsg.json,
-    });
-    const stale = (await p) as Array<{ path: string }>;
-    expect(stale).toHaveLength(1);
-    expect(stale[0].path).toBe("/Music/a.mp3");
-    // mtime 未变：不失效
-    p = sync.detectStaleLyrics([songWithLyric]);
-    loadMsg = lastMsg("metaLoad");
-    bridgeMock.emit("metaLoaded", {
-      requestId: loadMsg.requestId,
-      kind: "syncMeta",
-      json: saveMsg.json,
-    });
-    await expect(p).resolves.toEqual([]);
-  });
-
-  it("detectStaleLyrics：无 lyric_mtime 条目 / 非原生 → 不查不返回", async () => {
-    await setNativeEnv();
-    await expect(sync.detectStaleLyrics([{ path: "/Music/x.mp3" }])).resolves.toEqual([]);
-    await expect(sync.detectStaleLyrics([])).resolves.toEqual([]);
-    clearNativeEnv();
-    await expect(sync.detectStaleLyrics([songWithLyric])).resolves.toEqual([]);
-    expect(bridgeMock.post).not.toHaveBeenCalled();
-  });
-
-  it("invalidateLyricForSong：metaSave lyric:<hash> 覆盖为 {} 哨兵（清缓存）", async () => {
-    await setNativeEnv();
-    expect(await sync.invalidateLyricForSong(songWithLyric)).toBe(true);
-    const msg = lastMsg("metaSave");
-    expect(msg.kind).toMatch(/^lyric:[0-9a-f]{64}$/);
-    expect(msg.json).toBe("{}"); // 空对象哨兵：loadLyricFile 视为无缓存
-    // 非原生 → false
-    clearNativeEnv();
-    expect(await sync.invalidateLyricForSong(songWithLyric)).toBe(false);
-  });
-});
-
 describe("仅 Wi-Fi / 自动更新开关", () => {
-  it("wifiOnly 默认开；setWifiOnly(false) 持久化 + 通知原生", async () => {
-    await setNativeEnv();
+  it("wifiOnly 默认开；setWifiOnly(false) 持久化", () => {
     expect(sync.wifiOnlyEnabled()).toBe(true); // 默认开
     expect(sync.setWifiOnly(false)).toBe(false);
     expect(localStorage.getItem("qqplayer.syncWifiOnly")).toBe("off");
-    expect(bridgeMock.post).toHaveBeenCalledWith({ cmd: "setWifiOnly", on: false });
-    // 之后 syncAssets 的 items 带 wifiOnly: false
-    sync.syncAssets([{ url: "http://s/a.m4a", path: "audio/a.m4a", sha256: "", size: 1 }]);
-    const msg = lastMsg("syncDownload");
-    expect(msg.items[0].wifiOnly).toBe(false);
+    expect(sync.setWifiOnly(true)).toBe(true);
+    expect(localStorage.getItem("qqplayer.syncWifiOnly")).toBe("on");
   });
 
   it("autoUpdate 默认关；setAutoUpdate(true) 持久化", async () => {
@@ -538,52 +237,5 @@ describe("仅 Wi-Fi / 自动更新开关", () => {
     expect(localStorage.getItem("qqplayer.syncAutoUpdate")).toBe("on");
     expect(sync.setAutoUpdate(false)).toBe(false);
     expect(sync.autoUpdateEnabled()).toBe(false);
-  });
-});
-
-describe("精确删除：clearAssetsByType / deleteOrphanAssets / waitAssetsDeleted", () => {
-  it("clearAssetsByType：按前缀过滤 paths → deleteAssets {paths}", async () => {
-    await setNativeEnv();
-    const assets = [
-      { path: "audio/a.m4a", sha256: "", size: 1 },
-      { path: "covers/a.jpg", sha256: "", size: 1 },
-      { path: "books/b.epub", sha256: "", size: 1 },
-      { path: "dicts/d.mdx", sha256: "", size: 1 },
-      { path: "audio/orphan.m4a", sha256: "", size: 1 },
-    ];
-    expect(sync.clearAssetsByType("audio", assets)).toBe(2);
-    expect(sync.clearAssetsByType("covers", assets)).toBe(1);
-    expect(sync.clearAssetsByType("dicts", assets)).toBe(1);
-    const dels = bridgeMock.post.mock.calls
-      .filter((c) => c[0] && c[0].cmd === "deleteAssets")
-      .map((c) => c[0]);
-    expect(dels[0]).toEqual({ cmd: "deleteAssets", paths: ["audio/a.m4a", "audio/orphan.m4a"] });
-    expect(dels[1]).toEqual({ cmd: "deleteAssets", paths: ["covers/a.jpg"] });
-    expect(dels[2]).toEqual({ cmd: "deleteAssets", paths: ["dicts/d.mdx"] });
-    // lyric 前缀（meta kind）
-    expect(sync.clearAssetsByType("lyric", [{ path: "lyric:abc" }])).toBe(1);
-    // 无匹配且无 scope 回退（covers）→ 0
-    expect(sync.clearAssetsByType("covers", [])).toBe(0);
-  });
-
-  it("deleteOrphanAssets：孤儿 paths → deleteAssets；空列表不发", async () => {
-    await setNativeEnv();
-    expect(sync.deleteOrphanAssets([{ path: "audio/x.m4a", size: 1 }])).toBe(true);
-    expect(lastMsg("deleteAssets")).toEqual({ cmd: "deleteAssets", paths: ["audio/x.m4a"] });
-    bridgeMock.post.mockClear();
-    expect(sync.deleteOrphanAssets([])).toBe(false);
-    expect(bridgeMock.post).not.toHaveBeenCalled();
-  });
-
-  it("waitAssetsDeleted：回推 paths 结算；超时 resolve([])", async () => {
-    vi.useFakeTimers();
-    await setNativeEnv();
-    const p = sync.waitAssetsDeleted(1000);
-    bridgeMock.emit("assetsDeleted", { paths: ["audio/x.m4a"] });
-    await expect(p).resolves.toEqual(["audio/x.m4a"]);
-    // 超时路径
-    const p2 = sync.waitAssetsDeleted(1000);
-    vi.advanceTimersByTime(1001);
-    await expect(p2).resolves.toEqual([]);
   });
 });

@@ -219,21 +219,6 @@ export function useSelectionToolbar(options: {
       "selectionchange",
       onContentsSelectionChange,
     );
-    // iOS 壳：选区手柄（原生蓝色圆点）会叠在工具栏上/旁（无 API 单独禁用），
-    // 工具栏弹出后立即收起选区隐藏手柄；先锁定工具栏防选区收起事件把它关掉（2026-08-23）
-    if (
-      typeof window !== "undefined" &&
-      (window as { qqplayerIosBridge?: unknown }).qqplayerIosBridge
-    ) {
-      toolbarLocked = true;
-      requestAnimationFrame(() => {
-        try {
-          (contents as { window?: Window }).window?.getSelection()?.removeAllRanges();
-        } catch {
-          /* 收起失败不影响 */
-        }
-      });
-    }
   }
 
   // ---- 工具栏动作 ----

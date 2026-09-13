@@ -110,7 +110,6 @@ function routeApiGet(devices: unknown = DEVICES, commands: unknown = COMMANDS) {
 beforeEach(() => {
   vi.clearAllMocks();
   clearToasts();
-  delete window.qqplayerIosBridge;
   routeApiGet();
   apiPost.mockResolvedValue({ ok: true, data: { id: 99 } });
 });

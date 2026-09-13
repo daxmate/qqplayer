@@ -1,7 +1,7 @@
 // 队列域（P1-2 批次2：从 playerCore.js 拆出）
 //
-// 队列操作 / 连播模式 / 歌曲列表 / 队列顺序 / 自动刷新 / 流媒体 / 选歌 / iOS 本地优先。
-// 依赖方向：playerState、audioEngine、useLyric、useAbLoop、nativeAudioBridge（单向，无循环）。
+// 队列操作 / 连播模式 / 歌曲列表 / 队列顺序 / 自动刷新 / 流媒体 / 选歌。
+// 依赖方向：playerState、audioEngine、useLyric、useAbLoop（单向，无循环）。
 //
 // 循环依赖处理（与原始 playerCore.js 的行为零变化）：
 //   - 播放会话（playbackSession/flushPlaybackSession）与 showPlayerToast 属 playbackEngine，
@@ -28,10 +28,8 @@ import {
 } from "./audioEngine.ts";
 import { loadLyric, loadOnlineLyricForSong } from "./useLyric.js";
 import { resetAbLoopCount } from "./useAbLoop.js";
-import { isNativePlayback, resolveNativeUrl, nativePost } from "./nativeAudioBridge.js";
 import { showToast } from "./useToast.js";
 import { apiGet, apiPut, apiPost, invalidate } from "../utils/apiClient.js";
-import { ensureAsset, assetForSong, nativeMetaSave } from "../utils/sync.js";
 import i18n from "../locales/i18n.js";
 
 // ============ 播放会话/toast 回调注入（playbackEngine 注册） ============
@@ -251,15 +249,6 @@ export async function loadSongs(opts: { force?: boolean } = {}) {
     if (r.network) throw new Error(r.message); // 网络失败走 catch（state.error 提示）
     const songs = r.data;
     state.songs = songs;
-    // iOS 壳元数据文件兜底：IndexedDB 重启不可靠（免费签名覆盖安装被清），
-    // 成功拿到的曲库落 Documents/meta/songs.json（fire-and-forget；非壳/失败静默）
-    if (isNativePlayback()) {
-      try {
-        nativeMetaSave("songs", JSON.stringify(songs));
-      } catch {
-        /* 写文件失败静默：不影响加载 */
-      }
-    }
     // 拖拽排序持久化的队列顺序：刷新/启动时恢复（loadQueueOrder 需先于首次 loadSongs 完成，见 App.vue）
     applyQueueOrder();
     if (songs.length && state.currentIndex < 0) {
@@ -586,21 +575,13 @@ function isFiniteNumber(v: number): boolean {
 }
 
 // ============ 选歌 ============
-// 调试记录：播放决策链路（2026-08-25 定位"从固定秒数开始播"问题用；
-// 写 Documents/meta/debuglog.json，模拟器沙盒可直接读）
-// 导出供 playbackEngine（seek）与 mediaSession（远端命令/原生切歌）打点
+// 调试记录：播放决策链路（2026-08-25 定位"从固定秒数开始播"问题用；内存环形缓冲）
+// 导出供 playbackEngine（seek）打点
 const dbgBuf: Array<Record<string, unknown>> = [];
 export function dbgLog(ev: string, data?: Record<string, unknown> | null) {
   try {
     dbgBuf.push({ ts: Date.now(), ev, ...(data || {}) });
     if (dbgBuf.length > 300) dbgBuf.splice(0, dbgBuf.length - 300);
-    if (isNativePlayback()) {
-      try {
-        nativeMetaSave("debuglog", JSON.stringify(dbgBuf.slice(-80)));
-      } catch {
-        /* 写日志失败静默 */
-      }
-    }
   } catch {
     /* 日志不影响播放 */
   }
@@ -624,32 +605,9 @@ export function songChangedTargetIndex(
   return index < songsLen ? index : -1;
 }
 
-// 播放顺序快照 → 原生（setQueue）：锁屏/线控后台切歌用（Web 挂起时原生独立执行）。
-// 本地歌绝对 URL（resolveNativeUrl，AVPlayer 直接拉）；stream 歌 url 空（原生跳过，
-// MVP 限制：流媒体直链有时效，后台无法离线取）。顺序与前端一致：shuffle 用洗牌队列，
-// 普通模式用歌曲列表顺序。
-function nativeSyncQueue() {
-  const order = state.playMode === "shuffle" ? shuffleQueue : state.songs.map((_, i) => i);
-  const idx = state.playMode === "shuffle" ? shufflePos : state.currentIndex;
-  const songs = order.map((songIdx) => {
-    const s = state.songs[songIdx];
-    return {
-      // 非 stream 歌 path 必然存在；最小化 as 保持原 JS 语义
-      url: isStreamSong(s)
-        ? ""
-        : resolveNativeUrl("/api/audio?path=" + encodeURIComponent(s.path as string)),
-      title: s.name || "",
-      artist: s.artist || "",
-      album: s.album || "",
-    };
-  });
-  nativePost({ cmd: "setQueue", songs, index: idx < 0 ? 0 : idx });
-}
-
-// 当前 selectSong / maybePrefetchAsset 挂的 loadedmetadata 监听器引用
+// 当前 selectSong 挂的 loadedmetadata 监听器引用
 // （切歌时清理，防旧歌的 resumeAt 劫持新歌——2026-08-25 固定秒数开始播放根因）
 let loadedMetaHandler: AudioEventListener | null = null;
-let prefetchMetaHandler: AudioEventListener | null = null;
 
 export async function selectSong(index: number, opts: SelectSongOpts = {}): Promise<void> {
   if (index < 0 || index >= state.songs.length) return;
@@ -689,8 +647,7 @@ export async function selectSong(index: number, opts: SelectSongOpts = {}): Prom
   // 2026-08-26 复发根因：清理+挂载原在 await loadLyric 之后，而 audio.src 赋值在前——
   // 原生加载完成即 emit loadedmetadata，歌词加载慢时（网络请求）竞态窗口内旧监听器
   // （带旧断点 resumeAt）仍活着 → 新歌被 seek 到旧断点（固定秒数开始/尾部跳过）。
-  // 另：nativeAudioBridge 自定义事件系统曾忽略 {once:true}（2026-08-26 已修），
-  // 监听器挂上即需显式清理，清理时机必须早于任何 src 赋值。
+  // 另：监听器挂上即需显式清理，清理时机必须早于任何 src 赋值。
   if (loadedMetaHandler && typeof audio.removeEventListener === "function") {
     audio.removeEventListener("loadedmetadata", loadedMetaHandler);
   }
@@ -728,11 +685,7 @@ export async function selectSong(index: number, opts: SelectSongOpts = {}): Prom
   }
   audio.src = streamProxyUrl(src);
   dbgLog("selectSong.src", { src: audio.src });
-  // iOS：播放顺序快照同步原生（锁屏/线控后台切歌用；Web 挂起时原生按此快照切歌）
-  if (isNativePlayback()) nativeSyncQueue();
   applySpeed(); // 换源后恢复变速 + 音频图路由（浏览器换 src 可能重置 playbackRate）
-  // iOS 同步：本地歌资产本地优先（不阻塞远程播放；已下载时回执后切本地播放）
-  maybePrefetchAsset(state.currentSong, { resumeAt: opts.resumeAt });
   // 换源后恢复目标音量（淡出可能把音量降到 0；自动播放时由 fadeIn 平滑回升）
   applyVolume();
   state.currentTime = 0;
@@ -753,62 +706,4 @@ export async function selectSong(index: number, opts: SelectSongOpts = {}): Prom
   // （电台流 duration=Infinity → 保持 0，进度条走空态不崩）
   // 监听器清理+挂载已提前到 src 赋值前（见 selectSong 上部注释，2026-08-26）：
   // 旧 resumeAt 监听器不得劫持新歌，且清理必须早于原生 loadedmetadata 到达。
-}
-
-// ============ iOS 同步：本地歌播放资产本地优先（阶段3 · E1 修复） ============
-// 选歌播放时对本地歌（path 非空）总是查本地资产（hasAsset → assetStatus 回执）：
-//   - 已下载（exists=true）→ 回执 localURL，切本地播放（快、省流量、断网可播）
-//   - 未下载 → 保持远程播放（不阻塞）；「是否自动下载」的判断在 ensureAsset 内部
-//     （autoPrefetchEnabled 开启才发 syncDownload，默认关 = 只查不下载；
-//     下载由同步管理页显式触发）。
-// 桌面浏览器 / macOS 壳（无 iOS 桥）→ 直接 return，行为零变化。
-/**
- * 选歌播放前本地资产查询（内部函数；导出供单元测试直接驱动 assetStatus 回执）。
- */
-export async function maybePrefetchAsset(song: Song, opts: SelectSongOpts = {}): Promise<void> {
-  try {
-    if (!isNativePlayback() || !song || !song.path) return;
-    const item = await assetForSong(song as unknown as Parameters<typeof assetForSong>[0]);
-    if (!item) return;
-    const localURL = await ensureAsset(item);
-    if (!localURL) return; // 未下载 / 已发起后台下载：保持远程播放
-    // 回执已存在 → 切本地播放；仅当仍是同一首歌且源未被用户切换时生效
-    if (state.currentSong !== song) return;
-    const curSrc = audio.src;
-    if (!curSrc || curSrc === localURL) return;
-    const wasPlaying = !audio.paused;
-    const t = audio.currentTime || 0;
-    // 断点兜底：换源后镜像清零（t=0 = 新歌还没开始播）时，调用方带的恢复位置
-    // （restoreLastPlayed 断点续播）生效——切本地后从断点继续而不是从 0 开始
-    const resumeAt = t > 0 ? t : (opts.resumeAt ?? 0) > 0 ? (opts.resumeAt as number) : 0;
-    dbgLog("prefetch.rcv", { t, optsResumeAt: opts.resumeAt ?? null, resumeAt, src: audio.src });
-    audio.removeAttribute("src");
-    audio.src = localURL; // 本地文件秒开（原生 load → AVPlayer 本地播放）
-    dbgLog("prefetch.local", { localURL });
-    applyVolume();
-    if (wasPlaying) audio.play().catch(() => {});
-    // 保留进度：loadedmetadata 后再 seek（原生 load 未就绪时 seek 可能被丢弃）
-    // 监听器清理 + 同歌校验：切歌后旧 onMeta 不得在新歌的 loadedmetadata 上触发
-    // （否则旧断点劫持新歌，2026-08-25 固定秒数开始播放根因之一）
-    if (prefetchMetaHandler && typeof audio.removeEventListener === "function") {
-      audio.removeEventListener("loadedmetadata", prefetchMetaHandler);
-    }
-    if (resumeAt > 0) {
-      prefetchMetaHandler = (e) => {
-        audio.removeEventListener("loadedmetadata", prefetchMetaHandler as AudioEventListener);
-        if (state.currentSong !== song) return; // 已切歌：旧回执不 seek
-        const dur = (e ? (e as { duration?: number }).duration : undefined) || audio.duration || 0;
-        // clamp 防越界：目标超过 duration-0.5 会播到尾部立即 ended（"直接跳过"）
-        const target = dur > 0 ? Math.min(resumeAt, Math.max(0, dur - 0.5)) : resumeAt;
-        dbgLog("prefetch.seek", { resumeAt, dur, target });
-        if (target > 0) {
-          audio.currentTime = target;
-          state.currentTime = target;
-        }
-      };
-      audio.addEventListener("loadedmetadata", prefetchMetaHandler, { once: true });
-    }
-  } catch {
-    /* 预取失败静默：远程播放不受影响 */
-  }
 }

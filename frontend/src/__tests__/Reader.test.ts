@@ -81,26 +81,6 @@ vi.mock("../books/annotations", () => ({
   VOCAB_EXPORT_URL: "/api/vocab/export",
 }));
 
-vi.mock("../utils/sync.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../utils/sync.js")>();
-  return {
-    ...actual,
-    // 默认桌面环境（false）；iOS 分支测试显式 mockReturnValue(true)。
-    // 不读真实 window.qqplayerNative（sync.test.js 会设置它，并行时污染全局）。
-    // assetForBook 也 mock：真实实现里 crypto.subtle.digest 是真异步，
-    // 全量并发时 digest 变慢 → 调用跨测试漂移 → flaky（CI/全量实测）。
-    syncEnabled: vi.fn(() => false),
-    ensureAsset: vi.fn(async () => null),
-    assetForBook: vi.fn(async (book) => ({
-      url: `/api/books/${book?.id ?? "b1"}/file`,
-      path: `books/${book?.id ?? "b1"}.epub`,
-      sha256: "",
-      size: 0,
-    })),
-  };
-});
-
-import { ensureAsset, syncEnabled } from "../utils/sync.js";
 import { saveBookProgress } from "../books/api";
 
 import { getReaderSettings, saveReaderSettings, READER_SETTINGS_DEFAULTS } from "../books/settings";
@@ -766,53 +746,5 @@ describe("settings 模块（/api/settings 契约）", () => {
   it("PUT 失败 → 返回 false 不抛（调用方迁移逻辑靠它决定是否清 localStorage）", async () => {
     settingsFetchFail = true;
     await expect(saveReaderSettings({ fontSize: 110 })).resolves.toBe(false);
-  });
-});
-
-// ============ iOS 离线资产分支（阶段4）：本地命中走 /assets/ HTTP，未命中回退远程 ============
-describe("Reader iOS 离线资产", () => {
-  afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).qqplayerNative;
-    (syncEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
-  });
-
-  it("iOS 本地资产命中：fetch 本地 HTTP /assets/，不请求远程 fileUrl", async () => {
-    (syncEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    (ensureAsset as ReturnType<typeof vi.fn>).mockResolvedValue(
-      "file:///var/mobile/Containers/Data/Application/UUID/Documents/qqplayer-assets/books/abc123.epub",
-    );
-    const wrapper = mount(Reader, { props: { book: makeBook() } });
-    await flushPromises();
-
-    const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
-    expect(
-      urls.some((u) => u.startsWith("http://127.0.0.1:17888/native-assets/books/abc123.epub")),
-    ).toBe(true);
-    expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(false);
-    expect(mocks.ePub.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer);
-    wrapper.unmount();
-  });
-
-  it("iOS 本地未下载：回退远程 fileUrl（ensureAsset 返回 null，不阻塞）", async () => {
-    (syncEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    (ensureAsset as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const wrapper = mount(Reader, { props: { book: makeBook() } });
-    await flushPromises();
-
-    expect(ensureAsset).toHaveBeenCalled();
-    const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(true);
-    expect(mocks.ePub).toHaveBeenCalled();
-    wrapper.unmount();
-  });
-
-  it("桌面环境（syncEnabled false）：ensureAsset 不被调用，走远程零变化", async () => {
-    const wrapper = mount(Reader, { props: { book: makeBook() } });
-    await flushPromises();
-
-    expect(ensureAsset).not.toHaveBeenCalled();
-    const urls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.startsWith("/api/books/b1/file"))).toBe(true);
-    wrapper.unmount();
   });
 });

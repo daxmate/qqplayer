@@ -31,12 +31,10 @@ beforeEach(() => {
     "fetch",
     vi.fn(async () => ({ ok: false, json: async () => ({}) })),
   );
-  delete window.qqplayerIosBridge;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete window.qqplayerIosBridge;
   document.body.innerHTML = "";
 });
 

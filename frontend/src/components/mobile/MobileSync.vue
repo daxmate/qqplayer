@@ -12,156 +12,6 @@
     </header>
 
     <div class="msc-scroll">
-      <!-- 主按钮：同步全部（一键拉全：音乐音频+封面+歌词、图书、有声书=图书、词典） -->
-      <section class="msc-hero">
-        <button class="msc-sync-all" :disabled="syncState.syncing || syncBusy" @click="onSyncAll">
-          <RefreshCw :size="18" :class="{ spinning: syncState.syncing }" />
-          <span>{{ t("mobile.syncCenter.syncAll") }}</span>
-          <span v-if="badgeCount" class="msc-badge">{{ badgeCount }}</span>
-        </button>
-        <p class="msc-desc">{{ t("mobile.syncCenter.syncAllDesc") }}</p>
-        <p v-if="syncState.lastError" class="msc-error">
-          {{ t("settings.syncFailed", { msg: syncState.lastError }) }}
-        </p>
-      </section>
-
-      <!-- 🎵 音乐 -->
-      <section class="msc-group">
-        <h2 class="msc-group-title">
-          <Music2 :size="14" />
-          {{ t("settings.syncMusic") }}
-        </h2>
-        <div class="msc-item">
-          <div class="msc-label">{{ t("settings.syncAllSongs") }}</div>
-          <div class="msc-desc">{{ t("settings.syncAllSongsDesc") }}</div>
-          <button class="msc-btn primary" :disabled="syncBusy" @click="syncAllSongs">
-            {{ t("settings.syncStart") }}
-          </button>
-        </div>
-        <div class="msc-item">
-          <div class="msc-label">{{ t("settings.syncPlaylist") }}</div>
-          <div class="msc-desc">{{ t("settings.syncPlaylistDesc") }}</div>
-          <div class="msc-row">
-            <select v-model="syncPlaylistId" class="msc-select" :disabled="syncBusy">
-              <option value="">{{ t("settings.syncPlaylistPlaceholder") }}</option>
-              <option v-for="p in playlists" :key="p.id" :value="p.id">{{ p.name }}</option>
-            </select>
-            <button
-              class="msc-btn primary"
-              :disabled="syncBusy || !syncPlaylistId"
-              @click="syncSelectedPlaylist"
-            >
-              {{ t("settings.syncStart") }}
-            </button>
-          </div>
-        </div>
-        <div class="msc-item">
-          <div class="msc-label">{{ t("settings.syncPickSongs") }}</div>
-          <div class="msc-desc">{{ t("settings.syncPickDesc") }}</div>
-          <button class="msc-btn" :disabled="syncBusy" @click="openPicker('songs')">
-            {{ t("settings.syncPickOpen") }}
-          </button>
-          <div v-if="picker === 'songs'" class="sync-picker">
-            <div class="sync-picker-toolbar">
-              <input
-                v-model="pickerSearch"
-                class="msc-input"
-                :placeholder="t('settings.syncSearch')"
-                spellcheck="false"
-              />
-              <button class="mini-btn" @click="togglePickerAll">
-                {{ t("settings.syncPickAll") }}
-              </button>
-              <button class="mini-btn" @click="picker = ''">
-                {{ t("settings.syncPickCancel") }}
-              </button>
-            </div>
-            <div class="sync-picker-list">
-              <label v-for="s in filteredSongs" :key="s.path" class="sync-picker-item">
-                <input v-model="pickerSelected" type="checkbox" :value="s.path" />
-                <span class="sync-picker-name">{{ s.name }}</span>
-                <span class="sync-picker-meta">{{ s.artist }}</span>
-              </label>
-              <div v-if="!filteredSongs.length" class="msc-desc">
-                {{ t("settings.syncPickEmpty") }}
-              </div>
-            </div>
-            <div class="sync-picker-footer">
-              <span class="msc-desc">{{
-                t("settings.syncPickCount", { n: pickerSelected.length })
-              }}</span>
-              <button
-                class="msc-btn primary"
-                :disabled="!pickerSelected.length || syncBusy"
-                @click="downloadPickedSongs"
-              >
-                {{ t("settings.syncPickConfirm") }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 📖 图书（含有声书：同一离线链路） -->
-      <section class="msc-group">
-        <h2 class="msc-group-title">
-          <BookOpen :size="14" />
-          {{ t("settings.syncBooks") }}
-        </h2>
-        <div class="msc-item">
-          <div class="msc-label">{{ t("settings.syncAllBooks") }}</div>
-          <div class="msc-desc">{{ t("settings.syncAllBooksDesc") }}</div>
-          <button class="msc-btn primary" :disabled="syncBusy" @click="syncAllBooks">
-            {{ t("settings.syncStart") }}
-          </button>
-        </div>
-        <div class="msc-item">
-          <div class="msc-label">{{ t("settings.syncPickBooks") }}</div>
-          <div class="msc-desc">{{ t("settings.syncPickDesc") }}</div>
-          <button class="msc-btn" :disabled="syncBusy" @click="openPicker('books')">
-            {{ t("settings.syncPickOpen") }}
-          </button>
-          <div v-if="picker === 'books'" class="sync-picker">
-            <div class="sync-picker-toolbar">
-              <input
-                v-model="pickerSearch"
-                class="msc-input"
-                :placeholder="t('settings.syncSearch')"
-                spellcheck="false"
-              />
-              <button class="mini-btn" @click="togglePickerAll">
-                {{ t("settings.syncPickAll") }}
-              </button>
-              <button class="mini-btn" @click="picker = ''">
-                {{ t("settings.syncPickCancel") }}
-              </button>
-            </div>
-            <div class="sync-picker-list">
-              <label v-for="b in filteredBooks" :key="b.id" class="sync-picker-item">
-                <input v-model="pickerSelected" type="checkbox" :value="b.id" />
-                <span class="sync-picker-name">{{ b.title }}</span>
-                <span class="sync-picker-meta">{{ b.author }}</span>
-              </label>
-              <div v-if="!filteredBooks.length" class="msc-desc">
-                {{ t("settings.syncPickEmpty") }}
-              </div>
-            </div>
-            <div class="sync-picker-footer">
-              <span class="msc-desc">{{
-                t("settings.syncPickCount", { n: pickerSelected.length })
-              }}</span>
-              <button
-                class="msc-btn primary"
-                :disabled="!pickerSelected.length || syncBusy"
-                @click="downloadPickedBooks"
-              >
-                {{ t("settings.syncPickConfirm") }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- ✒️ 阅读标注 + 生词（manifest annotations/vocab：随同步自动拉取，非文件下载） -->
       <section class="msc-group">
         <h2 class="msc-group-title">
@@ -183,38 +33,19 @@
         </div>
       </section>
 
-      <!-- 📚 词典（manifest dicts） -->
+      <!-- 📚 词典（manifest dicts：清单来自主机端，文件下载由伴侣端自行处理） -->
       <section class="msc-group">
         <h2 class="msc-group-title">
           <BookMarked :size="14" />
           {{ t("mobile.syncCenter.dicts") }}
         </h2>
-        <div class="msc-item">
-          <div class="msc-desc">{{ t("mobile.syncCenter.dictsDesc") }}</div>
-          <button
-            class="msc-btn primary"
-            :disabled="syncBusy || !dictItems.length"
-            @click="downloadAllDicts"
-          >
-            {{ t("mobile.syncCenter.dictAll") }}
-          </button>
-        </div>
         <div v-if="dictRows.length" class="msc-dict-list">
           <div v-for="row in dictRows" :key="row.item.path" class="msc-dict-row">
             <div class="msc-dict-info">
               <span class="sync-dl-name" :title="row.item.path">{{
                 row.dict.title || row.dict.name || row.item.path
               }}</span>
-              <span
-                v-if="dictStatus(row.item)"
-                class="sync-dl-status"
-                :class="'st-' + dictStatus(row.item)"
-                >{{ statusLabel(dictStatus(row.item)) }}</span
-              >
             </div>
-            <button class="msc-btn danger" :disabled="syncBusy" @click="deleteDict(row.item)">
-              {{ t("mobile.syncCenter.dictDelete") }}
-            </button>
           </div>
         </div>
         <div v-else class="msc-item">
@@ -222,141 +53,7 @@
         </div>
       </section>
 
-      <!-- 下载状态面板（聚合视图：hash 文件名无意义，汇总进度 + 活跃项 + 失败重试） -->
-      <section class="msc-group">
-        <h2 class="msc-group-title">
-          <Download :size="14" />
-          {{ t("settings.syncDownloads") }}
-        </h2>
-        <template v-if="downloadSummary.total">
-          <div class="msc-item">
-            <div class="msc-desc sync-dl-progress-text">
-              {{
-                t("settings.syncDlProgress", {
-                  done: downloadSummary.done,
-                  total: downloadSummary.total,
-                })
-              }}
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: downloadSummary.pct + '%' }" />
-            </div>
-          </div>
-          <div class="msc-item">
-            <div class="msc-desc sync-stats">
-              <span>{{ t("settings.syncDlActive", { n: downloadStats.active }) }}</span>
-              <span>·</span>
-              <span>{{ t("settings.syncDlQueued", { n: downloadStats.queued }) }}</span>
-              <span>·</span>
-              <span>{{ t("settings.syncDlFailed", { n: downloadStats.failed }) }}</span>
-            </div>
-            <button class="msc-btn" :disabled="!downloadStats.finished" @click="clearFinished">
-              {{ t("settings.syncClearFinished") }}
-            </button>
-          </div>
-          <!-- 活跃下载（原生并发 ≤3，逐个实时进度） -->
-          <div v-if="activeList.length" class="sync-dl-list">
-            <div v-for="d in activeList" :key="d.path" class="sync-dl-item">
-              <div class="sync-dl-head">
-                <span class="sync-dl-name" :title="d.path">{{ d.name }}</span>
-                <span class="sync-dl-status" :class="'st-' + d.status">{{
-                  statusLabel(d.status)
-                }}</span>
-              </div>
-              <div class="progress-bar">
-                <div class="progress-fill" :style="{ width: dlPercent(d) + '%' }" />
-              </div>
-            </div>
-          </div>
-          <!-- 失败：计数 + 全部重试 -->
-          <div v-if="downloadStats.failed" class="msc-item">
-            <div class="msc-desc">
-              {{ t("settings.syncDlFailedDesc", { n: downloadStats.failed }) }}
-            </div>
-            <button class="msc-btn" :disabled="syncBusy" @click="retryAllFailed">
-              {{ t("settings.syncRetryAll") }}
-            </button>
-          </div>
-        </template>
-        <div v-else class="msc-item">
-          <div class="msc-desc">{{ t("settings.syncDlEmpty") }}</div>
-        </div>
-      </section>
-
-      <!-- 存储管理：按类型占用 + 清理（assetIndex 前缀过滤 → deleteAssets {paths}）+ 全清 -->
-      <section class="msc-group">
-        <h2 class="msc-group-title">
-          <Database :size="14" />
-          {{ t("settings.syncStorage") }}
-        </h2>
-        <div v-if="storageRows.length" class="msc-item">
-          <div v-for="row in storageRows" :key="row.key" class="msc-storage-row">
-            <div class="msc-storage-info">
-              <span class="msc-storage-name">{{ t(row.labelKey) }}</span>
-              <span class="msc-storage-bytes">{{ formatBytes(row.bytes) }}</span>
-            </div>
-            <button
-              class="msc-btn danger"
-              :disabled="!row.bytes || syncBusy"
-              @click="clearType(row)"
-            >
-              {{ t("mobile.syncCenter.clearType") }}
-            </button>
-          </div>
-          <div class="msc-storage-row">
-            <div class="msc-storage-info">
-              <span class="msc-storage-name">{{ t("mobile.syncCenter.typeOther") }}</span>
-              <span class="msc-storage-bytes">{{ formatBytes(otherBytes) }}</span>
-            </div>
-          </div>
-          <div class="msc-storage-row">
-            <div class="msc-storage-info">
-              <span class="msc-storage-name">{{ t("settings.syncStorageUsed") }}</span>
-              <span class="msc-storage-bytes">{{ formatBytes(storageTotal) }}</span>
-            </div>
-            <button class="msc-btn" @click="refreshStorage">
-              {{ t("settings.syncStorageRefresh") }}
-            </button>
-          </div>
-        </div>
-        <div v-else class="msc-item">
-          <div class="msc-desc">{{ t("settings.syncStorageUnknown") }}</div>
-        </div>
-        <div class="msc-item">
-          <div class="msc-label">{{ t("settings.syncClearAll") }}</div>
-          <div class="msc-desc">{{ t("settings.syncClearAllDesc") }}</div>
-          <button class="msc-btn danger" @click="toggleClearAll">
-            {{ clearAllArmed ? t("settings.syncClearAllConfirmGo") : t("settings.syncClearAllGo") }}
-          </button>
-        </div>
-      </section>
-
-      <!-- 清理未引用（清单中已不存在的本地残留资产） -->
-      <section class="msc-group">
-        <h2 class="msc-group-title">
-          <Trash2 :size="14" />
-          {{ t("mobile.syncCenter.orphans") }}
-        </h2>
-        <div class="msc-item">
-          <div class="msc-desc">{{ t("mobile.syncCenter.orphansDesc") }}</div>
-          <div class="msc-desc">
-            {{
-              orphanSize
-                ? t("mobile.syncCenter.orphansFree", { size: formatBytes(orphanSize) })
-                : t("mobile.syncCenter.orphansEmpty")
-            }}
-          </div>
-          <button class="msc-btn danger" :disabled="!orphanSize || syncBusy" @click="cleanOrphans">
-            {{
-              orphanArmed
-                ? t("mobile.syncCenter.orphansConfirmGo")
-                : t("mobile.syncCenter.orphansGo")
-            }}
-          </button>
-        </div>
-      </section>
-
-      <!-- 开关组：仅 Wi-Fi / 自动更新 / 自动预取 -->
+      <!-- 开关组：仅 Wi-Fi / 自动更新 / 自动预取（同步偏好，主机端与伴侣端共用） -->
       <section class="msc-group">
         <div class="msc-item msc-toggle-row" @click="toggleWifiOnly">
           <div>
@@ -385,95 +82,45 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+// 同步面板（负一屏 / 移动设置区）——数据层部分。
+// 设备端链路（资产下载/回执、指令轮询、本地文件与 assetIndex 管理）随 iOS 壳 2026-09-13
+// 退役一并移除；此面板保留主机端清单相关能力：阅读标注/生词状态、词典清单、同步偏好开关。
+import { ref, computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  ChevronLeft,
-  RefreshCw,
-  Music2,
-  BookOpen,
-  BookMarked,
-  PenLine,
-  Download,
-  Database,
-  Trash2,
-} from "@lucide/vue";
+import { ChevronLeft, PenLine, BookMarked } from "@lucide/vue";
 import { apiGet } from "../../utils/apiClient.js";
 import { getCache } from "../../utils/cacheDb.js";
-import { showToast } from "../../composables/useToast.js";
 import {
-  syncState,
-  syncDownloads,
   syncNow,
-  syncAssets,
-  buildSongSyncItems,
-  syncLyricsForSongs,
-  buildBookItems,
+  syncState,
   assetForDict,
-  clearFinished,
-  retryFailed,
-  clearAssets,
-  clearAssetsByType,
-  deleteOrphanAssets,
-  waitAssetsDeleted,
-  fetchAssetsSizeDetailed,
-  computeSyncOverview,
-  syncAll,
-  autoPrefetchEnabled,
-  setAutoPrefetch,
   wifiOnlyEnabled,
   setWifiOnly,
   autoUpdateEnabled,
   setAutoUpdate,
+  autoPrefetchEnabled,
+  setAutoPrefetch,
 } from "../../utils/sync.js";
 
-// ============ 本地类型（sync.ts 内部类型未导出，按同形「宽松视图」声明，运行时零变化） ============
-interface PlaylistLike {
-  id: string;
-  name: string;
-  songPaths?: string[];
-}
-interface SongLike {
-  path?: string;
-  name?: string;
-  artist?: string;
-}
-interface BookLike {
-  id?: string;
-  title?: string;
-  author?: string;
-}
+defineEmits(["back"]);
+defineProps({
+  // 嵌入式面板模式（负一屏设置区）：隐藏自身头部（返回/标题/上次同步时间），由 MobileSettings 统一头部提供
+  embedded: { type: Boolean, default: false },
+});
+const { t } = useI18n();
+
+/** manifest dicts 条目（宽松视图，运行时零变化） */
 interface DictLike {
   path?: string;
   name?: string;
   title?: string;
+  url?: string;
+  sha256?: string;
+  size?: number;
 }
+/** 词典下载项（assetForDict 产物；字段与 sync.ts 的 DownloadItem 对齐） */
 interface DownloadItemLike {
-  url: string;
   path: string;
-  sha256: string;
-  size: number;
-  name?: string;
-}
-interface SyncOverviewLike {
-  missing?: { audio: number; covers: number; books: number; dicts: number };
-  updateCount?: number;
-  orphanSize?: number;
-  orphans?: { path: string; size: number }[];
-  assets?: { path?: string; sha256?: string; size?: number }[];
-}
-interface AssetsSizeDataLike {
-  total?: number;
-  byType?: Record<string, number>;
-}
-/** 下载面板行：SyncDownloadEntry + path（path 是 map key；模板按字符串消费，网络/未知时可能缺失） */
-interface SyncDlEntry {
-  path?: string;
-  name: string;
-  status: string;
-  received: number;
-  total: number;
-  error: string;
   url: string;
   sha256: string;
   size: number;
@@ -482,238 +129,19 @@ interface DictRow {
   dict: DictLike;
   item: DownloadItemLike;
 }
-interface StorageRow {
-  key: string;
-  labelKey: string;
-  bytes: number;
-}
 
-defineEmits(["back"]);
-defineProps({
-  // 嵌入式面板模式（负一屏设置区）：隐藏自身头部（返回/标题/上次同步时间），由 MobileSettings 统一头部提供
-  embedded: { type: Boolean, default: false },
-});
-const { t } = useI18n();
 // ---------- 头部 ----------
 const lastSyncText = computed(() => {
   if (!syncState.lastSyncAt) return t("settings.syncLastTimeNever");
   return new Date(syncState.lastSyncAt).toLocaleString();
 });
 
-// ---------- 主按钮 / 总览（缺失 + 可更新徽标 / 孤儿 / 存储） ----------
-const syncBusy = ref(false); // 批量下载动作进行中（按钮禁用，防重复提交）
-const overview = ref<SyncOverviewLike | null>(null); // computeSyncOverview 结果
-const missingTotal = computed(() => {
-  const m = overview.value?.missing;
-  if (!m) return 0;
-  return m.audio + m.covers + m.books + m.dicts;
-});
-const badgeCount = computed(() => missingTotal.value + (overview.value?.updateCount || 0));
-const orphanSize = computed(() => overview.value?.orphanSize || 0);
-
-async function refreshOverview() {
-  overview.value = await computeSyncOverview();
-}
-
-async function onSyncAll() {
-  if (syncBusy.value || syncState.syncing) return;
-  syncBusy.value = true;
-  try {
-    const r = await syncAll();
-    if (r && r.ok) {
-      const m = r.missing || { audio: 0, covers: 0, books: 0, dicts: 0 };
-      const n = m.audio + m.covers + m.books + m.dicts;
-      showToast(t("mobile.syncCenter.syncAllDone", { n }));
-    }
-  } finally {
-    syncBusy.value = false;
-    await Promise.all([refreshOverview(), refreshStorage(), refreshDicts()]);
-  }
-}
-
-// ---------- 音乐 / 图书（自 SettingsModal 同步 tab 迁移） ----------
-const playlists = ref<PlaylistLike[]>([]); // /api/playlists 列表（歌单下拉）
-const syncPlaylistId = ref("");
-const allSongs = ref<SongLike[]>([]); // /api/songs 本地歌曲（手动选择面板数据）
-const allBooks = ref<BookLike[]>([]); // /api/books 列表（手动选择面板数据）
-const picker = ref(""); // '' | 'songs' | 'books'（内联多选面板）
-const pickerSearch = ref("");
-const pickerSelected = ref<string[]>([]); // songs: path[]；books: id[]
-
-const filteredSongs = computed(() => {
-  const q = pickerSearch.value.trim().toLowerCase();
-  if (!q) return allSongs.value;
-  return allSongs.value.filter((s) => (s.name || "").toLowerCase().includes(q));
-});
-const filteredBooks = computed(() => {
-  const q = pickerSearch.value.trim().toLowerCase();
-  if (!q) return allBooks.value;
-  return allBooks.value.filter((b) => (b.title || "").toLowerCase().includes(q));
-});
-
-function toastFetchFailed() {
-  showToast(t("settings.syncFetchFailed"), { type: "error" });
-}
-
-async function loadPlaylists() {
-  try {
-    const r = await apiGet("/api/playlists");
-    if (r.ok && r.data && Array.isArray(r.data.playlists)) playlists.value = r.data.playlists;
-  } catch {
-    /* 静默（下拉留空） */
-  }
-}
-
-async function syncAllSongs() {
-  if (syncBusy.value) return;
-  syncBusy.value = true;
-  try {
-    const r = await apiGet("/api/songs");
-    const songs = (r.ok && Array.isArray(r.data) ? r.data : []).filter((s) => s && s.path);
-    if (!songs.length) {
-      toastFetchFailed();
-      return;
-    }
-    // 音频+封面下载项（封面随歌一起同步；items.length 含封面，面板计数自动覆盖）
-    const items = await buildSongSyncItems(songs);
-    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
-    // 歌词落文件（fire-and-forget）：与音频下载并行不阻塞；完成后 toast 一次
-    syncLyricsForSongs(songs).then((r) => {
-      if (r && r.ok > 0) showToast(t("settings.syncLyricsDone", { n: r.ok }));
-    });
-  } catch {
-    toastFetchFailed();
-  } finally {
-    syncBusy.value = false;
-  }
-}
-
-async function syncSelectedPlaylist() {
-  const pid = syncPlaylistId.value;
-  if (!pid || syncBusy.value) return;
-  syncBusy.value = true;
-  try {
-    const [pr, sr] = await Promise.all([apiGet("/api/playlists"), apiGet("/api/songs")]);
-    const pl = ((pr.ok && pr.data && pr.data.playlists) || []).find(
-      (p: PlaylistLike) => p.id === pid,
-    );
-    if (!pl) {
-      toastFetchFailed();
-      return;
-    }
-    const paths = new Set(pl.songPaths || []);
-    const songs = (sr.ok && Array.isArray(sr.data) ? sr.data : []).filter(
-      (s) => s && s.path && paths.has(s.path),
-    );
-    if (!songs.length) {
-      toastFetchFailed();
-      return;
-    }
-    const items = await buildSongSyncItems(songs);
-    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
-    syncLyricsForSongs(songs).then((r) => {
-      if (r && r.ok > 0) showToast(t("settings.syncLyricsDone", { n: r.ok }));
-    });
-  } catch {
-    toastFetchFailed();
-  } finally {
-    syncBusy.value = false;
-  }
-}
-
-async function syncAllBooks() {
-  if (syncBusy.value) return;
-  syncBusy.value = true;
-  try {
-    const r = await apiGet("/api/books");
-    const books = r.ok && Array.isArray(r.data) ? r.data : [];
-    if (!books.length) {
-      toastFetchFailed();
-      return;
-    }
-    const items = await buildBookItems(books);
-    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
-  } catch {
-    toastFetchFailed();
-  } finally {
-    syncBusy.value = false;
-  }
-}
-
-async function openPicker(which: "songs" | "books") {
-  if (picker.value === which) {
-    picker.value = "";
-    return;
-  }
-  picker.value = which;
-  pickerSearch.value = "";
-  if (which === "songs" && !allSongs.value.length) {
-    try {
-      const r = await apiGet("/api/songs");
-      if (r.ok && Array.isArray(r.data)) allSongs.value = r.data.filter((s) => s && s.path);
-    } catch {
-      /* 面板留空 */
-    }
-  } else if (which === "books" && !allBooks.value.length) {
-    try {
-      const r = await apiGet("/api/books");
-      if (r.ok && Array.isArray(r.data)) allBooks.value = r.data;
-    } catch {
-      /* 面板留空 */
-    }
-  }
-}
-
-function togglePickerAll() {
-  const isSongs = picker.value === "songs";
-  const list = (isSongs ? filteredSongs.value : filteredBooks.value) as Array<{
-    [k: string]: unknown;
-  }>;
-  const key = isSongs ? "path" : "id";
-  const ids = list.map((x) => x[key] as string);
-  if (!ids.length) return;
-  const hasAll = ids.every((x) => pickerSelected.value.includes(x));
-  if (hasAll) {
-    pickerSelected.value = pickerSelected.value.filter((x) => !ids.includes(x));
-  } else {
-    pickerSelected.value = [...new Set([...pickerSelected.value, ...ids])];
-  }
-}
-
-async function downloadPickedSongs() {
-  if (syncBusy.value) return;
-  const picked = allSongs.value.filter((s) => pickerSelected.value.includes(s.path!)); // 面板数据加载时已过滤 path 缺失
-  if (!picked.length) return;
-  syncBusy.value = true;
-  try {
-    const items = await buildSongSyncItems(picked);
-    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
-    syncLyricsForSongs(picked).then((r) => {
-      if (r && r.ok > 0) showToast(t("settings.syncLyricsDone", { n: r.ok }));
-    });
-    pickerSelected.value = [];
-  } finally {
-    syncBusy.value = false;
-  }
-}
-
-async function downloadPickedBooks() {
-  if (syncBusy.value) return;
-  const picked = allBooks.value.filter((b) => pickerSelected.value.includes(b.id!)); // 面板数据加载时已过滤 id 缺失
-  if (!picked.length) return;
-  syncBusy.value = true;
-  try {
-    const items = await buildBookItems(picked);
-    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
-    pickerSelected.value = [];
-  } finally {
-    syncBusy.value = false;
-  }
-}
+// 拉清单/刷新阅读数据期间禁用按钮（防重复提交）
+const syncBusy = ref(false);
 
 // ---------- 词典区 ----------
 const dicts = ref<DictLike[]>([]); // manifest dicts 条目
-const dictItems = ref<DownloadItemLike[]>([]); // assetForDict 产物 [{path,url,sha256,size}]
+const dictItems = ref<DownloadItemLike[]>([]); // assetForDict 产物
 
 // dict 条目与下载项按下标配对（assetForDict 过滤 null 时同步过滤）
 const dictRows = computed<DictRow[]>(() => {
@@ -747,11 +175,6 @@ async function refreshDicts() {
   );
 }
 
-function dictStatus(item: DownloadItemLike) {
-  const e = syncDownloads[item.path];
-  return e ? e.status : "";
-}
-
 // ---------- 阅读标注 + 生词（manifest annotations/vocab：数据随同步拉取，非文件下载） ----------
 const readerData = ref({ books: 0, vocab: 0 }); // 有标注的书数 / 生词数
 
@@ -779,156 +202,6 @@ async function refreshReaderData(reSync = false) {
   };
 }
 
-async function downloadAllDicts() {
-  if (syncBusy.value) return;
-  const items = dictItems.value.filter(
-    (it) => !syncDownloads[it.path] || syncDownloads[it.path].status === "failed",
-  );
-  if (!items.length) {
-    showToast(t("mobile.syncCenter.dictsUpToDate"));
-    return;
-  }
-  syncBusy.value = true;
-  try {
-    if (syncAssets(items)) showToast(t("settings.syncStarted", { n: items.length }));
-  } finally {
-    syncBusy.value = false;
-  }
-}
-
-async function deleteDict(item: DownloadItemLike) {
-  if (syncBusy.value) return;
-  const n = clearAssetsByType("dicts", [{ path: item.path }]);
-  if (!n) {
-    showToast(t("mobile.syncCenter.nothingToClear"));
-    return;
-  }
-  delete syncDownloads[item.path];
-  showToast(t("mobile.syncCenter.dictDeleted"));
-  await waitAssetsDeleted();
-  await Promise.all([refreshStorage(), refreshOverview()]);
-}
-
-// ---------- 下载状态面板（迁移） ----------
-const downloadStats = computed(() => {
-  let active = 0;
-  let done = 0;
-  let failed = 0;
-  let queued = 0;
-  for (const d of Object.values(syncDownloads)) {
-    if (d.status === "done") done++;
-    else if (d.status === "failed") failed++;
-    else if (d.status === "queued") queued++;
-    else active++;
-  }
-  return { active, done, failed, queued, finished: done + failed };
-});
-const downloadSummary = computed(() => {
-  const total = Object.keys(syncDownloads).length;
-  const done = downloadStats.value.done;
-  return { total, done, pct: total ? Math.min(100, Math.round((done / total) * 100)) : 0 };
-});
-const activeList = computed<SyncDlEntry[]>(() =>
-  Object.values(syncDownloads).filter((d) => d.status === "downloading"),
-);
-
-function retryAllFailed() {
-  for (const path of Object.keys(syncDownloads)) {
-    if (syncDownloads[path].status === "failed") retryFailed(path);
-  }
-}
-
-function statusLabel(status: string) {
-  const key = "settings.syncStatus" + status.charAt(0).toUpperCase() + status.slice(1);
-  const text = t(key);
-  return text === key ? status : text;
-}
-
-function dlPercent(d: SyncDlEntry) {
-  if (!d.total) return 0;
-  return Math.min(100, Math.round((d.received / d.total) * 100));
-}
-
-// ---------- 存储管理（按类型细分 + 清理） ----------
-const storage = ref<AssetsSizeDataLike | null>(null); // fetchAssetsSizeDetailed 结果
-const STORAGE_TYPES = [
-  { key: "audio", labelKey: "mobile.syncCenter.typeAudio" },
-  { key: "covers", labelKey: "mobile.syncCenter.typeCovers" },
-  { key: "lyric", labelKey: "mobile.syncCenter.typeLyric" },
-  { key: "books", labelKey: "mobile.syncCenter.typeBooks" },
-  { key: "dicts", labelKey: "mobile.syncCenter.typeDicts" },
-];
-const storageRows = computed(() => {
-  const byType = (storage.value?.byType || {}) as Record<string, number>;
-  return STORAGE_TYPES.map((s) => ({ ...s, bytes: byType[s.key] || 0 }));
-});
-const otherBytes = computed(() => {
-  const byType = (storage.value?.byType || {}) as Record<string, number>;
-  return (byType.meta || 0) + (byType.other || 0);
-});
-const storageTotal = computed(() => storage.value?.total || 0);
-
-function formatBytes(bytes: number) {
-  if (!bytes || bytes < 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  let v = bytes;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
-}
-
-async function refreshStorage() {
-  storage.value = await fetchAssetsSizeDetailed();
-}
-
-async function clearType(row: StorageRow) {
-  if (syncBusy.value) return;
-  const assets = overview.value?.assets || [];
-  const n = clearAssetsByType(row.key, assets);
-  if (n) showToast(t("mobile.syncCenter.cleared", { n }));
-  else showToast(t("mobile.syncCenter.nothingToClear"));
-  await waitAssetsDeleted();
-  await Promise.all([refreshStorage(), refreshOverview()]);
-}
-
-const clearAllArmed = ref(false); // 两段式确认（WKWebView 不支持 window.confirm，沿用内联确认态）
-let clearAllArmTimer: ReturnType<typeof setTimeout> | null = null;
-function toggleClearAll() {
-  if (!clearAllArmed.value) {
-    clearAllArmed.value = true;
-    clearAllArmTimer = setTimeout(() => (clearAllArmed.value = false), 4000); // 4s 未确认自动复位
-    return;
-  }
-  clearAllArmed.value = false;
-  if (clearAllArmTimer) clearTimeout(clearAllArmTimer);
-  clearAssets("all");
-  showToast(t("mobile.syncCenter.clearedAll"));
-  waitAssetsDeleted().then(() => Promise.all([refreshStorage(), refreshOverview()]));
-}
-
-// ---------- 清理未引用 ----------
-const orphanArmed = ref(false);
-let orphanArmTimer: ReturnType<typeof setTimeout> | null = null;
-async function cleanOrphans() {
-  if (!orphanArmed.value) {
-    orphanArmed.value = true;
-    orphanArmTimer = setTimeout(() => (orphanArmed.value = false), 4000);
-    return;
-  }
-  orphanArmed.value = false;
-  if (orphanArmTimer) clearTimeout(orphanArmTimer);
-  const size = orphanSize.value;
-  const orphans = overview.value?.orphans || [];
-  if (deleteOrphanAssets(orphans)) {
-    showToast(t("mobile.syncCenter.orphansCleared", { size: formatBytes(size) }));
-  }
-  await waitAssetsDeleted();
-  await Promise.all([refreshStorage(), refreshOverview()]);
-}
-
 // ---------- 开关组 ----------
 const wifiOnlyOn = ref(wifiOnlyEnabled());
 const autoUpdateOn = ref(autoUpdateEnabled());
@@ -944,38 +217,15 @@ function togglePrefetch() {
   autoPrefetchOn.value = setAutoPrefetch(!autoPrefetchOn.value);
 }
 
-// ---------- 下载完成 → 自动刷新存储占用 ----------
-// 存储区在进入页面/手动刷新时取值；下载中的 .part 不计入（完成才显示）。
-// 监听状态变化：有条目 done/failed（终态）→ 防抖刷新存储区，下载完用户立即可见占用。
-let storageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-watch(
-  () =>
-    Object.values(syncDownloads)
-      .map((d) => d.status)
-      .join(","),
-  (statuses) => {
-    if (statuses.includes("done") || statuses.includes("failed")) {
-      if (storageRefreshTimer) clearTimeout(storageRefreshTimer);
-      storageRefreshTimer = setTimeout(() => {
-        storageRefreshTimer = null;
-        refreshStorage();
-      }, 800);
-    }
-  },
-);
-
-// ---------- 挂载：拉歌单 + 元数据（含词典缓存）+ 总览/存储/词典 ----------
+// ---------- 挂载：拉清单（含词典缓存）+ 阅读数据 ----------
 onMounted(() => {
-  loadPlaylists();
   syncNow().catch(() => {});
-  refreshOverview();
-  refreshStorage();
   refreshDicts();
   refreshReaderData();
 });
 
-// 供测试/调试：强制刷新总览（断言徽标数据）
-defineExpose({ refreshOverview, refreshStorage });
+// 供测试/调试：强制刷新词典清单与阅读数据
+defineExpose({ refreshDicts, refreshReaderData });
 </script>
 
 <style scoped>

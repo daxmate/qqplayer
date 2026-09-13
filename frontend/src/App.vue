@@ -220,9 +220,6 @@
         }}</span>
       </div>
     </Transition>
-
-    <!-- 未连接引导页（仅 iOS 壳无 server 时全屏覆盖；桌面浏览器 isShellUnpaired 恒 false 不渲染） -->
-    <NoConnectionView v-if="shellUnpaired" class="no-connection-overlay" />
   </div>
 </template>
 
@@ -257,9 +254,7 @@ import PairingConfirmModal from "./components/PairingConfirmModal.vue";
 import BooksView from "./books/BooksView.vue";
 import VideosView from "./videos/VideosView.vue";
 import MobileShell from "./components/mobile/MobileShell.vue";
-import NoConnectionView from "./components/NoConnectionView.vue";
 import { isMobile } from "./composables/useMobileViewport.js";
-import { isShellUnpaired } from "./composables/usePairingState.js";
 import { isSettingsOpen } from "./composables/settingsState.js";
 import { useShellBridge } from "./composables/useShellBridge.js";
 import { showToast } from "./composables/useToast.js";
@@ -274,14 +269,7 @@ import {
 } from "./utils/apiClient.js";
 import { setupDragImport, dragVisible, dragUploading } from "./composables/useDragImport.js";
 import { usePairingConfirm } from "./composables/usePairingConfirm.js";
-import {
-  initSync,
-  nativeMetaLoad,
-  syncNow,
-  pollCommands,
-  ensureCommandPolling,
-} from "./utils/sync.js";
-import { isNativePlayback, syncHostStatus } from "./composables/nativeAudioBridge.js";
+import { syncNow } from "./utils/sync.js";
 import { loadScrapingSettings } from "./composables/useScrapingSettings.js";
 import {
   coverSizePx,
@@ -342,10 +330,6 @@ const bridge = useShellBridge();
 
 const centerRef = ref<HTMLElement | null>(null);
 let cleanupCoverObserve: (() => void) | null = null;
-
-// iOS 壳未连接引导页：仅壳环境（window.qqplayerNative 存在）且无 server 时为 true。
-// 配对成功后原生注入 server + reload → 重新加载时此值自然变 false（无需监听变化）。
-const shellUnpaired = ref(false);
 
 // 封面模糊背景：当前歌曲封面 URL（开关 + 有歌时显示；流媒体歌用 coverUrl 网络图）
 const blurCoverUrl = computed(() => {
@@ -495,51 +479,7 @@ async function runStartupSelfTest() {
   }
 }
 
-/**
- * iOS 壳启动兜底：IndexedDB 重启不可靠（免费签名覆盖安装被清）→ 从原生文件
- * Documents/meta/{kind}.json 回填歌曲/收藏/歌单。方案 A：与正常加载并行发起，
- * 合并规则 = 回填完成时对应 state 仍为空才赋值——网络成功会覆盖（loadSongs 等
- * 完成后写文件），失败/离线则保留文件数据，保证断网重启后列表有数据。
- * 桌面浏览器 / macOS 壳（无 iOS 桥）→ 内部静默 no-op。
- */
-async function backfillMetaFromFile() {
-  if (!isNativePlayback()) return;
-  const [songsJson, favoritesJson, playlistsJson] = await Promise.all([
-    nativeMetaLoad("songs"),
-    nativeMetaLoad("favorites"),
-    nativeMetaLoad("playlists"),
-  ]);
-  if (songsJson) {
-    try {
-      const songs = JSON.parse(songsJson);
-      if (Array.isArray(songs) && songs.length && !state.songs.length) {
-        state.songs = songs;
-      }
-    } catch {
-      /* 文件数据损坏：忽略，走正常加载 */
-    }
-  }
-  if (favoritesJson) {
-    try {
-      const favs = JSON.parse(favoritesJson);
-      if (Array.isArray(favs) && !state.favorites.length) state.favorites = favs;
-    } catch {
-      /* 忽略 */
-    }
-  }
-  if (playlistsJson) {
-    try {
-      const pls = JSON.parse(playlistsJson);
-      if (Array.isArray(pls) && !state.playlists.length) state.playlists = pls;
-    } catch {
-      /* 忽略 */
-    }
-  }
-}
-
 onMounted(async () => {
-  // 未连接引导页判定：启动时检测一次（配对成功壳会 reload，无需轮询/监听）
-  shellUnpaired.value = isShellUnpaired();
   // 数据层在线状态/配对失效监听：离线降级与 401 特判的轻提示（见 apiClient）
   offlineUnsub = onOfflineChange((off) => {
     showToast(off ? t("app.offlineMode") : t("app.backOnline"));
@@ -552,14 +492,11 @@ onMounted(async () => {
   offlineRecoveryUnsub = onOfflineChange((off) => {
     if (off) return;
     syncNow();
-    pollCommands();
-    ensureCommandPolling();
     flushPendingOps();
   });
   // ① 主机可达性探测：最先 await（与 UI 渲染并行——setup 同步部分已跑完，不阻塞首帧）；
   //    不可达 → 全局离线：syncNow/轮询/自检全部短路（不发请求、不转动画、不报错）
   await probeHost();
-  syncHostStatus(); // 探测完成 → 状态条初始态（在线绿点 / 离线灰点，都推送一次）
   // ② 启动动作 gate：离线跳过自检与 dirty 队列回放（恢复在线后由 offlineRecoveryUnsub 自动补）
   if (!isOffline()) {
     // 回放上次会话遗留的 dirty 队列（离线时的收藏/歌单/播放记录/阅读进度）
@@ -568,8 +505,6 @@ onMounted(async () => {
     runStartupSelfTest();
   }
   // ③ 以下离线也执行：本地优先（列表走缓存/本地文件，必须能看）
-  // iOS 壳元数据文件兜底回填（与正常加载并行；空 state 才赋值，网络成功覆盖）
-  backfillMetaFromFile();
   // 队列顺序持久化：先拉取再加载歌曲（loadSongs 恢复顺序依赖该缓存）
   loadQueueOrder().then(() => {
     loadSongs().then(() => restoreLastPlayed());
@@ -583,9 +518,10 @@ onMounted(async () => {
   setupAutoRefresh();
   setupPlayerActions();
   setupMiniStatus();
-  // iOS 同步模块：订阅原生事件（syncAssetProgress/assetStatus/appState）+ 首次 manifest 同步
-  // （桌面浏览器内部静默 no-op；事件经 nativeAudioBridge 全局入口分发，无双重监听）
-  initSync();
+  // 主机端启动同步：Tauri 壳（window.qqplayerNative=true）启动即拉取 manifest。
+  // 浏览器恒 no-op（syncNow 首行 syncEnabled() 守卫，不发请求、不改状态）；
+  // 原 initSync 的原生事件订阅 + 指令轮询属 iOS 壳，随壳退役移除。
+  syncNow();
   // 桌面全局拖拽导入：window 级监听，卸载时清理
   cleanupDragImport = setupDragImport();
   // 封面/歌词区尺寸：RO 量 center 高度（自适应保底 + 拖拽范围硬保护依赖）
@@ -635,13 +571,6 @@ onUnmounted(() => {
 .app > *:not(.bg-blur) {
   position: relative;
   z-index: 1;
-}
-/* 未连接引导页：全屏覆盖主界面（iOS 壳未配对时；桌面浏览器不渲染）。
-   必须压过上方通用规则（同特异性、后声明胜出）——否则 position 被改回 relative、层级降为 1 */
-.app > .no-connection-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
 }
 /* 顶栏 */
 .topbar {

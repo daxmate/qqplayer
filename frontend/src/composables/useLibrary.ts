@@ -4,8 +4,6 @@ import { audio } from "./audioEngine.ts";
 import { selectSong, _resetPlayMode } from "./queueEngine.ts";
 import { showToast, toastError } from "./useToast.js";
 import { apiGet, apiPost, apiDelete, invalidate, writeLocal } from "../utils/apiClient.js";
-import { nativeMetaSave } from "../utils/sync.js";
-import { isNativePlayback } from "./nativeAudioBridge.js";
 import i18n from "../locales/i18n.js";
 
 // 歌曲行拖到侧栏歌单（HTML5 DnD）的传输 MIME 类型：
@@ -21,14 +19,6 @@ export async function loadFavorites(): Promise<void> {
     if (r.ok) {
       const data = r.data || {};
       state.favorites = data.paths || [];
-      // iOS 壳元数据文件兜底（IndexedDB 重启不可靠）：收藏落文件，fire-and-forget
-      if (isNativePlayback()) {
-        try {
-          nativeMetaSave("favorites", JSON.stringify(state.favorites));
-        } catch {
-          /* 写文件失败静默 */
-        }
-      }
     }
   } catch {
     /* 忽略 */
@@ -69,14 +59,6 @@ export async function loadPlaylists(): Promise<void> {
     if (r.ok) {
       const data = r.data || {};
       state.playlists = data.playlists || [];
-      // iOS 壳元数据文件兜底（IndexedDB 重启不可靠）：歌单落文件，fire-and-forget
-      if (isNativePlayback()) {
-        try {
-          nativeMetaSave("playlists", JSON.stringify(state.playlists));
-        } catch {
-          /* 写文件失败静默 */
-        }
-      }
       // 当前激活的歌单被删了 → 退回全部歌曲
       if (state.activePlaylistId && !state.playlists.some((p) => p.id === state.activePlaylistId)) {
         state.activePlaylistId = null;

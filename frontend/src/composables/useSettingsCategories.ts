@@ -1,9 +1,9 @@
 // 设置分类导航（SettingsModal 与移动端设置区侧边抽屉共用，避免双份维护）
-// 分类顺序 = 使用频度（界面/歌词/播放靠前，关于殿后）；iOS 壳（发起方）隐藏配对管理，
-// 由桌面壳管理配对（与 SettingsModal 原逻辑一致）。
+// 分类顺序 = 使用频度（界面/歌词/播放靠前，关于殿后）；配对管理归主机端
+//（Tauri 壳 / 浏览器，与 SettingsModal 原逻辑一致）。
 //
-// 注意：导出为「函数」而非模块级 computed —— isPairingEnabled() 读取 window.qqplayerIosBridge
-// 是非响应式的，模块级 computed 首次求值即缓存，后续壳环境切换（测试/壳初始化）拿不到最新值；
+// 注意：导出为「函数」而非模块级 computed —— isPairingEnabled() 的判定在运行时求值，
+// 模块级 computed 首次求值即缓存，后续环境切换（测试/初始化）拿不到最新值；
 // 由各组件在 setup 里包一层 computed（每次实例创建时求值），与 SettingsModal 原实现语义一致。
 import type { Component } from "vue";
 import {

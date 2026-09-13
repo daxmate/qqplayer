@@ -45,7 +45,6 @@ export function useNativeReaderBridge(options: {
   /** 壳注入的全局对象：qqplayerNative 环境标记 + webkit 消息桥 + 菜单 API 挂载点 */
   const nativeShell = window as unknown as {
     qqplayerNative?: boolean;
-    qqplayerIosBridge?: unknown;
     webkit?: { messageHandlers?: { native?: { postMessage?: (message: unknown) => void } } };
     __qqReaderMenu?: {
       lookup: () => void;
@@ -58,26 +57,14 @@ export function useNativeReaderBridge(options: {
     };
   };
 
-  /** 是否运行在 Swift 原生壳内（壳注入 window.qqplayerNative；浏览器没有）。
-   * 桌面壳（macOS/Windows）有原生右键菜单 → 隐藏 Web 工具栏；
-   * iOS 壳无原生选区菜单（系统菜单无法禁用，WebKit bug 244149），Web 工具栏必须保留。 */
+  /** 是否运行在原生壳内（壳注入 window.qqplayerNative；浏览器没有）。
+   *  Tauri 壳（Windows / Linux）有原生右键菜单 → 隐藏 Web 工具栏。 */
   function inNativeShell(): boolean {
-    return (
-      typeof window !== "undefined" &&
-      !!nativeShell.qqplayerNative &&
-      !nativeShell.qqplayerIosBridge
-    );
+    return typeof window !== "undefined" && !!nativeShell.qqplayerNative;
   }
 
   /** 壳内隐藏悬浮工具条（浏览器保留）；选区轮询与 currentSelection 照常维护（壳右键菜单依赖 cfi/context） */
   const isNativeShell = computed(inNativeShell);
-
-  /** iOS 壳标记（qqplayerIosBridge 由壳注入）：选区工具栏遮罩等 iOS 特有逻辑用 */
-  const isIOSShell = computed(
-    () =>
-      typeof window !== "undefined" &&
-      !!(window as { qqplayerIosBridge?: unknown }).qqplayerIosBridge,
-  );
 
   /** 已上报给壳的选区状态（去重：仅状态变化时发送，400ms 轮询不重复刷屏） */
   let reportedActive = false;
@@ -227,7 +214,6 @@ export function useNativeReaderBridge(options: {
 
   return {
     isNativeShell,
-    isIOSShell,
     inNativeShell,
     postReaderState,
     selectionHasHighlight,

@@ -3,13 +3,13 @@
 // 三组断言：
 //   1. 静态扫描（防裸调）：components/** 与 composables/* 不允许出现手写 path→/api/cover
 //      映射（`resolveServerUrl("/api/cover…")` 或裸 `"/api/cover?path=…"`），
-//      白名单 = 唯一入口 useCoverURL.ts + 原生桥 nativeAudioBridge.ts（resolveCoverURL）
-//      + 锁屏/媒体键元数据域 mediaSession.ts（契约消费点 #6，resolveCoverForMetadata 自有兑底链）。
+//      白名单 = 唯一入口 useCoverURL.ts
+//      + 锁屏/媒体键元数据域 mediaSession.ts（契约消费点 #6）。
 //      注释剥离后扫描（注释里的契约说明/示例不参与匹配；字符串里的 URL 保留参与匹配）。
 //   2. 消费点接入断言：MobilePlayer.vue / Cover.vue / TagEditorModal.vue 必须 import 并调用
 //      useCoverURL（新消费点一律走唯一入口，禁止手写）。
 //   3. 行为断言（mock sync/apiClient 层）：
-//      - 恢复在线重试：断网解析为空 + 错误标记 → onOfflineChange(false) 后清空并重新 resolve，
+//      - 恢复在线重试：错误标记 → onOfflineChange(false) 后清空已解析结果并触发调用方重新 resolve，
 //        最终有值（契约新增：恢复后自动补齐，不等切歌）。
 //      - 桌面直出回归：非壳环境 resolveCover 同步返回远程 URL（行为零变化）。
 import { describe, expect, it, beforeEach, vi } from "vitest";
@@ -112,11 +112,10 @@ function stripComments(code: string): string {
   return out;
 }
 
-// 白名单（绝对路径）：唯一入口 + 原生桥 + 锁屏/媒体键元数据域
+// 白名单（绝对路径）：唯一入口 + 锁屏/媒体键元数据域
 const BARE_CALL_WHITELIST = new Set([
   path.join(srcDir, "composables", "useCoverURL.ts"), // 唯一入口自身（契约）
-  path.join(srcDir, "composables", "nativeAudioBridge.ts"), // 原生桥 resolveCoverURL（契约白名单）
-  path.join(srcDir, "composables", "mediaSession.ts"), // 锁屏/媒体键元数据（契约消费点 #6 自有兑底链）
+  path.join(srcDir, "composables", "mediaSession.ts"), // 锁屏/媒体键元数据（自有 URL 构造；iOS 壳退役后 #6 决策链已删）
 ]);
 
 describe("coverResolutionContract：禁止手写 path→/api/cover 映射（防裸调）", () => {
@@ -192,18 +191,6 @@ const apiMock = vi.hoisted(() => {
 
 vi.mock("../utils/apiClient.js", () => apiMock);
 
-// ---------- mock：sync 层（无本地缓存/无内嵌；syncEnabled 可控） ----------
-const syncMock = vi.hoisted(() => ({
-  enabled: false,
-  cachedCoverURL: vi.fn(() => Promise.resolve(null)), // covers 缓存未命中
-  cacheCover: vi.fn(),
-  getEmbeddedCover: vi.fn(() => Promise.resolve(null)), // 无内嵌 APIC
-  assetForSong: vi.fn(() => Promise.resolve(null)),
-  syncEnabled: () => syncMock.enabled,
-}));
-
-vi.mock("../utils/sync.js", () => syncMock);
-
 import { useCoverURL } from "../composables/useCoverURL.js";
 
 const PATH = "/Music/offline-song.mp3";
@@ -215,42 +202,32 @@ function flush() {
 
 describe("coverResolutionContract：useCoverURL 行为", () => {
   beforeEach(() => {
-    syncMock.enabled = false;
     apiMock.state.offline = false;
     apiMock.listeners.clear();
-    syncMock.cachedCoverURL.mockClear();
-    syncMock.cacheCover.mockClear();
-    syncMock.getEmbeddedCover.mockClear();
-    syncMock.assetForSong.mockClear();
   });
 
   it("桌面/非壳：resolveCover 同步远程直出（行为零变化回归）", () => {
     const { coverSrc, resolveCover, dispose } = useCoverURL();
     resolveCover(PATH);
     expect(coverSrc(PATH)).toBe(REMOTE); // 同步可渲染
-    expect(syncMock.cachedCoverURL).not.toHaveBeenCalled(); // 非壳不查本地
     dispose();
   });
 
-  it("恢复在线重试：断网解析为空 + 错误标记 → onOfflineChange(false) 后清空并重新 resolve 有值", async () => {
-    syncMock.enabled = true;
-    apiMock.setOffline(true);
+  it("恢复在线重试：错误标记 → onOfflineChange(false) 清空并触发调用方重新 resolve", async () => {
     let refreshed = 0;
     const { coverSrc, coverOk, markCoverError, resolveCover, dispose } = useCoverURL({
       onOnlineRefresh: () => {
         refreshed += 1;
-        resolveCover(PATH, { download: true }); // 调用方对「当前歌曲」重新 resolve
+        resolveCover(PATH); // 调用方对「当前歌曲」重新 resolve
       },
     });
-    // 断网 + 无本地缓存 + 无内嵌 → 解析为空（保持空、不请求主机）
-    resolveCover(PATH, { download: true });
-    await flush();
-    expect(coverSrc(PATH)).toBe("");
-    expect(syncMock.cacheCover).not.toHaveBeenCalled(); // 断网不后台缓存
+    resolveCover(PATH);
+    expect(coverSrc(PATH)).toBe(REMOTE); // 远程直出（加载失败由 @error → markCoverError 处理）
     markCoverError(PATH);
     expect(coverOk(PATH)).toBe(false); // 失败标记
-    // 恢复在线：清空已解析结果 + 错误标记，触发 onOnlineRefresh 重新 resolve
-    apiMock.setOffline(false);
+    apiMock.setOffline(true);
+    await flush();
+    apiMock.setOffline(false); // 恢复在线：清空已解析结果 + 错误标记，触发 onOnlineRefresh
     await flush();
     expect(refreshed).toBe(1);
     expect(coverOk(PATH)).toBe(true); // 错误标记已清
@@ -259,14 +236,14 @@ describe("coverResolutionContract：useCoverURL 行为", () => {
   });
 
   it("恢复在线重试：调用方未传 onOnlineRefresh 时只清空状态不抛错", async () => {
-    syncMock.enabled = true;
-    apiMock.setOffline(true);
-    const { coverSrc, resolveCover, dispose } = useCoverURL();
+    const { coverSrc, markCoverError, resolveCover, dispose } = useCoverURL();
     resolveCover(PATH);
+    markCoverError(PATH);
+    apiMock.setOffline(true);
     await flush();
-    expect(coverSrc(PATH)).toBe("");
     apiMock.setOffline(false); // 无 onOnlineRefresh → 清空后无动作，不抛
     await flush();
+    expect(coverSrc(PATH)).toBe(""); // 状态已清空（等调用方重新 resolve）
     dispose();
   });
 });

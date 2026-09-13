@@ -53,13 +53,11 @@ beforeEach(() => {
   apiMock.apiGet.mockReset();
   apiMock.apiPost.mockReset();
   clearToasts();
-  delete window.qqplayerIosBridge;
   _resetPairingConfirm();
 });
 
 afterEach(() => {
   stopPolling();
-  delete window.qqplayerIosBridge;
   vi.useRealTimers();
 });
 
@@ -181,14 +179,11 @@ describe("失败处理不崩", () => {
 });
 
 describe("环境与生命周期", () => {
-  it("iOS 壳（window.qqplayerIosBridge 存在）→ 不启用轮询", () => {
-    window.qqplayerIosBridge = { postMessage: vi.fn() };
-    expect(isPairingEnabled()).toBe(false);
-    startPolling();
-    expect(apiMock.apiGet).not.toHaveBeenCalled(); // 立即查询也不发
+  it("isPairingEnabled() 恒启用（iOS 壳退役后前端只剩主机端）", () => {
+    expect(isPairingEnabled()).toBe(true);
   });
 
-  it("非 iOS（无桥）→ 启用；startPolling 立即查一次 + 每 2s 轮询", async () => {
+  it("startPolling 立即查一次 + 每 2s 轮询", async () => {
     vi.useFakeTimers();
     expect(isPairingEnabled()).toBe(true);
     apiMock.apiGet.mockResolvedValue(pendingResponse());

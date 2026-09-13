@@ -6,10 +6,6 @@
       </div>
       <h1 class="nc-title">{{ t("pairing.unpaired.title") }}</h1>
       <p class="nc-desc">{{ t("pairing.unpaired.desc") }}</p>
-      <button class="nc-pair-btn" @click="goPair">
-        <Link2 :size="16" />
-        {{ t("pairing.unpaired.pairNow") }}
-      </button>
       <p class="nc-hint">{{ t("pairing.unpaired.manualHint") }}</p>
     </div>
     <div class="nc-footer">{{ t("pairing.unpaired.localOk") }}</div>
@@ -17,16 +13,10 @@
 </template>
 
 <script setup lang="ts">
-import { WifiOff, Link2 } from "@lucide/vue";
+import { WifiOff } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { nativePost } from "../composables/nativeAudioBridge.js";
 
 const { t } = useI18n();
-
-/** 去配对：通知 iOS 壳打开配对页 sheet（配对成功壳注入 server + reload，引导页自然消失） */
-function goPair() {
-  nativePost({ cmd: "openPairing" });
-}
 </script>
 
 <style scoped>
@@ -76,31 +66,6 @@ function goPair() {
   font-size: 14px;
   line-height: 1.6;
   color: var(--text2);
-}
-.nc-pair-btn {
-  margin-top: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 34px;
-  border: none;
-  border-radius: 14px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 8px 24px var(--accent-glow);
-  transition:
-    transform 0.15s,
-    box-shadow 0.15s,
-    opacity 0.15s;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-.nc-pair-btn:active {
-  transform: scale(0.97);
-  opacity: 0.92;
 }
 .nc-hint {
   margin: 4px 0 0;
