@@ -9,6 +9,10 @@ SQLite 隔离（autouse）：每个测试独立临时 DB（DB_PATH → tmp_path�
 JSON 路径（favorites/playlists/playback/books/queue_order/network_songs/
 annotations/vocab/pairing）一并指向临时目录 —— 既保证绝不触碰真实用户数据
 （真实目录的旧 JSON 不会被自动迁移改名），也让按需写入 JSON 的测试走真实迁移流程。
+
+曲库路径隔离（autouse）：state.LIBRARY 是全局单例，测试里直接赋值（切库 / 回退默认库）
+若不还原会污染后续用例（本机真实曲库存在时，后面的 /api/songs 断言会被真实歌曲打穿）
+→ 统一在测试结束后还原。
 """
 
 import sys
@@ -54,3 +58,15 @@ def _sqlite_isolate(tmp_path, monkeypatch):
     db.reset()  # 清初始化标志：本测试的 DB 首次访问时重建/重迁移
     yield
     db.reset()
+
+
+@pytest.fixture(autouse=True)
+def _restore_library_state():
+    """曲库路径隔离：测试对 state.LIBRARY 的直接改写（切库 / 回退默认库）在测试结束后还原。
+
+    不还原时，本机真实曲库（~/Music/QQPlayer，存在且有歌）会被后续用例看到
+    （test_pairing 的 `/api/songs == []` 断言在全量跑时被真实歌曲打穿）。
+    """
+    original = state.LIBRARY
+    yield
+    state.LIBRARY = original

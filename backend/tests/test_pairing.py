@@ -268,13 +268,18 @@ def test_auth_401_invalid_token(monkeypatch):
     assert code == 401
 
 
-def test_auth_200_with_valid_token(monkeypatch):
+def test_auth_200_with_valid_token(monkeypatch, tmp_path):
     monkeypatch.setattr(state, "AUTH_ENABLED", True)
+    # /api/songs 同样受保护且放行：显式把曲库指向空目录（不依赖本机是否真有曲库，
+    # 也不受其他用例遗留的 state.LIBRARY 影响）
+    empty_lib = tmp_path / "empty-lib"
+    empty_lib.mkdir()
+    assert list(empty_lib.iterdir()) == []  # 自证前提：空目录 → 空列表
+    monkeypatch.setattr(state, "LIBRARY", empty_lib)
     _, token = _pair_device()
     code, body = _remote("GET", "/api/library", headers={"Authorization": f"Bearer {token}"})
     assert code == 200
     assert body["path"] == str(state.LIBRARY)
-    # /api/songs 同样受保护且放行（LIBRARY 指向不存在的临时目录 → 空列表，安全）
     code, body = _remote("GET", "/api/songs", headers={"Authorization": f"Bearer {token}"})
     assert code == 200 and body == []
 

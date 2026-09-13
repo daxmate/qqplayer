@@ -90,30 +90,30 @@ def test_set_library_invalid_dir_not_persisted(tmp_path, _stub_watcher):
 
 
 # ============ 启动初始化读取 ============
-def test_startup_applies_persisted_library_path(tmp_path):
+def test_startup_applies_persisted_library_path(tmp_path, monkeypatch):
     """settings.json 保存过有效路径 → 启动后 state.LIBRARY 用持久化值"""
     saved = tmp_path / "mylib"
     saved.mkdir()
     settings_service.save_settings({"path": str(saved)})
     state._settings = None  # 模拟重启：缓存清空，从盘上读
-    state.LIBRARY = state.DEFAULT_LIBRARY  # 回到默认再启动
+    monkeypatch.setattr(state, "LIBRARY", state.DEFAULT_LIBRARY)  # 回到默认再启动
     main_module._apply_persisted_library_path()
     assert saved == state.LIBRARY
 
 
-def test_startup_missing_dir_falls_back(tmp_path):
+def test_startup_missing_dir_falls_back(tmp_path, monkeypatch):
     """持久化路径目录不存在（外接盘没挂/被删）→ 保持默认，不崩"""
     settings_service.save_settings({"path": str(tmp_path / "ghost")})
     state._settings = None
-    state.LIBRARY = state.DEFAULT_LIBRARY
+    monkeypatch.setattr(state, "LIBRARY", state.DEFAULT_LIBRARY)
     main_module._apply_persisted_library_path()
     assert state.LIBRARY == state.DEFAULT_LIBRARY
 
 
-def test_startup_empty_path_falls_back(tmp_path):
+def test_startup_empty_path_falls_back(tmp_path, monkeypatch):
     """未设置过（path 空串）→ 保持默认，不崩"""
     settings_service.save_settings({"path": ""})
     state._settings = None
-    state.LIBRARY = state.DEFAULT_LIBRARY
+    monkeypatch.setattr(state, "LIBRARY", state.DEFAULT_LIBRARY)
     main_module._apply_persisted_library_path()
     assert state.LIBRARY == state.DEFAULT_LIBRARY

@@ -635,7 +635,7 @@ def test_scan_library_cache_hit(song_library, monkeypatch):
 def test_scan_cache_invalid_when_library_changes(song_library, monkeypatch):
     """切换歌曲库路径后缓存自动失效（按 library 路径做 key）"""
     backend.scan_library()
-    state.LIBRARY = song_library / "sub"
+    monkeypatch.setattr(state, "LIBRARY", song_library / "sub")
     backend.LIBRARY.mkdir()
     make_mp3(backend.LIBRARY / "新歌.mp3", title="新歌")
     songs = backend.scan_library()
@@ -685,9 +685,9 @@ def test_handler_skips_dir_modified(song_library, monkeypatch):
     assert len(calls) == 2
 
 
-def test_start_watcher_skips_missing_dir(song_library):
+def test_start_watcher_skips_missing_dir(song_library, monkeypatch):
     """歌曲库目录不存在时不启动 observer"""
-    state.LIBRARY = song_library / "ghost"
+    monkeypatch.setattr(state, "LIBRARY", song_library / "ghost")
     backend.start_watcher()
     assert backend._watch_observer is None
 
