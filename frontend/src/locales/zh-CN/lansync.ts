@@ -1,4 +1,4 @@
-// 局域网同步（S2 · web Host 侧）：LanSyncSettingsPanel.vue + composables/useLanSync.ts
+// 局域网同步（S2 · web Host 侧）：LanSyncSettingsPanel.vue + composables/useLanSync*.ts
 export default {
   lansync: {
     statusTitle: "服务状态",
@@ -46,6 +46,132 @@ export default {
 
     scopeTitle: "同步范围",
     scopeDesc:
-      "本阶段只支持「配对 + 连接」：配对成功后设备保持连接。歌曲、歌单与播放数据的同步尚未接线，会在后续版本提供。",
+      "配对 + 连接与内容同步均已可用：可把本机选中的内容推送到设备，也可点名取回设备上的歌曲。删除不会跨端传播，也不做全库镜像。",
+    scopeLyrics: "歌词与播放数据不做开关：随歌同步由后端处理，本页不提供选项。",
+
+    // ============ 面板分段 ============
+    tabPairing: "设备与配对",
+    tabContent: "内容同步",
+    contentTitle: "内容同步",
+    contentDevice: "目标设备",
+    contentDeviceHint: "选择要同步的设备（可先在上方「设备与配对」里完成配对）。",
+    contentNoDevice: "还没有已配对设备，请先在上方完成配对。",
+    contentServiceStopped: "局域网同步服务未运行，暂时无法同步内容。",
+    contentHint:
+      "推送 = 把本机选中的内容送到设备（设备已有的会自动跳过）；取回 = 把设备上点名选中的歌曲取回本机。",
+    contentPushTab: "推送到设备",
+    contentPullTab: "从设备取回",
+
+    // ============ 内容来源 ============
+    source: {
+      library: "全部曲库",
+      favorites: "收藏",
+      recentAdded: "最近添加",
+      recentPlayed: "最近播放",
+      topPlayed: "常听排行",
+    },
+    trackCount: "{n} 首",
+
+    // ============ 推送 ============
+    push: {
+      kindAll: "全部曲库",
+      kindPlaylists: "歌单与收藏",
+      kindTracks: "单曲",
+      allDesc: "把本机曲库的全部歌曲推送到设备（共 {n} 首）；设备上已有的会自动跳过。",
+      allEmpty: "本机曲库还没有可推送的歌曲。",
+      playlistsDesc: "勾选要推送到设备的歌单 / 收藏 / 自动歌单；设备缺的歌曲会自动补传。",
+      playlistsEmpty: "没有可选的歌单（先去播放列表页建一个吧）。",
+      tracksDesc: "先选来源，再勾选单曲（列表顺序 = 来源自身顺序）。",
+      source: "来源",
+      searchPlaceholder: "搜索曲名 / 歌手 / 专辑",
+      searchEmpty: "没有匹配的歌曲",
+      empty: "该来源暂无歌曲",
+      selectPage: "全选本页",
+      unselectPage: "取消本页",
+      selectedTracks: "已选 {n} 首",
+      selectedSources: "已选 {n} 项来源",
+      prev: "上一页",
+      next: "下一页",
+      loading: "正在读取本机曲库…",
+      start: "推送到该设备",
+      running: "推送中…",
+      noneSelected: "请先选择要推送的内容",
+      deviceOffline: "该设备当前离线，无法推送",
+      started: "已开始推送",
+      startFailed: "推送启动失败",
+      done: "推送完成",
+      doneWithFailures: "推送结束：{n} 个文件失败",
+    },
+
+    // ============ 拉取 ============
+    pull: {
+      browse: "浏览设备内容",
+      rebrowse: "重新浏览",
+      browseHint: "先浏览设备上的内容，再勾选要取回的歌曲。",
+      scopePlaylists: "设备歌单",
+      scopeTracks: "设备曲目",
+      playlistsEmpty: "设备上暂无歌单",
+      tracksEmpty: "没有匹配的曲目",
+      loading: "正在读取设备内容…",
+      summary: "设备曲库：{tracks} 首 · {size} · {playlists} 个歌单",
+      truncated: "设备曲目过多，清单已截断显示",
+      selectionHint: "取回的是点名勾选的歌曲，不做全库镜像。",
+      selectPage: "全选本页",
+      unselectPage: "取消本页",
+      selectedTracks: "已选 {n} 首",
+      prev: "上一页",
+      next: "下一页",
+      start: "取回入库",
+      running: "取回中…",
+      noneSelected: "请先勾选要取回的歌曲",
+      started: "已开始取回",
+      startFailed: "取回启动失败",
+      timeout: "设备未响应，请重试",
+      done: "取回完成",
+      doneWithFailures: "取回结束：{n} 个文件失败",
+    },
+
+    // ============ 运行视图（推送 / 拉取共用） ============
+    run: {
+      titlePush: "推送进度",
+      titlePull: "取回进度",
+      planned: "计划",
+      completed: "已完成",
+      skipped: "跳过",
+      failed: "失败",
+      skippedPush: "跳过 = 设备上已有且内容一致",
+      skippedPull: "跳过 = 两端内容一致，无需取回",
+      bytes: "{done} / {total}",
+      cancel: "取消",
+      cancelling: "取消中…",
+      cancelled: "已取消",
+      failuresTitle: "失败明细（{n}）",
+      openFailures: "查看失败原因",
+      closeFailures: "收起",
+      finishOk: "全部完成",
+      finishFailed: "存在失败项",
+      failedToCancel: "取消失败，请重试",
+      running: "进行中",
+    },
+
+    state: {
+      idle: "准备中",
+      requestingManifest: "正在核对设备内容",
+      pushing: "推送中",
+      fetching: "取回中",
+      done: "已完成",
+      failed: "失败",
+    },
+
+    failure: {
+      local_file_unavailable: "本机文件不存在或不可读",
+      send_failed: "发送失败（设备未确认）",
+      session_closed: "连接已断开",
+      cancelled: "已取消",
+      invalid_path: "路径不合法",
+      receive_failed: "接收失败",
+      write_failed: "写入失败",
+      unknown: "未知原因",
+    },
   },
 };

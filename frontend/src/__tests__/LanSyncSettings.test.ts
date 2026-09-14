@@ -191,12 +191,14 @@ describe("LanSyncSettingsPanel", () => {
     w.unmount();
   });
 
-  it("同步范围如实告知：只写「配对 + 连接」，不写已支持内容同步", async () => {
+  it("同步范围如实告知：配对 + 连接与内容同步都写清，不写已支持全库镜像", async () => {
     routeGet();
     const w = await mountPanel();
     const text = w.text();
     expect(text).toContain("配对 + 连接");
-    expect(text).toContain("尚未接线");
+    expect(text).toContain("删除不会跨端传播");
+    expect(text).toContain("不做全库镜像");
+    expect(text).toContain("随歌同步由后端处理");
     w.unmount();
   });
 });

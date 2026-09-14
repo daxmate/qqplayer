@@ -1,4 +1,4 @@
-// LAN sync (S2 · web host side): LanSyncSettingsPanel.vue + composables/useLanSync.ts
+// LAN sync (S2 · web host side): LanSyncSettingsPanel.vue + composables/useLanSync*.ts
 export default {
   lansync: {
     statusTitle: "Service status",
@@ -46,6 +46,136 @@ export default {
 
     scopeTitle: "Sync scope",
     scopeDesc:
-      "This stage supports pairing and connection only: a paired device stays connected. Song, playlist and playback-data sync is not wired up yet and will follow in a later version.",
+      "Pairing, connection and content sync are all available: push what you select on this computer to the device, or pull specific songs back. Deletions never propagate across devices, and there is no full-library mirroring.",
+    scopeLyrics:
+      "Lyrics and playback data have no toggle: they travel with the songs and are handled by the backend.",
+
+    // ============ panel sections ============
+    tabPairing: "Devices & pairing",
+    tabContent: "Content sync",
+    contentTitle: "Content sync",
+    contentDevice: "Device",
+    contentDeviceHint: "Pick the device to sync with (pair one above first if the list is empty).",
+    contentNoDevice: "No paired device yet — complete pairing above first.",
+    contentServiceStopped: "The LAN sync service is not running; content sync is unavailable.",
+    contentHint:
+      "Push sends the content you select here to the device (files it already has are skipped); Pull fetches the specific songs you select on the device.",
+    contentPushTab: "Push to device",
+    contentPullTab: "Pull from device",
+
+    // ============ content sources ============
+    source: {
+      library: "Whole library",
+      favorites: "Favorites",
+      recentAdded: "Recently added",
+      recentPlayed: "Recently played",
+      topPlayed: "Most played",
+    },
+    trackCount: "{n} songs",
+
+    // ============ push ============
+    push: {
+      kindAll: "Whole library",
+      kindPlaylists: "Playlists & favorites",
+      kindTracks: "Tracks",
+      allDesc:
+        "Push every song in this computer's library to the device ({n} songs); songs the device already has are skipped.",
+      allEmpty: "This library has no pushable songs yet.",
+      playlistsDesc:
+        "Tick the playlists / favorites / smart lists to push; songs missing on the device are sent automatically.",
+      playlistsEmpty: "No playlists to choose from yet.",
+      tracksDesc:
+        "Pick a source first, then tick individual tracks (list order = the source's own order).",
+      source: "Source",
+      searchPlaceholder: "Search title / artist / album",
+      searchEmpty: "No matching songs",
+      empty: "No songs in this source",
+      selectPage: "Select page",
+      unselectPage: "Clear page",
+      selectedTracks: "{n} selected",
+      selectedSources: "{n} sources selected",
+      prev: "Previous",
+      next: "Next",
+      loading: "Reading this computer's library…",
+      start: "Push to this device",
+      running: "Pushing…",
+      noneSelected: "Select something to push first",
+      deviceOffline: "That device is offline; cannot push",
+      started: "Push started",
+      startFailed: "Could not start the push",
+      done: "Push finished",
+      doneWithFailures: "Push finished: {n} file(s) failed",
+    },
+
+    // ============ pull ============
+    pull: {
+      browse: "Browse device content",
+      rebrowse: "Browse again",
+      browseHint: "Browse what is on the device, then tick the songs to fetch back.",
+      scopePlaylists: "Device playlists",
+      scopeTracks: "Device tracks",
+      playlistsEmpty: "No playlists on the device",
+      tracksEmpty: "No matching tracks",
+      loading: "Reading device content…",
+      summary: "Device library: {tracks} tracks · {size} · {playlists} playlists",
+      truncated: "The device list is large; it is truncated here",
+      selectionHint: "Only the songs you tick are fetched — this is not a full-library mirror.",
+      selectPage: "Select page",
+      unselectPage: "Clear page",
+      selectedTracks: "{n} selected",
+      prev: "Previous",
+      next: "Next",
+      start: "Fetch into library",
+      running: "Fetching…",
+      noneSelected: "Tick the songs to fetch first",
+      started: "Fetch started",
+      startFailed: "Could not start the fetch",
+      timeout: "The device did not respond, please retry",
+      done: "Fetch finished",
+      doneWithFailures: "Fetch finished: {n} file(s) failed",
+    },
+
+    // ============ run view (shared by push / pull) ============
+    run: {
+      titlePush: "Push progress",
+      titlePull: "Fetch progress",
+      planned: "Planned",
+      completed: "Done",
+      skipped: "Skipped",
+      failed: "Failed",
+      skippedPush: "Skipped = already on the device with identical content",
+      skippedPull: "Skipped = identical on both sides, nothing to fetch",
+      bytes: "{done} / {total}",
+      cancel: "Cancel",
+      cancelling: "Cancelling…",
+      cancelled: "Cancelled",
+      failuresTitle: "Failures ({n})",
+      openFailures: "Show failure reasons",
+      closeFailures: "Hide",
+      finishOk: "All done",
+      finishFailed: "Finished with failures",
+      failedToCancel: "Could not cancel, please retry",
+      running: "Running",
+    },
+
+    state: {
+      idle: "Preparing",
+      requestingManifest: "Checking device content",
+      pushing: "Pushing",
+      fetching: "Fetching",
+      done: "Done",
+      failed: "Failed",
+    },
+
+    failure: {
+      local_file_unavailable: "Local file missing or unreadable",
+      send_failed: "Send failed (device did not acknowledge)",
+      session_closed: "Connection closed",
+      cancelled: "Cancelled",
+      invalid_path: "Invalid path",
+      receive_failed: "Receive failed",
+      write_failed: "Write failed",
+      unknown: "Unknown reason",
+    },
   },
 };

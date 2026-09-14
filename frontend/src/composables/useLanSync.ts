@@ -12,6 +12,37 @@ import { apiGet, apiPost, apiDelete } from "../utils/apiClient.js";
 /** 事件轮询间隔（ms）：批准卡与设备在线状态的刷新时延 */
 export const POLL_INTERVAL_MS = 1000;
 
+/** 事件订阅者（模块级事件总线：内容同步的异步回执——如拉取清单 preview——也走这里） */
+type LanSyncEventHandler = (events: unknown[]) => void;
+
+const eventHandlers = new Set<LanSyncEventHandler>();
+
+/**
+ * 订阅 lansync 事件（返回退订函数）。
+ *
+ * 本文件是**唯一**轮询 `/api/lansync/events` 的地方（游标单点推进），其它模块
+ * （拉取清单、运行进度）通过这里拿事件，不再各起一套轮询——多个轮询各自推进游标
+ * 会互相漏事件。订阅者在组件卸载时必须退订。
+ */
+export function onLanSyncEvents(handler: LanSyncEventHandler): () => void {
+  eventHandlers.add(handler);
+  return () => {
+    eventHandlers.delete(handler);
+  };
+}
+
+/** 分发一批事件到订阅者（单个订阅者异常不影响其它订阅者 / 轮询本身） */
+function dispatchEvents(events: unknown[]): void {
+  if (!events.length) return;
+  for (const handler of [...eventHandlers]) {
+    try {
+      handler(events);
+    } catch {
+      /* 订阅者自身异常不上抛 */
+    }
+  }
+}
+
 /** 服务状态（GET /api/lansync/status；不可用时 available=false + error） */
 export interface LanSyncStatus {
   available: boolean;
@@ -150,7 +181,10 @@ export function useLanSync(): LanSyncApi {
       const events = Array.isArray(res.data.events) ? res.data.events : [];
       const next = Number(res.data.cursor);
       if (Number.isFinite(next)) cursor = next;
-      if (events.length) await loadLists();
+      if (events.length) {
+        await loadLists();
+        dispatchEvents(events);
+      }
     } finally {
       polling = false;
     }

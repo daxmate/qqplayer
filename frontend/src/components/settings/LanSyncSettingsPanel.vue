@@ -3,177 +3,213 @@
   样式复用全局 .group/.setting-item 约定，仅局域网同步专属块写 scoped 样式。 -->
 <template>
   <div class="group">
-    <div class="group-title">
-      <Wifi :size="13" />
-      {{ t("lansync.statusTitle") }}
-    </div>
     <div class="setting-item">
-      <div class="setting-label">
-        <span class="lansync-dot" :class="running ? 'on' : 'off'" />
-        {{ running ? t("lansync.running", { port: status?.port ?? 0 }) : t("lansync.notRunning") }}
-      </div>
-      <div class="setting-desc">{{ t("lansync.statusDesc") }}</div>
-      <div v-if="status?.error" class="setting-desc lansync-error">{{ status.error }}</div>
-    </div>
-  </div>
-
-  <!-- ============ 本机身份 ============ -->
-  <div class="group">
-    <div class="group-title">
-      <ScanLine :size="13" />
-      {{ t("lansync.identityTitle") }}
-    </div>
-    <div class="setting-item">
-      <div class="setting-label">{{ t("lansync.deviceName") }}</div>
-      <div class="setting-control">
-        <span class="lansync-mono" data-testid="lansync-device-name">{{
-          status?.device_name || "—"
-        }}</span>
-      </div>
-    </div>
-    <div class="setting-item">
-      <div class="setting-label">{{ t("lansync.deviceId") }}</div>
-      <div class="setting-desc">{{ t("lansync.deviceIdDesc") }}</div>
-      <div class="lansync-id" data-testid="lansync-device-id">
-        <span v-for="(g, i) in idGroups" :key="i" class="lansync-id-group">{{ g }}</span>
-      </div>
-      <div class="setting-control">
-        <button class="btn" :disabled="!identity" @click="copyDeviceId">
-          <Copy :size="13" /> {{ t("lansync.copy") }}
+      <div class="lansync-seg" role="tablist">
+        <button
+          class="lansync-seg-btn"
+          :class="{ on: section === 'pairing' }"
+          data-testid="lansync-section-pairing"
+          @click="section = 'pairing'"
+        >
+          {{ t("lansync.tabPairing") }}
+        </button>
+        <button
+          class="lansync-seg-btn"
+          :class="{ on: section === 'content' }"
+          data-testid="lansync-section-content"
+          @click="section = 'content'"
+        >
+          {{ t("lansync.tabContent") }}
         </button>
       </div>
     </div>
   </div>
 
-  <!-- ============ 添加设备 ============ -->
-  <div class="group">
-    <div class="group-title">
-      <QrCode :size="13" />
-      {{ t("lansync.addDeviceTitle") }}
-    </div>
-    <template v-if="qrImage">
+  <template v-if="section === 'pairing'">
+    <div class="group">
+      <div class="group-title">
+        <Wifi :size="13" />
+        {{ t("lansync.statusTitle") }}
+      </div>
       <div class="setting-item">
-        <div class="setting-desc">{{ t("lansync.qrHint") }}</div>
-        <div class="lansync-qr-wrap">
-          <img class="lansync-qr" :src="qrImage" :alt="t('lansync.addDeviceTitle')" />
+        <div class="setting-label">
+          <span class="lansync-dot" :class="running ? 'on' : 'off'" />
+          {{
+            running ? t("lansync.running", { port: status?.port ?? 0 }) : t("lansync.notRunning")
+          }}
         </div>
-        <div class="setting-desc">{{ t("lansync.addDeviceHint") }}</div>
+        <div class="setting-desc">{{ t("lansync.statusDesc") }}</div>
+        <div v-if="status?.error" class="setting-desc lansync-error">{{ status.error }}</div>
+      </div>
+    </div>
+
+    <!-- ============ 本机身份 ============ -->
+    <div class="group">
+      <div class="group-title">
+        <ScanLine :size="13" />
+        {{ t("lansync.identityTitle") }}
+      </div>
+      <div class="setting-item">
+        <div class="setting-label">{{ t("lansync.deviceName") }}</div>
         <div class="setting-control">
-          <button class="btn" data-testid="lansync-stop-qr" :disabled="busy" @click="onStopPairing">
-            {{ t("lansync.stopQr") }}
+          <span class="lansync-mono" data-testid="lansync-device-name">{{
+            status?.device_name || "—"
+          }}</span>
+        </div>
+      </div>
+      <div class="setting-item">
+        <div class="setting-label">{{ t("lansync.deviceId") }}</div>
+        <div class="setting-desc">{{ t("lansync.deviceIdDesc") }}</div>
+        <div class="lansync-id" data-testid="lansync-device-id">
+          <span v-for="(g, i) in idGroups" :key="i" class="lansync-id-group">{{ g }}</span>
+        </div>
+        <div class="setting-control">
+          <button class="btn" :disabled="!identity" @click="copyDeviceId">
+            <Copy :size="13" /> {{ t("lansync.copy") }}
           </button>
         </div>
       </div>
-    </template>
-    <template v-else>
-      <div class="setting-item">
-        <div class="setting-desc">{{ t("lansync.addDeviceHint") }}</div>
-        <div class="setting-control">
+    </div>
+
+    <!-- ============ 添加设备 ============ -->
+    <div class="group">
+      <div class="group-title">
+        <QrCode :size="13" />
+        {{ t("lansync.addDeviceTitle") }}
+      </div>
+      <template v-if="qrImage">
+        <div class="setting-item">
+          <div class="setting-desc">{{ t("lansync.qrHint") }}</div>
+          <div class="lansync-qr-wrap">
+            <img class="lansync-qr" :src="qrImage" :alt="t('lansync.addDeviceTitle')" />
+          </div>
+          <div class="setting-desc">{{ t("lansync.addDeviceHint") }}</div>
+          <div class="setting-control">
+            <button
+              class="btn"
+              data-testid="lansync-stop-qr"
+              :disabled="busy"
+              @click="onStopPairing"
+            >
+              {{ t("lansync.stopQr") }}
+            </button>
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="setting-item">
+          <div class="setting-desc">{{ t("lansync.addDeviceHint") }}</div>
+          <div class="setting-control">
+            <button
+              class="btn primary"
+              data-testid="lansync-show-qr"
+              :disabled="!running || busy"
+              @click="onStartPairing"
+            >
+              <QrCode :size="13" /> {{ t("lansync.showQr") }}
+            </button>
+          </div>
+          <div v-if="!running" class="setting-desc lansync-muted">
+            {{ t("lansync.unavailableHint") }}
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ============ 待批准设备 ============ -->
+    <div class="group">
+      <div class="group-title">
+        <Clock :size="13" />
+        {{ t("lansync.pendingTitle") }}
+      </div>
+      <template v-if="pending.length">
+        <div
+          v-for="r in pending"
+          :key="r.request_id"
+          class="lansync-card"
+          :data-testid="'lansync-pending-' + r.request_id"
+        >
+          <div class="lansync-card-main">
+            <div class="lansync-card-name">
+              {{ r.display_name || r.suggested_display_name || "—" }}
+            </div>
+            <div class="lansync-card-meta">{{ shortId(r.device_id, r.device_id_formatted) }}</div>
+          </div>
           <button
-            class="btn primary"
-            data-testid="lansync-show-qr"
-            :disabled="!running || busy"
-            @click="onStartPairing"
+            class="btn primary lansync-btn-sm"
+            :disabled="busy"
+            :data-testid="'lansync-approve-' + r.request_id"
+            @click="onApprove(r)"
           >
-            <QrCode :size="13" /> {{ t("lansync.showQr") }}
+            {{ t("lansync.approve") }}
+          </button>
+          <button
+            class="btn lansync-btn-sm"
+            :disabled="busy"
+            :data-testid="'lansync-reject-' + r.request_id"
+            @click="onReject(r)"
+          >
+            {{ t("lansync.reject") }}
           </button>
         </div>
-        <div v-if="!running" class="setting-desc lansync-muted">
-          {{ t("lansync.unavailableHint") }}
-        </div>
+      </template>
+      <div v-else class="setting-item">
+        <div class="setting-desc lansync-muted">{{ t("lansync.pendingEmpty") }}</div>
       </div>
-    </template>
-  </div>
-
-  <!-- ============ 待批准设备 ============ -->
-  <div class="group">
-    <div class="group-title">
-      <Clock :size="13" />
-      {{ t("lansync.pendingTitle") }}
     </div>
-    <template v-if="pending.length">
-      <div
-        v-for="r in pending"
-        :key="r.request_id"
-        class="lansync-card"
-        :data-testid="'lansync-pending-' + r.request_id"
-      >
-        <div class="lansync-card-main">
-          <div class="lansync-card-name">
-            {{ r.display_name || r.suggested_display_name || "—" }}
+
+    <!-- ============ 已配对设备 ============ -->
+    <div class="group">
+      <div class="group-title">
+        <Smartphone :size="13" />
+        {{ t("lansync.devicesTitle") }}
+      </div>
+      <template v-if="devices.length">
+        <div
+          v-for="d in devices"
+          :key="d.peer_id"
+          class="lansync-card"
+          :data-testid="'lansync-device-' + d.peer_id"
+        >
+          <span class="lansync-dot" :class="d.online ? 'on' : 'off'" />
+          <div class="lansync-card-main">
+            <div class="lansync-card-name">{{ d.display_name || shortId(d.peer_id) }}</div>
+            <div class="lansync-card-meta">
+              {{ d.online ? t("lansync.online") : t("lansync.offline") }} ·
+              {{ t("lansync.lastSeen") }} {{ lastActive(d.last_seen_at) }}
+            </div>
           </div>
-          <div class="lansync-card-meta">{{ shortId(r.device_id, r.device_id_formatted) }}</div>
+          <button
+            class="btn lansync-btn-sm danger"
+            :disabled="busy"
+            :data-testid="'lansync-revoke-' + d.peer_id"
+            @click="askRevoke(d)"
+          >
+            {{ t("lansync.revoke") }}
+          </button>
         </div>
-        <button
-          class="btn primary lansync-btn-sm"
-          :disabled="busy"
-          :data-testid="'lansync-approve-' + r.request_id"
-          @click="onApprove(r)"
-        >
-          {{ t("lansync.approve") }}
-        </button>
-        <button
-          class="btn lansync-btn-sm"
-          :disabled="busy"
-          :data-testid="'lansync-reject-' + r.request_id"
-          @click="onReject(r)"
-        >
-          {{ t("lansync.reject") }}
-        </button>
+      </template>
+      <div v-else class="setting-item">
+        <div class="setting-desc lansync-muted">{{ t("lansync.devicesEmpty") }}</div>
+        <div class="setting-desc">{{ t("lansync.devicesEmptyDesc") }}</div>
       </div>
-    </template>
-    <div v-else class="setting-item">
-      <div class="setting-desc lansync-muted">{{ t("lansync.pendingEmpty") }}</div>
     </div>
-  </div>
 
-  <!-- ============ 已配对设备 ============ -->
-  <div class="group">
-    <div class="group-title">
-      <Smartphone :size="13" />
-      {{ t("lansync.devicesTitle") }}
-    </div>
-    <template v-if="devices.length">
-      <div
-        v-for="d in devices"
-        :key="d.peer_id"
-        class="lansync-card"
-        :data-testid="'lansync-device-' + d.peer_id"
-      >
-        <span class="lansync-dot" :class="d.online ? 'on' : 'off'" />
-        <div class="lansync-card-main">
-          <div class="lansync-card-name">{{ d.display_name || shortId(d.peer_id) }}</div>
-          <div class="lansync-card-meta">
-            {{ d.online ? t("lansync.online") : t("lansync.offline") }} ·
-            {{ t("lansync.lastSeen") }} {{ lastActive(d.last_seen_at) }}
-          </div>
-        </div>
-        <button
-          class="btn lansync-btn-sm danger"
-          :disabled="busy"
-          :data-testid="'lansync-revoke-' + d.peer_id"
-          @click="askRevoke(d)"
-        >
-          {{ t("lansync.revoke") }}
-        </button>
+    <!-- ============ 同步范围（如实告知：能力与语义边界） ============ -->
+    <div class="group">
+      <div class="group-title">
+        <Link2 :size="13" />
+        {{ t("lansync.scopeTitle") }}
       </div>
-    </template>
-    <div v-else class="setting-item">
-      <div class="setting-desc lansync-muted">{{ t("lansync.devicesEmpty") }}</div>
-      <div class="setting-desc">{{ t("lansync.devicesEmptyDesc") }}</div>
+      <div class="setting-item">
+        <div class="setting-desc">{{ t("lansync.scopeDesc") }}</div>
+        <div class="setting-desc">{{ t("lansync.scopeLyrics") }}</div>
+      </div>
     </div>
-  </div>
+  </template>
 
-  <!-- ============ 同步范围（如实告知：本阶段只做配对 + 连接） ============ -->
-  <div class="group">
-    <div class="group-title">
-      <Link2 :size="13" />
-      {{ t("lansync.scopeTitle") }}
-    </div>
-    <div class="setting-item">
-      <div class="setting-desc">{{ t("lansync.scopeDesc") }}</div>
-    </div>
-  </div>
+  <!-- ============ 内容同步（推送 / 取回） ============ -->
+  <LanSyncContentPanel v-else :devices="devices" :running="running" />
 
   <!-- 撤销配对二次确认 -->
   <Teleport to="body">
@@ -210,9 +246,13 @@ import {
   type LanSyncDevice,
   type LanSyncPairRequest,
 } from "../../composables/useLanSync.js";
+import LanSyncContentPanel from "./LanSyncContentPanel.vue";
 import { showToast, toastError } from "../../composables/useToast.js";
 
 const { t } = useI18n();
+
+/** 面板分段：设备与配对（默认）/ 内容同步 */
+const section = ref<"pairing" | "content">("pairing");
 
 const {
   status,
@@ -367,6 +407,29 @@ onBeforeUnmount(stopPolling);
 </script>
 
 <style scoped>
+.lansync-seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.lansync-seg-btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+}
+.lansync-seg-btn.on {
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+}
 .lansync-dot {
   display: inline-block;
   width: 8px;
