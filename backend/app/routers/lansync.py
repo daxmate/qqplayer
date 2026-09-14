@@ -11,6 +11,13 @@
 - POST   /api/lansync/pairing/{request_id}/approve|reject|cancel
 - GET    /api/lansync/devices                       已配对设备；DELETE 撤销配对
 - GET    /api/lansync/events?cursor=N               事件轮询（UI 实时刷新批准卡/设备状态）
+- POST   /api/lansync/push                          发起「推送到设备」（S3a）→ run_id
+- GET    /api/lansync/push/{run_id}                 推送进度 / 账目（未知 run_id → 404）
+- POST   /api/lansync/push/{run_id}/cancel          取消推送（未知 / 已终态 → cancelled=false）
+- POST   /api/lansync/pull/preview                  请求对端清单一页（清单**异步**经 /events 到达）
+- POST   /api/lansync/pull                          发起「从设备拉取」（S3b）→ run_id
+- GET    /api/lansync/pull/{run_id}                 拉取进度 / 账目（未知 run_id → 404）
+- POST   /api/lansync/pull/{run_id}/cancel          取消拉取（未知 / 已终态 → cancelled=false）
 
 **鉴权不进白名单**（与老链路 `/api/pairing/*` 不同）：lansync 的"批准"= 授予信任关系，
 未配对设备不得经免鉴权通道调用；正常调用方是本机浏览器（localhost 免鉴权）。
@@ -21,11 +28,15 @@ from __future__ import annotations
 import base64
 import io
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from app.lansync.deviceid import short_comparison_parts
 from app.lansync.models import PROTOCOL_VERSION
+from app.lansync.pull import DEFAULT_PAGE_LIMIT, PullError
+from app.lansync.push import PushError
 from app.lansync.service import SyncService
 from app.services import lansync_host
 
@@ -37,6 +48,8 @@ router = APIRouter()
 UNAVAILABLE_DETAIL = "局域网同步服务未运行"
 #: 配对请求不存在/已过期
 NO_REQUEST_DETAIL = "配对请求不存在或已过期"
+#: 同步运行（推送 / 拉取）不存在
+NO_RUN_DETAIL = "同步运行不存在"
 
 
 def _require_service() -> SyncService:
@@ -187,3 +200,116 @@ def api_lansync_events(cursor: int = 0):
     service = _require_service()
     new_cursor, events = service.events_since(cursor)
     return {"cursor": new_cursor, "events": events}
+
+
+# -------------------------------------------- 内容同步（S3a 推送 / S3b 拉取）
+#
+# 本段**只有 HTTP 形状**：取服务 → 调 `SyncService` → 错误映射。
+# 选择集语义、对账、逐文件传输、事件产出全在 `app/lansync/`（push / pull / service）。
+
+
+class PushBody(BaseModel):
+    """`POST /api/lansync/push` 请求体（`selection: null` = 本端全库）。"""
+
+    peer_id: str
+    selection: dict[str, Any] | None = None
+
+
+class PullPreviewBody(BaseModel):
+    """`POST /api/lansync/pull/preview` 请求体（`scope` 缺省 = 对端曲目清单）。"""
+
+    peer_id: str
+    scope: str | None = None
+    query: str | None = None
+    offset: int = 0
+    limit: int | None = None
+
+
+class PullBody(BaseModel):
+    """`POST /api/lansync/pull` 请求体（`relative_paths: null` = 对端全库）。"""
+
+    peer_id: str
+    relative_paths: list[str] | None = None
+
+
+@router.post("/api/lansync/push")
+def api_lansync_push(body: PushBody):
+    """发起「推送到设备」：建推送运行并返回 `run_id`。
+
+    进度 / 账目走 `GET /api/lansync/push/{run_id}` 与 `/events`（`type: "push"`）。
+    该设备无就绪会话 / 选择集非法 → 400（`PushError`）。
+    """
+    service = _require_running_service()
+    try:
+        run_id = service.push_selection(body.peer_id, selection=body.selection)
+    except PushError as error:
+        raise HTTPException(400, str(error)) from error
+    return {"run_id": run_id}
+
+
+@router.get("/api/lansync/push/{run_id}")
+def api_lansync_push_status(run_id: str):
+    """推送进度 / 账目（`LibraryPushRun.status` 原样返回）；未知 `run_id` → 404。"""
+    status = _require_running_service().push_status(run_id)
+    if not status:
+        raise HTTPException(404, NO_RUN_DETAIL)
+    return status
+
+
+@router.post("/api/lansync/push/{run_id}/cancel")
+def api_lansync_push_cancel(run_id: str):
+    """取消推送：已终态 / 未知 `run_id` → `cancelled: false`（幂等，不报 404）。"""
+    return {"cancelled": _require_running_service().cancel_push(run_id)}
+
+
+@router.post("/api/lansync/pull/preview")
+def api_lansync_pull_preview(body: PullPreviewBody):
+    """请求对端内容清单的**一页**（帧 15），返回本端请求描述（帧 16 异步到达）。
+
+    返回 `{"request_id", "scope", "offset", "limit"}`：`request_id` 用于与 `/events` 的
+    `type: "pull"` / `action: "preview"` 事件配对；`limit` 缺省取
+    :data:`~app.lansync.pull.DEFAULT_PAGE_LIMIT`（越界由对端钳制，§13.2）。
+    该设备无就绪会话 → 400（`PullError`）。
+    """
+    service = _require_running_service()
+    limit = DEFAULT_PAGE_LIMIT if body.limit is None else body.limit
+    try:
+        return service.pull_preview(
+            body.peer_id,
+            scope=body.scope,
+            query=body.query,
+            offset=body.offset,
+            limit=limit,
+        )
+    except PullError as error:
+        raise HTTPException(400, str(error)) from error
+
+
+@router.post("/api/lansync/pull")
+def api_lansync_pull(body: PullBody):
+    """发起「从设备拉取」：建拉取运行并返回 `run_id`。
+
+    进度 / 账目走 `GET /api/lansync/pull/{run_id}` 与 `/events`（`type: "pull"`）。
+    该设备无就绪会话 / 发送失败 → 400（`PullError`）。
+    """
+    service = _require_running_service()
+    try:
+        run_id = service.pull_selection(body.peer_id, relative_paths=body.relative_paths)
+    except PullError as error:
+        raise HTTPException(400, str(error)) from error
+    return {"run_id": run_id}
+
+
+@router.get("/api/lansync/pull/{run_id}")
+def api_lansync_pull_status(run_id: str):
+    """拉取进度 / 账目（`LibraryPullRun.status` 原样返回）；未知 `run_id` → 404。"""
+    status = _require_running_service().pull_status(run_id)
+    if not status:
+        raise HTTPException(404, NO_RUN_DETAIL)
+    return status
+
+
+@router.post("/api/lansync/pull/{run_id}/cancel")
+def api_lansync_pull_cancel(run_id: str):
+    """取消拉取：已终态 / 未知 `run_id` → `cancelled: false`（幂等，不报 404）。"""
+    return {"cancelled": _require_running_service().cancel_pull(run_id)}
