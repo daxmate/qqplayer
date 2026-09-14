@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from app import state
+from app.lansync.aligned_save import save_aligned_lyrics
 from app.services import library_scan, tags
 from app.services import lyrics as lyrics_service
 from lyric_fetch import (
@@ -236,4 +237,13 @@ def api_lyric_align(body: dict):
     lrc = lyrics_service._align_to_lrc(sentences)
     if not lrc:
         raise HTTPException(500, "AI 对齐失败，未识别到歌词行，请检查音频文件与歌词内容")
-    return {"lrc": lrc, "lines": lrc.count("\n") + 1, "duration": library_scan.get_duration(f)}
+    # 产物落 aligned 歌词库（§15 随歌通道的写入侧：只有 aligned 参与随歌同步）。
+    # 落库失败 / 跳过**不影响本接口**：save_aligned_lyrics 不抛异常，只回状态（下面拼进返回体）。
+    aligned = save_aligned_lyrics(str(f), sentences)
+    return {
+        "lrc": lrc,
+        "lines": lrc.count("\n") + 1,
+        "duration": library_scan.get_duration(f),
+        "aligned_saved": aligned["status"] == "saved",
+        "aligned_status": aligned["status"],
+    }
