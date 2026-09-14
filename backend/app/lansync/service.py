@@ -30,15 +30,30 @@ import tempfile
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from . import changelog
+from . import lyrics as lyrics_channel
+from .changelog import (
+    DEFAULT_BATCH_SIZE,
+    DIRECTION_PULL,
+    DIRECTION_PUSH,
+    V1_SYNCED_ENTITIES,
+    CarryDriver,
+    ChangeLogPeer,
+    ChangeLogStore,
+    DataSyncError,
+    DataSyncRun,
+)
 from .crypto import CryptoError, Identity
 from .deviceid import formatted
 from .filetransfer import DEFAULT_ACK_TIMEOUT
+from .frame import FrameType
 from .locallib import SCOPE_TRACKS
+from .lyrics import SYNCHRONIZED_KINDS
 from .models import (
     PROTOCOL_VERSION,
     CloseReason,
@@ -69,6 +84,10 @@ EVENT_BUFFER_SIZE = 512
 MAX_PUSH_RUNS = 32
 #: 保留的拉取运行实例上限（口径同 `MAX_PUSH_RUNS`）
 MAX_PULL_RUNS = 32
+#: 保留的播放数据同步运行（S4）上限（口径同 `MAX_PUSH_RUNS`）
+MAX_DATA_RUNS = 32
+#: 保留的歌词推送运行（S4）上限（口径同 `MAX_PUSH_RUNS`）
+MAX_LYRICS_RUNS = 32
 
 
 class IdentityStoreError(Exception):
@@ -167,6 +186,7 @@ class SyncService:
         enable_mdns: bool = True,
         on_application_frame: Callable[[HostSession, int, bytes], None] | None = None,
         push_ack_timeout: float = DEFAULT_ACK_TIMEOUT,
+        lyrics_root: Path | str | None = None,
     ) -> None:
         """构造即加载/生成身份（`store_dir` 缺省 = `app.state.DATA_DIR`）。
 
@@ -174,6 +194,7 @@ class SyncService:
         `on_application_frame` = ready 后业务帧的应用层接入口（M2b 文件传输用）；
         `push_ack_timeout` = 推送等单条 `file_ack` 的超时秒数（对位 Swift
         `SyncFileSender.defaultAckTimeout`）；0 = 不挂定时器。
+        `lyrics_root` = aligned 歌词库根（S4 随歌通道；缺省 `state.ALIGNED_LYRIC_DIR`）。
         """
         self._store_dir = Path(store_dir) if store_dir is not None else default_store_dir()
         raw_name = device_name if device_name is not None else (socket.gethostname() or "qqplayer")
@@ -191,6 +212,16 @@ class SyncService:
         #: 拉取运行（key = run_id）与对端清单浏览器（key = session_id）
         self._pull_runs: dict[str, LibraryPullRun] = {}
         self._browsers: dict[str, PeerLibraryBrowser] = {}
+        #: 播放数据同步（S4）：每会话一个帧 8/9 处理器；运行（key = run_id）
+        self._changelog_peers: dict[str, ChangeLogPeer] = {}
+        self._data_runs: dict[str, DataSyncRun] = {}
+        #: 歌词推送运行（key = run_id）与其 ack 超时定时器
+        self._lyrics_runs: dict[str, lyrics_channel.LyricsPushRun] = {}
+        self._lyrics_timers: dict[str, Any] = {}
+        #: 已做过「跟歌走」收尾的推送 / 拉取运行 id（每个运行只收尾一次）
+        self._carry_done: set[str] = set()
+        self._lyrics_root = lyrics_root
+        self._lyrics_store = lyrics_channel.AlignedLyricsStore(lyrics_root)
         self._application_frame_handler = on_application_frame
         config = session_config if session_config is not None else SyncSessionConfig()
         if config.display_name is None:
@@ -229,6 +260,14 @@ class SyncService:
             run.handle_session_closed()
         for run in list(self._pull_runs.values()):
             run.handle_session_closed()
+        for run in list(self._data_runs.values()):
+            run.handle_session_closed()
+        for run_id in list(self._lyrics_timers):
+            self._cancel_lyrics_ack_timer(run_id)
+        for run in list(self._lyrics_runs.values()):
+            run.handle_session_closed()
+            self._lyrics_runs.pop(run.run_id, None)
+        self._changelog_peers.clear()
         self._browsers.clear()
 
     # ---------------------------------------------------------------- 状态
@@ -506,6 +545,7 @@ class SyncService:
         run = self._push_runs.get(str(event.get("run_id") or ""))
         if run is not None:
             self._arm_push_ack_timer(run)
+        self._maybe_carry_push(run, event)
         self._emit(EventType.PUSH, dict(event))
 
     # ---------------------------------------------------------------- 拉取
@@ -556,7 +596,10 @@ class SyncService:
         if session is None:
             raise PullError(f"该设备无就绪会话，无法拉取：{peer_id}")
         run = LibraryPullRun(
-            session, relative_paths=relative_paths, on_event=self._handle_pull_event
+            session,
+            relative_paths=relative_paths,
+            lyrics_root=self._lyrics_root,
+            on_event=self._handle_pull_event,
         )
         self._register_pull_run(run)
         try:
@@ -615,7 +658,299 @@ class SyncService:
 
     def _handle_pull_event(self, event: dict[str, Any]) -> None:
         """拉取运行 / 浏览器的回调 → 应用级事件（`EventType.PULL`，UI 按游标轮询）。"""
+        run = self._pull_runs.get(str(event.get("run_id") or ""))
+        self._maybe_carry_pull(run, event)
         self._emit(EventType.PULL, dict(event))
+
+    # ------------------------------------------------- 播放数据同步（S4 · 帧 8/9）
+
+    def data_sync_push(self, peer_id: str) -> str:
+        """发起一次「推送本端播放数据增量」（S4），返回 `run_id`。
+
+        流程：取本端 outbox 中 `id > 已推给该 peer 的游标` 的增量 → 过滤 delete
+        （**不传播删除**）→ 逐行填 `contentHash` → 分批发帧 9 → **全部批次成功才推进
+        推送游标**。空增量不发帧也不动游标（§14.6）。帧 9 无应答（与 Swift
+        `sendIncrement` 同语义）：状态迁到 `sending` → `done`。
+
+        该设备无就绪会话 → :class:`~app.lansync.changelog.DataSyncError`。
+        """
+        session = self._ready_session(peer_id)
+        if session is None:
+            raise DataSyncError(f"该设备无就绪会话，无法同步播放数据：{peer_id}")
+        peer = self._changelog_peer_for(session)
+        run = DataSyncRun(peer, DIRECTION_PUSH, on_event=self._handle_data_event)
+        self._register_data_run(run)
+        run.start_push(DEFAULT_BATCH_SIZE)
+        return run.run_id
+
+    def data_sync_pull(self, peer_id: str) -> str:
+        """发起一次「拉取对端播放数据增量」（S4），返回 `run_id`。
+
+        流程：发帧 8（带本端已消费的对端游标）→ 对端回帧 9 → 拦截 delete → 按
+        `contentHash` 本地化（缺歌挂起）→ LWW → 落本端业务表 → 推进拉取游标。
+        应答异步到达（经若 `events_since` 的 `EventType.DATA` 事件感知），本方法不阻塞。
+
+        该设备无就绪会话 → :class:`~app.lansync.changelog.DataSyncError`。
+        """
+        session = self._ready_session(peer_id)
+        if session is None:
+            raise DataSyncError(f"该设备无就绪会话，无法拉取播放数据：{peer_id}")
+        peer = self._changelog_peer_for(session)
+        run = DataSyncRun(peer, DIRECTION_PULL, on_event=self._handle_data_event)
+        peer.bind_run(run)
+        self._register_data_run(run)
+        run.start_pull()
+        if run.is_terminal:
+            peer.unbind_run(run)
+        return run.run_id
+
+    def data_sync_status(self, run_id: str | None = None) -> dict[str, Any]:
+        """播放数据同步状态 / 账目。
+
+        - 传 `run_id`：该运行的状态（未知 → 空字典）；
+        - 不传：总览 `{"outbox": {...}, "peers": [...], "pending": n,
+          "lyrics": {...}, "runs": [...]}`（UI / 诊断用）。
+        """
+        if run_id:
+            run = self._data_runs.get(str(run_id))
+            return run.status() if run is not None else {}
+        peers: list[dict[str, Any]] = []
+        for device in self._trust.list_devices():
+            store = ChangeLogStore()
+            peers.append(
+                {
+                    "peer_id": device.peer_id,
+                    "display_name": device.display_name,
+                    "cursor": store.cursor(device.peer_id),
+                    "pushCursor": store.push_cursor(device.peer_id),
+                }
+            )
+        return {
+            "outbox": {
+                "maxId": ChangeLogStore().max_id(),
+                "entities": list(V1_SYNCED_ENTITIES),
+            },
+            "peers": peers,
+            "pending": len(ChangeLogStore().pending()),
+            "lyrics": {
+                "root": str(self._lyrics_store.root),
+                "count": len(self._lyrics_store.entries()),
+                "kinds": [kind.value for kind in SYNCHRONIZED_KINDS],
+            },
+            "runs": [run.status() for run in self._data_runs.values()],
+        }
+
+    def lyrics_push_status(self, run_id: str) -> dict[str, Any]:
+        """歌词推送运行状态（未知 `run_id` → 空字典）。"""
+        run = self._lyrics_runs.get(str(run_id))
+        return run.status() if run is not None else {}
+
+    def _changelog_peer_for(self, session: HostSession) -> ChangeLogPeer:
+        """该会话的帧 8/9 处理器（一连接一实例；会话关闭即丢弃）。"""
+        peer = self._changelog_peers.get(session.session_id)
+        if peer is None:
+            peer = ChangeLogPeer(
+                session,
+                peer_id=str(session.peer_device_id or ""),
+                on_event=self._handle_data_event,
+            )
+            self._changelog_peers[session.session_id] = peer
+        return peer
+
+    def _register_data_run(self, run: DataSyncRun) -> None:
+        """登记播放数据运行（超上限时优先淘汰最早终态的）。"""
+        self._data_runs[run.run_id] = run
+        while len(self._data_runs) > MAX_DATA_RUNS:
+            obsolete = next(
+                (key for key, item in self._data_runs.items() if item.is_terminal), None
+            )
+            if obsolete is None:
+                obsolete = next(iter(self._data_runs))
+            self._data_runs.pop(obsolete, None)
+
+    def _handle_data_event(self, event: dict[str, Any]) -> None:
+        """数据同步运行 / 帧处理回调 → 应用级事件（`EventType.DATA`）。"""
+        self._emit(EventType.DATA, dict(event))
+
+    def _route_data_frame(self, session: HostSession, frame_type: int, payload: bytes) -> bool:
+        """把帧 8/9 交给该会话的播放数据处理器（未就绪 → 不消费）。"""
+        if frame_type not in (FrameType.CHANGE_LOG_PULL, FrameType.CHANGE_LOG_PUSH):
+            return False
+        peer = self._changelog_peer_for(session)
+        return peer.handle_application_frame(frame_type, payload)
+
+    def _session_by_id(self, session_id: str | None) -> HostSession | None:
+        """会话 id → 会话对象（已关闭 / 未知 → None）。"""
+        if not session_id:
+            return None
+        for session in self._server.sessions:
+            if session.session_id == session_id:
+                return session
+        return None
+
+    # ------------------------------------------------- 跟歌走 / 歌词随歌（S4）
+
+    @staticmethod
+    def _song_paths(event: Mapping[str, Any]) -> list[str]:
+        """事件账目里的**歌曲**相对路径（歌词 wire 路径不算歌：播放数据以歌为单位）。"""
+        return [
+            str(path)
+            for path in (event.get("completed") or [])
+            if not lyrics_channel.is_lyrics_path(path)
+        ]
+
+    def _maybe_carry_push(self, run: Any, event: Mapping[str, Any]) -> None:
+        """推送运行进终态 → 本端这批歌的播放数据（帧 9）+ aligned 歌词随歌（每运行一次）。
+
+        只对 `done` 收尾（失败的歌没送达，不携带它的播放数据）；`peer_hashes` =
+        对端本轮 manifest 的 `content_hash` ∪ 本轮送达歌曲的本地指纹（计划器内部再并集）。
+        """
+        run_id = str(event.get("run_id") or "")
+        if not run_id or run_id in self._carry_done or str(event.get("state") or "") != "done":
+            return
+        self._carry_done.add(run_id)
+        songs = self._song_paths(event)
+        session = self._session_by_id(getattr(run, "session_id", None))
+        if not songs or session is None:
+            return
+        peer = self._changelog_peer_for(session)
+        peer_hashes = [
+            str(entry.content_hash)
+            for entry in (getattr(run, "peer_entries", ()) or ())
+            if getattr(entry, "content_hash", None)
+        ]
+        plan = CarryDriver(peer).carry_push(songs, peer_hashes=peer_hashes)
+        peer.replay_pending()
+        self._emit(
+            EventType.DATA,
+            {
+                "action": "carry_push",
+                "peer_id": peer.peer_id,
+                "state": "done",
+                **plan.to_dict(),
+            },
+        )
+        self._start_lyrics_push(session, songs)
+
+    def _maybe_carry_pull(self, run: Any, event: Mapping[str, Any]) -> None:
+        """拉取运行进终态 → 请求对端带这批歌的播放数据（帧 8）+ 把这批歌的歌词带回来。"""
+        run_id = str(event.get("run_id") or "")
+        if not run_id or run_id in self._carry_done or run is None:
+            return
+        if str(event.get("state") or "") != "done":
+            return
+        songs = self._song_paths(event)
+        if not songs:
+            return  # 本次只取回歌词（或空批）：不再级联
+        self._carry_done.add(run_id)
+        session = self._session_by_id(getattr(run, "session_id", None))
+        if session is None:
+            return
+        peer = self._changelog_peer_for(session)
+        peer.replay_pending()  # 刚落地的新歌 → 把之前挂起的远端行重放
+        plan = CarryDriver(peer).carry_pull(songs)  # 发帧 8；应答经该会话处理器落库
+        self._emit(
+            EventType.DATA,
+            {
+                "action": "carry_pull",
+                "peer_id": peer.peer_id,
+                "state": "done",
+                **plan.to_dict(),
+            },
+        )
+        lyrics_paths = self._peer_lyrics_paths_for_songs(run, songs)
+        if lyrics_paths:
+            self.pull_selection(session.peer_device_id, lyrics_paths)
+
+    @staticmethod
+    def _peer_lyrics_paths_for_songs(run: Any, songs: Sequence[str]) -> list[str]:
+        """对端 manifest 里、属于这几首歌的 `@lyrics/...` 路径（没有 → 空）。
+
+        歌词是依附歌曲的内容：只为本轮真正拿到的歌要歌词，不整库拉。
+        """
+        entries = list(getattr(run, "peer_entries", ()) or ())
+        if not entries:
+            return []
+        wanted: set[str] = set()
+        for path in songs:
+            digest = changelog.content_hash_for_stable_id(path)
+            if digest:
+                wanted.add(digest)
+        if not wanted:
+            return []
+        out: set[str] = set()
+        for entry in entries:
+            relative = str(getattr(entry, "relative_path", ""))
+            if not lyrics_channel.is_lyrics_path(relative):
+                continue
+            digest = lyrics_channel.song_content_hash(relative)
+            if digest and digest in wanted:
+                out.add(relative)
+        return sorted(out)
+
+    def _start_lyrics_push(self, session: HostSession, songs: list[str]) -> None:
+        """把这几首歌的 aligned 歌词随歌推给对端（无歌词 = 不发帧）。"""
+        run = lyrics_channel.LyricsPushRun(
+            session,
+            store=self._lyrics_store,
+            root=None,
+            ack_timeout=self._push_ack_timeout,
+            on_event=self._handle_lyrics_event,
+        )
+        self._lyrics_runs[run.run_id] = run
+        while len(self._lyrics_runs) > MAX_LYRICS_RUNS:
+            obsolete = next(
+                (key for key, item in self._lyrics_runs.items() if item.is_terminal), None
+            )
+            if obsolete is None:
+                obsolete = next(iter(self._lyrics_runs))
+            self._lyrics_runs.pop(obsolete, None)
+            self._cancel_lyrics_ack_timer(obsolete)
+        run.start(songs)
+        self._arm_lyrics_ack_timer(run)
+
+    def _handle_lyrics_event(self, event: dict[str, Any]) -> None:
+        """歌词推送运行事件 → 应用级事件（`EventType.LYRICS`）+ 重挂 ack 定时器。"""
+        run = self._lyrics_runs.get(str(event.get("run_id") or ""))
+        if run is not None:
+            self._arm_lyrics_ack_timer(run)
+        self._emit(EventType.LYRICS, dict(event))
+
+    def _route_lyrics_frame(self, session: HostSession, frame_type: int, payload: bytes) -> bool:
+        """把 `file_ack` 交给该会话上未终态的歌词推送运行（消费即止）。"""
+        for run in list(self._lyrics_runs.values()):
+            if run.session_id != session.session_id or run.is_terminal:
+                continue
+            if run.handle_application_frame(frame_type, payload):
+                return True
+        return False
+
+    def _arm_lyrics_ack_timer(self, run: lyrics_channel.LyricsPushRun) -> None:
+        """按 ack 超时重挂定时器（对端不回 ack → 该歌词失败，不悬挂）。"""
+        self._cancel_lyrics_ack_timer(run.run_id)
+        if run.is_terminal or not run.is_awaiting_ack or run.ack_timeout <= 0:
+            return
+        self._lyrics_timers[run.run_id] = self._schedule_timer(
+            run.ack_timeout, lambda: self._fire_lyrics_ack_timeout(run.run_id)
+        )
+
+    def _cancel_lyrics_ack_timer(self, run_id: str) -> None:
+        """摘掉该歌词运行的 ack 超时定时器（幂等）。"""
+        handle = self._lyrics_timers.pop(run_id, None)
+        if handle is not None:
+            handle.cancel()
+
+    def _fire_lyrics_ack_timeout(self, run_id: str) -> None:
+        """ack 超时到点：该歌词落失败 + 自动推进下一条（不再有事件时兜底重挂）。"""
+        self._lyrics_timers.pop(run_id, None)
+        run = self._lyrics_runs.get(run_id)
+        if run is None or run.is_terminal:
+            return
+        try:
+            run.handle_ack_timeout()
+        except Exception:  # noqa: BLE001 - 定时器回调不得抛出
+            logger.exception("lansync 歌词推送 ack 超时处理失败（run=%s）", run_id)
+        self._arm_lyrics_ack_timer(run)
 
     # ---------------------------------------------------------------- 事件
 
@@ -660,6 +995,14 @@ class SyncService:
         for run in list(self._pull_runs.values()):
             if run.session_id == session.session_id:
                 run.handle_session_closed()
+        for run in list(self._data_runs.values()):
+            if run.peer_id == session.peer_device_id:
+                run.handle_session_closed()
+        for run_id, run in list(self._lyrics_runs.items()):
+            if run.session_id == session.session_id:
+                run.handle_session_closed()
+                self._cancel_lyrics_ack_timer(run_id)
+        self._changelog_peers.pop(session.session_id, None)
         self._browsers.pop(session.session_id, None)
         self._emit(
             EventType.SESSION,
@@ -688,7 +1031,11 @@ class SyncService:
         """
         if self._route_push_frame(session, frame_type, payload):
             return
+        if self._route_lyrics_frame(session, frame_type, payload):
+            return
         if self._route_pull_frame(session, frame_type, payload):
+            return
+        if self._route_data_frame(session, frame_type, payload):
             return
         if self._application_frame_handler is None:
             return

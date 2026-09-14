@@ -72,7 +72,7 @@ from .locallib import (
     REASON_INVALID_PATH,
     resolve_library_file,
 )
-from .manifest import Collection, manifest_entries
+from .manifest import Collection, ManifestEntry, manifest_entries
 from .push_models import (
     REASON_CANCELLED,
     REASON_LOCAL_FILE_UNAVAILABLE,
@@ -200,6 +200,7 @@ class LibraryPushRun:
         self._dispatched = 0
         #: 待推送队列（已按声明顺序排好）
         self._queue: list[_PendingPush] = []
+        self._peer_entries: tuple[ManifestEntry, ...] = ()
         self._sender: FileSender | None = None
         self._current: PushEntry | None = None
         #: 在途文件总字节（进度分母；`_handle_ack` 报进度时用）
@@ -244,6 +245,15 @@ class LibraryPushRun:
     def summary(self) -> LibraryPushSummary:
         """结果账目（实时值）。"""
         return self._summary
+
+    @property
+    def peer_entries(self) -> tuple[ManifestEntry, ...]:
+        """本轮拿到的**对端 manifest 条目**（未拿到 = 空）。
+
+        给「跟歌走」的配对判据用（§14.9：对端持有的 `content_hash` 集合）——
+        不为此重建一次 manifest 请求。
+        """
+        return self._peer_entries
 
     def status(self) -> dict[str, Any]:
         """可查询状态对象（`push_status` 返回值；键名 camelCase）。"""
@@ -338,6 +348,7 @@ class LibraryPushRun:
         except PushError as error:
             self._fail(f"manifest_response 载荷非法：{error}")
             return
+        self._peer_entries = tuple(remote_entries)
         try:
             local_entries = manifest_entries(self._selection, root=self._root)
         except Exception as error:  # noqa: BLE001 - 本端曲库事实不可用 = 本次推送失败

@@ -122,6 +122,12 @@ DEFAULT_AUDIO_EXTS = [".mp3", ".flac", ".m4a", ".wav", ".ogg", ".aac", ".opus"]
 AUDIO_EXTS = set(DEFAULT_AUDIO_EXTS)
 LYRIC_EXTS = {".srt", ".lrc"}
 
+# 歌词缓存根（与 backend/lyric_fetch.py 的 CACHE_DIR 同口径）：manual / network 两类
+# 歌词各自一个子命名空间；aligned 子目录是 S2 随歌同步的**唯一**歌词落点（§15.1）。
+LYRIC_CACHE_DIR = Path(os.path.expanduser("~")) / ".cache" / "qqplayer" / "lyric"
+# 对齐歌词库（桌面 AI 对齐产物；随歌同步通道读写这里，其余两类不参与同步）
+ALIGNED_LYRIC_DIR = LYRIC_CACHE_DIR / "aligned"
+
 # 本地视频格式白名单（视频模块：/api/videos 列表扫描 + stream/subtitle 服务）
 VIDEO_EXTS = [".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".ts"]
 

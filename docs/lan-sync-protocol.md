@@ -1020,11 +1020,11 @@ web 版（FastAPI + Vue，本仓库）以 **Host + 同步发起方** 角色接�
 | 按路径拉取请求 / 结果 | 12 / 13 | ❌ 缺失 | 同上 | `SyncLibrarySyncModels.swift`、`SyncLibraryFetchResponder.swift` |
 | 推送声明 | 14 | ❌ 缺失 | 同上 | `SyncLibraryPushModels.swift`、`SyncLibraryPassiveHost.swift` |
 | 文件分块传输（停等 / 断点 / SHA-256） | 4 / 5 / 6 | ❌ 缺失 | 同上 | `SyncFileTransferModels.swift`、`SyncFileSender.swift`、`SyncFileReceiver.swift` |
-| 播放数据变更日志 + LWW + 游标 | 8 / 9 | ❌ 缺失 | 同上 | `SyncDataSyncModels.swift`、`SyncChangeLogStore.swift`、`SyncChangeLogPeer.swift`、`SyncLWWReconcile.swift`、`SyncChangeLogApplier.swift` |
-| `content_hash` 双向映射 + 缺歌挂起重放 | （8/9 载荷内） | ❌ 缺失 | 同上 | `SyncChangeLogMapping.swift`、`SyncChangeLogPendingStore.swift` |
-| 删除不传播策略 | （8/9 载荷内） | ❌ 缺失 | 同上 | `SyncChangeLogDeletionPolicy.swift` |
-| 播放数据「跟歌走」 | （8/9 载荷内） | ❌ 缺失 | 同上 | `SyncPlaybackCarryPlan.swift`、`SyncPlaybackCarryPeer.swift` |
-| aligned 歌词命名空间与随歌安装 | （10/11 + 12/13 内） | ❌ 缺失 | 同上 | `SyncAlignedLyrics.swift`、`SyncLyricsReceiver.swift`、`Services/AlignedLyricsStore.swift` |
+| 播放数据变更日志 + LWW + 游标 | 8 / 9 | ✅ 已实现（S4，2026-09-14） | `backend/app/lansync/changelog.py`、`backend/app/db.py`（`sync_outbox` / `sync_cursor` / `sync_push_cursor`） | `SyncDataSyncModels.swift`、`SyncChangeLogStore.swift`、`SyncChangeLogPeer.swift`、`SyncLWWReconcile.swift`、`SyncChangeLogApplier.swift` |
+| `content_hash` 双向映射 + 缺歌挂起重放 | （8/9 载荷内） | ✅ 已实现（S4） | `changelog.py`（`localize_row` / `rewrite_row`）、`db.py`（`sync_pending_change` + `track_fingerprint_by_hash`） | `SyncChangeLogMapping.swift`、`SyncChangeLogPendingStore.swift` |
+| 删除不传播策略 | （8/9 载荷内） | ✅ 已实现（S4，唯一事实源 `is_transmittable` / `transmittable_indexes`） | `changelog.py` | `SyncChangeLogDeletionPolicy.swift` |
+| 播放数据「跟歌走」 | （8/9 载荷内） | ✅ 已实现（S4，推送帧 9 / 拉取帧 8） | `changelog.py`（`carry_plan` / `pairing_plan` / `CarryDriver`）、`service.py`（推送/拉取终态收尾） | `SyncPlaybackCarryPlan.swift`、`SyncPlaybackCarryPeer.swift` |
+| aligned 歌词命名空间与随歌安装 | （10/11 + 12/13 内） | ⚠️ 部分（S4：推送帧 14 + 4/5/6、拉取 12/13 + 4/5/6 随歌已实现；**web 作为被请求方**的 `@lyrics/` 应答未接，见表下注） | `backend/app/lansync/lyrics.py`、`pull.py`（`lyrics_root` 安装分支） | `SyncAlignedLyrics.swift`、`SyncLyricsReceiver.swift`、`Services/AlignedLyricsStore.swift` |
 | 推送 / 拉取编排（一次同步的动作与状态机） | — | ❌ 缺失 | 同上 | `SyncLibraryPushController.swift`、`SyncLibraryPullController.swift`、`SyncCollectionSyncCoordinator.swift`、`SyncDataSyncCoordinator.swift` |
 | 会话事件分发链（多 handler 挂接、先己后彼、释放不牵连他人） | — | ❌ 缺失（回调是单值字段） | `backend/app/lansync/session.py:336-348`（单个 `on_application_frame`） | `SyncPeerSession+Frames.swift:599-660`（`SyncSessionAttachment`） |
 | 内容选择与 `@smart:*` 命名空间 | （15 载荷内） | ❌ 缺失 | 同上 | `SyncCollectionSelection.swift`、`SyncBrowseSource.swift` |
@@ -1044,11 +1044,11 @@ web 版（FastAPI + Vue，本仓库）以 **Host + 同步发起方** 角色接�
 6. **按路径拉取应答（设备侧能力，web 作为被动端时也要）** → `SyncLibraryFetchResponder.swift`（收 12 → **逐条根内包含性 + 软链校验**（越界拒读）→ 串行用 FileSender 推 → 回 13）、`SyncLocalLibraryProvider.swift`（被动侧能力装配：manifest 应答 + 拉取应答）。
 7. **推送声明与接收认领** → `SyncLibraryPushModels.swift`（`SyncPushClaimTable` 传输级身份 → 目标相对路径；`SyncLibraryLanding` 原子落位、失败保留本端原文件）、`SyncLibraryPassiveHost.swift`（收 14 + 收文件 + 认领落位 + 歌词安装的被动端装配）。
 8. **发起端两条编排** → `SyncLibraryPushController.swift`（推：拿对端 manifest → 计划 toPush → 发 14 → 串行推送 → 汇总）、`SyncLibraryPullController.swift`（拉：拿对端 manifest → 计划 toFetch → 发 12 → 收文件 + 校验 + 落位 → 收 13 收尾）、`SyncCollectionSyncCoordinator.swift`（选中集合的单向补齐编排，含「对端多出来的什么都不做」）、`SyncDataSyncCoordinator.swift`（独立「同步数据」：一次 = 推本端增量 + 拉对端增量）。
-9. **播放数据链路** → `SyncChangeLogStore.swift`（outbox 追加 / 两张游标 / 分页取批，事务纪律）、`SyncChangeLogPeer.swift`（帧 8/9 处理：应答 pull、主动推增量、收批）、`SyncLWWReconcile.swift`（LWW 纯逻辑）、`SyncChangeLogApplier.swift`（胜出行落本地业务表）。
-10. **跨端引用映射与竞态兜底** → `SyncChangeLogMapping.swift`（发送侧填 `contentHash`、接收侧本地化改写）、`SyncChangeLogPendingStore.swift`（缺歌挂起 + 歌到位重放）。
-11. **删除不传播（单一事实源）** → `SyncChangeLogDeletionPolicy.swift`（发送侧逐行过滤 + 批次抑制、接收侧一律忽略；五个消费点必须都走它）。
-12. **播放数据跟歌走** → `SyncPlaybackCarryPlan.swift`（计划器：只带本次传输的、只带两端共有的、delete 不带）、`SyncPlaybackCarryPeer.swift`（生产接线：帧 9 推 / 帧 8 拉 + 本端曲库事实）。
-13. **对齐歌词** → `SyncAlignedLyrics.swift`（`@lyrics/{歌曲 content_hash}.json` 命名空间 + manifest 条目 + content_hash 映射）、`SyncLyricsReceiver.swift`（接收安装编排：暂存 / 收尾重试 / 丢弃，无删除路径）、`Services/AlignedLyricsStore.swift`（歌词库唯一入口：目录即类型标记，仅 `aligned` 参与同步）。
+9. **播放数据链路** → `SyncChangeLogStore.swift`（outbox 追加 / 两张游标 / 分页取批，事务纪律）、`SyncChangeLogPeer.swift`（帧 8/9 处理：应答 pull、主动推增量、收批）、`SyncLWWReconcile.swift`（LWW 纯逻辑）、`SyncChangeLogApplier.swift`（胜出行落本地业务表）。**web 侧已实现（S4）**，见 §16.5。
+10. **跨端引用映射与竞态兜底** → `SyncChangeLogMapping.swift`（发送侧填 `contentHash`、接收侧本地化改写）、`SyncChangeLogPendingStore.swift`（缺歌挂起 + 歌到位重放）。**web 侧已实现（S4）**，见 §16.5。
+11. **删除不传播（单一事实源）** → `SyncChangeLogDeletionPolicy.swift`（发送侧逐行过滤 + 批次抑制、接收侧一律忽略；五个消费点必须都走它）。**web 侧已实现（S4）**，见 §16.5。
+12. **播放数据跟歌走** → `SyncPlaybackCarryPlan.swift`（计划器：只带本次传输的、只带两端共有的、delete 不带）、`SyncPlaybackCarryPeer.swift`（生产接线：帧 9 推 / 帧 8 拉 + 本端曲库事实）。**web 侧已实现（S4）**，见 §16.5。
+13. **对齐歌词** → `SyncAlignedLyrics.swift`（`@lyrics/{歌曲 content_hash}.json` 命名空间 + manifest 条目 + content_hash 映射）、`SyncLyricsReceiver.swift`（接收安装编排：暂存 / 收尾重试 / 丢弃，无删除路径）、`Services/AlignedLyricsStore.swift`（歌词库唯一入口：目录即类型标记，仅 `aligned` 参与同步）。**web 侧已实现（S4）**，见 §16.5。
 14. **内容选择 / `@smart:*`** → `SyncCollectionSelection.swift`（歌单标识形态校验 + 选择集展开）、`SyncBrowseSource.swift`（`@library` / `@favorites` / `<slug>` / `@smart:*` 解析与排序，零 IO）。
 15. **顶层服务装配** → `SyncLibraryPassiveHost.swift`（一个已配对会话的被动端能力全套接线）、`SyncPlaybackCarryPeer.swift:128-157`（携带驱动装配，含「必须强持有 handler」的坑）。
 
@@ -1056,7 +1056,7 @@ web 版（FastAPI + Vue，本仓库）以 **Host + 同步发起方** 角色接�
 
 - **假设 1**：web Host 在 S2 拓扑里同时扮演「服务端」与「发起方（Mac 角色）」，因此两条流程的**发起动作**都在 web 侧；设备（iOS）保持纯被动（设计文档 §6.1 + §12b 决策 6）。
 - **假设 2**：§16.1 的两条流程按 Swift 现有实现（`SyncLibraryPushController` / `SyncLibraryPullController`）的帧序复刻；Swift 端未实现的时序细节（例如推送批与播放数据携带的先后）以各自文件为准。
-- **待核实 1**：web 侧曲库 / DB 是否已有 `content_hash` 列与 outbox（`sync_outbox` / `sync_cursor` / `sync_push_cursor` / `sync_pending_change`）——本次只取证到 `frame.py` / `session.py` / `service.py`，`backend/app/db.py`、`routers/library.py` 未读；矩阵中该行标 ⚠️ 而非 ✅/❌。
+- **待核实 1（已核实，S4 2026-09-14）**：web 侧曲库 / DB **已有** `content_hash`（`track_fingerprints` 表 + `locallib.ensure_content_hash`）；S4 又补了 `sync_outbox` / `sync_cursor` / `sync_push_cursor` / `sync_pending_change` 四张表（幂等建表，老库启动自动补）。
 - **待核实 2**：web 侧会话回调目前是**单值字段**（`session.py:336-348`），多 handler 需要自己实现一个分发链（Swift 用 `SyncSessionAttachment`）；是否需要保持「释放不牵连其它 handler」的语义由实现方定。
 - **待核实 3**：`docs/lan-sync-web-host-plan.md` M6/M7 里程碑与本清单的映射（该文档 M6 = 内容同步 10/11 + 15/16 + 12/13 + 14 + 4/5/6，M7 = 8/9 + LWW + content_hash + 对齐歌词），本章未改动该文档。
 
@@ -1064,6 +1064,29 @@ web 版（FastAPI + Vue，本仓库）以 **Host + 同步发起方** 角色接�
 >
 > - 设计文档 §1 说「未来 web/NAS 主机按同契约另行实现（FastAPI 侧），客户端不感知」——本章确认：**客户端确实不感知**（帧值 / 载荷 / 语义全部复用 v1），但 web 侧当前**只有帧与通道层**，业务语义（内容同步 / 播放数据）尚未实现（见 §16.2 矩阵）。
 > - 设计文档 §5「原语集（逻辑层，与传输解耦）」把 `manifestFetch` / `filePull(fileID, offset)` / `filePush` 写成抽象原语；线上实际帧号与命名是 10/11、12/13、14+4/5/6（`SyncFrame.swift:52-75`），本章按线上实现记录。
+
+---
+
+### 16.5 web 侧 S4 实现落点（2026-09-14）
+
+| 关注点 | 落点 |
+| --- | --- |
+| 变更日志 / 游标 / 挂起（存储） | `backend/app/db.py`：`sync_outbox` / `sync_cursor` / `sync_push_cursor` / `sync_pending_change`、`sync_outbox_page`（本批末行 id 口径）、`sync_apply_*`（远端胜出行落业务表） |
+| 语义层（实体 / 行键 / 快照 / LWW / 映射 / 删除策略 / 计划器 / 帧 8/9） | `backend/app/lansync/changelog.py` |
+| 歌词通道（命名空间 / 库 / manifest / 接收安装 / 推送） | `backend/app/lansync/lyrics.py` |
+| 应用级接口 | `service.py`：`data_sync_push(peer_id)` / `data_sync_pull(peer_id)` / `data_sync_status(run_id=None)`；事件类型 `EventType.DATA` / `EventType.LYRICS`（经既有 `events_since` 轮询） |
+| 跟歌走 / 歌词随歌挂接 | `service.py`：推送/拉取运行进终态时收尾（帧 9 带播放数据、帧 8 拉对端数据、帧 14 + 4/5/6 推歌词、12/13 拉歌词） |
+| outbox 写点 | `db.py` 业务写入点（favorites / playlists / playback_events）**同一事务**内落 outbox |
+
+**web 侧身份口径（实现基准，与 Swift 的差异）**：Swift 的本端歌曲身份是 `track.stable_id`（绝对路径哈希）；web 曲库是文件系统扫描、没有 songs 表，故 **web 的本端身份 = 曲库相对路径**（行键用它），跨端身份键两端一致 = 歌曲 `content_hash`。行键 / 载荷在线上仍是**发送端本端形态**（§14.8 v1 格式不变，老 peer 可互通）。
+
+**歌词库命名空间（web 新增）**：现有 `manual`（`~/.cache/qqplayer/lyric/manual/`）与 `network`（`~/.cache/qqplayer/lyric/`）都不参与同步；S4 新增 `aligned`（`state.ALIGNED_LYRIC_DIR`，默认 `~/.cache/qqplayer/lyric/aligned/`）作为随歌通道**唯一落点**，**文件名 = 歌曲 content_hash**（web 相对路径会随改名漂移，指纹才是稳定身份）——于是 wire 路径与本地文件名恒等，无需二次映射。
+
+**已知缺口（如实记录）**：
+
+1. web 作为**被请求方**的歌词应答未接：`fetch_responder` 不认 `@lyrics/` 命名空间（收到该路径的帧 12 会回 `invalid_path`）。v1 拓扑（设备纯被动、发起方恒为 web/Mac）用不到；若将来让设备主动拉，需给应答器加「根表」（§15.3）。
+2. `manual` 歌词的同步不在 v1 范围（§15 拍板），web 侧 `POST /api/lyric/align` 目前只返回 LRC 文本、不落 aligned 库 → **生产环境里 aligned 库需要上游落库点**（后续项）。
+3. 推送「跟歌走」的配对判据用「对端本轮 manifest ∪ 本轮送达歌曲的本地指纹」（与 Swift 同口径）；但帧 9 的 `lastOutboxID = 本批实际末行 id`，批内末行可能小于对端已记下的位置 → **对端游标可能回退**（v1 该游标在被推方是惰性的，与 Swift 记录一致，§14.9）。
 
 ---
 

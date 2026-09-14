@@ -251,9 +251,11 @@ async def _paired_reconnect(store_dir: Path) -> None:
         again.establish_ready()
         assert await _wait_for(lambda: [s for s in service.sessions if s.is_ready])
         assert service.pending_pairs == []  # 不弹批准
-        again.send_application_frame(FrameType.CHANGE_LOG_PULL, b'{"cursor":0}')
+        # 业务帧通道抽样：用**未被内部实现消费**的帧型（S4 起帧 8/9 由变更日志处理器
+        # 应答 / 落库，不再透传到应用层；帧 15 仍按“无内部消费者 → 交应用层”的语义走）
+        again.send_application_frame(FrameType.PEER_LIBRARY_REQUEST, b'{"cursor":0}')
         await _wait_for(lambda: frames)
-        assert frames == [(int(FrameType.CHANGE_LOG_PULL), b'{"cursor":0}')]
+        assert frames == [(int(FrameType.PEER_LIBRARY_REQUEST), b'{"cursor":0}')]
         _, events = service.events_since(0)
         assert sum(1 for e in events if e["type"] == "pair_request") == 1  # 只第一次配对
         await again.aclose()

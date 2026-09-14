@@ -55,6 +55,8 @@ def _sqlite_isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "ANNOTATIONS_FILE", tmp_path / "annotations.json")
     monkeypatch.setattr(state, "VOCAB_FILE", tmp_path / "vocab.json")
     monkeypatch.setattr(state, "PAIRING_FILE", tmp_path / "pairing.json")
+    # aligned 歌词库（S4 随歌通道）也指向临时目录：测试绝不碰真实用户歌词缓存
+    monkeypatch.setattr(state, "ALIGNED_LYRIC_DIR", tmp_path / "lyrics-aligned")
     db.reset()  # 清初始化标志：本测试的 DB 首次访问时重建/重迁移
     yield
     db.reset()

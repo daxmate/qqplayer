@@ -78,6 +78,10 @@ class EventType(str, Enum):
     #: 拉取（S3b）编排事件：对端清单页（`action: "preview"`）+ 状态迁移 + 逐条接收进度
     #: （载荷见 `pull.LibraryPullRun.status` 与 `pull.PeerLibraryPage.to_payload`）
     PULL = "pull"
+    #: 播放数据同步（S4）事件：帧 8/9 运行状态 + 账目（见 `changelog.DataSyncRun.status`）
+    DATA = "data"
+    #: 对齐歌词随歌推送（S4）事件：状态 + 逐文件进度（见 `lyrics.LyricsPushRun.status`）
+    LYRICS = "lyrics"
 
 
 @dataclass(frozen=True, slots=True)

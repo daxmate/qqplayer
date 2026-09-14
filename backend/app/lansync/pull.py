@@ -44,6 +44,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+from . import lyrics as lyrics_channel
 from .fetch_responder import (
     FetchPayloadError,
     FetchRequest,
@@ -556,14 +557,23 @@ class LibraryPullRun:
         *,
         relative_paths: Iterable[Any] | None = None,
         root: Any = None,
+        lyrics_root: Any = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
         run_id: str | None = None,
         incoming_dir_name: str = INCOMING_DIR_NAME,
     ) -> None:
         """`relative_paths` = 本端点名集合（缺省 None = 对端全库）。
 
+        `lyrics_root` = aligned 歌词库根（§15：取回的 `@lyrics/...` 条目装进歌词库，
+        **不落曲库根**）；None = 歌词条目按普通路径处理（默认不认歌词命名空间，
+        避免测试直接碰到真实用户缓存目录）。
         `on_event` = 进度 / 状态事件回调（service 层转 `EventType.PULL`）。
         """
+        self.run_id = run_id or uuid.uuid4().hex
+        self._session = session
+        self._root = root
+        self._lyrics_root = lyrics_root
+        self._lyrics_receiver: Any = None
         self.run_id = run_id or uuid.uuid4().hex
         self._session = session
         self._root = root
@@ -594,6 +604,7 @@ class LibraryPullRun:
         self._claims = _ClaimIndex()
         self._receiver: FileReceiver | None = None
         self._staging_dir: Path | None = None
+        self._peer_entries: tuple[ManifestEntry, ...] = ()
 
     # ---------------------------------------------------------------- 查询
 
@@ -626,6 +637,15 @@ class LibraryPullRun:
     def summary(self) -> LibraryPullSummary:
         """结果账目（实时值）。"""
         return self._summary
+
+    @property
+    def peer_entries(self) -> tuple[ManifestEntry, ...]:
+        """本轮拿到的**对端 manifest 条目**（未拿到 = 空）。
+
+        给「跟歌走 / 歌词随歌」用：对端 manifest 里的 `@lyrics/...` 条目 = 对端
+        持有的对齐歌词，本端据此点名搬运（§15.3）。
+        """
+        return self._peer_entries
 
     def status(self) -> dict[str, Any]:
         """可查询状态对象（`pull_status` 返回值；键名 camelCase）。"""
@@ -703,6 +723,7 @@ class LibraryPullRun:
             self._fail(f"manifest_response 载荷非法：{error}")
             return
         self._root_name = root_name
+        self._peer_entries = tuple(remote_entries)
         try:
             local_entries = manifest_entries(Collection.all(), root=self._root)
         except Exception as error:  # noqa: BLE001 - 本端曲库事实不可用 = 本次拉取失败
@@ -812,6 +833,10 @@ class LibraryPullRun:
                 "收到的文件与点名集合对不上（身份与文件名都无匹配）",
             )
             return
+        if lyrics_channel.is_lyrics_path(relative_path):
+            # 歌词条目：装进 aligned 歌词库（**不落曲库根、不写孤儿**，§15.4）
+            self._install_lyrics(result, relative_path)
+            return
         target = self._target_path(relative_path)
         if target is None:
             self._record_failure(relative_path, REASON_INVALID_PATH, "目标路径非法 / 越出曲库根")
@@ -830,6 +855,32 @@ class LibraryPullRun:
                 "size": int(result.total_size),
             }
         )
+
+    def _install_lyrics(self, result: FileTransferResult, relative_path: str) -> None:
+        """收到一条 `@lyrics/...`：交给 `LyricsReceiver` 安装（本端没这首歌 → 暂存/丢弃）。
+
+        账目口径与普通文件相同（`completed` / `failed`），但**不**做指纹落库与扫描缓存失效
+        （歌词不是曲库事实）；**不存在删除本端歌词的路径**（§15.4 不传播删除）。
+        """
+        outcome = self._lyrics_receiver_instance().receive(result.target_path, relative_path)
+        if outcome.kind in ("installed", "discarded"):
+            self._summary.completed.append(relative_path)
+            self._received_bytes += max(0, result.total_size)
+            self._total_bytes = max(self._total_bytes, self._received_bytes)
+            self._emit({"action": "lyrics", "path": relative_path, "outcome": outcome.kind})
+            return
+        if outcome.kind == "pending":
+            self._emit({"action": "lyrics", "path": relative_path, "outcome": "pending"})
+            return
+        self._record_failure(relative_path, REASON_SEND_FAILED, "歌词安装失败")
+
+    def _lyrics_receiver_instance(self) -> Any:
+        """惰性建歌词接收编排（一运行一实例；收尾时统一再试一次映射）。"""
+        if self._lyrics_receiver is None:
+            self._lyrics_receiver = lyrics_channel.LyricsReceiver(
+                lyrics_channel.AlignedLyricsStore(self._lyrics_root)
+            )
+        return self._lyrics_receiver
 
     def _land(self, result: FileTransferResult, target: Path, relative_path: str) -> bool:
         """把接收端落好的文件移入目标相对路径（目录不存在则创建；目标已存在则覆盖）。"""
@@ -910,6 +961,20 @@ class LibraryPullRun:
                 continue
             known.add(failure.relative_path)
             self._summary.failed.append(PullFailure(failure.relative_path, failure.reason))
+        # 轮次收尾：暂存歌词再试一次映射（仍不行则丢弃，下次同步自愈，§15.4）
+        if self._lyrics_receiver is not None:
+            for outcome in self._lyrics_receiver.flush_pending():
+                if outcome.kind == "installed":
+                    if outcome.wire_path not in self._summary.completed:
+                        self._summary.completed.append(outcome.wire_path)
+                elif outcome.kind in ("discarded", "failed"):
+                    self._emit(
+                        {
+                            "action": "lyrics",
+                            "path": outcome.wire_path,
+                            "outcome": outcome.kind,
+                        }
+                    )
         self._receiver = None  # 本轮结束：不再接文件帧
         self._transition(PullState.DONE)
 
@@ -921,10 +986,12 @@ class LibraryPullRun:
         self._emit({"action": "failure", "path": relative_path, "reason": reason})
 
     def _close_receiver(self) -> None:
-        """中止在途接收（`.part` 保留：可续传）。"""
+        """中止在途接收（`.part` 保留：可续传；暂存歌词清理）。"""
         receiver, self._receiver = self._receiver, None
         if receiver is not None:
             receiver.cancel()
+        if self._lyrics_receiver is not None:
+            self._lyrics_receiver.cancel()
 
     def _transition(self, state: PullState) -> None:
         """状态迁移 + 事件（终态含完整账目）。"""

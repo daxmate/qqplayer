@@ -23,6 +23,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,22 @@ from pathlib import Path
 from app import state
 
 logger = logging.getLogger(__name__)
+
+
+class _LazyChanges:
+    """惰性代理：本模块 → `app.lansync.changelog` 的**纯构造函数**（避免模块级循环 import）。
+
+    changelog 依赖 db 的存储 API；db 只在**业务写入点**取它的纯构造器
+    （`for_favorite` / `for_play_history` / `for_playlists` / `for_playlist_item`）。
+    """
+
+    def __getattr__(self, name: str):
+        from app.lansync import changelog
+
+        return getattr(changelog, name)
+
+
+_changes = _LazyChanges()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS favorites (
@@ -115,7 +132,42 @@ CREATE TABLE IF NOT EXISTS track_fingerprints (
     mtime_ms      INTEGER NOT NULL DEFAULT 0,  -- 文件 mtime（毫秒 since 1970）
     updated_at    TEXT NOT NULL DEFAULT ''
 );
+-- 局域网同步（S2, S4）播放数据变更日志（outbox）：本端**业务写入点**的变更记录，
+-- 与 Swift `sync_outbox` 同构（列名 row_key / updated_at / payload_json）。追加与业务
+-- 行写入**同一事务**（绝不先改业务行后补 outbox）；delete 本地留痕但**永不上线**（§14.9）。
+CREATE TABLE IF NOT EXISTS sync_outbox (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity       TEXT NOT NULL,               -- favorite|play_history|playlist|playlist_item
+    row_key      TEXT NOT NULL,               -- 本地形态行键（相对路径 / 复合键，§14.5）
+    op           TEXT NOT NULL,               -- upsert|delete
+    updated_at   INTEGER NOT NULL,            -- 变更时刻（毫秒 since 1970）= LWW 判据
+    payload_json TEXT                         -- 行快照 JSON（delete 行为 NULL）
+);
+-- 拉取游标：本端**已消费的对端** outbox 位置（谁写/谁读见 §14.6）
+CREATE TABLE IF NOT EXISTS sync_cursor (
+    peer_id        TEXT PRIMARY KEY,
+    last_outbox_id INTEGER NOT NULL DEFAULT 0
+);
+-- 推送游标：本端**已推给对端**的本端 outbox 位置（与上面那张表**方向相反**，合表必错）
+CREATE TABLE IF NOT EXISTS sync_push_cursor (
+    peer_id        TEXT PRIMARY KEY,
+    last_outbox_id INTEGER NOT NULL DEFAULT 0
+);
+-- 本地缺歌挂起：content_hash 映射不到本端曲目时暂存远端行，歌到位后重放（数据不丢，§14.8）
+CREATE TABLE IF NOT EXISTS sync_pending_change (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity         TEXT NOT NULL,
+    content_hash   TEXT NOT NULL,
+    remote_row_key TEXT NOT NULL,             -- 远端原始行键（重放时重新本地化）
+    op             TEXT NOT NULL,
+    updated_at     INTEGER NOT NULL,
+    payload_json   TEXT,
+    created_at     TEXT NOT NULL DEFAULT '',
+    UNIQUE(entity, content_hash, remote_row_key)
+);
 CREATE INDEX IF NOT EXISTS idx_playlist_songs_playlist ON playlist_songs(playlist_id, position);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_key ON sync_outbox(entity, row_key);
+CREATE INDEX IF NOT EXISTS idx_sync_pending_hash ON sync_pending_change(content_hash);
 CREATE INDEX IF NOT EXISTS idx_playback_ts ON playback_events(ts);
 CREATE INDEX IF NOT EXISTS idx_track_fingerprints_hash ON track_fingerprints(content_hash);
 CREATE INDEX IF NOT EXISTS idx_ops_cursor ON ops(id);
@@ -514,21 +566,43 @@ def favorites_load() -> list[str]:
 
 
 def favorites_save(paths: list[str]) -> None:
-    """全量重写收藏（等价原 JSON save 语义；单事务原子写）"""
+    """全量重写收藏（等价原 JSON save 语义；单事务原子写）
+
+    与 outbox 同一事务：按前后集合差异补记 upsert/delete（S4），不产生无谓变更。
+    """
     _ensure_ready()
+    before = set(favorites_load())
+    after = [p for p in paths if p]
+    after_set = set(after)
     with _write_lock, _session() as conn:
         conn.execute("DELETE FROM favorites")
-        conn.executemany("INSERT INTO favorites (path) VALUES (?)", [(p,) for p in paths if p])
+        conn.executemany("INSERT INTO favorites (path) VALUES (?)", [(p,) for p in after])
+        changes = [
+            row
+            for path in after_set - before
+            for row in _changes.for_favorite(path, _changes.OP_UPSERT)
+        ]
+        changes += [
+            row
+            for path in before - after_set
+            for row in _changes.for_favorite(path, _changes.OP_DELETE)
+        ]
+        _outbox_add(conn, changes)
 
 
 def favorites_toggle(path: str) -> bool:
-    """在列表则移除、不在则追加；返回收藏后是否处于已收藏状态"""
+    """在列表则移除、不在则追加；返回收藏后是否处于已收藏状态
+
+    业务行与 outbox 变更（favorite upsert/delete）**同一事务**提交（S4）。
+    """
     _ensure_ready()
     with _write_lock, _session() as conn:
         if conn.execute("SELECT 1 FROM favorites WHERE path = ?", (path,)).fetchone():
             conn.execute("DELETE FROM favorites WHERE path = ?", (path,))
+            _outbox_add(conn, _changes.for_favorite(path, _changes.OP_DELETE))
             return False
         conn.execute("INSERT INTO favorites (path) VALUES (?)", (path,))
+        _outbox_add(conn, _changes.for_favorite(path, _changes.OP_UPSERT))
         return True
 
 
@@ -539,7 +613,11 @@ def favorites_remove(paths: list[str]) -> None:
     if not paths:
         return
     with _write_lock, _session() as conn:
-        conn.executemany("DELETE FROM favorites WHERE path = ?", [(p,) for p in paths])
+        for p in paths:
+            if conn.execute("SELECT 1 FROM favorites WHERE path = ?", (p,)).fetchone() is None:
+                continue  # 无匹配不动：不产生无对象的 outbox 行
+            conn.execute("DELETE FROM favorites WHERE path = ?", (p,))
+            _outbox_add(conn, _changes.for_favorite(p, _changes.OP_DELETE))
 
 
 def favorites_replace_path(old: str, new: str) -> None:
@@ -579,8 +657,12 @@ def playlists_load() -> list[dict]:
 
 
 def playlists_save(playlists: list[dict]) -> None:
-    """全量重写歌单（等价原 JSON save 语义；单事务原子写）"""
+    """全量重写歌单（等价原 JSON save 语义；单事务原子写）
+
+    与 outbox 同一事务：按前后差异补记歌单结构 / 歌单项的 upsert/delete（S4）。
+    """
     _ensure_ready()
+    before = playlists_load()
     with _write_lock, _session() as conn:
         conn.execute("DELETE FROM playlist_songs")
         conn.execute("DELETE FROM playlists")
@@ -599,6 +681,7 @@ def playlists_save(playlists: list[dict]) -> None:
                     "INSERT INTO playlist_songs (playlist_id, path, position) VALUES (?,?,?)",
                     (pl["id"], str(path), pos),
                 )
+        _outbox_add(conn, _changes.for_playlists(before, playlists))
 
 
 def playlists_remove_paths(paths: list[str]) -> None:
@@ -608,7 +691,23 @@ def playlists_remove_paths(paths: list[str]) -> None:
     if not paths:
         return
     with _write_lock, _session() as conn:
-        conn.executemany("DELETE FROM playlist_songs WHERE path = ?", [(p,) for p in paths])
+        for p in paths:
+            rows = conn.execute(
+                "SELECT playlist_id FROM playlist_songs WHERE path = ?", (p,)
+            ).fetchall()
+            if not rows:
+                continue
+            conn.execute("DELETE FROM playlist_songs WHERE path = ?", (p,))
+            _outbox_add(
+                conn,
+                [
+                    change
+                    for item in rows
+                    for change in _changes.for_playlist_item(
+                        item["playlist_id"], p, _changes.OP_DELETE, 0
+                    )
+                ],
+            )
 
 
 def playlists_replace_path(old: str, new: str) -> None:
@@ -627,7 +726,10 @@ def playlists_replace_path(old: str, new: str) -> None:
 
 # ============ playback_events（滚动截断保留 PLAYBACK_LIMIT 条） ============
 def playback_append(record: dict) -> None:
-    """追加一条播放记录；超 PLAYBACK_LIMIT 删最旧（单事务）"""
+    """追加一条播放记录；超 PLAYBACK_LIMIT 删最旧（单事务）
+
+    与 outbox 同一事务：补记 play_history upsert（跨端行键 = 相对路径 + 播放时刻毫秒）。
+    """
     _ensure_ready()
     with _write_lock, _session() as conn:
         conn.execute(
@@ -636,6 +738,7 @@ def playback_append(record: dict) -> None:
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             _playback_row(record),
         )
+        _outbox_add(conn, _changes.for_play_history(record))
         _trim_playback(conn)
 
 
@@ -1053,3 +1156,380 @@ def track_fingerprints_upsert(rows: list[dict]) -> int:
             items,
         )
     return len(items)
+
+
+# ============ 局域网同步（S2, S4）播放数据变更日志 ============
+# 表：sync_outbox（本端变更留痕）/ sync_cursor（拉取游标）/ sync_push_cursor（推送游标）
+#     / sync_pending_change（本地缺歌挂起）。语义契约见 docs/lan-sync-protocol.md §14。
+#
+# 纪律（与 Swift `SyncChangeLogStore` 同口径）：
+# - **业务写入点在同一事务内追加 outbox**（本模块的 favorites/playlists/playback 写函数
+#   自己调 `_outbox_add`），业务行回滚则 outbox 一并回滚 —— 绝不先改业务行后补 outbox
+#   （丢变更）或先记 outbox 后业务失败（假变更）。
+# - 两张游标表**方向相反，绝不可复用**：`sync_cursor` = 本端已消费的**对端**位置（拉取），
+#   `sync_push_cursor` = 本端**已推给对端**的本端位置（推送）。
+# - 取页返回 `last_outbox_id` = **本批实际末行 id**（与取批同一读事务内取值）：分页下
+#   不会把本批没发出的行永久越过；空批不推进（§14.6 S1 口径）。
+# - delete 行本地照常留痕，但**不上线**（过滤在同步层，见 app/lansync/changelog.py）。
+#
+# 纯存储层：不做删除传播判定、不做 LWW、不做 content_hash 映射（都在 lansync 层）。
+
+
+def _now_ms() -> int:
+    """当前时刻（毫秒 since 1970，UTC 无关）。"""
+    return int(time.time() * 1000)
+
+
+def iso_to_ms(text: str) -> int:
+    """ISO8601 文本 → 毫秒（解析失败/为空 → 0）。
+
+    播放记录 `ts` 列存的是 ISO 文本；跨端 LWW 与行键需要毫秒整数（§14.7）。
+    支持带时区与不带时区两种形态（不带时区按本地时区解释，与写入侧一致）。
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return 0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def _outbox_add(conn: sqlite3.Connection, rows: list[dict]) -> None:
+    """**在调用方事务内**追加 outbox 行（业务写点专用；rows 由 lansync 层构造）。
+
+    行字段：entity / row_key / op / updated_at / payload_json（后两项可缺省）。
+    """
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT INTO sync_outbox (entity, row_key, op, updated_at, payload_json) VALUES (?,?,?,?,?)",
+        [
+            (
+                str(r["entity"]),
+                str(r["row_key"]),
+                str(r["op"]),
+                int(r.get("updated_at") or _now_ms()),
+                r.get("payload_json"),
+            )
+            for r in rows
+        ],
+    )
+
+
+def sync_outbox_append(rows: list[dict]) -> int:
+    """追加 outbox 行（独立事务；仅同步层补记用，业务写点走 `_outbox_add`）。返回条数。"""
+    _ensure_ready()
+    if not rows:
+        return 0
+    with _write_lock, _session() as conn:
+        _outbox_add(conn, rows)
+    return len(rows)
+
+
+def sync_outbox_page(after: int = 0, limit: int = 500) -> dict:
+    """取一页增量 + 本批实际末行 id（**同一读事务**内取值，§14.6）。
+
+    返回 `{"rows": [行字典…], "last_outbox_id": int}`；空批 `last_outbox_id` = 传入游标。
+    """
+    _ensure_ready()
+    start = max(0, int(after or 0))
+    size = max(1, int(limit or 1))
+    with _session() as conn:
+        conn.execute("BEGIN")  # 两段读同一快照：批外新行不被「末尾值」越过
+        rows = conn.execute(
+            "SELECT id, entity, row_key, op, updated_at, payload_json FROM sync_outbox "
+            "WHERE id > ? ORDER BY id LIMIT ?",
+            (start, size),
+        ).fetchall()
+    return {
+        "rows": [_outbox_row(r) for r in rows],
+        "last_outbox_id": rows[-1]["id"] if rows else start,
+    }
+
+
+def sync_outbox_latest(refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """批量取这些 `(entity, row_key)` 的本端最新行（对账代表本端事实，避免 N+1）。
+
+    同键多行时取 `updated_at` 最大、平局取 `id` 最大（= 最新落库）；本端没有的键不出现。
+    """
+    _ensure_ready()
+    wanted = {(str(e), str(k)) for e, k in refs}
+    if not wanted:
+        return {}
+    by_entity: dict[str, list[str]] = {}
+    for entity, row_key in wanted:
+        by_entity.setdefault(entity, []).append(row_key)
+    result: dict[tuple[str, str], dict] = {}
+    with _session() as conn:
+        for entity, keys in by_entity.items():
+            placeholders = ",".join("?" for _ in keys)
+            rows = conn.execute(
+                "SELECT id, entity, row_key, op, updated_at, payload_json FROM sync_outbox "
+                f"WHERE entity = ? AND row_key IN ({placeholders}) "
+                "ORDER BY updated_at DESC, id DESC",
+                (entity, *keys),
+            ).fetchall()
+            for row in rows:
+                key = (row["entity"], row["row_key"])
+                if key not in result:  # 降序 → 首次出现即最新行
+                    result[key] = _outbox_row(row)
+    return result
+
+
+def sync_outbox_load(entities: list[str] | None = None) -> list[dict]:
+    """按实体取全部 outbox 行（outbox id 升序；「跟歌走」按行内歌曲引用过滤用）。
+
+    与 Swift `SyncPlaybackCarryDatabaseFacts.playbackRows` 同口径：取全量再按歌曲引用
+    过滤（web 侧 outbox 规模 = 本地变更数，不做复杂索引；需要时后续加列）。
+    """
+    _ensure_ready()
+    sql = "SELECT id, entity, row_key, op, updated_at, payload_json FROM sync_outbox"
+    params: tuple = ()
+    if entities:
+        placeholders = ",".join("?" for _ in entities)
+        sql += f" WHERE entity IN ({placeholders})"
+        params = tuple(str(e) for e in entities)
+    sql += " ORDER BY id"
+    with _session() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [_outbox_row(r) for r in rows]
+
+
+def sync_outbox_max_id() -> int:
+    """本端 outbox 当前最大 id（无行 = 0）。"""
+    _ensure_ready()
+    with _session() as conn:
+        return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM sync_outbox").fetchone()[0])
+
+
+def _outbox_row(row: sqlite3.Row) -> dict:
+    """outbox 行 → 字典（键名与线上列表一致，供同步层直接消费）。"""
+    return {
+        "id": int(row["id"]),
+        "entity": row["entity"],
+        "row_key": row["row_key"],
+        "op": row["op"],
+        "updated_at": int(row["updated_at"]),
+        "payload_json": row["payload_json"],
+    }
+
+
+# ---- 游标（两张表，方向相反，绝不可合表） ----
+def sync_cursor_get(peer_id: str) -> int:
+    """本端已消费的**对端** outbox 位置（无记录 = 0 = 全量）。"""
+    _ensure_ready()
+    with _session() as conn:
+        row = conn.execute(
+            "SELECT last_outbox_id FROM sync_cursor WHERE peer_id = ?", (str(peer_id),)
+        ).fetchone()
+    return int(row["last_outbox_id"]) if row else 0
+
+
+def sync_cursor_set(peer_id: str, last_outbox_id: int) -> None:
+    """记录本端已消费到对端的 outbox 位置（幂等 upsert）。"""
+    _ensure_ready()
+    with _write_lock, _session() as conn:
+        conn.execute(
+            "INSERT INTO sync_cursor (peer_id, last_outbox_id) VALUES (?,?) "
+            "ON CONFLICT(peer_id) DO UPDATE SET last_outbox_id = excluded.last_outbox_id",
+            (str(peer_id), int(last_outbox_id)),
+        )
+
+
+def sync_push_cursor_get(peer_id: str) -> int:
+    """本端**已推给该 peer** 的本端 outbox 位置（无记录 = 0）。"""
+    _ensure_ready()
+    with _session() as conn:
+        row = conn.execute(
+            "SELECT last_outbox_id FROM sync_push_cursor WHERE peer_id = ?", (str(peer_id),)
+        ).fetchone()
+    return int(row["last_outbox_id"]) if row else 0
+
+
+def sync_push_cursor_set(peer_id: str, last_outbox_id: int) -> None:
+    """记录本端已推给该 peer 的本端 outbox 位置（**全部批次成功**后才推进）。"""
+    _ensure_ready()
+    with _write_lock, _session() as conn:
+        conn.execute(
+            "INSERT INTO sync_push_cursor (peer_id, last_outbox_id) VALUES (?,?) "
+            "ON CONFLICT(peer_id) DO UPDATE SET last_outbox_id = excluded.last_outbox_id",
+            (str(peer_id), int(last_outbox_id)),
+        )
+
+
+# ---- 本地缺歌挂起（content_hash 映射不到本端曲目） ----
+def sync_pending_add(rows: list[dict]) -> int:
+    """挂起远端行（键 `(entity, content_hash, remote_row_key)`，重复挂起 = 覆盖）。"""
+    _ensure_ready()
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    items = [
+        (
+            str(r["entity"]),
+            str(r["content_hash"]),
+            str(r["remote_row_key"]),
+            str(r["op"]),
+            int(r.get("updated_at") or 0),
+            r.get("payload_json"),
+            now,
+        )
+        for r in rows
+        if str(r.get("content_hash", ""))
+    ]
+    if not items:
+        return 0
+    with _write_lock, _session() as conn:
+        conn.executemany(
+            "INSERT INTO sync_pending_change "
+            "(entity, content_hash, remote_row_key, op, updated_at, payload_json, created_at) "
+            "VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(entity, content_hash, remote_row_key) DO UPDATE SET "
+            "op = excluded.op, updated_at = excluded.updated_at, "
+            "payload_json = excluded.payload_json",
+            items,
+        )
+    return len(items)
+
+
+def sync_pending_load() -> list[dict]:
+    """全部挂起行（id 升序；歌到位后重放）。"""
+    _ensure_ready()
+    with _session() as conn:
+        rows = conn.execute(
+            "SELECT id, entity, content_hash, remote_row_key, op, updated_at, payload_json "
+            "FROM sync_pending_change ORDER BY id"
+        ).fetchall()
+    return [
+        {
+            "id": int(r["id"]),
+            "entity": r["entity"],
+            "content_hash": r["content_hash"],
+            "remote_row_key": r["remote_row_key"],
+            "op": r["op"],
+            "updated_at": int(r["updated_at"]),
+            "payload_json": r["payload_json"],
+        }
+        for r in rows
+    ]
+
+
+def sync_pending_delete(ids: list[int]) -> int:
+    """删除已重放/已作废的挂起行，返回删除条数。"""
+    _ensure_ready()
+    targets = [int(i) for i in ids or []]
+    if not targets:
+        return 0
+    with _write_lock, _session() as conn:
+        conn.executemany("DELETE FROM sync_pending_change WHERE id = ?", [(i,) for i in targets])
+    return len(targets)
+
+
+# ---- 远端胜出行的本地应用（只落 upsert 快照；绝不删本地行，§14.9） ----
+def sync_apply_favorite(path: str) -> None:
+    """应用远端收藏（幂等：已存在则不动；web 收藏行无时间戳列）。"""
+    _ensure_ready()
+    if not path:
+        return
+    with _write_lock, _session() as conn:
+        conn.execute("INSERT OR IGNORE INTO favorites (path) VALUES (?)", (str(path),))
+
+
+def sync_apply_play_history(path: str, played_at_ms: int, play_duration_ms: int) -> None:
+    """应用远端播放历史：按 `(path, ts)` 匹配本地行，存在则更新时长，不存在则插入。
+
+    web 侧 `ts` 是 ISO 文本，跨端行键用毫秒 —— 这里由毫秒回写 ISO（同一时刻的唯一表示）。
+    """
+    _ensure_ready()
+    if not path:
+        return
+    ts = datetime.fromtimestamp(max(0, int(played_at_ms)) / 1000, tz=timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    duration = max(0.0, int(play_duration_ms) / 1000)
+    with _write_lock, _session() as conn:
+        existing = conn.execute(
+            "SELECT id FROM playback_events WHERE path = ? AND ts = ? LIMIT 1", (str(path), ts)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE playback_events SET duration = ? WHERE id = ?", (duration, existing["id"])
+            )
+            return
+        conn.execute(
+            "INSERT INTO playback_events "
+            "(ts, path, name, artist, album, played, duration, ratio, completed, source, mode, device) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ts, str(path), "", "", "", 0.0, duration, 0.0, 0, "sync", "continuous", ""),
+        )
+
+
+def sync_apply_playlist(playlist_id: str, name: str, created_at: str, updated_at: str) -> None:
+    """应用远端歌单结构（幂等 upsert；本地已有的项不动，项级由 playlist_item 收敛）。"""
+    _ensure_ready()
+    if not playlist_id:
+        return
+    with _write_lock, _session() as conn:
+        conn.execute(
+            "INSERT INTO playlists (id, name, createdAt, updatedAt) VALUES (?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET name = excluded.name, updatedAt = excluded.updatedAt",
+            (str(playlist_id), str(name), str(created_at), str(updated_at)),
+        )
+
+
+def sync_apply_playlist_item(playlist_id: str, path: str, position: int) -> None:
+    """应用远端歌单项：本地无该歌单则**跳过**（结构收敛由 playlist upsert 先行保证）。"""
+    _ensure_ready()
+    if not playlist_id or not path:
+        return
+    with _write_lock, _session() as conn:
+        if (
+            conn.execute("SELECT 1 FROM playlists WHERE id = ?", (str(playlist_id),)).fetchone()
+            is None
+        ):
+            return
+        existing = conn.execute(
+            "SELECT id FROM playlist_songs WHERE playlist_id = ? AND path = ? LIMIT 1",
+            (str(playlist_id), str(path)),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE playlist_songs SET position = ? WHERE id = ?",
+                (int(position), existing["id"]),
+            )
+            return
+        conn.execute(
+            "INSERT INTO playlist_songs (playlist_id, path, position) VALUES (?,?,?)",
+            (str(playlist_id), str(path), int(position)),
+        )
+
+
+def track_fingerprint_by_hash(content_hash: str) -> dict | None:
+    """`content_hash` → 首个入库的本地指纹行（同 hash 多行取 rowid 最小 = 最早入库）。
+
+    跨端身份 → 本端身份的反向映射（协议 §14.8 接收侧）：两端对同一 hash 得到**确定性**
+    的同一条本地曲目（与 Swift `SyncContentHashResolver.trackStableId` 的 `ORDER BY id LIMIT 1`
+    同口径，差在 web 用 rowid 而非主键 id）。
+    """
+    _ensure_ready()
+    if not content_hash:
+        return None
+    with _session() as conn:
+        row = conn.execute(
+            "SELECT relative_path, content_hash, size, mtime_ms, updated_at "
+            "FROM track_fingerprints WHERE content_hash = ? ORDER BY rowid LIMIT 1",
+            (str(content_hash),),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "relative_path": row["relative_path"],
+        "content_hash": row["content_hash"],
+        "size": int(row["size"]),
+        "mtime_ms": int(row["mtime_ms"]),
+        "updated_at": row["updated_at"],
+    }
