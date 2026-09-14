@@ -180,14 +180,20 @@ def test_rate_limit_other_device_unaffected(monkeypatch):
 
 
 def test_rate_limit_resets_after_10min(monkeypatch):
-    """两次请求间隔 >10min 重置计数（测试缩短重置窗口）"""
-    monkeypatch.setattr(state, "PAIRING_RATE_BASE_SECONDS", 60)
-    monkeypatch.setattr(state, "PAIRING_RATE_RESET_SECONDS", 0.05)
+    """两次请求间隔 >10min 重置计数（注入假时钟，不依赖真实等待时长）"""
+    clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(pairing_service, "_now", lambda: clock["t"])
     for _ in range(3):
         assert client.post("/api/pairing/request", json={"device_id": "spam-02"}).status_code == 200
+    # 时钟未推进（窗口内）→ 第 4 次累计触发退避：429
     assert client.post("/api/pairing/request", json={"device_id": "spam-02"}).status_code == 429
-    time.sleep(0.06)  # 超过重置窗口 → 计数清零，重新从 1 计
+    # 推进超过重置窗口（默认 10min）→ 计数清零，重新从 1 计：放行
+    clock["t"] += state.PAIRING_RATE_RESET_SECONDS + 1
     assert client.post("/api/pairing/request", json={"device_id": "spam-02"}).status_code == 200
+    # 重置后重新计数：时钟停住再发 3 次放行、第 4 次仍 429（证明计数确实从 1 重来）
+    for _ in range(2):
+        assert client.post("/api/pairing/request", json={"device_id": "spam-02"}).status_code == 200
+    assert client.post("/api/pairing/request", json={"device_id": "spam-02"}).status_code == 429
 
 
 # ============ 设备管理 ============

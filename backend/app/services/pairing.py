@@ -38,6 +38,15 @@ _RATE_LIMITS: dict[str, list[float]] = {}
 _RATE_LOCK = threading.Lock()
 
 
+def _now() -> float:
+    """限流用的单调时钟（模块级唯一时间来源，测试可 monkeypatch 注入假时钟）。
+
+    单调递增、不受系统时间调整影响；抽成函数是为了让限流测试直接推进时钟，
+    而不是靠 time.sleep 赌真实耗时（线上语义不变，仍走 time.monotonic）。
+    """
+    return time.monotonic()
+
+
 def _now_iso() -> str:
     """ISO 时间戳（秒级，与 favorites/playback 等存储同风格）"""
     return datetime.now().isoformat(timespec="seconds")
@@ -134,7 +143,7 @@ class RateLimited(Exception):
 def _rate_limit_ok(device_id: str) -> bool:
     """限流判定（按 device_id）：连续 3 次内放行；第 n 次（n>=4）需距上次
     base * 2^(n-4) 秒；与上次间隔 > 重置窗口时计数清零重新计。"""
-    now = time.monotonic()
+    now = _now()
     base = state.PAIRING_RATE_BASE_SECONDS
     reset = state.PAIRING_RATE_RESET_SECONDS
     with _RATE_LOCK:
