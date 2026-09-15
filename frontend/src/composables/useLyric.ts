@@ -2,12 +2,12 @@ import { computed, watch } from "vue";
 import { audio } from "./audioEngine.ts";
 import { state, type LyricLine, type Song } from "./playerState.ts";
 import { lyricSettings } from "./useSettings.js";
-import { parseLrcText, mergeTranslationLines } from "../utils/parseLrc.js";
+import { parseLrcText, mergeTranslationLines, mergeRomaLines } from "../utils/parseLrc.js";
 import { apiGet, apiPost, apiPut, apiDelete, invalidate } from "../utils/apiClient.js";
 import i18n from "../locales/i18n.js";
 
 // 非本地歌（stream 曲库网络条目 / 试听 / URL 播放）：没有可解析的本地歌词文件，
-// 按歌名/歌手走在线候选链路（/api/lyric/search 返回候选 LRC 全文 + 翻译），
+// 按歌名/歌手走在线候选链路（/api/lyric/search 返回候选 LRC 全文 + 附轨），
 // 前端解析成与后端 /api/lyric 一致的 lines 结构。失败/无结果返回空歌词（不抛错）。
 
 /** 歌词载荷：lines + 来源信息（在线候选 / 文件兜底共用） */
@@ -24,6 +24,7 @@ interface LyricSearchCandidate {
   source?: string;
   text?: string;
   tlyric?: string;
+  romalrc?: string;
   [key: string]: unknown;
 }
 
@@ -35,6 +36,7 @@ interface ManualLyricState {
   text?: string;
   source?: string;
   tlyric?: string;
+  romalrc?: string;
   [key: string]: unknown;
 }
 
@@ -62,6 +64,8 @@ export async function loadOnlineLyricForSong(song: Song): Promise<LyricPayload> 
     const hit = exact || results.find((r) => r.text);
     if (!hit) return { lines: [], format: null, source: null };
     let lines = parseLrcText(hit.text || "") as LyricLine[];
+    // 附轨各自填自己的槽位（romalrc → text[1]、tlyric → text[2]），互不覆盖
+    if (hit.romalrc) lines = mergeRomaLines(lines, parseLrcText(hit.romalrc));
     if (hit.tlyric) lines = mergeTranslationLines(lines, parseLrcText(hit.tlyric));
     return { lines, format: lines.length ? "lrc" : null, source: hit.source || "online" };
   } catch {
@@ -143,19 +147,21 @@ export async function fetchManualLyric(path: string | null): Promise<ManualLyric
   return { specified: false };
 }
 
-// 保存手动指定歌词（覆盖旧值）；tlyric 为可选中文翻译 LRC（JSON 歌词携带）
+// 保存手动指定歌词（覆盖旧值）；tlyric / romalrc 为可选附轨 LRC（JSON 歌词携带）
 export async function saveManualLyric({
   path,
   format,
   text,
   source,
   tlyric,
+  romalrc,
 }: {
   path: string | null;
   format?: string;
   text?: string;
   source?: string;
   tlyric?: string;
+  romalrc?: string;
 }): Promise<unknown> {
   const r = await apiPut("/api/lyric/manual", {
     path,
@@ -163,6 +169,7 @@ export async function saveManualLyric({
     text,
     source,
     tlyric: tlyric || undefined,
+    romalrc: romalrc || undefined,
   });
   const data = r.data || {};
   if (!r.ok) throw new Error(data.detail || i18n.global.t("errors.saveLyric"));

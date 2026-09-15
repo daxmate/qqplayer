@@ -93,10 +93,25 @@ def test_cache_key_stable():
 def test_cache_roundtrip(cache_dir):
     key = "abc123"
     assert lyric_fetch._load_cache(key) is None
-    lyric_fetch._save_cache(key, "[00:01.00]hello", "netease", "[00:01.00]你好")
-    lrc, tlyric, source = lyric_fetch._load_cache(key)
+    lyric_fetch._save_cache(key, "[00:01.00]hello", "netease", "[00:01.00]你好", "[00:01.00]ni hao")
+    lrc, tlyric, romalrc, source = lyric_fetch._load_cache(key)
     assert lrc == "[00:01.00]hello"
     assert tlyric == "[00:01.00]你好"
+    assert romalrc == "[00:01.00]ni hao"
+    assert source == "netease"
+
+
+def test_cache_old_file_without_romalrc(cache_dir):
+    """旧缓存文件没有 romalrc 键 → 照常读出（romalrc 为 None），不判为损坏"""
+    (cache_dir / "old1.json").write_text(
+        '{"lrc": "[00:01.00]hello", "tlyric": "[00:01.00]你好", "source": "netease",'
+        ' "fetched_at": 9999999999}',
+        encoding="utf-8",
+    )
+    lrc, tlyric, romalrc, source = lyric_fetch._load_cache("old1")
+    assert lrc == "[00:01.00]hello"
+    assert tlyric == "[00:01.00]你好"
+    assert romalrc is None
     assert source == "netease"
 
 
@@ -117,12 +132,30 @@ def test_fetch_netease_success(fake_netease):
         "lrc": {"lyric": "[00:01.00]沈むように"},
         "tlyric": {"lyric": "[00:01.00]像是沉溺"},
         "yrc": None,
-        "romalrc": None,
+        "romalrc": {"lyric": "[00:01.00]shi zu mu yo u ni"},
     }
     assert lyric_fetch.fetch_netease("夜に駆ける", "YOASOBI") == (
         "[00:01.00]沈むように",
         "[00:01.00]像是沉溺",
+        "[00:01.00]shi zu mu yo u ni",
     )
+
+
+def test_fetch_netease_no_romalrc(fake_netease):
+    """无 romalrc（未提供该字段 / 为 None）→ 第三位 None，不报错、不占位"""
+    fake_netease["search"] = lambda q, limit=20: [
+        {
+            "id": "123",
+            "title": "x",
+            "artist": "",
+            "album": "",
+            "cover": "",
+            "duration": "",
+            "level": "exhigh",
+        }
+    ]
+    fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": "[00:01.00]hi"}}
+    assert lyric_fetch.fetch_netease("x", "") == ("[00:01.00]hi", None, None)
 
 
 def test_fetch_netease_no_tlyric(fake_netease):
@@ -139,7 +172,7 @@ def test_fetch_netease_no_tlyric(fake_netease):
         }
     ]
     fake_netease["get_lyric"] = lambda sid: {"lrc": {"lyric": "[00:01.00]hi"}, "tlyric": None}
-    assert lyric_fetch.fetch_netease("x", "") == ("[00:01.00]hi", None)
+    assert lyric_fetch.fetch_netease("x", "") == ("[00:01.00]hi", None, None)
 
 
 def test_fetch_netease_no_result(fake_netease):
@@ -189,9 +222,10 @@ def test_fetch_netease_word_json_lyric(fake_netease):
         "lrc": {"lyric": '{"t":0,"c":[{"tx":"作词: "},{"tx":"某人"}]}\n[00:10.00]正文'},
         "tlyric": {"lyric": "[00:10.00]正文翻译"},
     }
-    lrc, tlyric = lyric_fetch.fetch_netease("x", "")
+    lrc, tlyric, romalrc = lyric_fetch.fetch_netease("x", "")
     assert lrc == "[00:00.00]作词: 某人\n[00:10.00]正文"
     assert tlyric == "[00:10.00]正文翻译"
+    assert romalrc is None  # 未提供 romalrc → None
 
 
 # ============ lrclib ============
@@ -232,9 +266,10 @@ def test_online_fallback_chain(fake_http, fake_netease, cache_dir):
 
     fake_netease["search"] = boom
     fake_http["lrclib.net"] = FakeResp([{"instrumental": False, "syncedLyrics": "[00:01.00]ok"}])
-    lrc, tlyric, source = lyric_fetch.fetch_online_lyric("歌", "手")
+    lrc, tlyric, romalrc, source = lyric_fetch.fetch_online_lyric("歌", "手")
     assert lrc == "[00:01.00]ok"
     assert tlyric is None
+    assert romalrc is None
     assert source == "lrclib"
 
 
@@ -258,21 +293,27 @@ def test_online_cache_hit_no_request(fake_netease, cache_dir):
 
     def fake_lyric(sid):
         calls["lyric"] += 1
-        return {"lrc": {"lyric": "[00:01.00]first"}, "tlyric": {"lyric": "[00:01.00]第一"}}
+        return {
+            "lrc": {"lyric": "[00:01.00]first"},
+            "tlyric": {"lyric": "[00:01.00]第一"},
+            "romalrc": {"lyric": "[00:01.00]di yi"},
+        }
 
     fake_netease["search"] = fake_search
     fake_netease["get_lyric"] = fake_lyric
-    lrc, tlyric, source = lyric_fetch.fetch_online_lyric("x", "")
+    lrc, tlyric, romalrc, source = lyric_fetch.fetch_online_lyric("x", "")
     assert lrc == "[00:01.00]first"
     assert tlyric == "[00:01.00]第一"
+    assert romalrc == "[00:01.00]di yi"
     # 第二次：置空 stub 让任何调用都失败——但缓存命中不会发请求
     calls["search"] = 0
     calls["lyric"] = 0
     fake_netease["search"] = _boom
     fake_netease["get_lyric"] = _boom
-    lrc, tlyric, source = lyric_fetch.fetch_online_lyric("x", "")
+    lrc, tlyric, romalrc, source = lyric_fetch.fetch_online_lyric("x", "")
     assert lrc == "[00:01.00]first"
     assert tlyric == "[00:01.00]第一"
+    assert romalrc == "[00:01.00]di yi"
     assert source == "netease"
     assert calls == {"search": 0, "lyric": 0}
 
@@ -281,10 +322,10 @@ def test_online_no_result_cached(fake_http, fake_netease, cache_dir):
     """无结果也会缓存，第二次不再请求"""
     fake_netease["search"] = lambda q, limit=20: []
     fake_http["lrclib.net"] = FakeResp([])
-    assert lyric_fetch.fetch_online_lyric("无", "") == (None, None, None)
+    assert lyric_fetch.fetch_online_lyric("无", "") == (None, None, None, None)
     fake_http.clear()
     fake_netease["search"] = _boom
-    assert lyric_fetch.fetch_online_lyric("无", "") == (None, None, None)
+    assert lyric_fetch.fetch_online_lyric("无", "") == (None, None, None, None)
 
 
 # ============ 手动指定歌词 ============
@@ -311,6 +352,37 @@ def test_manual_with_tlyric(cache_dir):
     # 无 tlyric 时不落字段
     lyric_fetch.save_manual_lyric("/tmp/x.mp3", "lrc", "[00:01.00]hi", "粘贴")
     assert "tlyric" not in lyric_fetch.load_manual_lyric("/tmp/x.mp3")
+
+
+def test_manual_with_romalrc(cache_dir):
+    """JSON 歌词：lrc 原文 + romalrc 罗马音一起保存/读取"""
+    lyric_fetch.save_manual_lyric(
+        "/tmp/x.mp3",
+        "lrc",
+        "[00:01.00]沈む",
+        "上传·x.json",
+        tlyric="[00:01.00]像是沉溺",
+        romalrc="[00:01.00]shi zu mu",
+    )
+    data = lyric_fetch.load_manual_lyric("/tmp/x.mp3")
+    assert data["tlyric"] == "[00:01.00]像是沉溺"
+    assert data["romalrc"] == "[00:01.00]shi zu mu"
+    # 无 romalrc 时不落字段（旧盘面同形）
+    lyric_fetch.save_manual_lyric("/tmp/x.mp3", "lrc", "[00:01.00]hi", "粘贴")
+    assert "romalrc" not in lyric_fetch.load_manual_lyric("/tmp/x.mp3")
+
+
+def test_manual_old_file_without_romalrc(cache_dir):
+    """旧手动歌词文件没有 romalrc 键 → 照常读出，不抛异常"""
+    f = cache_dir / "manual" / f"{lyric_fetch.manual_key('/old.mp3')}.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(
+        '{"format": "lrc", "text": "[00:01.00]hi", "source": "粘贴", "created_at": 1}',
+        encoding="utf-8",
+    )
+    data = lyric_fetch.load_manual_lyric("/old.mp3")
+    assert data["text"] == "[00:01.00]hi"
+    assert data.get("romalrc") is None
 
 
 def test_manual_key_by_path():
@@ -359,6 +431,7 @@ def test_search_netease_candidates(fake_netease):
     fake_netease["get_lyric"] = lambda sid: {
         "lrc": {"lyric": "[00:01.00]沈む"},
         "tlyric": {"lyric": "[00:01.00]像是沉溺"},
+        "romalrc": {"lyric": "[00:01.00]shi zu mu"},
     }
     results = lyric_fetch.search_netease("夜に駆ける", "YOASOBI")
     assert len(results) == 2
@@ -367,6 +440,7 @@ def test_search_netease_candidates(fake_netease):
     assert results[0]["cover"] == "http://p1/1.jpg"
     assert results[0]["text"] == "[00:01.00]沈む"
     assert results[0]["tlyric"] == "[00:01.00]像是沉溺"
+    assert results[0]["romalrc"] == "[00:01.00]shi zu mu"
     assert results[1]["duration"] == 2.0
 
 

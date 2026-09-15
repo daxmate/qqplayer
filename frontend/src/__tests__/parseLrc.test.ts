@@ -2,7 +2,7 @@
 // 覆盖：空行丢弃 / 信息行（作词作曲等元信息）丢弃 / 超短行丢弃 /
 // 保守性（关键词开头但无分隔的正常歌词不误杀）/ 空行导致的时长空洞被跳过。
 import { describe, expect, it } from "vitest";
-import { parseLrcText } from "../utils/parseLrc.js";
+import { parseLrcText, mergeRomaLines, mergeTranslationLines } from "../utils/parseLrc.js";
 import type { LyricLine } from "../composables/playerState.js";
 
 // parseLrcText 静态返回 LyricLine[]（联合含 sec 章节行），但本模块只产出 line 行；
@@ -64,5 +64,43 @@ describe("parseLrcText 过滤规则（与后端 parse_lrc 同构）", () => {
   it("同一行多时间戳仍展开为多行，过滤同样生效", () => {
     const lines = parse("[00:01.00][00:05.00]一句歌词\n[00:03.00]作词：某人\n[00:06.00]另一句\n");
     expect(texts(lines)).toEqual(["一句歌词", "一句歌词", "另一句"]);
+  });
+});
+
+describe("附轨合并（romalrc → text[1]，tlyric → text[2]；与后端 merge_translation 同构）", () => {
+  /** 附轨合并返回 LyricLine[]（联合含 sec 行），本组用例只关心 line 行 → 收窄类型 */
+  const merged = (lines: TimedLine[], track: string): TimedLine[] =>
+    mergeRomaLines(lines, parse(track)) as TimedLine[];
+  const mergedZh = (lines: TimedLine[], track: string): TimedLine[] =>
+    mergeTranslationLines(lines, parse(track)) as TimedLine[];
+
+  it("罗马音按时间戳（±0.6s）填进 text[1]", () => {
+    const lines = parse("[00:10.00]沈むように\n[00:20.00]二人だけの空\n");
+    const out = merged(lines, "[00:10.30]shi zu mu yo u ni\n[00:30.00]x");
+    expect(out[0].text).toEqual(["沈むように", "shi zu mu yo u ni"]);
+    expect(out[1].text).toEqual(["二人だけの空"]); // 超出容差 → 不占位
+  });
+
+  it("时间差超过 0.6s → 不合并（与后端同一容差）", () => {
+    const lines = parse("[00:10.00]原文\n");
+    expect(merged(lines, "[00:10.61]roma")[0].text).toEqual(["原文"]);
+  });
+
+  it("两条附轨互不覆盖（romalrc 与 tlyric 各写自己的槽位）", () => {
+    const lines = parse("[00:10.00]沈むように\n");
+    const withRoma = merged(lines, "[00:10.00]shi zu mu");
+    const withBoth = mergedZh(withRoma, "[00:10.00]像是沉溺");
+    expect(withBoth[0].text).toEqual(["沈むように", "shi zu mu", "像是沉溺"]);
+  });
+
+  it("无附轨行 → 原样返回（不占位）", () => {
+    const lines = parse("[00:10.00]原文\n");
+    expect(mergeRomaLines(lines, [])[0]).toMatchObject({ text: ["原文"] });
+    expect(mergeTranslationLines(lines, [])[0]).toMatchObject({ text: ["原文"] });
+  });
+
+  it("无 romalrc → text[1] 保持空，不占位", () => {
+    const lines = parse("[00:10.00]原文\n");
+    expect(lines[0].text).toEqual(["原文"]);
   });
 });

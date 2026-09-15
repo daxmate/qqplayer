@@ -288,6 +288,7 @@ async function pickResult(r: LyricSearchCandidate, i: number) {
         title: r.title,
         artist: r.artist ? " - " + r.artist : "",
       }),
+      romalrc: r.romalrc,
     });
     await afterSaved();
   } catch (err) {
@@ -350,12 +351,14 @@ async function save() {
   let format: string | undefined =
     tab.value === "upload" ? (detectedFormat.value ?? undefined) : (pasteFormat.value ?? undefined);
   let tlyric: string | undefined = undefined;
+  let romalrc: string | undefined = undefined;
   if (format === "json") {
-    // JSON 歌词：提取 lrc 原文 + tlyric 翻译，按 LRC 保存
+    // JSON 歌词：提取 lrc 原文 + tlyric 翻译 / romalrc 罗马音附轨，按 LRC 保存
     const obj = JSON.parse(text);
     text = obj.lrc;
     format = "lrc";
     if (typeof obj.tlyric === "string" && obj.tlyric.trim()) tlyric = obj.tlyric;
+    if (typeof obj.romalrc === "string" && obj.romalrc.trim()) romalrc = obj.romalrc;
   }
   saving.value = true;
   try {
@@ -368,6 +371,7 @@ async function save() {
           ? t("spec.sourceUpload", { name: file.value?.name || "" })
           : t("spec.sourcePaste"),
       tlyric,
+      romalrc,
     });
     await afterSaved();
   } catch (err) {
@@ -387,6 +391,7 @@ async function restoreManualLyric(
     text?: string;
     source?: string;
     tlyric?: string;
+    romalrc?: string;
   } | null,
 ) {
   if (!cached) return;
@@ -397,6 +402,7 @@ async function restoreManualLyric(
       text: cached.text,
       source: cached.source,
       tlyric: cached.tlyric,
+      romalrc: cached.romalrc,
     });
     manual.value = await fetchManualLyric(cached.path);
     await loadLyric();

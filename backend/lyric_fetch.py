@@ -1,6 +1,6 @@
 """在线歌词获取（多源 fallback + 本地缓存）+ 用户手动指定歌词
 
-链路: 网易云音乐（原文+翻译） → lrclib.net → None
+链路: 网易云音乐（原文+中文翻译+罗马音） → lrclib.net → None
 缓存: ~/.cache/qqplayer/lyric/<key>.json（key = sha1(title|artist)）
 手动指定: ~/.cache/qqplayer/lyric/manual/<key>.json（key = sha1(歌曲绝对路径)）
 """
@@ -29,7 +29,10 @@ def cache_key(title: str, artist: str) -> str:
 
 
 def _load_cache(key: str):
-    """读取缓存，返回 (lrc, tlyric, source) 或 None"""
+    """读取缓存，返回 (lrc, tlyric, romalrc, source) 或 None
+
+    旧缓存文件没有 romalrc 键 → 该位为 None（向后兼容，不因此判为损坏）。
+    """
     f = CACHE_DIR / f"{key}.json"
     if not f.exists():
         return None
@@ -37,7 +40,7 @@ def _load_cache(key: str):
         data = json.loads(f.read_text(encoding="utf-8"))
         if time.time() - data.get("fetched_at", 0) > CACHE_TTL:
             return None
-        return data.get("lrc"), data.get("tlyric"), data.get("source")
+        return data.get("lrc"), data.get("tlyric"), data.get("romalrc"), data.get("source")
     except Exception:
         return None
 
@@ -52,7 +55,10 @@ def manual_key(path: str) -> str:
 
 
 def load_manual_lyric(path: str):
-    """读取手动指定歌词，返回 {format, text, source, created_at} 或 None"""
+    """读取手动指定歌词；返回 {format, text, source, created_at, tlyric?, romalrc?} 或 None
+
+    附轨键可选（旧文件没有 → 读侧 .get 得 None，照常工作）。
+    """
     f = MANUAL_DIR / f"{manual_key(path)}.json"
     if not f.exists():
         return None
@@ -66,9 +72,18 @@ def load_manual_lyric(path: str):
 
 
 def save_manual_lyric(
-    path: str, format: str, text: str, source: str = "manual", tlyric: str | None = None
+    path: str,
+    format: str,
+    text: str,
+    source: str = "manual",
+    tlyric: str | None = None,
+    romalrc: str | None = None,
 ) -> dict:
-    """保存手动指定歌词（覆盖旧值），返回完整 payload；tlyric 为可选中文翻译 LRC"""
+    """保存手动指定歌词（覆盖旧值），返回完整 payload
+
+    tlyric / romalrc 为可选附轨 LRC（中文翻译 / 日语罗马音，JSON 歌词携带）；
+    为空则不落字段（与旧文件同形，读取侧 data.get 兼容）。
+    """
     fmt = format if format in ("lrc", "srt") else "lrc"
     payload = {
         "format": fmt,
@@ -78,6 +93,8 @@ def save_manual_lyric(
     }
     if tlyric:
         payload["tlyric"] = tlyric
+    if romalrc:
+        payload["romalrc"] = romalrc
     try:
         MANUAL_DIR.mkdir(parents=True, exist_ok=True)
         (MANUAL_DIR / f"{manual_key(path)}.json").write_text(
@@ -124,12 +141,15 @@ def cleanup_orphan_manual_lyrics(valid_paths: list[str]) -> int:
     return removed
 
 
-def _save_cache(key: str, lrc: str, source: str, tlyric: str | None = None):
+def _save_cache(
+    key: str, lrc: str, source: str, tlyric: str | None = None, romalrc: str | None = None
+):
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         payload = {
             "lrc": lrc,
             "tlyric": tlyric,
+            "romalrc": romalrc,
             "source": source,
             "fetched_at": int(time.time()),
         }
@@ -178,8 +198,18 @@ def _netease_search(title: str, artist: str):
     return cands[0]["id"]
 
 
+def _attach_lrc(data: dict | None, key: str) -> str | None:
+    """附轨字段（tlyric / romalrc，结构同为 {"lyric": ...}）→ LRC 字符串；无内容返回 None
+
+    两条附轨共用同一个转换入口（逐字 JSON 与普通 LRC 都由 word_json_to_lrc 归一）。
+    """
+    if not data or not isinstance(data.get(key), dict):
+        return None
+    return netease_provider.word_json_to_lrc(data[key].get("lyric", "")) or None
+
+
 def _netease_lyric(song_id: int):
-    """按歌曲 id 获取 (原文 LRC, 中文翻译 LRC)；无歌词返回 (None, None)
+    """按歌曲 id 获取 (原文 LRC, 中文翻译 LRC, 罗马音 LRC)；无歌词返回 (None, None, None)
 
     新版逐字歌词（lrc.lyric 为 JSON-lines 格式）自动转成普通 LRC，
     老歌普通 LRC 原样透传。
@@ -189,37 +219,39 @@ def _netease_lyric(song_id: int):
     if data and isinstance(data.get("lrc"), dict):
         lrc = netease_provider.word_json_to_lrc(data["lrc"].get("lyric", ""))
     if not lrc.strip():
-        return None, None
-    tlyric = None
-    if data and isinstance(data.get("tlyric"), dict):
-        tlyric = netease_provider.word_json_to_lrc(data["tlyric"].get("lyric", "")) or None
-    return lrc, tlyric
+        return None, None, None
+    return lrc, _attach_lrc(data, "tlyric"), _attach_lrc(data, "romalrc")
 
 
-def fetch_netease(title: str, artist: str) -> tuple[str, str | None] | None:
-    """网易云获取歌词，返回 (原文, 翻译)；失败/无结果返回 None"""
+def fetch_netease(title: str, artist: str) -> tuple[str, str | None, str | None] | None:
+    """网易云获取歌词，返回 (原文, 翻译, 罗马音)；失败/无结果返回 None"""
     try:
         song_id = _netease_search(title, artist)
         if song_id is None:
             return None
-        lrc, tlyric = _netease_lyric(song_id)
+        lrc, tlyric, romalrc = _netease_lyric(song_id)
         if lrc is None:
             return None
-        return lrc, tlyric
+        return lrc, tlyric, romalrc
     except (httpx.HTTPError, OSError, ValueError, KeyError):
         return None
 
 
 def search_netease(title: str, artist: str):
-    """搜索网易云候选（带歌词全文+翻译），返回 [{source, title, artist, duration, text, tlyric}]"""
+    """搜索网易云候选（带歌词全文+两条附轨）
+
+    返回 [{source, title, artist, duration, text, tlyric, romalrc}]
+    """
     try:
         cands = _netease_candidates(title, artist)
         out = []
         for c in cands[:5]:
-            lrc, tlyric = _netease_lyric(c["id"])
+            lrc, tlyric, romalrc = _netease_lyric(c["id"])
             if not lrc:
                 continue
-            out.append({"source": "netease", **c, "text": lrc, "tlyric": tlyric})
+            out.append(
+                {"source": "netease", **c, "text": lrc, "tlyric": tlyric, "romalrc": romalrc}
+            )
         return out
     except (httpx.HTTPError, OSError, ValueError, KeyError):
         return []
@@ -374,7 +406,7 @@ def _auto_attach_translation_inner(title: str, artist: str, text: str, fmt: str)
         ]:
             if time.monotonic() > deadline:
                 break
-            lrc, tlyric = _netease_lyric(cand["id"])
+            lrc, tlyric, _romalrc = _netease_lyric(cand["id"])
             if not lrc or not tlyric:
                 continue
             matched = _match_translation_lines(manual_lines, lrc, tlyric)
@@ -440,6 +472,7 @@ def search_lrclib(title: str, artist: str):
                         "duration": hit.get("duration"),
                         "text": text,
                         "tlyric": None,
+                        "romalrc": None,
                     }
                 )
             return out
@@ -479,25 +512,31 @@ def fetch_lrclib(title: str, artist: str) -> str | None:
 
 
 # ============ 统一入口 ============
-def fetch_online_lyric(title: str, artist: str) -> tuple[str | None, str | None, str | None]:
-    """多源获取：网易云 → lrclib。返回 (原文, 翻译, 来源)，全部失败返回 (None, None, None)"""
+def fetch_online_lyric(
+    title: str, artist: str
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """多源获取：网易云 → lrclib
+
+    返回 (原文, 翻译, 罗马音, 来源)；全部失败返回 (None, None, None, None)。
+    lrclib 无附轨 → 后两位为 None。
+    """
     key = cache_key(title, artist)
     cached = _load_cache(key)
     if cached is not None:
-        cached_lrc, cached_tlyric, cached_source = cached
+        cached_lrc, cached_tlyric, cached_romalrc, cached_source = cached
         if cached_lrc:
-            return cached_lrc, cached_tlyric, cached_source
-        return None, None, None  # 命中"无结果"缓存，不再请求
+            return cached_lrc, cached_tlyric, cached_romalrc, cached_source
+        return None, None, None, None  # 命中"无结果"缓存，不再请求
     # 网易云
     netease = fetch_netease(title, artist)
     if netease is not None:
-        lrc, tlyric = netease
-        _save_cache(key, lrc, "netease", tlyric)
-        return lrc, tlyric, "netease"
+        lrc, tlyric, romalrc = netease
+        _save_cache(key, lrc, "netease", tlyric, romalrc)
+        return lrc, tlyric, romalrc, "netease"
     # lrclib 兜底
     lrc = fetch_lrclib(title, artist)
     if lrc:
         _save_cache(key, lrc, "lrclib")
-        return lrc, None, "lrclib"
+        return lrc, None, None, "lrclib"
     _save_cache(key, "", "none")  # 缓存"无结果"，避免反复请求
-    return None, None, None
+    return None, None, None, None

@@ -106,6 +106,7 @@ const LYRIC_RESULTS: LyricCandidate[] = [
     cover: null,
     text: "[00:01.00]第一句\n[00:05.00]第二句",
     tlyric: "[00:01.00]中文一\n[00:05.00]中文二",
+    romalrc: "[00:01.00]dai i chi ku\n[00:05.00]dai ni ku",
   },
 ];
 
@@ -119,6 +120,7 @@ interface LyricCandidate {
   cover: string | null;
   text: string;
   tlyric?: string;
+  romalrc?: string;
 }
 
 /** 播放统计上报体（POST /api/playback） */
@@ -229,6 +231,7 @@ describe("playPreview 试听语义（临时播放列表）", () => {
     expect(state.lyric.length).toBe(2);
     expect((state.lyric[0] as { text: string[] }).text[0]).toBe("第一句");
     expect((state.lyric[0] as { text: string[] }).text[2]).toBe("中文一"); // tlyric 合并
+    expect((state.lyric[0] as { text: string[] }).text[1]).toBe("dai i chi ku"); // romalrc 合并
     expect(state.lyricFormat).toBe("lrc");
     expect(state.lyricSource).toBe("netease");
   });
@@ -453,9 +456,13 @@ describe("非本地歌在线歌词（loadLyric）", () => {
       type: "line",
       s: 1,
       e: 5,
-      text: ["第一句", "", "中文一"],
+      text: ["第一句", "dai i chi ku", "中文一"],
     });
-    expect(state.lyric[1]).toMatchObject({ type: "line", s: 5, text: ["第二句", "", "中文二"] });
+    expect(state.lyric[1]).toMatchObject({
+      type: "line",
+      s: 5,
+      text: ["第二句", "dai ni ku", "中文二"],
+    });
     expect(state.lyricFormat).toBe("lrc");
   });
 

@@ -193,7 +193,9 @@ def test_api_lyric_yakimochi(song_library):
 
 def test_api_lyric_missing(song_library, monkeypatch):
     """本地无歌词且在线也获取失败 → 404"""
-    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None, None)
+    )
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"]})
     assert r.status_code == 404
@@ -203,8 +205,9 @@ def test_api_lyric_online_fallback(song_library, monkeypatch):
     """本地无歌词时在线获取成功 → 200，带 source 和翻译合并"""
     lrc = "[00:10.00]沈むように溶けてゆくように\n[00:20.00]二人だけの空"
     tlyric = "[00:10.00]像是沉溺溶化一般\n[00:20.00]只有两人的天空"
+    romalrc = "[00:10.00]shi zu mu yo u ni\n[00:20.00]fu ta ri da ke no so ra"
     monkeypatch.setattr(
-        router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, tlyric, "netease")
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, tlyric, romalrc, "netease")
     )
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"]})
@@ -213,13 +216,15 @@ def test_api_lyric_online_fallback(song_library, monkeypatch):
     assert data["source"] == "netease"
     assert data["format"] == "lrc"
     first = next(ln for ln in data["lines"] if ln["type"] == "line")
-    assert first["text"] == ["沈むように溶けてゆくように", "", "像是沉溺溶化一般"]
+    assert first["text"] == ["沈むように溶けてゆくように", "shi zu mu yo u ni", "像是沉溺溶化一般"]
 
 
 def test_api_lyric_prefer_online_uses_online(song_library, monkeypatch):
     """prefer=online 且本地有歌词 → 用在线歌词（在线优先）"""
     lrc = "[00:01.00]オンライン優先の歌詞\n[00:02.00]二行目"
-    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, None, "lrclib"))
+    monkeypatch.setattr(
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, None, None, "lrclib")
+    )
     song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")  # 本地有 srt
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
     assert r.status_code == 200
@@ -232,7 +237,9 @@ def test_api_lyric_prefer_online_uses_online(song_library, monkeypatch):
 
 def test_api_lyric_prefer_online_fallback_local(song_library, monkeypatch):
     """prefer=online 且在线失败 → 回退本地歌词"""
-    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None, None)
+    )
     song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
     assert r.status_code == 200
@@ -243,7 +250,9 @@ def test_api_lyric_prefer_online_fallback_local(song_library, monkeypatch):
 
 def test_api_lyric_prefer_online_missing(song_library, monkeypatch):
     """prefer=online、本地无歌词且在线失败 → 404"""
-    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr(
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (None, None, None, None)
+    )
     song = next(s for s in backend.scan_library() if s["name"] == "知足")
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "online"})
     assert r.status_code == 404
@@ -252,7 +261,9 @@ def test_api_lyric_prefer_online_missing(song_library, monkeypatch):
 def test_api_lyric_prefer_invalid_defaults_local(song_library, monkeypatch):
     """prefer 非法值 → 按 local 处理（本地优先）"""
     lrc = "[00:01.00]不应使用"
-    monkeypatch.setattr(router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, None, "netease"))
+    monkeypatch.setattr(
+        router_lyrics, "fetch_online_lyric", lambda *a, **k: (lrc, None, None, "netease")
+    )
     song = next(s for s in backend.scan_library() if s["name"] == "ヤキモチ")
     r = client.get("/api/lyric", params={"path": song["path"], "prefer": "bogus"})
     assert r.status_code == 200
@@ -520,6 +531,40 @@ def test_merge_translation_none():
     lines = [{"type": "line", "s": 1.0, "e": 2.0, "text": ["原文"]}]
     assert backend.merge_translation(lines, None) == lines
     assert backend.merge_translation(lines, "") == lines
+
+
+def test_merge_romalrc_into_text1():
+    """罗马音（romalrc）合并进 text[1]，与中文翻译（text[2]）同容差、同入口"""
+    lines = [
+        {"type": "line", "s": 10.0, "e": 15.0, "text": ["沈むように"]},
+        {"type": "line", "s": 20.0, "e": 25.0, "text": ["二人だけの空"]},
+    ]
+    romalrc = "[00:10.00]shi zu mu yo u ni\n[00:20.00]fu ta ri da ke no so ra"
+    merged = backend.merge_translation(lines, None, romalrc)
+    assert merged[0]["text"] == ["沈むように", "shi zu mu yo u ni"]
+    assert merged[1]["text"] == ["二人だけの空", "fu ta ri da ke no so ra"]
+
+
+def test_merge_both_tracks_slots():
+    """两条附轨同时合并：romalrc → text[1]、tlyric → text[2]，互不覆盖"""
+    lines = [{"type": "line", "s": 10.0, "e": 15.0, "text": ["沈むように"]}]
+    merged = backend.merge_translation(lines, "[00:10.00]像是沉溺", "[00:10.00]shi zu mu yo u ni")
+    assert merged[0]["text"] == ["沈むように", "shi zu mu yo u ni", "像是沉溺"]
+
+
+def test_merge_romalrc_no_match_keeps_empty():
+    """无 romalrc / 时间戳不匹配 → text[1] 不占位（保持空）"""
+    lines = [{"type": "line", "s": 10.0, "e": 15.0, "text": ["原文"]}]
+    assert backend.merge_translation(lines, None, None)[0]["text"] == ["原文"]
+    assert backend.merge_translation(lines, None, "[00:30.00]no match")[0]["text"] == ["原文"]
+
+
+def test_merge_romalrc_without_translation():
+    """只有 romalrc、无 tlyric：text[2] 不占位（数组按槽位补齐）"""
+    lines = [{"type": "line", "s": 10.0, "e": 15.0, "text": ["原文"]}]
+    merged = backend.merge_translation(lines, None, "[00:10.00]gen bun")
+    assert merged[0]["text"] == ["原文", "gen bun"]
+    assert len(merged[0]["text"]) == 2
 
 
 # ============ 歌单 ============
@@ -1297,6 +1342,33 @@ def test_manual_lyric_with_tlyric(song_library, tmp_path):
     # 查询接口也返回 tlyric
     r = client.get("/api/lyric/manual", params={"path": str(song)})
     assert r.json()["tlyric"] == tlyric
+
+
+def test_manual_lyric_with_romalrc(song_library, tmp_path):
+    """JSON 歌词上传（lrc + romalrc）：/api/lyric 把罗马音合并进 text[1]"""
+    song = tmp_path / "yakimochi" / "song.mp3"
+    lrc = "[00:01.00]原文第一行\n[00:05.00]原文第二行\n"
+    romalrc = "[00:01.00]gen bun dai i chi\n[00:05.00]gen bun dai ni\n"
+    r = client.put(
+        "/api/lyric/manual",
+        json={
+            "path": str(song),
+            "format": "lrc",
+            "text": lrc,
+            "source": "上传·x.json",
+            "romalrc": romalrc,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["romalrc"] == romalrc
+    r = client.get("/api/lyric", params={"path": str(song)})
+    assert r.json()["source"] == "manual"
+    lines = r.json()["lines"]
+    assert lines[0]["text"][0] == "原文第一行"
+    assert lines[0]["text"][1] == "gen bun dai i chi"  # 罗马音已合并
+    # 查询接口也返回 romalrc
+    r = client.get("/api/lyric/manual", params={"path": str(song)})
+    assert r.json()["romalrc"] == romalrc
 
 
 def test_manual_lyric_invalid_content(song_library, tmp_path):

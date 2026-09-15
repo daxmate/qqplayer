@@ -2,7 +2,8 @@
 //
 // 本地歌的歌词由后端 /api/lyric 解析（parse_lrc → lines）；非本地歌（无 path）没有对应
 // 文件，后端无法解析，这里复用 /api/lyric/search 的候选原文，在前端解析成与后端相同的
-// lines 结构：{type:'line', s, e, text:[原文]}（text[1] 罗马音占位空、text[2] 翻译见合并）。
+// lines 结构：{type:'line', s, e, text:[原文]}（text[1] 罗马音 / text[2] 翻译由下方
+// 附轨合并函数填入：romalrc → text[1]、tlyric → text[2]；无附轨则不填不占位）。
 import type { LyricLine } from "../composables/playerState.js";
 
 const LRC_TIME_RE = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
@@ -47,16 +48,39 @@ export function parseLrcText(text: string | null | undefined): LyricLine[] {
   return out;
 }
 
-/** 合并中文翻译（tlyric LRC）→ text = [原文, "", 翻译]（与后端 merge_translation 同构） */
-export function mergeTranslationLines(lines: LyricLine[], tlines: LyricLine[]): LyricLine[] {
+/** 附轨在 text 数组中的槽位（**唯一事实源**，与后端 backend/app/services/lyrics.py
+ *  的 ATTACH_TRACK_SLOTS 同构）：text = [原文, 罗马音(romalrc), 中文翻译(tlyric)] */
+export const LYRIC_ROMA_SLOT = 1;
+export const LYRIC_ZH_SLOT = 2;
+
+/** 把一条附轨（已解析的 LRC 行）按时间戳（±0.6s）填进 text[slot]
+ *
+ * 只写自己的槽位，其余槽位原样保留（附轨之间互不覆盖，合并顺序无关）；
+ * 数组不足则补空串。无附轨行 / 无匹配行 → 原样返回（不占位）。
+ * 两条附轨共用这一个实现（见下方两个导出包装）。
+ */
+function mergeAttachLines(lines: LyricLine[], tlines: LyricLine[], slot: number): LyricLine[] {
   if (!tlines || !tlines.length) return lines;
   return lines.map((ln) => {
     if (ln.type !== "line") return ln;
     for (const t of tlines) {
       if (t.type === "line" && Math.abs(t.s - ln.s) <= 0.6) {
-        return { ...ln, text: [ln.text[0], "", t.text[0]] };
+        const text = ln.text.slice();
+        while (text.length < slot + 1) text.push("");
+        text[slot] = t.text[0];
+        return { ...ln, text };
       }
     }
     return ln;
   });
+}
+
+/** 合并中文翻译（tlyric LRC）→ text[2]（与后端 merge_translation 同构） */
+export function mergeTranslationLines(lines: LyricLine[], tlines: LyricLine[]): LyricLine[] {
+  return mergeAttachLines(lines, tlines, LYRIC_ZH_SLOT);
+}
+
+/** 合并罗马音（romalrc LRC）→ text[1]（与后端 merge_translation 同构） */
+export function mergeRomaLines(lines: LyricLine[], tlines: LyricLine[]): LyricLine[] {
+  return mergeAttachLines(lines, tlines, LYRIC_ROMA_SLOT);
 }

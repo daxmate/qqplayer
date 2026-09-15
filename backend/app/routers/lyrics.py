@@ -49,8 +49,10 @@ def api_lyric(path: str, prefer: str = "local"):
             else lyrics_service.parse_lrc(manual["text"])
         )
         if data:
-            if manual.get("tlyric"):
-                data = lyrics_service.merge_translation(data, manual["tlyric"])
+            if manual.get("tlyric") or manual.get("romalrc"):
+                data = lyrics_service.merge_translation(
+                    data, manual.get("tlyric"), manual.get("romalrc")
+                )
             return {"format": manual["format"], "lines": data, "source": "manual"}
         # 手动指定内容解析不出行：当作没指定，继续走自动链路（不删除，弹窗里可改）
 
@@ -78,10 +80,12 @@ def api_lyric(path: str, prefer: str = "local"):
         """返回 (format, lines, source) 或 None"""
         artist, title, _album, _y, _g, _t, _aa = tags.extract_tags(f)
         title = title or f.stem
-        lrc_text, tlyric_text, source = fetch_online_lyric(title, artist or "")
+        lrc_text, tlyric_text, romalrc_text, source = fetch_online_lyric(title, artist or "")
         if lrc_text is None:
             return None
-        lines = lyrics_service.merge_translation(lyrics_service.parse_lrc(lrc_text), tlyric_text)
+        lines = lyrics_service.merge_translation(
+            lyrics_service.parse_lrc(lrc_text), tlyric_text, romalrc_text
+        )
         return ("lrc", lines, source)
 
     prefer = prefer if prefer in ("local", "online") else "local"
@@ -120,15 +124,18 @@ def api_lyric_manual_get(path: str):
 def api_lyric_manual_put(body: dict):
     """保存手动指定歌词（上传文件/在线选择/粘贴文本统一走这里，覆盖旧值）
 
-    tlyric 可选：中文翻译 LRC（JSON 歌词上传时携带），/api/lyric 返回时合并进歌词行。
+    tlyric / romalrc 可选：中文翻译 / 日语罗马音 LRC（JSON 歌词上传时携带），
+    /api/lyric 返回时合并进歌词行（text[2] / text[1]）。
     请求体未携带 tlyric（或为空）时：自动尝试网易云翻译补全（行级文本匹配，失败/无匹配/
     无歌名歌手元数据时静默跳过，不阻塞保存；请求体显式带 tlyric 则尊重用户）。
+    romalrc 不做自动补全（只透传上传值）。
     """
     path = (body.get("path") or "").strip()
     fmt = body.get("format") or "lrc"
     text = body.get("text") or ""
     source = body.get("source") or ""
     tlyric = body.get("tlyric") or None
+    romalrc = body.get("romalrc") or None
     if not path:
         raise HTTPException(400, "缺少歌曲路径")
     if not text.strip():
@@ -152,7 +159,7 @@ def api_lyric_manual_put(body: dict):
             auto = auto_attach_translation(title, artist, text, fmt)
             if auto:
                 tlyric = auto
-    payload = save_manual_lyric(str(f), fmt, text, source, tlyric)
+    payload = save_manual_lyric(str(f), fmt, text, source, tlyric, romalrc)
     return {"ok": True, **payload}
 
 

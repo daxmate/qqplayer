@@ -89,13 +89,20 @@ def parse_lrc(text: str):
     return result
 
 
-def merge_translation(lines: list, tlyric_text: str | None):
-    """把网易云中文翻译（tlyric LRC）按时间戳合并进主歌词行
-    约定 text = [原文, 罗马音(空), 中文翻译]（与前端 KaraokePanel/LyricPanel 渲染位一致）
+# 附轨在 text 数组中的槽位（**唯一事实源**，与前端 frontend/src/utils/parseLrc.ts 同构）：
+# text = [原文, 罗马音(romalrc), 中文翻译(tlyric)]（与 KaraokePanel/LyricPanel 渲染位一致）
+ATTACH_TRACK_SLOTS = {"romalrc": 1, "tlyric": 2}
+
+
+def _merge_attach_track(lines: list, track_text: str | None, slot: int) -> list:
+    """把一条附轨 LRC 按时间戳（容差 0.6s）填进每行的 text[slot]
+
+    只写自己的槽位，其余槽位原样保留（附轨之间互不覆盖，合并顺序无关）；
+    数组不足则补空串。无附轨文本 / 无匹配行 → 原样返回（不占位）。
     """
-    if not tlyric_text:
+    if not track_text:
         return lines
-    tlines = [t for t in parse_lrc(tlyric_text) if t.get("text")]
+    tlines = [t for t in parse_lrc(track_text) if t.get("text")]
     if not tlines:
         return lines
     result = []
@@ -103,10 +110,22 @@ def merge_translation(lines: list, tlyric_text: str | None):
         if ln["type"] == "line":
             for t in tlines:
                 if abs(t["s"] - ln["s"]) <= 0.6:
-                    ln = {**ln, "text": [ln["text"][0], "", t["text"][0]]}
+                    text = list(ln["text"]) + [""] * max(0, slot + 1 - len(ln["text"]))
+                    text[slot] = t["text"][0]
+                    ln = {**ln, "text": text}
                     break
         result.append(ln)
     return result
+
+
+def merge_translation(lines: list, tlyric_text: str | None, romalrc_text: str | None = None):
+    """把网易云附轨（中文翻译 tlyric / 罗马音 romalrc LRC）按时间戳合并进主歌词行
+
+    两条附轨共用同一个实现（_merge_attach_track，槽位见 ATTACH_TRACK_SLOTS）；
+    无 romalrc → text[1] 保持空（前端 showRoma 下不显示、不占位）。
+    """
+    lines = _merge_attach_track(lines, romalrc_text, ATTACH_TRACK_SLOTS["romalrc"])
+    return _merge_attach_track(lines, tlyric_text, ATTACH_TRACK_SLOTS["tlyric"])
 
 
 def _align_to_lrc(sentences: list) -> str:
